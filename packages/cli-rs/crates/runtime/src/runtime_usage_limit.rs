@@ -1,14 +1,15 @@
 // The provider's own signal that the account's usage limit is used up. Hub
-// classifies error text itself (agentUsageLimitFromError); the host reports
-// only what the provider said in a structured event.
-
-use std::time::Duration;
+// classifies error text itself (agentUsageLimitFromError) and attributes the
+// refusal's reset time against the raw reading; the host reports only what the
+// provider said in a structured event plus a fresh provider reading.
 
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use xmatrix_harness::quota::{self, Account, Provider, ReadOptions};
-use xmatrix_harness::{LlmQuotaUsage, LlmUsage};
+use xmatrix_harness::LlmUsage;
+#[cfg(test)]
+use xmatrix_harness::LlmQuotaUsage;
 
 /// The provider account behind this Instance cannot run another turn until
 /// `resets_at` (RFC 3339, UTC) when the provider said when.
@@ -17,28 +18,17 @@ pub(crate) struct UsageLimit {
     pub(crate) resets_at: Option<String>,
 }
 
-/// A usage limit as reported to Hub: what it used up, told from a complete
-/// provider reading taken after the refusal.
+/// A usage limit as reported to Hub: the refusal's reset time and the complete
+/// provider reading taken after the refusal. Hub attributes which window was
+/// used up from these raw facts.
 #[derive(Clone, Debug)]
 pub(crate) struct UsageLimitReport {
     pub(crate) resets_at: Option<String>,
-    /// `account`, the `scope` of one scoped window (`"Fable"`), or
-    /// [`UNRESOLVED_QUOTA_SCOPE`].
-    pub(crate) quota_scope: String,
-    /// Why the scope is unresolved.
+    /// Why no reading or reset time could be supplied for Hub attribution.
     pub(crate) quota_scope_reason: Option<&'static str>,
-    /// The complete reading the scope was told from.
+    /// The complete provider reading taken after the refusal.
     pub(crate) usage: Option<LlmUsage>,
 }
-
-pub(crate) const ACCOUNT_QUOTA_SCOPE: &str = "account";
-pub(crate) const UNRESOLVED_QUOTA_SCOPE: &str = "unresolved";
-
-/// How far apart a refusal's reset and a window's reset may lie and still
-/// name the same window. The refusal states whole seconds and the usage
-/// endpoint the instant it computed: 18:00:00 against 17:59:59.768897 on
-/// 2026-11-15. The account's own windows reset hours apart.
-const RESET_MATCH_TOLERANCE: Duration = Duration::from_secs(2);
 
 fn rfc3339_from_unix_seconds(seconds: i64) -> Option<String> {
     OffsetDateTime::from_unix_timestamp(seconds)
@@ -56,9 +46,10 @@ fn claude_spawn_uses_default_login() -> bool {
             .any(|key| std::env::var(key).is_ok_and(|value| !value.trim().is_empty()))
 }
 
-/// Tell what a Claude usage limit used up. Reads the usage endpoint now,
-/// past any cached reading or rate-limit verdict (which only repeat the
-/// refusal), sharing one request with any other read of the same account.
+/// Gather the raw provider reading after a Claude usage limit. Reads the usage
+/// endpoint now, past any cached reading or rate-limit verdict (which only
+/// repeat the refusal), sharing one request with any other read of the same
+/// account. Hub attributes the scope from the refusal's reset time and reading.
 pub(crate) async fn resolve_claude_usage_limit(limit: UsageLimit) -> UsageLimitReport {
     if !claude_spawn_uses_default_login() {
         return usage_limit_report(limit, Err("login_not_default"));
@@ -78,64 +69,15 @@ fn usage_limit_report(
     limit: UsageLimit,
     reading: Result<LlmUsage, &'static str>,
 ) -> UsageLimitReport {
-    let scope = reading
-        .as_ref()
-        .map_err(|reason| *reason)
-        .and_then(|usage| {
-            let resets_at = limit.resets_at.as_deref().ok_or("no_reset_time")?;
-            quota_scope_by_reset(usage, resets_at).map(str::to_string)
-        });
-    let (quota_scope, quota_scope_reason) = match scope {
-        Ok(scope) => (scope, None),
-        Err(reason) => (UNRESOLVED_QUOTA_SCOPE.to_string(), Some(reason)),
+    let quota_scope_reason = match &reading {
+        Err(reason) => Some(*reason),
+        Ok(_) if limit.resets_at.is_none() => Some("no_reset_time"),
+        Ok(_) => None,
     };
     UsageLimitReport {
         resets_at: limit.resets_at,
-        quota_scope,
         quota_scope_reason,
         usage: reading.ok(),
-    }
-}
-
-/// The window a refusal used up is the one that resets when the refusal
-/// says (within [`RESET_MATCH_TOLERANCE`]). An account's week and a model's
-/// week can reset at the same instant (both 2026-11-19T17:59:59 on
-/// 2026-11-15); among windows that share the reset, the used-up one is it,
-/// and the account's when it is used up too, since it stops every model.
-fn quota_scope_by_reset<'a>(usage: &'a LlmUsage, resets_at: &str) -> Result<&'a str, &'static str> {
-    let refused = OffsetDateTime::parse(resets_at, &Rfc3339).map_err(|_| "no_reset_time")?;
-    let resets_with_refusal = |window: &&LlmQuotaUsage| {
-        window
-            .reset_at
-            .as_deref()
-            .and_then(|at| OffsetDateTime::parse(at, &Rfc3339).ok())
-            .is_some_and(|at| (at - refused).unsigned_abs() <= RESET_MATCH_TOLERANCE)
-    };
-    let candidates: Vec<(&str, &LlmQuotaUsage)> = usage
-        .quota_usages
-        .iter()
-        .flatten()
-        .filter(resets_with_refusal)
-        .map(|window| (ACCOUNT_QUOTA_SCOPE, window))
-        .chain(
-            usage
-                .scoped_quota_usages
-                .iter()
-                .flatten()
-                .filter(resets_with_refusal)
-                .filter_map(|window| Some((window.scope.as_deref()?, window))),
-        )
-        .collect();
-    let used_up: Vec<&str> = candidates
-        .iter()
-        .filter(|(_, window)| window.percent.is_some_and(|percent| percent >= 100.0))
-        .map(|(scope, _)| *scope)
-        .collect();
-    match (candidates.as_slice(), used_up.as_slice()) {
-        ([], _) => Err("no_matching_window"),
-        ([(scope, _)], _) | (_, [scope]) => Ok(scope),
-        (_, used_up) if used_up.contains(&ACCOUNT_QUOTA_SCOPE) => Ok(ACCOUNT_QUOTA_SCOPE),
-        _ => Err("ambiguous_window"),
     }
 }
 
@@ -238,75 +180,28 @@ mod tests {
         }
     }
 
-    fn scope_of(report: &UsageLimitReport) -> (&str, Option<&str>) {
-        (report.quota_scope.as_str(), report.quota_scope_reason)
-    }
-
     #[test]
-    fn a_model_week_used_up_beside_the_account_week_is_that_models() {
+    fn usage_limit_report_forwards_raw_reset_and_reading_for_hub_attribution() {
         let report = usage_limit_report(
             refused_at("2026-11-19T18:00:00Z"),
             Ok(reading(0.0, 55.0, 100.0)),
         );
-        assert_eq!(scope_of(&report), ("Fable", None));
-        assert!(report.usage.is_some(), "the reading travels with the scope");
         assert_eq!(report.resets_at.as_deref(), Some("2026-11-19T18:00:00Z"));
+        assert_eq!(report.quota_scope_reason, None);
+        assert!(report.usage.is_some(), "the reading travels for Hub attribution");
     }
 
     #[test]
-    fn the_account_is_used_up_when_its_own_window_is() {
-        // The 5h session resets alone.
-        let report = usage_limit_report(
-            refused_at("2026-11-15T23:00:00Z"),
-            Ok(reading(100.0, 55.0, 100.0)),
-        );
-        assert_eq!(scope_of(&report), ("account", None));
-        // Both weeks used up: the account's stops every model.
-        let report = usage_limit_report(
-            refused_at("2026-11-19T18:00:00Z"),
-            Ok(reading(0.0, 100.0, 100.0)),
-        );
-        assert_eq!(scope_of(&report), ("account", None));
-    }
+    fn usage_limit_report_marks_missing_reset_time_and_failed_reads() {
+        let missing_reset = usage_limit_report(UsageLimit::default(), Ok(reading(0.0, 55.0, 100.0)));
+        assert_eq!(missing_reset.resets_at, None);
+        assert_eq!(missing_reset.quota_scope_reason, Some("no_reset_time"));
+        assert!(missing_reset.usage.is_some());
 
-    #[test]
-    fn one_window_at_the_refused_reset_is_it_whatever_its_rounded_percent() {
-        let report = usage_limit_report(
-            refused_at("2026-11-15T23:00:01Z"),
-            Ok(reading(99.0, 55.0, 100.0)),
-        );
-        assert_eq!(scope_of(&report), ("account", None));
-    }
-
-    #[test]
-    fn a_refusal_no_window_explains_is_unresolved() {
-        // Beyond the 2 s tolerance of the session's 23:00:00.31 reset.
-        let report = usage_limit_report(
-            refused_at("2026-11-15T23:00:03Z"),
-            Ok(reading(100.0, 55.0, 100.0)),
-        );
-        assert_eq!(
-            scope_of(&report),
-            ("unresolved", Some("no_matching_window"))
-        );
-        assert!(report.usage.is_some());
-
-        // Both weeks share the reset and neither reads used up.
-        let report = usage_limit_report(
-            refused_at("2026-11-19T18:00:00Z"),
-            Ok(reading(0.0, 99.0, 99.0)),
-        );
-        assert_eq!(scope_of(&report), ("unresolved", Some("ambiguous_window")));
-
-        let report = usage_limit_report(UsageLimit::default(), Ok(reading(0.0, 55.0, 100.0)));
-        assert_eq!(scope_of(&report), ("unresolved", Some("no_reset_time")));
-    }
-
-    #[test]
-    fn a_failed_read_is_unresolved_and_carries_no_reading() {
-        let report =
+        let failed =
             usage_limit_report(refused_at("2026-11-19T18:00:00Z"), Err("usage_read_failed"));
-        assert_eq!(scope_of(&report), ("unresolved", Some("usage_read_failed")));
-        assert!(report.usage.is_none());
+        assert_eq!(failed.resets_at.as_deref(), Some("2026-11-19T18:00:00Z"));
+        assert_eq!(failed.quota_scope_reason, Some("usage_read_failed"));
+        assert!(failed.usage.is_none());
     }
 }

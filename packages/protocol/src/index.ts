@@ -246,13 +246,16 @@ export type {
   LaunchDecisionStage, LaunchHarnessFit, LaunchParameterEvidence, LaunchPlacementCandidate,
 } from "./launch-parameter-evidence.js";
 export {
-  currentRoutingQuotaWindows, fromPreScopeCursorWire, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
-  ROUTING_QUOTA_MAX_SCOPE_BYTES, ROUTING_QUOTA_MAX_WINDOWS, ROUTING_QUOTA_PROBE_MAX_TARGETS, routingQuotaAccountPartExpiry, routingQuotaPace,
-  routingQuotaProbeObservations, routingQuotaRecord, routingQuotaUsageWindows,
+  ACCOUNT_QUOTA_SCOPE, attributeRoutingQuotaRefusal, currentRoutingQuotaWindows, fromPreScopeCursorWire,
+  mergeRoutingQuotaWindows, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
+  ROUTING_QUOTA_MAX_SCOPE_BYTES, ROUTING_QUOTA_MAX_WINDOWS, ROUTING_QUOTA_PROBE_MAX_TARGETS,
+  ROUTING_QUOTA_RESET_MATCH_MS, routingQuotaAccountPartExpiry, routingQuotaPace,
+  routingQuotaProbeObservations, routingQuotaRecord, routingQuotaUsageWindows, UNRESOLVED_QUOTA_SCOPE,
 } from "./agent-routing-quota-probe.js";
 export type {
   RoutingQuotaProbeRequest, RoutingQuotaProbeResponse, RoutingQuotaProbeResult,
-  RoutingQuotaProbeTarget, RoutingQuotaProbeWindow, RoutingQuotaRecord, RoutingQuotaWindow,
+  RoutingQuotaProbeTarget, RoutingQuotaProbeWindow, RoutingQuotaRecord, RoutingQuotaRefusalAttribution,
+  RoutingQuotaWindow,
 } from "./agent-routing-quota-probe.js";
 export {
   canonicalRegistrationHarness, parseAgentRegistrationKey, parseSpaceAgentRegistrationKey,

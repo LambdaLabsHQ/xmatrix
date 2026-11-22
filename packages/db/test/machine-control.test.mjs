@@ -126,7 +126,8 @@ test("Quota completion records each reading in its registration's pool without a
       : query.name === "machine_control_complete_v1" ? [{ command_id: "probe-1" }]
       // grok's registration changed version after the probe was issued; its digest no longer matches.
       : query.name === "registration_quota_probe_result_target_v1" ? [{ environment_version: 4,
-        quota_pool_id: `registration:machine-1:${query.values[2]}` }] : []);
+        quota_pool_id: `registration:machine-1:${query.values[2]}` }]
+      : query.name === "registration_quota_observe_insert_v1" ? [{ inserted: 1 }] : []);
     return new PostgresMachineControlRepository(db).command({ commandId: `complete-${success}`, action: "complete",
       controlId: "probe-1", ownerUserId: "user-1", ownerEmail: "one@example.com", machineId: "machine-1",
       hostId: "host-1", daemonId: "daemon-1", connectionEpoch: 1, eventType: "machine_quota_probe_result",
@@ -134,16 +135,16 @@ test("Quota completion records each reading in its registration's pool without a
       principal: machinePrincipal() }).then(() => db);
   };
   const db = await run(true);
-  const writes = db.calls.filter(call => call.name === "registration_quota_observe_v9");
+  const writes = db.calls.filter(call => call.name === "registration_quota_observe_insert_v1");
   assert.equal(writes.length, 1, "only the target still at its issued configuration is recorded");
   assert.deepEqual(writes[0].values.slice(0, 4), ["user-1", "registration:machine-1:codex", 0, observedAt]);
   assert.equal(writes[0].values[4], resetAt, "an exhausted reading holds until the provider reset");
   assert.deepEqual(JSON.parse(writes[0].values[5]), [{ usedPercent: 100, resetAt }],
     "the window behind the reading is kept for the Agents page");
   assert.equal(writes[0].values[6], null, "a reading without the provider's verdict stores none");
-  assert.deepEqual(writes[0].values.slice(7), [null, null, null, false, 0],
+  assert.deepEqual(writes[0].values.slice(7), [null, null, null],
     "a probe that did not ask for scoped windows renews only the account part");
-  assert.equal((await run(false)).calls.some(call => call.name === "registration_quota_observe_v9"), false,
+  assert.equal((await run(false)).calls.some(call => call.name === "registration_quota_observe_insert_v1"), false,
     "a failed probe records nothing");
 });
 

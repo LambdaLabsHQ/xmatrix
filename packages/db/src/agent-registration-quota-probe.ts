@@ -1,9 +1,10 @@
-import { clampRoutingQuotaObservedTime, currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseLlmQuotaAccount,
-  quotaAccountBalance, routingModelOptionNamed, routingModelOptions, routingQuotaAccountPartExpiry,
-  routingQuotaObservation, routingQuotaProbeObservations, routingQuotaVerdict, type RoutingBillingHolds,
-  type RoutingQuotaVerdict, routingQuotaRecord, routingQuotaUsageWindows, type AgentRegistrationLiveState,
-  type LlmQuotaAccount, type LlmQuotaUsage, type LlmUsage, type RoutingModelOption, type RoutingQuotaProbeRequest,
-  type RoutingQuotaRecord, type RoutingQuotaWindow } from "@xmatrix/protocol";
+import { ACCOUNT_QUOTA_SCOPE, attributeRoutingQuotaRefusal, clampRoutingQuotaObservedTime, currentRoutingQuotaWindows,
+  digestCanonicalCloneCborV1, mergeRoutingQuotaWindows, parseLlmQuotaAccount, quotaAccountBalance, routingModelOptionNamed,
+  routingModelOptions, routingQuotaAccountPartExpiry, routingQuotaObservation, routingQuotaProbeObservations,
+  routingQuotaVerdict, routingScopedQuotaExpiry, type RoutingBillingHolds, type RoutingQuotaVerdict, routingQuotaRecord,
+  routingQuotaUsageWindows, UNRESOLVED_QUOTA_SCOPE, type AgentRegistrationLiveState, type LlmQuotaAccount,
+  type LlmQuotaUsage, type LlmUsage, type RoutingModelOption, type RoutingQuotaProbeRequest, type RoutingQuotaRecord,
+  type RoutingQuotaWindow } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
@@ -319,144 +320,154 @@ function registrationQuotaProbeDigest(input: { ownerUserId: string; machineId: s
   return digestCanonicalCloneCborV1({ kind: "registration-quota-probe", ...input });
 }
 
-/** How far apart a refusal's reset and a window's reset may lie and still
- * name the same window: the provider states whole seconds in one place and
- * the instant it computed in another (the daemon matches the same way). */
-const QUOTA_RESET_MATCH_MS = 2_000;
-
-/** `account`: a usage limit used up an account window. */
-export const ACCOUNT_QUOTA_SCOPE = "account";
-/** The daemon could not tell which window a usage limit used up. */
-export const UNRESOLVED_QUOTA_SCOPE = "unresolved";
-
-/**
- * The reading with the window that resets at `resetsAt` read as used up, or
- * none when the reading does not tell which window that is: a refusal names
- * the window it used up by its reset, whatever share the reading rounds it
- * to. `scope` narrows the match to the account windows (`account`) or to one
- * scope's windows; without it any window counts. Several windows resetting
- * then (an account week and a model week at the same instant) tell it only
- * when one of them already reads used up; marking them all would stop the
- * whole account for one model.
- */
-export function quotaRecordUsedUp(record: RoutingQuotaRecord, resetsAt: number, scope: string | undefined,
-  now: number): RoutingQuotaRecord | undefined {
-  const matches = (window: RoutingQuotaWindow, scoped: boolean) =>
-    (scope === undefined || (scope === ACCOUNT_QUOTA_SCOPE ? !scoped
-      : scoped && window.scope?.toLowerCase() === scope.toLowerCase()))
-    && window.resetAt !== undefined && Math.abs(Date.parse(window.resetAt) - resetsAt) <= QUOTA_RESET_MATCH_MS;
-  const candidates = [...record.windows.filter(window => matches(window, false)),
-    ...(record.scoped?.windows ?? []).filter(window => matches(window, true))];
-  const sole = candidates.length === 1 ? candidates[0] : undefined;
-  if (!sole && !candidates.some(window => window.usedPercent >= 100)) return undefined;
-  const mark = (windows: readonly RoutingQuotaWindow[]) =>
-    windows.map(window => window === sole ? { ...window, usedPercent: 100 } : window);
-  const windows = mark(record.windows);
-  const scoped = record.scoped ? mark(record.scoped.windows) : undefined;
-  return routingQuotaRecord({ quotaSource: "provider_api", quotaObservedAt: record.observedAt,
-    quotaUsages: routingQuotaUsageWindows(windows),
-    ...(scoped ? { scopedQuotaUsages: routingQuotaUsageWindows(scoped) } : {}),
-    ...(record.quotaAccount ? { quotaAccount: record.quotaAccount } : {}) }, now);
-}
-
-/** `column=new` where `condition` holds, else the stored value. `values`
- * maps a column to what replaces it (`EXCLUDED.column` by default). */
-const setWhen = (condition: string, columns: readonly string[], values: Record<string, string> = {}) =>
-  columns.map(column => `${column}=CASE WHEN ${condition} THEN ${values[column] ?? `EXCLUDED.${column}`}
-    ELSE o.${column} END`).join(",");
-/** The account part of a stored reading is replaced by a newer reading, but a
- * windowless usage-limit hold only by a reading that explains it ($11: one of
- * its windows resets when the hold ends) or once it ends. An account-level
- * billing refusal hold is never cleared by periodic probes; only a direct
- * successful reply clears it. */
-const ACCOUNT_PART_NEWER = `EXCLUDED.observed_at>=o.observed_at AND (o.source<>'daemon'
-  OR o.expires_at<=statement_timestamp()
-  OR ($11::boolean AND NOT COALESCE((o.account_json->>'billingRefusal')::boolean,FALSE)))`;
-/** The scoped part only by a newer complete reading. */
-const SCOPED_PART_NEWER = `EXCLUDED.scoped_observed_at>=COALESCE(o.scoped_observed_at,'-infinity'::timestamptz)`;
-
-/**
- * The new windows of one part (`incoming`), each keeping the larger share
- * used of itself and the same window as stored (`stored`: the same scope,
- * or both account windows, the same label, a reset within
- * QUOTA_RESET_MATCH_MS). A window read used up (a refusal said so) is not
- * reopened by a later reading that rounds or lags it below 100%; its reset
- * moves its `resetAt`, which makes it another window.
- */
-const keptWindows = (incoming: string, stored: string) => `COALESCE((SELECT jsonb_agg(CASE
-    WHEN kept.used>(n->>'usedPercent')::float8 THEN jsonb_set(n,'{usedPercent}',to_jsonb(kept.used)) ELSE n END
-    ORDER BY n_at)
-  FROM jsonb_array_elements(${incoming}) WITH ORDINALITY AS fresh(n,n_at)
-  LEFT JOIN LATERAL (SELECT max((p->>'usedPercent')::float8) AS used
-    FROM jsonb_array_elements(COALESCE(${stored},'[]'::jsonb)) p
-    WHERE p->>'label' IS NOT DISTINCT FROM n->>'label' AND p->>'scope' IS NOT DISTINCT FROM n->>'scope'
-      AND n ? 'resetAt' AND p ? 'resetAt' AND abs(extract(epoch FROM
-        (p->>'resetAt')::timestamptz-(n->>'resetAt')::timestamptz))*1000<=${QUOTA_RESET_MATCH_MS}) kept ON TRUE),
-  ${incoming})`;
-/** When a part with these windows stops counting: as read, or later when a
- * kept used-up window holds it until its reset (31 days at most). */
-const keptExpiry = (expires: string, windows: string, observed: string) => `GREATEST(${expires},
-  (SELECT max(LEAST((w->>'resetAt')::timestamptz,${observed}+interval '31 days')) FROM jsonb_array_elements(
-    COALESCE(${windows},'[]'::jsonb)) w WHERE (w->>'usedPercent')::float8>=100 AND w ? 'resetAt'
-      AND (w->>'resetAt')::timestamptz>${observed}))`;
-const KEPT_ACCOUNT_WINDOWS = keptWindows("EXCLUDED.windows_json", "o.windows_json");
-const KEPT_SCOPED_WINDOWS = keptWindows("EXCLUDED.scoped_windows_json", "o.scoped_windows_json");
-/** The account's headroom as the kept windows leave it: the reading's own
- * (`EXCLUDED.remaining`, the provider's verdict included) lowered by a window
- * kept used up, never below the floor a still-served account keeps ($12). */
-const KEPT_REMAINING = `GREATEST(LEAST(EXCLUDED.remaining,COALESCE(100-(SELECT max((w->>'usedPercent')::float8)
-  FROM jsonb_array_elements(${KEPT_ACCOUNT_WINDOWS}) w),100)),$12::float8)`;
+export { ACCOUNT_QUOTA_SCOPE, UNRESOLVED_QUOTA_SCOPE } from "@xmatrix/protocol";
 
 /** Persist one owner's provider reading, each part fenced on its own read
  * time: every reading renews the account part, a complete one the scoped part
  * too. A reading never replaces a newer one, and one already expired is not
  * written. A complete reading over a windowless usage-limit hold that shows
  * the window resetting when the hold ends reads it as the one used up
- * (`quotaRecordUsedUp`) and replaces the hold; one that shows none leaves the
- * hold until it ends. */
+ * (`attributeRoutingQuotaRefusal`) and replaces the hold; one that shows none
+ * leaves the hold until it ends. Window merging, remaining headroom and
+ * 31-day exhausted holds are derived once in `@xmatrix/protocol`, never in SQL. */
 export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction, input: {
   ownerUserId: string; quotaPoolId: string; record: RoutingQuotaRecord;
 }): Promise<boolean> {
-  let record = input.record;
-  let explainsHold = false;
-  if (record.scoped) {
-    const [hold] = await tx.query<QueryResultRow>({ name: "registration_quota_hold_v2", text: `SELECT
-        to_json(expires_at)#>>'{}' AS held_until FROM control.registration_quota_observations
-      WHERE owner_user_id=$1 AND quota_pool_id=$2 AND source='daemon' AND expires_at>statement_timestamp()
-        AND NOT COALESCE((account_json->>'billingRefusal')::boolean,FALSE)
-        AND observed_at<=$3::timestamptz FOR UPDATE`,
-    values: [input.ownerUserId, input.quotaPoolId, record.observedAt], maxRows: 1 });
-    const narrowed = hold ? quotaRecordUsedUp(record, Date.parse(String(hold.held_until)), undefined, Date.now()) : undefined;
-    if (narrowed) { record = narrowed; explainsHold = true; }
-  }
-  await tx.query({ name: "registration_quota_observe_v9", text: `INSERT INTO control.registration_quota_observations AS o
-      (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source,windows_json,account_json,
-        scoped_windows_json,scoped_observed_at,scoped_expires_at)
+  const incoming = input.record;
+  const incomingAccountExpiry = routingQuotaAccountPartExpiry(incoming);
+  const incomingScopedExpiry = incoming.scoped?.expiresAt ?? null;
+  let effectiveAccountRemaining = incoming.account?.value ?? 100;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const inserted = await tx.query<QueryResultRow>({ name: "registration_quota_observe_insert_v1", text: `INSERT INTO
+        control.registration_quota_observations
+        (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source,windows_json,account_json,
+          scoped_windows_json,scoped_observed_at,scoped_expires_at)
       SELECT $1,$2,$3,LEAST($4::timestamptz,statement_timestamp()),$5::timestamptz,'provider',$6::jsonb,$7::jsonb,$8::jsonb,
         CASE WHEN $9::timestamptz IS NULL THEN NULL ELSE LEAST($9::timestamptz,statement_timestamp()) END,$10::timestamptz
-      WHERE $4::timestamptz<=statement_timestamp()+interval '5 seconds' AND GREATEST($5::timestamptz,$10::timestamptz)>statement_timestamp()
-      ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET
-        ${setWhen(ACCOUNT_PART_NEWER, ["remaining", "observed_at", "expires_at", "source", "windows_json", "account_json"], {
-          windows_json: KEPT_ACCOUNT_WINDOWS, remaining: KEPT_REMAINING,
-          expires_at: keptExpiry("EXCLUDED.expires_at", KEPT_ACCOUNT_WINDOWS, "EXCLUDED.observed_at"),
-          account_json: `CASE WHEN o.account_json ? 'billingRefusalScopes'
-            THEN COALESCE(EXCLUDED.account_json,'{}'::jsonb)||jsonb_build_object('billingRefusalScopes',o.account_json->'billingRefusalScopes')
-            ELSE EXCLUDED.account_json END` })},
-        ${setWhen(SCOPED_PART_NEWER, ["scoped_windows_json", "scoped_observed_at", "scoped_expires_at"], {
-          scoped_windows_json: KEPT_SCOPED_WINDOWS,
-          scoped_expires_at: keptExpiry("EXCLUDED.scoped_expires_at", KEPT_SCOPED_WINDOWS, "EXCLUDED.scoped_observed_at") })}
-      WHERE (${ACCOUNT_PART_NEWER}) OR ${SCOPED_PART_NEWER}`,
-    values: [input.ownerUserId, input.quotaPoolId, record.account?.value ?? 100, record.observedAt,
-      routingQuotaAccountPartExpiry(record), record.windows.length ? JSON.stringify(record.windows) : null,
-      record.quotaAccount ? JSON.stringify(record.quotaAccount) : null,
-      record.scoped ? JSON.stringify(record.scoped.windows) : null, record.scoped ? record.observedAt : null,
-      record.scoped?.expiresAt ?? null, explainsHold, record.quotaAccount?.allowed === true ? 1 : 0],
-    maxRows: 0 });
+      WHERE $4::timestamptz<=statement_timestamp()+interval '5 seconds'
+        AND GREATEST($5::timestamptz,$10::timestamptz)>statement_timestamp()
+      ON CONFLICT (owner_user_id,quota_pool_id) DO NOTHING
+      RETURNING 1 AS inserted`,
+    values: [input.ownerUserId, input.quotaPoolId, incoming.account?.value ?? 100, incoming.observedAt,
+      incomingAccountExpiry, incoming.windows.length ? JSON.stringify(incoming.windows) : null,
+      incoming.quotaAccount ? JSON.stringify(incoming.quotaAccount) : null,
+      incoming.scoped ? JSON.stringify(incoming.scoped.windows) : null, incoming.scoped ? incoming.observedAt : null,
+      incomingScopedExpiry], maxRows: 1 });
+    if (inserted.length > 0) break;
+
+    const [existing] = await tx.query<QueryResultRow>({ name: "registration_quota_observe_lock_v1", text: `SELECT
+        to_json(statement_timestamp())#>>'{}' AS server_now,source,remaining,
+        to_json(observed_at)#>>'{}' AS observed_at,to_json(expires_at)#>>'{}' AS expires_at,
+        windows_json,account_json,scoped_windows_json,
+        to_json(scoped_observed_at)#>>'{}' AS scoped_observed_at,
+        to_json(scoped_expires_at)#>>'{}' AS scoped_expires_at
+      FROM control.registration_quota_observations
+      WHERE owner_user_id=$1 AND quota_pool_id=$2 FOR UPDATE`,
+    values: [input.ownerUserId, input.quotaPoolId], maxRows: 1 });
+    if (!existing) continue;
+
+    const serverNow = time(existing.server_now);
+    const clampedObserved = clampRoutingQuotaObservedTime(Date.parse(incoming.observedAt), serverNow);
+    const maxExpiry = Math.max(Date.parse(incomingAccountExpiry),
+      incomingScopedExpiry ? Date.parse(incomingScopedExpiry) : -Infinity);
+    if (clampedObserved === undefined || !(maxExpiry > serverNow)) {
+      effectiveAccountRemaining = Number(existing.remaining);
+      break;
+    }
+
+    let record = incoming;
+    let explainsHold = false;
+    const existingObserved = time(existing.observed_at);
+    const existingExpires = time(existing.expires_at);
+    const existingAccountObj = storedObject(existing.account_json);
+    const existingIsBillingHold = existingAccountObj.billingRefusal === true;
+    if (record.scoped && existing.source === "daemon" && existingExpires > serverNow
+        && !existingIsBillingHold && existingObserved <= clampedObserved) {
+      const narrowed = attributeRoutingQuotaRefusal(record, existingExpires, serverNow);
+      if (narrowed) { record = narrowed.record; explainsHold = true; }
+    }
+
+    const accountPartNewer = clampedObserved >= existingObserved
+      && (existing.source !== "daemon" || existingExpires <= serverNow || (explainsHold && !existingIsBillingHold));
+    const existingScopedObserved = time(existing.scoped_observed_at);
+    const scopedPartNewer = record.scoped !== undefined
+      && (!Number.isFinite(existingScopedObserved) || clampedObserved >= existingScopedObserved);
+    if (!accountPartNewer && !scopedPartNewer) {
+      effectiveAccountRemaining = Number(existing.remaining);
+      break;
+    }
+
+    const clampedObservedIso = new Date(clampedObserved).toISOString();
+    let nextRemaining = Number(existing.remaining);
+    let nextObservedAt = String(existing.observed_at);
+    let nextExpiresAt = String(existing.expires_at);
+    let nextSource = String(existing.source);
+    let nextWindowsJson: unknown = existing.windows_json;
+    let nextAccountJson: unknown = existing.account_json;
+    let nextScopedWindowsJson: unknown = existing.scoped_windows_json;
+    let nextScopedObservedAt: string | null = existing.scoped_observed_at ? String(existing.scoped_observed_at) : null;
+    let nextScopedExpiresAt: string | null = existing.scoped_expires_at ? String(existing.scoped_expires_at) : null;
+
+    if (accountPartNewer) {
+      const storedAccountWindows = currentRoutingQuotaWindows(existing.windows_json, serverNow);
+      const mergedWindows = mergeRoutingQuotaWindows(record.windows, storedAccountWindows);
+      const accountMergedRecord = routingQuotaRecord({
+        quotaSource: "provider_api",
+        quotaObservedAt: clampedObservedIso,
+        quotaUsages: routingQuotaUsageWindows(mergedWindows),
+        ...(record.scoped ? { scopedQuotaUsages: routingQuotaUsageWindows(record.scoped.windows) } : {}),
+        ...(record.quotaAccount ? { quotaAccount: record.quotaAccount } : {}),
+      }, serverNow);
+      nextWindowsJson = mergedWindows.length ? mergedWindows : null;
+      nextRemaining = accountMergedRecord?.account?.value ?? record.account?.value ?? 100;
+      nextObservedAt = clampedObservedIso;
+      nextExpiresAt = accountMergedRecord ? routingQuotaAccountPartExpiry(accountMergedRecord)
+        : routingQuotaAccountPartExpiry({ ...record, observedAt: clampedObservedIso });
+      nextSource = "provider";
+      if ("billingRefusalScopes" in existingAccountObj) {
+        nextAccountJson = { ...record.quotaAccount, billingRefusalScopes: existingAccountObj.billingRefusalScopes };
+      } else {
+        nextAccountJson = record.quotaAccount ?? null;
+      }
+      effectiveAccountRemaining = nextRemaining;
+    } else {
+      effectiveAccountRemaining = Number(existing.remaining);
+    }
+
+    if (scopedPartNewer && record.scoped) {
+      const storedScopedWindows = currentRoutingQuotaWindows(existing.scoped_windows_json, serverNow);
+      const mergedScopedWindows = mergeRoutingQuotaWindows(record.scoped.windows, storedScopedWindows);
+      nextScopedWindowsJson = mergedScopedWindows;
+      nextScopedObservedAt = clampedObservedIso;
+      nextScopedExpiresAt = routingScopedQuotaExpiry({
+        quotaSource: "provider_api",
+        quotaObservedAt: clampedObservedIso,
+        scopedQuotaUsages: routingQuotaUsageWindows(mergedScopedWindows),
+        ...(record.quotaAccount ? { quotaAccount: record.quotaAccount } : {}),
+      }, serverNow) ?? null;
+    }
+
+    await tx.query({ name: "registration_quota_observe_update_v1", text: `UPDATE control.registration_quota_observations
+      SET remaining=$3,observed_at=$4::timestamptz,expires_at=$5::timestamptz,source=$6,
+        windows_json=$7::jsonb,account_json=$8::jsonb,scoped_windows_json=$9::jsonb,
+        scoped_observed_at=$10::timestamptz,scoped_expires_at=$11::timestamptz
+      WHERE owner_user_id=$1 AND quota_pool_id=$2`,
+    values: [
+      input.ownerUserId, input.quotaPoolId, nextRemaining, nextObservedAt, nextExpiresAt, nextSource,
+      nextWindowsJson === null ? null : JSON.stringify(nextWindowsJson),
+      nextAccountJson === null ? null : JSON.stringify(nextAccountJson),
+      nextScopedWindowsJson === null ? null : JSON.stringify(nextScopedWindowsJson),
+      nextScopedObservedAt, nextScopedExpiresAt,
+    ], maxRows: 0 });
+    break;
+  }
+
   // A reading may end a refused summon's wait. Marking it here, in the
   // reading's own transaction, means the event cannot be lost. True when one
   // of the owner's waits is ready to deliver. A used-up account rings nobody;
   // the waits read the stored reading, kept windows included.
-  return (record.account?.value ?? 100) > 0 && await markRegistrationQuotaWaitersReady(tx, input.ownerUserId);
+  return effectiveAccountRemaining > 0 && await markRegistrationQuotaWaitersReady(tx, input.ownerUserId);
 }
 
 
@@ -480,7 +491,7 @@ export async function markRegistrationQuotaWaitersReady(tx: DatabaseTransaction,
     ORDER BY w.quota_pool_id,w.channel_id LIMIT ${QUOTA_WAITERS_PER_OWNER}`,
   values: [ownerUserId], maxRows: QUOTA_WAITERS_PER_OWNER });
   const ready = waits.filter(row => row.ready !== true && row.observed_at != null
-    && (registrationQuotaReading(row)?.remainingPercent ?? 100) > 0);
+    && registrationQuotaVerdict(row).state !== "usedUp");
   if (ready.length) {
     await tx.query({ name: "registration_quota_waiters_ready_v1", text: `UPDATE control.registration_quota_waiters w
         SET ready_at=clock_timestamp(),ready_token=gen_random_uuid()
@@ -554,8 +565,8 @@ export type RegistrationUsageLimit = { quotaPoolId: string; limitedUntil?: strin
  * newer reading stands.
  */
 export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, input: {
-  ownerUserId: string; machineId: string; harness: string; resetsAt?: string; quotaScope?: string; usage?: unknown;
-  billingRefusal?: boolean;
+  ownerUserId: string; machineId: string; harness: string; resetsAt?: string; quotaScope?: string;
+  quotaScopeReason?: string; usage?: unknown; billingRefusal?: boolean;
 }): Promise<RegistrationUsageLimit | undefined> {
   const now = Date.now();
   const reset = input.resetsAt ? Date.parse(input.resetsAt) : NaN;
@@ -613,14 +624,15 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
     return { quotaPoolId, ...(limitedUntil ? { limitedUntil } : {}), usedUp: "account" };
   }
   const record = input.usage === undefined ? undefined : routingQuotaRecord(input.usage, now);
-  const scope = input.quotaScope?.trim();
-  const usedUp = scope && scope !== UNRESOLVED_QUOTA_SCOPE && record?.scoped && Number.isFinite(reset)
-    ? quotaRecordUsedUp(record, reset, scope, now) : undefined;
-  if (usedUp) {
-    await upsertRegistrationQuotaObservation(tx, { ownerUserId: input.ownerUserId, quotaPoolId, record: usedUp });
+  const scope = input.quotaScope?.trim() || undefined;
+  const scopeReason = input.quotaScopeReason?.trim() || undefined;
+  const attributed = record?.scoped && Number.isFinite(reset) && scope !== UNRESOLVED_QUOTA_SCOPE
+    ? attributeRoutingQuotaRefusal(record, reset, now, scope) : undefined;
+  if (attributed) {
+    await upsertRegistrationQuotaObservation(tx, { ownerUserId: input.ownerUserId, quotaPoolId, record: attributed.record });
     const limitedUntil = new Date(reset).toISOString();
-    return scope === ACCOUNT_QUOTA_SCOPE ? { quotaPoolId, limitedUntil, usedUp: "account" }
-      : { quotaPoolId, limitedUntil, usedUp: "scope", scope: scope! };
+    return attributed.usedUp === "account" ? { quotaPoolId, limitedUntil, usedUp: "account" }
+      : { quotaPoolId, limitedUntil, usedUp: "scope", scope: attributed.scope };
   }
   if (record) await upsertRegistrationQuotaObservation(tx, { ownerUserId: input.ownerUserId, quotaPoolId, record });
   const rows = await tx.query<QueryResultRow>({ name: "registration_usage_limit_observe_v4", text: `INSERT INTO
@@ -638,9 +650,11 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
     RETURNING to_json(expires_at)#>>'{}' AS expires_at`,
   values: [input.ownerUserId, quotaPoolId, Number.isFinite(reset) ? new Date(reset).toISOString() : null], maxRows: 1 });
   const limitedUntil = rows[0] ? new Date(String(rows[0].expires_at)).toISOString() : undefined;
-  // A daemon that predates scopes reports the account used up, as before.
+  // A daemon that predates scopes sends neither a scope, a reason, nor a
+  // complete reading, which means the whole account is used up.
+  const scopeAware = Boolean(scope || scopeReason || record?.scoped);
   return { quotaPoolId, ...(limitedUntil ? { limitedUntil } : {}),
-    usedUp: scope === undefined || scope === "" || scope === ACCOUNT_QUOTA_SCOPE ? "account" : "unresolved" };
+    usedUp: !scopeAware || scope === ACCOUNT_QUOTA_SCOPE ? "account" : "unresolved" };
 }
 
 /** Clear an active account billing-refusal hold, and any scoped billing holds

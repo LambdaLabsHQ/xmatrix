@@ -110,6 +110,7 @@ test("a usage limit no window explains holds the pool and waits for a retry on t
   assert.deepEqual(commands.map(command => command.family),
     ["registration-usage-limit-hold", "append-message", "offer-usage-limit-retry"]);
   assert.equal(commands[0].input.quotaScope, "unresolved");
+  assert.equal(commands[0].input.quotaScopeReason, "usage_read_failed");
   assert.deepEqual(commands[2].input.model, { model: "claude-opus-5-5", quotaScopes: ["Opus"] });
 });
 
