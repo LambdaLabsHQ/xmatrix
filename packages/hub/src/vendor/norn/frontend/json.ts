@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The stable JSON form of a Norn syntax tree, as printed by `norn parse --json`.
  *
@@ -13,15 +13,15 @@
  * bytes of a version-1 tree, which pin a running program's code, never change.
  */
 import {
-  NODE_FIELDS, NODE_GROUPS, NODE_SCHEMA, VERSION_2_KINDS, type FieldSchema, type NodeGroup, type NodeKind, type Pos, type Program,
+  NODE_FIELDS, NODE_GROUPS, NODE_SCHEMA, OPTIONAL_V3_FIELDS, VERSION_2_KINDS, VERSION_3_KINDS, type FieldSchema, type NodeGroup, type NodeKind, type Pos, type Program,
   type Span,
 } from "./ast.js";
 
 export const AST_FORMAT = "norn-ast";
 /** The newest version this front-end reads and writes. */
-export const AST_VERSION = 2;
+export const AST_VERSION = 3;
 /** The versions this front-end reads. */
-export type AstVersion = 1 | 2;
+export type AstVersion = 1 | 2 | 3;
 
 export interface AstDocument {
   format: typeof AST_FORMAT;
@@ -63,8 +63,8 @@ export function astFromJson(text: string): Program {
   }
   if (!isObject(document) || document["format"] !== AST_FORMAT) throw new AstJsonError("", `not a ${AST_FORMAT} document`);
   const version = document["version"];
-  if (version !== 1 && version !== 2) {
-    throw new AstJsonError("version", `unsupported ${AST_FORMAT} version ${describe(version)}; expected 1 or 2`);
+  if (version !== 1 && version !== 2 && version !== 3) {
+    throw new AstJsonError("version", `unsupported ${AST_FORMAT} version ${describe(version)}; expected 1, 2 or 3`);
   }
   for (const key of Object.keys(document)) {
     if (key !== "format" && key !== "version" && key !== "program") throw new AstJsonError("", `unknown field ${JSON.stringify(key)} in the document`);
@@ -121,6 +121,7 @@ interface Context {
 }
 
 const VERSION_2: ReadonlySet<string> = new Set(VERSION_2_KINDS);
+const VERSION_3: ReadonlySet<string> = new Set(VERSION_3_KINDS);
 
 type JsonObject = { [key: string]: unknown };
 
@@ -172,7 +173,12 @@ function check({ value, schema, path }: Task, tasks: Task[], context: Context): 
 
 function needVersion2(context: Context, path: Path, what: string): void {
   if (context.version < 2) fail(path, `${what} needs ${AST_FORMAT} version 2, but this document is version ${context.version}`);
-  context.needed = 2;
+  if (context.needed < 2) context.needed = 2;
+}
+
+function needVersion3(context: Context, path: Path, what: string): void {
+  if (context.version < 3) fail(path, `${what} needs ${AST_FORMAT} version 3, but this document is version ${context.version}`);
+  context.needed = 3;
 }
 
 function once(value: object, path: Path, seen: Set<object>): void {
@@ -192,11 +198,24 @@ function checkNode(value: unknown, allowed: NodeGroup | readonly NodeKind[], pat
     fail(path, `expected ${expected(allowed)}, found ${article(kind)} ${kind} node`);
   }
   const fields = NODE_FIELDS[kind] as readonly string[];
-  checkKeys(value, ["kind", ...fields, "span"], path);
+  const optional = OPTIONAL_V3_FIELDS[kind] ?? [];
+  checkKeys(value, ["kind", ...fields, "span"], optional, path);
   checkSpan(value["span"], child(path, "span"));
   if (VERSION_2.has(kind)) needVersion2(context, path, `${article(kind)} ${kind} node`);
+  if (VERSION_3.has(kind)) needVersion3(context, path, `${article(kind)} ${kind} node`);
   if (kind === "TypeDecl" && value["definition"] === null) {
     needVersion2(context, child(path, "definition"), "an abstract type, whose definition is null,");
+  }
+  if (kind === "Open" && typeof value["module"] === "string" && value["module"] !== "Std") {
+    needVersion3(context, child(path, "module"), `opening module ${JSON.stringify(value["module"])}`);
+  }
+  if (kind === "TypeName" && typeof value["name"] === "string" && value["name"].includes(".")) {
+    needVersion3(context, child(path, "name"), `qualified type ${JSON.stringify(value["name"])}`);
+  }
+  for (const field of optional) {
+    if (Object.hasOwn(value, field) && value[field] !== undefined) {
+      needVersion3(context, child(path, field), `field ${JSON.stringify(field)} on ${kind}`);
+    }
   }
   if (kind === "TemplateLiteral") {
     const { strings, expressions } = value;
@@ -207,23 +226,25 @@ function checkNode(value: unknown, allowed: NodeGroup | readonly NodeKind[], pat
   const schema = NODE_SCHEMA[kind] as { readonly [field: string]: FieldSchema };
   for (let index = fields.length - 1; index >= 0; index -= 1) {
     const field = fields[index]!;
+    if (optional.includes(field) && (!Object.hasOwn(value, field) || value[field] === undefined)) continue;
     tasks.push({ value: value[field], schema: schema[field]!, path: child(path, field) });
   }
 }
 
-/** Exactly these keys: an unknown key is reported before a missing one. */
-function checkKeys(object: JsonObject, keys: readonly string[], path: Path): void {
+/** Exactly these keys (with optional v3 fields allowed to be omitted): an unknown key is reported before a missing one. */
+function checkKeys(object: JsonObject, keys: readonly string[], optional: readonly string[], path: Path): void {
   for (const key of Object.keys(object)) {
     if (!keys.includes(key)) fail(path, `unknown field ${JSON.stringify(key)}`);
   }
   for (const key of keys) {
+    if (optional.includes(key)) continue;
     if (!Object.hasOwn(object, key)) fail(path, `missing field ${JSON.stringify(key)}`);
   }
 }
 
 function checkSpan(value: unknown, path: Path): void {
   if (!isObject(value)) fail(path, `expected a span {start, end}, found ${describe(value)}`);
-  checkKeys(value, ["start", "end"], path);
+  checkKeys(value, ["start", "end"], [], path);
   const start = checkPos(value["start"], child(path, "start"));
   const end = checkPos(value["end"], child(path, "end"));
   if (end.offset < start.offset) fail(path, `the span ends at offset ${end.offset}, before it starts at ${start.offset}`);
@@ -231,7 +252,7 @@ function checkSpan(value: unknown, path: Path): void {
 
 function checkPos(value: unknown, path: Path): Pos {
   if (!isObject(value)) fail(path, `expected a position {line, column, offset}, found ${describe(value)}`);
-  checkKeys(value, ["line", "column", "offset"], path);
+  checkKeys(value, ["line", "column", "offset"], [], path);
   for (const key of ["line", "column", "offset"]) {
     const number = value[key];
     const least = key === "offset" ? 0 : 1;
@@ -318,9 +339,12 @@ function write(program: Program, version: AstVersion): string {
       out.push(`{"kind":${JSON.stringify(kind)}`);
       stack.push(new Raw(`,"span":${spanJson(item["span"] as Span)}}`));
       const fields = NODE_FIELDS[kind] as readonly string[];
+      const optional = OPTIONAL_V3_FIELDS[kind] ?? [];
       for (let index = fields.length - 1; index >= 0; index -= 1) {
-        stack.push(item[fields[index]!]);
-        stack.push(new Raw(`,${JSON.stringify(fields[index])}:`));
+        const field = fields[index]!;
+        if (optional.includes(field) && (!Object.hasOwn(item, field) || item[field] === undefined)) continue;
+        stack.push(item[field]);
+        stack.push(new Raw(`,${JSON.stringify(field)}:`));
       }
     } else {
       out.push(JSON.stringify(item));

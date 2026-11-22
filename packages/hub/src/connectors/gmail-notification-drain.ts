@@ -2,6 +2,7 @@ import type { GmailRoutingJob } from "@xmatrix/db";
 import type { Env } from "../types";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { connectorEventArrived } from "../outside-events";
+import { extractGmailEventData } from "../norn-libraries";
 import { connectorAppRepository, connectorCredentialRepository, gmailRoutingRepository } from "./credentials";
 import { appendToRoutes, connectorEventMessageId } from "./event-ingress";
 import type { ConnectorEvent } from "./provider";
@@ -59,7 +60,12 @@ async function deliver(env: Env, job: GmailRoutingJob, id: string, read: { crede
     summary: "A new Gmail message is available", body: autoRead && "unread" in autoRead ? `${body} ${autoRead.unread}` : body };
   await post(env, job, event, feature, targets, privateRead === undefined ? undefined : { xmatrixPrivateConnectorResultOwner: job.userId });
   if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");
-  await connectorEventArrived(env, { spaceId: job.spaceId, provider: "gmail", event, authorizedUserId: job.userId });
+  await connectorEventArrived(env, {
+    spaceId: job.spaceId,
+    provider: "gmail",
+    event: { ...event, data: extractGmailEventData(id, job.selection.address, privateRead) },
+    authorizedUserId: job.userId,
+  });
   await repository.delivered(job,id);
 }
 async function process(env: Env, job: GmailRoutingJob) {

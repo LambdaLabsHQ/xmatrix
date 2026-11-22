@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The Norn abstract syntax tree.
  *
@@ -34,10 +34,10 @@ export interface Program {
   span: Span;
 }
 
-/** Type declarations, externals and `open` appear only at the top level of a program. */
-export type TopLevelItem = TypeDecl | External | Open | Statement;
+/** Type declarations, externals, `open`, `needs` and statements appear at the top level of a program or library. */
+export type TopLevelItem = TypeDecl | External | Open | Needs | Statement;
 
-/** `type name<'a> = definition`, or `type name<'a>` for an abstract type. */
+/** `type name<'a> = definition`, `pub opaque type name = ...`, or `type name<'a>` for an abstract type. */
 export interface TypeDecl {
   kind: "TypeDecl";
   /** Lowercase type name, e.g. `probe`. */
@@ -50,6 +50,12 @@ export interface TypeDecl {
    * only the host makes; only a host interface file declares one.
    */
   definition: VariantType | RecordType | TypeExpression | null;
+  /** Version 3: `"pub"` when explicitly exported from a library. Omitted when private/default. */
+  visibility?: "pub";
+  /** Version 3: `true` for `pub opaque type` (generative opaque type). Omitted otherwise. */
+  opaque?: boolean;
+  /** Version 3: leading `/** ... *\/` doc comment, if any. */
+  doc?: string;
   span: Span;
 }
 
@@ -64,10 +70,19 @@ export interface External {
   span: Span;
 }
 
-/** `open Std`. In v0 the only module is `Std`. */
+/** `open Std`, `open GitHub`, or `open GitHub.{issueOpened, ciFailed}`. */
 export interface Open {
   kind: "Open";
-  module: "Std";
+  module: string;
+  /** Version 3: selective import list (`open GitHub.{a, b}`). Omitted for whole-module `open`. */
+  names?: string[];
+  span: Span;
+}
+
+/** Version 3: `needs Team`: declares a library dependency resolved in the program's Space. */
+export interface Needs {
+  kind: "Needs";
+  module: string;
   span: Span;
 }
 
@@ -76,11 +91,15 @@ export interface Open {
 
 export type Statement = Let | LetRec | Expression;
 
-/** `let pattern = value` */
+/** `let pattern = value`, `pub let x: type = value` */
 export interface Let {
   kind: "Let";
   pattern: Pattern;
   value: Expression;
+  /** Version 3: `"pub"` when explicitly exported from a library. */
+  visibility?: "pub";
+  /** Version 3: optional type annotation on the binding. */
+  annotation?: TypeExpression;
   span: Span;
 }
 
@@ -88,6 +107,8 @@ export interface Let {
 export interface LetRec {
   kind: "LetRec";
   bindings: RecBinding[];
+  /** Version 3: `"pub"` when explicitly exported from a library. */
+  visibility?: "pub";
   span: Span;
 }
 
@@ -96,6 +117,8 @@ export interface RecBinding {
   kind: "RecBinding";
   name: string;
   value: Lambda;
+  /** Version 3: optional type annotation on the recursive binding. */
+  annotation?: TypeExpression;
   span: Span;
 }
 
@@ -114,6 +137,7 @@ export type Expression =
   | ParticipantLiteral
   | RefLiteral
   | Identifier
+  | QualifiedIdentifier
   | Constructor
   | TupleLiteral
   | ListLiteral
@@ -227,6 +251,14 @@ export type RefKind = "doc" | "channel";
 /** A lowercase name used as a value: `pr`, `ask`, `push`. */
 export interface Identifier {
   kind: "Identifier";
+  name: string;
+  span: Span;
+}
+
+/** Version 3: a module-qualified value reference such as `GitHub.issueOpened` or `String.toLowerCase`. */
+export interface QualifiedIdentifier {
+  kind: "QualifiedIdentifier";
+  module: string;
   name: string;
   span: Span;
 }
@@ -353,12 +385,14 @@ export type BinaryOperator =
   | "*."
   | "/.";
 
-/** `(a, ~b, ~c=1) => body`, `x => body`, `() => body` */
+/** `(a, ~b, ~c=1) => body`, `(x: int): string => body`, `x => body`, `() => body` */
 export interface Lambda {
   kind: "Lambda";
   /** Empty for `() => …`. */
   params: Parameter[];
   body: Expression;
+  /** Version 3: optional return type annotation `(...): T => ...`. */
+  returnType?: TypeExpression;
   span: Span;
 }
 
@@ -412,11 +446,19 @@ export interface LabelledArg {
   span: Span;
 }
 
-/** A positional parameter is a pattern, usually a `VarPattern` or `WildcardPattern`. */
-export type Parameter = Pattern | LabelledParam;
+/** A positional parameter is a pattern (or annotated pattern in v3), or a labelled parameter. */
+export type Parameter = Pattern | AnnotatedParam | LabelledParam;
+
+/** Version 3: a positional parameter with an optional type annotation, as in `approval: approved`. */
+export interface AnnotatedParam {
+  kind: "AnnotatedParam";
+  pattern: Pattern;
+  type: TypeExpression;
+  span: Span;
+}
 
 /**
- * `~label`, `~label=default`, `~label as name`, `~label as name=default`.
+ * `~label`, `~label=default`, `~label as name`, `~label as name=default`, `~label: type=default`.
  * `pattern` is what the argument binds: a `VarPattern` named like the label
  * when there is no `as`. Without a default the argument is required.
  */
@@ -425,6 +467,8 @@ export interface LabelledParam {
   label: string;
   pattern: Pattern;
   defaultValue: Expression | null;
+  /** Version 3: optional type annotation on the labelled parameter. */
+  annotation?: TypeExpression;
   span: Span;
 }
 
@@ -507,11 +551,11 @@ export interface OrPattern {
 }
 
 // ---------------------------------------------------------------------------
-// Types (only in type and external declarations: v0 programs carry no annotations)
+// Types (in declarations, interfaces, and optional v3 annotations)
 
-export type TypeExpression = TypeName | TypeVar | TupleType | FunctionType;
+export type TypeExpression = TypeName | TypeVar | TupleType | FunctionType | TypeHole;
 
-/** `string`, `list<'a>`, `result<int, string>` */
+/** `string`, `list<'a>`, `result<int, string>`, or qualified `Events.kind<issue>` (v3). */
 export interface TypeName {
   kind: "TypeName";
   name: string;
@@ -523,6 +567,12 @@ export interface TypeName {
 export interface TypeVar {
   kind: "TypeVar";
   name: string;
+  span: Span;
+}
+
+/** Version 3: `_` type hole inside an annotation, resolved to a fresh inferred type variable. */
+export interface TypeHole {
+  kind: "TypeHole";
   span: Span;
 }
 
@@ -570,6 +620,8 @@ export interface ConstructorDecl {
   kind: "ConstructorDecl";
   name: string;
   args: TypeExpression[];
+  /** Version 3: leading `/** ... *\/` doc comment, if any. */
+  doc?: string;
   span: Span;
 }
 
@@ -585,6 +637,8 @@ export interface FieldDecl {
   kind: "FieldDecl";
   name: string;
   type: TypeExpression;
+  /** Version 3: leading `/** ... *\/` doc comment, if any. */
+  doc?: string;
   span: Span;
 }
 
@@ -596,6 +650,7 @@ export type AstNode =
   | TypeDecl
   | External
   | Open
+  | Needs
   | Let
   | LetRec
   | RecBinding
@@ -603,6 +658,7 @@ export type AstNode =
   | RecordField
   | Case
   | LabelledArg
+  | AnnotatedParam
   | LabelledParam
   | Pattern
   | FieldPattern
@@ -621,15 +677,18 @@ export type FieldsOf<K extends NodeKind> = Exclude<keyof Extract<AstNode, { kind
 /**
  * The fields of every node kind, in their JSON order. In the JSON form each
  * node is `kind`, then these fields in this order, then `span`.
+ * Optional v3 fields (listed in `OPTIONAL_V3_FIELDS`) are omitted when unset so
+ * v1 and v2 trees keep their exact serialized bytes.
  */
 export const NODE_FIELDS = {
   Program: ["body"],
-  TypeDecl: ["name", "params", "definition"],
+  TypeDecl: ["name", "params", "definition", "visibility", "opaque", "doc"],
   External: ["name", "type"],
-  Open: ["module"],
-  Let: ["pattern", "value"],
-  LetRec: ["bindings"],
-  RecBinding: ["name", "value"],
+  Open: ["module", "names"],
+  Needs: ["module"],
+  Let: ["pattern", "value", "visibility", "annotation"],
+  LetRec: ["bindings", "visibility"],
+  RecBinding: ["name", "value", "annotation"],
   IntLiteral: ["value"],
   FloatLiteral: ["value"],
   StringLiteral: ["value"],
@@ -641,6 +700,7 @@ export const NODE_FIELDS = {
   ParticipantLiteral: ["name", "instance", "args"],
   RefLiteral: ["refKind", "value"],
   Identifier: ["name"],
+  QualifiedIdentifier: ["module", "name"],
   Constructor: ["name", "args"],
   TupleLiteral: ["elements"],
   ListLiteral: ["elements", "rest"],
@@ -652,13 +712,14 @@ export const NODE_FIELDS = {
   Try: ["operand"],
   Unary: ["op", "operand"],
   Binary: ["op", "left", "right"],
-  Lambda: ["params", "body"],
+  Lambda: ["params", "body", "returnType"],
   Block: ["body"],
   If: ["condition", "thenBranch", "elseBranch"],
   Switch: ["scrutinee", "cases"],
   Case: ["pattern", "guard", "body"],
   LabelledArg: ["label", "value"],
-  LabelledParam: ["label", "pattern", "defaultValue"],
+  AnnotatedParam: ["pattern", "type"],
+  LabelledParam: ["label", "pattern", "defaultValue", "annotation"],
   WildcardPattern: [],
   VarPattern: ["name"],
   LiteralPattern: ["literal"],
@@ -670,14 +731,28 @@ export const NODE_FIELDS = {
   OrPattern: ["alternatives"],
   TypeName: ["name", "args"],
   TypeVar: ["name"],
+  TypeHole: [],
   TupleType: ["elements"],
   FunctionType: ["params", "result"],
   LabelledType: ["label", "type", "optional"],
   VariantType: ["constructors"],
-  ConstructorDecl: ["name", "args"],
+  ConstructorDecl: ["name", "args", "doc"],
   RecordType: ["fields"],
-  FieldDecl: ["name", "type"],
+  FieldDecl: ["name", "type", "doc"],
 } as const satisfies { readonly [K in NodeKind]: readonly FieldsOf<K>[] };
+
+/** Optional fields introduced in norn-ast version 3; omitted on v1/v2 trees when absent. */
+export const OPTIONAL_V3_FIELDS: Readonly<Partial<Record<NodeKind, readonly string[]>>> = {
+  TypeDecl: ["visibility", "opaque", "doc"],
+  Open: ["names"],
+  Let: ["visibility", "annotation"],
+  LetRec: ["visibility"],
+  RecBinding: ["annotation"],
+  Lambda: ["returnType"],
+  LabelledParam: ["annotation"],
+  ConstructorDecl: ["doc"],
+  FieldDecl: ["doc"],
+};
 
 // Fails to compile if NODE_FIELDS leaves out a field of some node kind.
 type UnlistedFields = { [K in NodeKind]: Exclude<FieldsOf<K>, (typeof NODE_FIELDS)[K][number]> }[NodeKind];
@@ -690,7 +765,7 @@ void allFieldsListed;
 
 const EXPRESSION_KINDS = [
   "IntLiteral", "FloatLiteral", "StringLiteral", "TemplateLiteral", "BoolLiteral", "UnitLiteral", "TimeLiteral",
-  "DurationLiteral", "ParticipantLiteral", "RefLiteral", "Identifier", "Constructor", "TupleLiteral", "ListLiteral",
+  "DurationLiteral", "ParticipantLiteral", "RefLiteral", "Identifier", "QualifiedIdentifier", "Constructor", "TupleLiteral", "ListLiteral",
   "RecordLiteral", "FieldAccess", "Call", "Pipe", "Try", "Unary", "Binary", "Lambda", "Block", "If", "Switch",
 ] as const satisfies readonly Expression["kind"][];
 
@@ -700,16 +775,16 @@ const ALTERNATIVE_KINDS = [
 ] as const satisfies readonly Pattern["kind"][];
 
 const PATTERN_KINDS = [...ALTERNATIVE_KINDS, "OrPattern"] as const;
-const TYPE_KINDS = ["TypeName", "TypeVar", "TupleType", "FunctionType"] as const satisfies readonly TypeExpression["kind"][];
+const TYPE_KINDS = ["TypeName", "TypeVar", "TypeHole", "TupleType", "FunctionType"] as const satisfies readonly TypeExpression["kind"][];
 const STATEMENT_KINDS = ["Let", "LetRec", ...EXPRESSION_KINDS] as const;
 
 /** The unions of ast.ts as lists of kinds, by the name an error message uses for them. */
 export const NODE_GROUPS = {
-  "top-level item": ["TypeDecl", "External", "Open", ...STATEMENT_KINDS],
+  "top-level item": ["TypeDecl", "External", "Open", "Needs", ...STATEMENT_KINDS],
   statement: STATEMENT_KINDS,
   expression: EXPRESSION_KINDS,
   argument: [...EXPRESSION_KINDS, "LabelledArg"],
-  parameter: [...PATTERN_KINDS, "LabelledParam"],
+  parameter: [...PATTERN_KINDS, "AnnotatedParam", "LabelledParam"],
   pattern: PATTERN_KINDS,
   type: TYPE_KINDS,
   "parameter type": [...TYPE_KINDS, "LabelledType"],
@@ -779,12 +854,16 @@ void allValuesListed;
 /** The schema of every field of every node kind. The compiler checks that it covers each field. */
 export const NODE_SCHEMA: { readonly [K in NodeKind]: { readonly [F in FieldsOf<K>]: FieldSchema } } = {
   Program: { body: list(node("top-level item")) },
-  TypeDecl: { name: "string", params: list(node(["TypeVar"])), definition: nullable(node(["VariantType", "RecordType", ...TYPE_KINDS])) },
+  TypeDecl: {
+    name: "string", params: list(node(["TypeVar"])), definition: nullable(node(["VariantType", "RecordType", ...TYPE_KINDS])),
+    visibility: { oneOf: ["pub"] }, opaque: "boolean", doc: "string",
+  },
   External: { name: "string", type },
-  Open: { module: { oneOf: ["Std"] } },
-  Let: { pattern, value: expression },
-  LetRec: { bindings: list(node(["RecBinding"]), 1) },
-  RecBinding: { name: "string", value: node(["Lambda"]) },
+  Open: { module: "string", names: list("string", 1) },
+  Needs: { module: "string" },
+  Let: { pattern, value: expression, visibility: { oneOf: ["pub"] }, annotation: type },
+  LetRec: { bindings: list(node(["RecBinding"]), 1), visibility: { oneOf: ["pub"] } },
+  RecBinding: { name: "string", value: node(["Lambda"]), annotation: type },
   IntLiteral: { value: "decimal" },
   FloatLiteral: { value: "number" },
   StringLiteral: { value: "string" },
@@ -796,6 +875,7 @@ export const NODE_SCHEMA: { readonly [K in NodeKind]: { readonly [F in FieldsOf<
   ParticipantLiteral: { name: "string", instance: nullable("digits"), args: list(node(["LabelledArg"])) },
   RefLiteral: { refKind: { oneOf: REF_KINDS }, value: "string" },
   Identifier: { name: "string" },
+  QualifiedIdentifier: { module: "string", name: "string" },
   Constructor: { name: "string", args: list(expression) },
   TupleLiteral: { elements: list(expression, 2) },
   ListLiteral: { elements: list(expression), rest: nullable(expression) },
@@ -807,13 +887,14 @@ export const NODE_SCHEMA: { readonly [K in NodeKind]: { readonly [F in FieldsOf<
   Try: { operand: expression },
   Unary: { op: { oneOf: UNARY_OPERATORS }, operand: expression },
   Binary: { op: { oneOf: BINARY_OPERATORS }, left: expression, right: expression },
-  Lambda: { params: list(node("parameter")), body: expression },
+  Lambda: { params: list(node("parameter")), body: expression, returnType: type },
   Block: { body: list(node("statement")) },
   If: { condition: expression, thenBranch: node(["Block"]), elseBranch: nullable(node(["Block", "If"])) },
   Switch: { scrutinee: expression, cases: list(node(["Case"]), 1) },
   Case: { pattern, guard: nullable(expression), body: expression },
   LabelledArg: { label: "string", value: expression },
-  LabelledParam: { label: "string", pattern, defaultValue: nullable(expression) },
+  AnnotatedParam: { pattern, type },
+  LabelledParam: { label: "string", pattern, defaultValue: nullable(expression), annotation: type },
   WildcardPattern: {},
   VarPattern: { name: "string" },
   LiteralPattern: { literal: node(["IntLiteral", "FloatLiteral", "StringLiteral", "BoolLiteral", "UnitLiteral"]) },
@@ -825,13 +906,14 @@ export const NODE_SCHEMA: { readonly [K in NodeKind]: { readonly [F in FieldsOf<
   OrPattern: { alternatives: list(node(ALTERNATIVE_KINDS), 2) },
   TypeName: { name: "string", args: list(type) },
   TypeVar: { name: "string" },
+  TypeHole: {},
   TupleType: { elements: list(type, 2) },
   FunctionType: { params: list(node("parameter type")), result: type },
   LabelledType: { label: "string", type, optional: "boolean" },
   VariantType: { constructors: list(node(["ConstructorDecl"]), 1) },
-  ConstructorDecl: { name: "string", args: list(type) },
+  ConstructorDecl: { name: "string", args: list(type), doc: "string" },
   RecordType: { fields: list(node(["FieldDecl"]), 1) },
-  FieldDecl: { name: "string", type },
+  FieldDecl: { name: "string", type, doc: "string" },
 };
 
 /**
@@ -842,3 +924,6 @@ export const NODE_SCHEMA: { readonly [K in NodeKind]: { readonly [F in FieldsOf<
  * 1 gave it.
  */
 export const VERSION_2_KINDS = ["External", "FunctionType", "LabelledType"] as const satisfies readonly NodeKind[];
+
+/** The node kinds that norn-ast version 3 added, for modules, visibility, annotations and type holes. */
+export const VERSION_3_KINDS = ["Needs", "QualifiedIdentifier", "AnnotatedParam", "TypeHole"] as const satisfies readonly NodeKind[];

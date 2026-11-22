@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /** All language values have a lossless JSON representation. */
 export type Value =
   | { type: "unit" }
@@ -11,8 +11,9 @@ export type Value =
   | { type: "record"; fields: Record<string, Value> }
   | { type: "closure"; node: string; environment: string }
   | { type: "builtin"; name: string }
-  | { type: "request"; id: string }
-  | { type: "source"; kind: "fact" | "stream"; name: string; args: Value[]; labels: Record<string, Value> };
+  | { type: "request"; id: string; transforms?: { kind: "validate" | "map"; fn: Value }[] }
+  | { type: "source"; kind: "fact" | "stream"; name: string; args: Value[]; labels: Record<string, Value> }
+  | { type: "opaque"; library: string; typeName: string; value: Value };
 
 /** Plain data: what a ledger holds and what crosses a restart. */
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -68,6 +69,7 @@ export function show(value: Value): string {
     case "closure": case "builtin": return "<function>";
     case "request": return `<request ${value.id}>`;
     case "source": return `<${value.kind} ${value.name}>`;
+    case "opaque": return `<${value.library}.${value.typeName}>`;
   }
 }
 /** Stable key for a value, independent of object insertion order: names a fact, a stream or a request's content. */

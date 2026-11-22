@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The Norn type checker (docs/types.md).
  *
@@ -13,11 +13,19 @@
  * a browser. `node.ts` reads the reference host and the standard library from
  * this repository's files.
  */
-export { FAMILIES, type Family } from "./builtins.js";
-export { CODES, type CheckDiagnostic, type Code, type Severity } from "./diagnostics.js";
+export { FAMILIES, builtinModuleExports, type Family } from "./builtins.js";
+export { CODES, type CheckDiagnostic, type Code, type DiagnosticFix, type DiagnosticSecondary, type Severity } from "./diagnostics.js";
 export type { EffectSummary } from "./effects.js";
-export { elaborate } from "./elaborate.js";
-export type { Form, FormDefinition, ReportForm } from "./forms.js";
-export { checkProgram, loadLibrary, type CheckOptions, type CheckResult, type Library } from "./infer.js";
+export { elaborate, type FormEvidencePlan } from "./elaborate.js";
+export {
+  EVENTS_INTERFACE_SOURCE, validateEventKindAgainstManifests,
+  type ConnectorEventSpec, type ConnectorFieldSpec, type ConnectorManifest,
+} from "./events.js";
+export type { Form, FormDefinition, FormRefusal, ReportForm } from "./forms.js";
+export { checkProgram, loadLibrary, type CheckOptions, type CheckResult, type Library, type LoadLibraryOptions } from "./infer.js";
 export { builtinInterface, hostSources, loadInterface, type HostInterface, type ValueBinding } from "./interface.js";
+export {
+  deriveInterface, diffEffectLocks, diffInterfaces, diffProgramUpgrade, formatInterfaceSummary, pinProgramDefinitions,
+  type DerivedInterface, type DerivedTypeExport, type DerivedValueExport, type EffectLockDiff, type InterfaceChangeKind, type InterfaceDiff, type ProgramPin, type UpgradeDiff,
+} from "./modules.js";
 export { checkSource, readInterface, readLibrary, type SourceCheck } from "./source.js";

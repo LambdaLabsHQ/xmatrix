@@ -84,13 +84,27 @@ function streamText(stream: Extract<Value, { type: "source" }>): string {
   if (stream.name === "ciFailed") return `CI fails on ${word(stream.args[0])}`;
   if (stream.name === "prMerged") return `a pull request merges on ${word(stream.args[0])}`;
   if (stream.name === "appEvent") return `${word(stream.args[0])} reports ${word(stream.labels.feature) || "an event"}`;
+  if (stream.name === "Events.events") {
+    const kindVal = stream.args[0];
+    const app = kindVal?.type === "variant" && kindVal.name === "EventKind" ? word(kindVal.args[0]) : "";
+    const kind = kindVal?.type === "variant" && kindVal.name === "EventKind" ? word(kindVal.args[1]) : "";
+    const source = word(stream.labels.source);
+    return `${app || "event"} ${kind || "event"}${source ? ` on ${source}` : ""}`;
+  }
   return stream.name;
 }
 
 /** The program's waits that have begun and not ended, each by its place in the text and its count there. */
 function waitsBegun(ledger: Ledger): Map<string, number> {
   const waits = new Map<string, number>();
-  for (const key of Object.keys(ledger.entries)) {
+  for (const [key, entry] of Object.entries(ledger.entries)) {
+    if (key.startsWith("loop:")) {
+      const state = entry.value as unknown as { sealedRounds?: number; active?: unknown } | null;
+      if (state && typeof state === "object" && state.active === null && typeof state.sealedRounds === "number") {
+        waits.set(key, state.sealedRounds);
+      }
+      continue;
+    }
     if (!key.startsWith("wait:") || !key.endsWith("/began") || ledger.entries[key.slice(0, -"/began".length)]) continue;
     const [place = "", count = "0"] = key.slice(0, -"/began".length).split("#");
     waits.set(place, Math.max(waits.get(place) ?? 0, Number(count)));
@@ -99,7 +113,18 @@ function waitsBegun(ledger: Ledger): Map<string, number> {
 }
 /** How far each loop of the program has come: it changes when a round is over. */
 const roundsHandled = (ledger: Ledger): string =>
-  JSON.stringify(Object.entries(ledger.entries).filter(([key]) => key.endsWith("/handled")).map(([key, entry]) => [key, entry.value]).sort());
+  JSON.stringify(
+    Object.entries(ledger.entries)
+      .filter(([key]) => key.endsWith("/handled") || key.startsWith("loop:"))
+      .map(([key, entry]) => {
+        if (key.startsWith("loop:")) {
+          const state = entry.value as unknown as { sealedRounds?: number } | null;
+          return [key, state?.sealedRounds ?? 0];
+        }
+        return [key, entry.value];
+      })
+      .sort(),
+  );
 
 /** Two flows that read the same, whenever they happen and whatever their answers say. */
 const sameFlow = (steps: PageProgramStep[]): string =>

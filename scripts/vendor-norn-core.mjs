@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-const revision = "38245c85e0afacad4ce937b6b84fa1d72442af9a";
+const revision = "9882eceec0c609c362a64144ad5bef227268bac4";
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/vendor-norn-core.mjs <norn-checkout>");
 const root = fileURLToPath(new URL("../packages/hub/src/vendor/norn/", import.meta.url));
@@ -17,6 +17,9 @@ const runtime = ["code", "machine", "pattern", "value", "std", "sha256", "form",
 const files = [...frontend, ...runtime].sort();
 // Each patch must find its text, so a refresh cannot silently drop one.
 const patches = {
+  "frontend/parser.ts": [
+    ['  private noAnnotation(): void {\n    if (this.at(":")) this.fail("type annotations are not part of Norn v0: types are inferred (spec §4)");\n  }\n\n', "", "unused `noAnnotation` helper removed for Hub noUnusedLocals"],
+  ],
   "runtime/machine.ts": [
     ["values: Value[], env: string): void {", "values: Value[], _env: string): void {", "unused parameter `env` renamed `_env`"],
   ],

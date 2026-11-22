@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The Norn parser: tokens to the syntax tree of ast.ts.
  *
@@ -25,7 +25,7 @@ export type ParseResult = { ok: true; program: A.Program } | { ok: false; diagno
 export function parse(source: string): ParseResult {
   const lexed = lex(source);
   if (lexed.diagnostics.length > 0) return { ok: false, diagnostics: lexed.diagnostics };
-  const parser = new Parser(lexed.tokens);
+  const parser = new Parser(lexed.tokens, lexed.docs);
   const program = parser.parseProgram();
   return parser.diagnostics.length > 0 ? { ok: false, diagnostics: parser.diagnostics } : { ok: true, program };
 }
@@ -68,18 +68,24 @@ const FOREIGN_WORDS: ReadonlyMap<string, string> = new Map([
 class Parser {
   readonly diagnostics: Diagnostic[] = [];
   private readonly tokens: Token[];
+  private readonly docs: ReadonlyMap<number, string> | undefined;
   /** For each `(`, the index of its matching `)`, or -1. */
   private readonly closing: Int32Array;
   private index = 0;
 
-  constructor(tokens: Token[]) {
+  constructor(tokens: Token[], docs?: ReadonlyMap<number, string>) {
     this.tokens = tokens;
+    this.docs = docs;
     this.closing = new Int32Array(tokens.length).fill(-1);
     const open: number[] = [];
     tokens.forEach((token, index) => {
       if (token.kind === "(") open.push(index);
       if (token.kind === ")" && open.length > 0) this.closing[open.pop()!] = index;
     });
+  }
+
+  private docAt(tokenIndex: number): string | undefined {
+    return this.docs?.get(tokenIndex);
   }
 
   // Token access -----------------------------------------------------------
@@ -154,10 +160,6 @@ class Parser {
     this.fail(`expected ',' or '${close}' after ${item}, found ${describe(found)}`);
   }
 
-  private noAnnotation(): void {
-    if (this.at(":")) this.fail("type annotations are not part of Norn v0: types are inferred (spec §4)");
-  }
-
   // Program and statements -------------------------------------------------
 
   parseProgram(): A.Program {
@@ -188,10 +190,56 @@ class Parser {
   }
 
   private parseTopLevelItem(): A.TopLevelItem {
+    if (this.atPub()) return this.parsePubItem();
+    if (this.atOpaqueType()) return this.parseTypeDecl(undefined, true);
     if (this.at("type")) return this.parseTypeDecl();
     if (this.atExternal()) return this.parseExternal();
     if (this.at("open")) return this.parseOpen();
+    if (this.atNeeds()) return this.parseNeeds();
     return this.parseStatement();
+  }
+
+  /** Contextual `pub` before `type`, `opaque type`, `let` or `let rec` on the same line. */
+  private atPub(): boolean {
+    const token = this.peek();
+    const next = this.peek(1);
+    if (token.kind !== "Ident" || token.text !== "pub" || next.span.start.line !== token.span.end.line) return false;
+    if (next.kind === "type" || next.kind === "let") return true;
+    return next.kind === "Ident" && next.text === "opaque" && this.peek(2).kind === "type" && this.peek(2).span.start.line === next.span.end.line;
+  }
+
+  /** Contextual `opaque type ...` on the same line. */
+  private atOpaqueType(): boolean {
+    const token = this.peek();
+    const next = this.peek(1);
+    return token.kind === "Ident" && token.text === "opaque" && next.kind === "type" && next.span.start.line === token.span.end.line;
+  }
+
+  /** Contextual `needs Module` at top level on the same line. */
+  private atNeeds(): boolean {
+    const token = this.peek();
+    const next = this.peek(1);
+    return token.kind === "Ident" && token.text === "needs" && next.kind === "UIdent" && next.span.start.line === token.span.end.line;
+  }
+
+  private parsePubItem(): A.TopLevelItem {
+    const startIndex = this.index;
+    const pubToken = this.next();
+    const doc = this.docAt(startIndex);
+    if (this.atOpaqueType()) {
+      this.next(); // consume `opaque`
+      const decl = this.parseTypeDecl("pub", true, pubToken, doc);
+      return decl;
+    }
+    if (this.at("type")) return this.parseTypeDecl("pub", false, pubToken, doc);
+    if (this.at("let")) return this.parseLet("pub", pubToken);
+    this.fail(`expected 'type', 'opaque type' or 'let' after 'pub', found ${describe(this.peek())}`);
+  }
+
+  private parseNeeds(): A.Needs {
+    const start = this.next();
+    const mod = this.next();
+    return { kind: "Needs", module: mod.text, span: this.spanFrom(start) };
   }
 
   private parseStatement(): A.Statement {
@@ -247,39 +295,59 @@ class Parser {
     }
   }
 
-  private parseLet(): A.Let | A.LetRec {
+  private parseLet(visibility?: "pub", startToken?: Token): A.Let | A.LetRec {
     const letToken = this.next();
+    const start = startToken ?? letToken;
     if (this.eat("rec")) {
       const bindings = [this.parseRecBinding("'let rec'")];
       while (this.eat("and")) bindings.push(this.parseRecBinding("'and'"));
-      return { kind: "LetRec", bindings, span: this.spanFrom(letToken) };
+      return { kind: "LetRec", bindings, ...(visibility ? { visibility } : {}), span: this.spanFrom(start) };
     }
     const pattern = this.parsePattern();
-    this.noAnnotation();
+    const annotation = this.eat(":") ? this.parseType() : undefined;
     this.expect("=", "after the pattern of 'let'");
     const value = this.parseExpression();
     if (this.at("and")) this.fail("'and' can only join the functions of a 'let rec'");
-    return { kind: "Let", pattern, value, span: this.spanFrom(letToken) };
+    return {
+      kind: "Let",
+      pattern,
+      value,
+      ...(visibility ? { visibility } : {}),
+      ...(annotation ? { annotation } : {}),
+      span: this.spanFrom(start),
+    };
   }
 
   private parseRecBinding(after: string): A.RecBinding {
     const name = this.expectIdent(`a function name after ${after}`);
-    this.noAnnotation();
+    const annotation = this.eat(":") ? this.parseType() : undefined;
     this.expect("=", `after '${name.text}'`);
     const value = this.parseExpression();
     if (value.kind !== "Lambda") {
       this.fail(`'let rec' binds functions only: write 'let rec ${name.text} = (…) => …'`, value.span);
     }
-    return { kind: "RecBinding", name: name.text, value, span: this.spanFrom(name) };
+    return { kind: "RecBinding", name: name.text, value, ...(annotation ? { annotation } : {}), span: this.spanFrom(name) };
   }
 
   private parseOpen(): A.Open {
     const openToken = this.next();
     const name = this.peek();
     if (name.kind !== "UIdent") this.fail(`expected a module name after 'open', found ${describe(name)}`);
-    if (name.text !== "Std") this.fail(`only 'open Std' exists in v0: there is no module ${name.text}`);
     this.next();
-    return { kind: "Open", module: "Std", span: this.spanFrom(openToken) };
+    let names: string[] | undefined;
+    if (this.at(".") && this.peek(1).kind === "{") {
+      this.next(); // '.'
+      const openBrace = this.next(); // '{'
+      names = [];
+      while (!this.atListEnd("}")) {
+        const item = this.expectIdent("an exported name in open list");
+        names.push(item.text);
+        if (!this.eat(",")) break;
+      }
+      this.closeList("}", openBrace, "an exported name");
+      if (names.length === 0) this.fail("selective open needs at least one name, as in open GitHub.{issueOpened}", this.spanFrom(openBrace));
+    }
+    return { kind: "Open", module: name.text, ...(names ? { names } : {}), span: this.spanFrom(openToken) };
   }
 
   // Expressions ------------------------------------------------------------
@@ -288,18 +356,37 @@ class Parser {
     return this.startsLambda() ? this.parseLambda() : this.parseBinary(0);
   }
 
-  /** `x =>`, `_ =>` or `(…) =>`. */
+  /** `x =>`, `_ =>`, `(…) =>`, or `(…): ReturnType =>`. */
   private startsLambda(): boolean {
     const token = this.peek();
     if (token.kind === "Ident" || token.kind === "Underscore") return this.peek(1).kind === "=>";
     if (token.kind !== "(") return false;
     const close = this.closing[this.index] ?? -1;
-    return close >= 0 && this.tokens[close + 1]?.kind === "=>";
+    if (close < 0) return false;
+    const after = this.tokens[close + 1];
+    if (after?.kind === "=>") return true;
+    if (after?.kind !== ":") return false;
+    // Scan past a return type annotation after `):` to see if `=>` follows.
+    let i = close + 2;
+    let angle = 0;
+    let paren = 0;
+    while (i < this.tokens.length) {
+      const k = this.tokens[i]!.kind;
+      if (k === "<") angle++;
+      else if (k === ">") { if (angle > 0) angle--; else return false; }
+      else if (k === "(") paren++;
+      else if (k === ")") { if (paren > 0) paren--; else return false; }
+      else if (k === "=>" && angle === 0 && paren === 0) return true;
+      else if (k === "EOF" || k === ";" || k === "{" || k === "}") return false;
+      i++;
+    }
+    return false;
   }
 
   private parseLambda(): A.Lambda {
     const start = this.peek();
     let params: A.Parameter[];
+    let returnType: A.TypeExpression | undefined;
     if (start.kind === "(") {
       params = [];
       const open = this.next();
@@ -308,6 +395,7 @@ class Parser {
         if (!this.eat(",")) break;
       }
       this.closeList(")", open, "a parameter");
+      if (this.eat(":")) returnType = this.parseType(false);
     } else {
       this.next();
       params = [start.kind === "Underscore"
@@ -316,22 +404,23 @@ class Parser {
     }
     this.expect("=>", "after the parameters");
     const body = this.parseExpression();
-    return { kind: "Lambda", params, body, span: this.spanFrom(start) };
+    return { kind: "Lambda", params, body, ...(returnType ? { returnType } : {}), span: this.spanFrom(start) };
   }
 
   private parseParameter(): A.Parameter {
     const start = this.peek();
     if (start.kind !== "~") {
       const pattern = this.parsePattern();
-      this.noAnnotation();
+      const annotation = this.eat(":") ? this.parseType() : undefined;
       if (this.at("=")) this.fail("only a labelled parameter can have a default, as in ~on=[]");
+      if (annotation) return { kind: "AnnotatedParam", pattern, type: annotation, span: this.spanFrom(start) };
       return pattern;
     }
     this.next();
     const label = this.expectIdent("a label name after '~'");
     let pattern: A.Pattern = { kind: "VarPattern", name: label.text, span: spanOf(label) };
     if (this.eat("as")) pattern = this.parsePattern();
-    this.noAnnotation();
+    const annotation = this.eat(":") ? this.parseType() : undefined;
     let defaultValue: A.Expression | null = null;
     if (this.eat("=")) {
       if (this.at("?")) {
@@ -339,7 +428,7 @@ class Parser {
       }
       defaultValue = this.parseExpression();
     }
-    return { kind: "LabelledParam", label: label.text, pattern, defaultValue, span: this.spanFrom(start) };
+    return { kind: "LabelledParam", label: label.text, pattern, defaultValue, ...(annotation ? { annotation } : {}), span: this.spanFrom(start) };
   }
 
   private parseBinary(minPrecedence: number): A.Expression {
@@ -402,13 +491,18 @@ class Parser {
     return expression;
   }
 
-  /** After `->`: a function name or a parenthesized expression, then its own arguments if any. */
+  /** After `->`: a function name, qualified `Module.name`, or a parenthesized expression, then its own arguments if any. */
   private parsePipe(left: A.Expression): A.Pipe {
     const token = this.peek();
     let callee: A.Expression;
     if (token.kind === "Ident") {
       this.next();
       callee = { kind: "Identifier", name: token.text, span: spanOf(token) };
+    } else if (token.kind === "UIdent" && this.peek(1).kind === "." && this.peek(2).kind === "Ident") {
+      const mod = this.next();
+      this.next(); // '.'
+      const name = this.next();
+      callee = { kind: "QualifiedIdentifier", module: mod.text, name: name.text, span: span(mod.span.start, name.span.end) };
     } else if (token.kind === "(") {
       callee = this.parseParenthesized();
     } else {
@@ -530,10 +624,12 @@ class Parser {
     return { kind: "ParticipantLiteral", name: token.name, instance: token.instance, args, span: this.spanFrom(token) };
   }
 
-  private parseConstructor(): A.Constructor {
+  private parseConstructor(): A.Constructor | A.QualifiedIdentifier {
     const name = this.next();
     if (this.at(".") && this.peek(1).kind === "Ident") {
-      this.fail(`qualified names such as ${name.text}.${this.peek(1).text} are not part of Norn v0; 'open Std' brings the standard library into scope`);
+      this.next(); // '.'
+      const member = this.next();
+      return { kind: "QualifiedIdentifier", module: name.text, name: member.text, span: span(name.span.start, member.span.end) };
     }
     const args: A.Expression[] = [];
     if (this.atArguments()) {
@@ -833,8 +929,15 @@ class Parser {
 
   // Types ------------------------------------------------------------------
 
-  private parseTypeDecl(): A.TypeDecl {
+  private parseTypeDecl(visibility?: "pub", opaque = false, startToken?: Token, leadingDoc?: string): A.TypeDecl {
+    const startIndex = this.index;
+    let firstToken = startToken;
+    if (opaque && !firstToken && this.peek().kind === "Ident" && this.peek().text === "opaque") {
+      firstToken = this.next();
+    }
+    const doc = leadingDoc ?? this.docAt(startIndex);
     const typeToken = this.next();
+    const start = firstToken ?? typeToken;
     const nameToken = this.peek();
     if (nameToken.kind === "UIdent") {
       this.fail(`type names start with a lowercase letter: write 'type ${lowerFirst(nameToken.text)} = …'`);
@@ -852,16 +955,21 @@ class Parser {
       }
       this.closeList(">", open, "a type variable");
     }
+    const extra = {
+      ...(visibility ? { visibility } : {}),
+      ...(opaque ? { opaque: true } : {}),
+      ...(doc ? { doc } : {}),
+    };
     // Without '=', at the end of the line, the type is abstract: `type pr`.
     if (!this.at("=") && (this.at(";") || this.at("EOF") || this.atLineStart())) {
-      return { kind: "TypeDecl", name: name.text, params, definition: null, span: this.spanFrom(typeToken) };
+      return { kind: "TypeDecl", name: name.text, params, definition: null, ...extra, span: this.spanFrom(start) };
     }
     this.expect("=", `after the type name '${name.text}'`);
     const next = this.peek();
-    const definition = next.kind === "|" || next.kind === "UIdent"
+    const definition = next.kind === "|" || (next.kind === "UIdent" && this.peek(1).kind !== ".")
       ? this.parseVariantType()
       : next.kind === "{" ? this.parseRecordType() : this.parseType();
-    return { kind: "TypeDecl", name: name.text, params, definition, span: this.spanFrom(typeToken) };
+    return { kind: "TypeDecl", name: name.text, params, definition, ...extra, span: this.spanFrom(start) };
   }
 
   private parseVariantType(): A.VariantType {
@@ -873,6 +981,7 @@ class Parser {
   }
 
   private parseConstructorDecl(): A.ConstructorDecl {
+    const doc = this.docAt(this.index);
     const name = this.peek();
     if (name.kind !== "UIdent") {
       this.fail(`expected a constructor name, which starts with an uppercase letter, found ${describe(name)}`);
@@ -888,17 +997,18 @@ class Parser {
       }
       this.closeList(")", open, "a type");
     }
-    return { kind: "ConstructorDecl", name: name.text, args, span: this.spanFrom(name) };
+    return { kind: "ConstructorDecl", name: name.text, args, ...(doc ? { doc } : {}), span: this.spanFrom(name) };
   }
 
   private parseRecordType(): A.RecordType {
     const open = this.next();
     const fields: A.FieldDecl[] = [];
     while (!this.atListEnd("}")) {
+      const doc = this.docAt(this.index);
       const name = this.expectIdent("a field name");
       this.expect(":", `after the field name '${name.text}'`);
       const type = this.parseType();
-      fields.push({ kind: "FieldDecl", name: name.text, type, span: this.spanFrom(name) });
+      fields.push({ kind: "FieldDecl", name: name.text, type, ...(doc ? { doc } : {}), span: this.spanFrom(name) });
       if (!this.eat(",")) break;
     }
     this.closeList("}", open, "a field");
@@ -907,20 +1017,32 @@ class Parser {
   }
 
   /**
-   * A type: `string`, `list<'a>`, `'a`, `(int, string)`, or a function type
+   * A type: `string`, `list<'a>`, `'a`, `_`, `Events.kind<issue>`, `(int, string)`, or a function type
    * such as `(string, ~until: duration=?) => outcome<string>`, `() => time` or
    * `string => unit`. The result of a function type extends as far right as
    * it can, so `int => int => int` is `int => (int => int)`.
    */
-  private parseType(): A.TypeExpression {
+  private parseType(allowArrow = true): A.TypeExpression {
     const token = this.peek();
-    if (token.kind === "(") return this.parseParenthesizedType();
+    if (token.kind === "(") return this.parseParenthesizedType(allowArrow);
     let type: A.TypeExpression;
-    if (token.kind === "TypeVar") {
+    if (token.kind === "Underscore") {
+      this.next();
+      type = { kind: "TypeHole", span: spanOf(token) };
+    } else if (token.kind === "TypeVar") {
       this.next();
       type = { kind: "TypeVar", name: token.text.slice(1), span: spanOf(token) };
-    } else if (token.kind === "Ident") {
-      this.next();
+    } else if (token.kind === "Ident" || (token.kind === "UIdent" && this.peek(1).kind === "." && this.peek(2).kind === "Ident")) {
+      let typeName: string;
+      if (token.kind === "UIdent") {
+        const mod = this.next();
+        this.next(); // '.'
+        const member = this.next();
+        typeName = `${mod.text}.${member.text}`;
+      } else {
+        this.next();
+        typeName = token.text;
+      }
       const args: A.TypeExpression[] = [];
       if (this.at("<")) {
         const open = this.next();
@@ -930,7 +1052,7 @@ class Parser {
         }
         this.closeList(">", open, "a type");
       }
-      type = { kind: "TypeName", name: token.text, args, span: this.spanFrom(token) };
+      type = { kind: "TypeName", name: typeName, args, span: this.spanFrom(token) };
     } else if (token.kind === "UIdent") {
       this.fail(`expected a type, found '${token.text}': type names start with a lowercase letter`);
     } else if (token.kind === "~") {
@@ -938,11 +1060,11 @@ class Parser {
     } else {
       this.fail(`expected a type, found ${describe(token)}`);
     }
-    return this.at("=>") ? this.parseFunctionType(token, [type]) : type;
+    return allowArrow && this.at("=>") ? this.parseFunctionType(token, [type]) : type;
   }
 
   /** `(…)`: the parameters of a function type when `=>` follows, otherwise a tuple type or a parenthesized type. */
-  private parseParenthesizedType(): A.TypeExpression {
+  private parseParenthesizedType(allowArrow = true): A.TypeExpression {
     const open = this.next();
     const params: A.ParameterType[] = [];
     while (!this.atListEnd(")")) {
@@ -950,7 +1072,7 @@ class Parser {
       if (!this.eat(",")) break;
     }
     const close = this.closeList(")", open, "a type");
-    if (this.at("=>")) return this.parseFunctionType(open, params);
+    if (allowArrow && this.at("=>")) return this.parseFunctionType(open, params);
     const labelled = params.find((param) => param.kind === "LabelledType");
     if (labelled !== undefined) {
       this.fail("a labelled type such as ~until: duration is only allowed among the parameters of a function type, which '=>' follows", labelled.span);

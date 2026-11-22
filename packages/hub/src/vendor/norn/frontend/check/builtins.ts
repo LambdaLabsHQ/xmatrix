@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * What every program sees without declaring it: the base types, `list`,
  * `option`, `result`, `reply`, `yesno`, `either`, the three source types, and
@@ -13,10 +13,10 @@ import {
 } from "./types.js";
 
 /** The effect families of docs/types.md §8, in the order the effects summary lists them. */
-export const FAMILIES = ["ask", "confirm", "choose", "run", "wait", "handOver", "cancel", "say", "judge"] as const;
+export const FAMILIES = ["ask", "confirm", "choose", "run", "wait", "handOver", "cancel", "say", "judge", "spawn"] as const;
 export type Family = (typeof FAMILIES)[number];
 
-export const BASE_TYPES = ["string", "int", "float", "bool", "unit", "time", "duration", "participant", "ref"] as const;
+export const BASE_TYPES = ["string", "int", "float", "bool", "unit", "time", "duration", "participant", "ref", "json"] as const;
 
 export const t = {
   string: con("string"),
@@ -28,6 +28,7 @@ export const t = {
   duration: con("duration"),
   participant: con("participant"),
   ref: con("ref"),
+  json: con("json"),
   yesno: con("yesno"),
   list: (element: Type) => con("list", element),
   option: (element: Type) => con("option", element),
@@ -35,8 +36,13 @@ export const t = {
   reply: (answer: Type) => con("reply", answer),
   either: (first: Type, second: Type) => con("either", first, second),
   event: (element: Type) => source(FACT, element),
+  fact: (element: Type) => source(FACT, element),
+  once: (element: Type) => source(FACT, element),
   stream: (element: Type) => source(OCCURRENCE, element),
   request: (answer: Type) => requestOf(answer),
+  eachStrategy: con("eachStrategy"),
+  admission: con("admission"),
+  timedValue: (element: Type) => con("timedValue", element),
 };
 
 const param = (index: number, name: string): TParam => ({ tag: "param", index, name });
@@ -57,11 +63,60 @@ export function builtinTable(): TypeTable {
   variant("reply", ["a"], [["Answered", [a]], ["Refused", [t.string]], ["NoReply", []], ["Broke", [t.string]], ["Cancelled", []], ["Revoked", []]]);
   variant("yesno", [], [["Yes", []], ["No", []]]);
   variant("either", ["a", "b"], [["First", [a]], ["Second", [param(1, "b")]]]);
+  variant("eachStrategy", [], [["Queue", []], ["Latest", []], ["Restart", []], ["Together", []], ["Batch", []]]);
+  variant("admission", [], [["Allow", []], ["Deny", [t.string]], ["AlsoAsk", [t.participant]]]);
+  const timedRecord = typeInfo({
+    name: "timedValue",
+    kind: "record",
+    origin: "builtin",
+    params: ["a"],
+    fields: [
+      { name: "at", type: t.time, decl: null },
+      { name: "value", type: a, decl: null },
+    ],
+    equality: { never: false, params: new Set([0]) },
+  });
+  table.types.set("timedValue", timedRecord);
+  table.records.push(timedRecord);
   const sourceName = (name: string, kind: Type): TypeInfo =>
     typeInfo({ name, kind: "source", origin: "builtin", params: ["a"], sourceKind: kind, equality: { never: false, params: new Set([0]) } });
   table.types.set("event", sourceName("event", FACT));
+  table.types.set("fact", sourceName("fact", FACT));
+  table.types.set("once", sourceName("once", FACT));
   table.types.set("stream", sourceName("stream", OCCURRENCE));
   table.types.set("request", sourceName("request", REQUEST));
+  // Standard capability interface `Events` built-in types: `Events.kind<'a>` and `Events.envelope<'a>`.
+  const eventsKind = typeInfo({
+    name: "Events.kind",
+    library: "Events",
+    visibility: "pub",
+    kind: "abstract",
+    origin: "builtin",
+    params: ["a"],
+    equality: { never: false, params: new Set([0]) },
+  });
+  table.qualifiedTypes.set("Events.kind", eventsKind);
+  const eventsEnvelope = typeInfo({
+    name: "Events.envelope",
+    library: "Events",
+    visibility: "pub",
+    kind: "record",
+    origin: "builtin",
+    params: ["a"],
+    fields: [
+      { name: "specversion", type: t.string, decl: null },
+      { name: "kind", type: t.string, decl: null },
+      { name: "source", type: t.string, decl: null },
+      { name: "id", type: t.string, decl: null },
+      { name: "occurredAt", type: t.option(t.time), decl: null },
+      { name: "subject", type: t.option(t.string), decl: null },
+      { name: "receivedAt", type: t.time, decl: null },
+      { name: "data", type: a, decl: null },
+    ],
+    equality: { never: false, params: new Set([0]) },
+  });
+  table.qualifiedTypes.set("Events.envelope", eventsEnvelope);
+  table.records.push(eventsEnvelope);
   return table;
 }
 
@@ -109,12 +164,19 @@ export function builtinValues(): Builtin[] {
       return fun([t.list(t.request(a))], [], tuple([t.request(a), t.reply(a)]));
     }],
     // Offered to all of them; whoever takes it first holds it, and nobody else does.
-    ["anyOf", null, () => fun([t.list(t.participant)], [optional("except", t.participant)], t.participant)],
+    // `~except` accepts either a participant or a request handle (separation of duties).
+    ["anyOf", null, () => fun([t.list(t.participant)], [optional("except", g())], t.participant)],
+    // Resolves to whoever holds or answered a prior request (continuity of ownership).
+    ["sameAs", null, () => fun([t.request(g())], [], t.participant)],
     ["cancel", "cancel", () => fun([t.request(g())], [], t.unit)],
     ["status", null, () => {
       const a = g();
       return fun([t.request(a)], [], t.option(t.reply(a)));
     }],
+    // Optional implicit `taken` fact: resolves once a request is taken, started by an Agent, or answered.
+    ["taken", null, () => fun([t.request(g())], [], t.once(t.time))],
+    // Per-request free-text notes stream (`say(r, text)` appends to `r->notes`).
+    ["notes", null, () => fun([t.request(g())], [], t.stream(t.string))],
     ["say", "say", () => fun([g("addressee"), t.string], [], t.unit)],
     ["now", null, () => fun([], [], t.time)],
     ["show", null, () => fun([g()], [], t.string)],
@@ -129,24 +191,144 @@ export function builtinValues(): Builtin[] {
       const b = g();
       return fun([t.stream(a), t.stream(b)], [], t.stream(t.either(a, b)));
     }],
+    // Homogeneous stream merge: satisfies `s->merge(never()) == s` and strict associativity.
+    ["merge", null, () => {
+      const a = g();
+      return fun([t.stream(a), t.stream(a)], [], t.stream(a));
+    }],
     ["map", null, () => {
       const a = g();
       const b = g();
       return fun([t.stream(a), fun([a], [], b)], [], t.stream(b));
     }],
+    // Maps a request's answer while preserving its cancellable `request<'b>` handle.
+    ["mapRequest", null, () => {
+      const a = g();
+      const b = g();
+      return fun([t.request(a), fun([a], [], b)], [], t.request(b));
+    }],
     ["filter", null, () => {
       const a = g();
       return fun([t.stream(a), fun([a], [], t.bool)], [], t.stream(a));
+    }],
+    ["filterMap", null, () => {
+      const a = g();
+      const b = g();
+      return fun([t.stream(a), fun([a], [], t.option(b))], [], t.stream(b));
+    }],
+    // Pure stateful stream accumulator: may stay silent (`None`) or emit (`Some(b)`).
+    ["scan", null, () => {
+      const a = g(), s = g(), b = g();
+      return fun([t.stream(a), s, fun([s, a], [], tuple([s, t.option(b)]))], [], t.stream(b));
+    }],
+    // Exposes each occurrence's timestamp alongside its value.
+    ["timed", null, () => {
+      const a = g();
+      return fun([t.stream(a)], [], t.stream(t.timedValue(a)));
     }],
     ["gather", null, () => {
       const a = g();
       return fun([t.stream(a)], [], t.stream(t.list(a)));
     }],
+    // Structured concurrency: scoped child task whose open requests cancel automatically when it ends.
+    ["spawn", "spawn", () => {
+      const a = g();
+      return fun([fun([], [], a)], [optional("key", t.string)], t.request(a));
+    }],
+    // Policy scope: clamps every request's `~by` opened inside `f()` to `min(req.~by, scopeDeadline)`.
+    ["within", null, () => {
+      const a = g();
+      return fun([g("deadline"), fun([], [], a)], [], a);
+    }],
+    // Request-level pure value validator: keeps request identity, rejects invalid answers with structured path errors.
+    ["accepting", null, () => {
+      const a = g();
+      const b = g();
+      return fun([t.request(a), fun([a], [], t.result(b, t.string))], [], t.request(b));
+    }],
     // forEach waits for each occurrence, so it counts as the wait family.
     ["forEach", "wait", () => {
       const a = g();
-      return fun([t.stream(a), fun([a], [], g("handled"))], [], g());
+      return fun(
+        [t.stream(a), fun([a], [], g("handled"))],
+        [optional("key", t.string), optional("each", t.eachStrategy), optional("per", fun([a], [], t.string))],
+        g(),
+      );
     }],
   ];
   return values.map(([name, family, type]) => ({ name, family, type: type() }));
+}
+
+/**
+ * Built-in data and capability modules (`String`, `List`, `Option`, `Result`,
+ * `JSON`, `Events`), available via qualified access (`String.toLowerCase`,
+ * `List.map`, `Events.events`, etc.). Pure functions except `Events.events`
+ * which constructs a stream source.
+ */
+export function builtinModuleExports(): Readonly<Record<string, readonly Builtin[]>> {
+  const eq = () => newVar(GENERIC, null, true);
+  const wrap = (entries: [string, () => Type][]): Builtin[] =>
+    entries.map(([name, type]) => ({ name, family: null, type: type() }));
+  return {
+    String: wrap([
+      ["toLowerCase", () => fun([t.string], [], t.string)],
+      ["toUpperCase", () => fun([t.string], [], t.string)],
+      ["includes", () => fun([t.string, t.string], [], t.bool)],
+      ["startsWith", () => fun([t.string, t.string], [], t.bool)],
+      ["endsWith", () => fun([t.string, t.string], [], t.bool)],
+      ["trim", () => fun([t.string], [], t.string)],
+      ["split", () => fun([t.string, t.string], [], t.list(t.string))],
+      ["length", () => fun([t.string], [], t.int)],
+      ["slice", () => fun([t.string, t.int, t.int], [], t.string)],
+    ]),
+    List: wrap([
+      ["map", () => { const a = g(), b = g(); return fun([t.list(a), fun([a], [], b)], [], t.list(b)); }],
+      ["filter", () => { const a = g(); return fun([t.list(a), fun([a], [], t.bool)], [], t.list(a)); }],
+      ["filterMap", () => { const a = g(), b = g(); return fun([t.list(a), fun([a], [], t.option(b))], [], t.list(b)); }],
+      ["some", () => { const a = g(); return fun([t.list(a), fun([a], [], t.bool)], [], t.bool); }],
+      ["every", () => { const a = g(); return fun([t.list(a), fun([a], [], t.bool)], [], t.bool); }],
+      ["includes", () => { const a = eq(); return fun([t.list(a), a], [], t.bool); }],
+      ["find", () => { const a = g(); return fun([t.list(a), fun([a], [], t.bool)], [], t.option(a)); }],
+      ["fold", () => { const a = g(), b = g(); return fun([t.list(a), b, fun([b, a], [], b)], [], b); }],
+      ["length", () => { const a = g(); return fun([t.list(a)], [], t.int); }],
+      ["concat", () => { const a = g(); return fun([t.list(a), t.list(a)], [], t.list(a)); }],
+      ["flatten", () => { const a = g(); return fun([t.list(t.list(a))], [], t.list(a)); }],
+    ]),
+    Option: wrap([
+      ["map", () => { const a = g(), b = g(); return fun([t.option(a), fun([a], [], b)], [], t.option(b)); }],
+      ["flatMap", () => { const a = g(), b = g(); return fun([t.option(a), fun([a], [], t.option(b))], [], t.option(b)); }],
+      ["withDefault", () => { const a = g(); return fun([t.option(a), a], [], a); }],
+      ["isSome", () => { const a = g(); return fun([t.option(a)], [], t.bool); }],
+      ["isNone", () => { const a = g(); return fun([t.option(a)], [], t.bool); }],
+    ]),
+    Result: wrap([
+      ["map", () => { const a = g(), b = g(), e = g(); return fun([t.result(a, e), fun([a], [], b)], [], t.result(b, e)); }],
+      ["flatMap", () => { const a = g(), b = g(), e = g(); return fun([t.result(a, e), fun([a], [], t.result(b, e))], [], t.result(b, e)); }],
+      ["mapError", () => { const a = g(), e1 = g(), e2 = g(); return fun([t.result(a, e1), fun([e1], [], e2)], [], t.result(a, e2)); }],
+      ["withDefault", () => { const a = g(), e = g(); return fun([t.result(a, e), a], [], a); }],
+      ["isOk", () => { const a = g(), e = g(); return fun([t.result(a, e)], [], t.bool); }],
+      ["isError", () => { const a = g(), e = g(); return fun([t.result(a, e)], [], t.bool); }],
+    ]),
+    JSON: wrap([
+      ["decode", () => { const a = g(); return fun([t.json], [], t.result(a, t.string)); }],
+      ["encode", () => { const a = g(); return fun([a], [], t.json); }],
+      ["get", () => fun([t.json, t.string], [], t.option(t.json))],
+      ["asString", () => fun([t.json], [], t.option(t.string))],
+      ["asInt", () => fun([t.json], [], t.option(t.int))],
+      ["asFloat", () => fun([t.json], [], t.option(t.float))],
+      ["asBool", () => fun([t.json], [], t.option(t.bool))],
+      ["asList", () => fun([t.json], [], t.option(t.list(t.json)))],
+    ]),
+    Events: wrap([
+      ["kind", () => { const a = g(); return fun([t.string, t.string], [], con("Events.kind", a)); }],
+      ["events", () => {
+        const a = g();
+        return fun(
+          [con("Events.kind", a)],
+          [optional("source", t.string), optional("subject", t.string)],
+          t.stream(con("Events.envelope", a)),
+        );
+      }],
+    ]),
+  };
 }

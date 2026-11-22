@@ -1,12 +1,21 @@
-import { nornRunBlock, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken, utf8ByteLength } from "@xmatrix/protocol";
+import { nornLibBlock, nornRunBlock, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken, utf8ByteLength } from "@xmatrix/protocol";
 import { NORN_HANDED_ON_REASON, type NornProgramState, type NornProgramWrite, type NornStep } from "@xmatrix/db";
-import { checkSource, elaborate, hostSources, readInterface, readLibrary, type Form, type ReportForm } from "./vendor/norn/frontend/check/index";
+import {
+  checkSource, diffProgramUpgrade, elaborate, hostSources, pinProgramDefinitions, readInterface, readLibrary,
+  type Form, type Library, type ProgramPin, type ReportForm, type UpgradeDiff,
+} from "./vendor/norn/frontend/check/index";
 import { NORN_STD } from "./vendor/norn/std";
 import { parse } from "./vendor/norn/frontend/parser";
 import { compile, type Code } from "./vendor/norn/runtime/code";
-import { delegate, emptyLedger, evaluate, occur, reclaim, settle, stop, take, type Delegation, type Ledger, type LedgerRequest, type Pass,
-  type PassOptions, type Reply } from "./vendor/norn/runtime/ledger";
+import {
+  delegate, deliverEvent, emptyLedger, evaluate, migrateLedger, occur, previewEdit, reclaim, settle, stop, take, verifyMigration,
+  type CloudEventInput, type Delegation, type EditPreview, type Ledger, type LedgerRequest, type MigrationReport, type MigrationResult,
+  type MigrationStep, type Pass, type PassOptions, type Reply,
+} from "./vendor/norn/runtime/ledger";
 import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
+import {
+  loadBuiltinNornLibraries, NORN_CONNECTOR_EVENT_MANIFESTS,
+} from "./norn-libraries";
 
 /**
  * The xMatrix host of Norn (docs/architecture/norn-host.md): what a program
@@ -17,6 +26,28 @@ import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
 
 /** A `norn run` (or `norn <edition> run`) block of a text, and why it does not run when it cannot. */
 export interface NornBlock { name: string; source: string; edition?: string; problem?: string }
+/** A `norn 1 lib <Name>` Space library block on a Page. */
+export interface NornLibBlock { name: string; source: string; edition?: string; problem?: string }
+
+/** Extracts top-level `norn 1 lib <Name>` library blocks from Markdown text. */
+export function nornLibBlocks(body: string): NornLibBlock[] {
+  const root = parseMarkdown(body) as { children?: { type?: string; lang?: string | null; meta?: string | null; value?: string }[] };
+  const blocks = (root.children ?? []).flatMap(node => {
+    const block = node.type === "code" ? nornLibBlock([node.lang, node.meta].filter(Boolean).join(" ")) : null;
+    return block ? [{ ...block, source: node.value ?? "" }] : [];
+  });
+  return blocks.map(block => block.problem || blocks.filter(other => other.name === block.name).length < 2 ? block
+    : { ...block, problem: `Two library blocks are named ${block.name}; rename one.` });
+}
+
+/** Map of valid Space library sources defined on a Page body. */
+export function pageSpaceLibraries(body: string): Record<string, string> {
+  const libs: Record<string, string> = {};
+  for (const block of nornLibBlocks(body)) {
+    if (!block.problem && block.name) libs[block.name] = block.source;
+  }
+  return libs;
+}
 
 /**
  * The programs a text carries: its top-level fenced blocks tagged `norn run`
@@ -37,9 +68,9 @@ export function nornBlocks(body: string): NornBlock[] {
 }
 
 /** Why a block does not run as written, or undefined when it runs. */
-export function nornBlockProblem(block: NornBlock): string | undefined {
+export function nornBlockProblem(block: NornBlock, libraries?: Readonly<Record<string, string>>): string | undefined {
   if (block.problem) return block.problem;
-  const checked = checkNornProgram(block.source);
+  const checked = checkNornProgram(block.source, libraries ? { libraries } : undefined);
   return "refusal" in checked ? checked.refusal : undefined;
 }
 
@@ -68,19 +99,122 @@ external appEvent: (string, ~feature: string=?) => stream<string>
 `;
 const HOST = readInterface(NORN_HOST_INTERFACE, "xmatrix.norn");
 const SOURCES = hostSources(HOST);
-/** The standard library, for a program that writes `open Std`: `routine`, `decide`, `remind`, `followUp`, `schedule`, `all`. */
+/** The standard library, for a program that writes `open Std`: `routine`, `decide`, `remind`, `followUp`, `schedule`, `all`, `race`, `quorum`. */
 const STD = readLibrary(NORN_STD, "std.norn", HOST);
+/** Built-in application libraries layered on `Events`: `GitHub`, `Gmail`. */
+const BUILTIN_LIBRARIES = loadBuiltinNornLibraries(HOST);
 
-type Checked = { code: Code; targets: string[] } | { refusal: string };
-/** Checks a program against this host: the built-ins alone, with no standard library and no facts yet. */
-export function checkNornProgram(source: string): Checked {
-  const checked = checkSource(source, { host: HOST, std: STD });
+function loadProgramLibraries(extra?: Readonly<Record<string, string>>): { libraries: Record<string, Library>; refusal?: string } {
+  const libraries: Record<string, Library> = { ...BUILTIN_LIBRARIES };
+  for (const [name, source] of Object.entries(extra ?? {})) {
+    const lib = readLibrary(source, `${name}.norn`, HOST, {
+      name,
+      libraries,
+    });
+    const errors = lib.diagnostics.filter(d => d.severity === "error");
+    if (!lib.ok || errors.length) {
+      return {
+        libraries,
+        refusal: `Library ${name}: ${errors.slice(0, 20).map(({ message, span }) => `${span.start.line}:${span.start.column} ${message}`).join("\n")}`,
+      };
+    }
+    libraries[name] = lib;
+  }
+  return { libraries };
+}
+
+type Checked = { code: Code; targets: string[]; libraries: Readonly<Record<string, Library>> } | { refusal: string };
+/** Checks a program against this host, `Std`, built-in `GitHub`/`Gmail` libraries, and any Space libraries. */
+export function checkNornProgram(source: string, options?: { libraries?: Readonly<Record<string, string>> }): Checked {
+  const loaded = loadProgramLibraries(options?.libraries);
+  if (loaded.refusal) return { refusal: loaded.refusal };
+  const checked = checkSource(source, {
+    host: HOST,
+    std: STD,
+    libraries: loaded.libraries,
+    manifests: NORN_CONNECTOR_EVENT_MANIFESTS,
+  });
   const errors = checked.diagnostics.filter(diagnostic => diagnostic.severity === "error");
   if (!checked.ok || !checked.program || errors.length) {
     return { refusal: errors.slice(0, 20).map(({ message, span }) => `${span.start.line}:${span.start.column} ${message}`).join("\n") };
   }
-  return { code: compile(elaborate(checked.program, checked.reports), { std: STD.program, sources: SOURCES }),
-    targets: [...new Set((checked.effects ?? []).flatMap(effect => effect.targets))].sort() };
+  const libraryPrograms = Object.fromEntries(Object.entries(loaded.libraries).map(([name, lib]) => [name, lib.program]));
+  return {
+    code: compile(elaborate(checked.program, checked.reports), { std: STD.program, libraries: libraryPrograms, sources: SOURCES }),
+    targets: [...new Set((checked.effects ?? []).flatMap(effect => effect.targets))].sort(),
+    libraries: loaded.libraries,
+  };
+}
+
+/** Pins a program's source and every referenced library by SHA-256 content hash. */
+export function pinNornProgram(source: string, spaceLibraries?: Readonly<Record<string, string>>): ProgramPin | { refusal: string } {
+  const parsed = parse(source);
+  if (!parsed.ok) return { refusal: parsed.diagnostics.map(d => `${d.span.start.line}:${d.span.start.column} ${d.message}`).join("\n") };
+  const loaded = loadProgramLibraries(spaceLibraries);
+  if (loaded.refusal) return { refusal: loaded.refusal };
+  return pinProgramDefinitions(parsed.program, loaded.libraries);
+}
+
+/** Computes a 3-way upgrade diff (interface diff + effect lock diff + ledger diff) before updating a program or library. */
+export function diffNornProgramUpgrade(
+  before: { source: string; libraries?: Readonly<Record<string, string>> },
+  after: { source: string; libraries?: Readonly<Record<string, string>> },
+  ledger: Ledger = emptyLedger(0),
+  now = 0,
+): UpgradeDiff | { refusal: string } {
+  const beforeParsed = parse(before.source);
+  if (!beforeParsed.ok) return { refusal: beforeParsed.diagnostics.map(d => `${d.span.start.line}:${d.span.start.column} ${d.message}`).join("\n") };
+  const afterParsed = parse(after.source);
+  if (!afterParsed.ok) return { refusal: afterParsed.diagnostics.map(d => `${d.span.start.line}:${d.span.start.column} ${d.message}`).join("\n") };
+  const loadedBefore = loadProgramLibraries(before.libraries);
+  if (loadedBefore.refusal) return { refusal: loadedBefore.refusal };
+  const loadedAfter = loadProgramLibraries(after.libraries);
+  if (loadedAfter.refusal) return { refusal: loadedAfter.refusal };
+  return diffProgramUpgrade({
+    beforeProgram: beforeParsed.program,
+    afterProgram: afterParsed.program,
+    host: HOST,
+    std: STD,
+    beforeLibraries: loadedBefore.libraries,
+    afterLibraries: loadedAfter.libraries,
+    ledger,
+    now,
+    sources: SOURCES,
+  });
+}
+
+/** Two-text read-only edit preview against an existing ledger without mutating it. */
+export function previewNornEdit(
+  beforeSource: string,
+  afterSource: string,
+  ledger: Ledger,
+  now: number,
+  options?: { beforeLibraries?: Readonly<Record<string, string>>; afterLibraries?: Readonly<Record<string, string>> },
+): EditPreview | { refusal: string } {
+  const before = checkNornProgram(beforeSource, options?.beforeLibraries ? { libraries: options.beforeLibraries } : undefined);
+  if ("refusal" in before) return before;
+  const after = checkNornProgram(afterSource, options?.afterLibraries ? { libraries: options.afterLibraries } : undefined);
+  if ("refusal" in after) return after;
+  return previewEdit(before.code, after.code, ledger, now);
+}
+
+/**
+ * Read-only migration verification for legacy v1 ledgers: never mutates the
+ * input ledger and fails closed (`keepLegacy: true`) on any ambiguity.
+ */
+export function verifyNornLedgerMigration(
+  source: string,
+  legacyLedger: Ledger,
+  now: number,
+  steps: readonly MigrationStep[] = [],
+  options?: { libraries?: Readonly<Record<string, string>> },
+): { migration: MigrationResult; report?: MigrationReport } | { refusal: string } {
+  const checked = checkNornProgram(source, options);
+  if ("refusal" in checked) return checked;
+  const migration = migrateLedger(checked.code, legacyLedger, now);
+  if (!migration.ok) return { migration };
+  const report = verifyMigration(checked.code, legacyLedger, now, steps);
+  return { migration, report };
 }
 
 /** A holder that names an Agent this host starts: a harness by its name, or `@auto`. */
@@ -481,24 +615,40 @@ export function nornPasses(code: Code, ledger: Ledger, now: number, each: (pass:
  * Requests this host cannot deliver end at once, so the program reads why.
  */
 export function nornStep(act?: NornAct,
-  /** An outside event and the streams it matches in this program. */
-  occurred?: { id: string; streams: readonly NornStream[]; what: string }): NornStep<NornPassResult> {
+  /** An outside event and the streams it matches in this program (legacy text or CloudEvents 1.0.2). */
+  occurred?: { id: string; streams: readonly NornStream[]; what: string; cloudEvent?: CloudEventInput },
+  options?: { libraries?: Readonly<Record<string, string>> }): NornStep<NornPassResult> {
   return (state: NornProgramState) => {
     // The host's receipt travels with the occurrence. Older ledgers have no receipt on their occurrences.
     const ledger = state.ledger as Omit<Ledger, "occurrences"> & {
       occurrences: (Ledger["occurrences"][number] & { outsideEventId?: string })[];
+      pinnedLibraries?: Record<string, string>;
     };
     const now = Math.max(state.nowMs, ledger.startedAt);
+    if (options?.libraries && Object.keys(options.libraries).length > 0) {
+      ledger.pinnedLibraries = { ...options.libraries };
+    }
+    const activeLibraries = options?.libraries ?? ledger.pinnedLibraries;
     if (occurred && state.stopReason === null) {
-      if (ledger.occurrences.some(entry => entry.outsideEventId === occurred.id)) {
+      const legacyStreams = occurred.streams.filter(stream => stream.name !== "Events.events");
+      const eventsStreams = occurred.streams.filter(stream => stream.name === "Events.events");
+      let deliveredAny = false;
+      if (legacyStreams.length > 0 && !ledger.occurrences.some(entry => entry.outsideEventId === occurred.id)) {
+        for (const stream of legacyStreams) {
+          occur(ledger, stream, text(occurred.what), now);
+          ledger.occurrences.at(-1)!.outsideEventId = occurred.id;
+        }
+        deliveredAny = true;
+      }
+      if (eventsStreams.length > 0 && occurred.cloudEvent) {
+        const res = deliverEvent(ledger, occurred.cloudEvent, now, { matchSources: eventsStreams });
+        if (res.delivered) deliveredAny = true;
+      }
+      if (!deliveredAny) {
         return { write: null, result: { status: "running" } };
       }
-      for (const stream of occurred.streams) {
-        occur(ledger, stream, text(occurred.what), now);
-        ledger.occurrences.at(-1)!.outsideEventId = occurred.id;
-      }
     }
-    const checked = checkNornProgram(state.source);
+    const checked = checkNornProgram(state.source, activeLibraries && Object.keys(activeLibraries).length ? { libraries: activeLibraries } : undefined);
     let refusal: string | undefined, returnedTo: string | undefined, nextDue: number | null = null, taken = false;
     // What the program says is new to the ledger in the pass that says it, so it is collected here and nowhere else.
     const said: { to: string; text: string }[] = [];
@@ -577,14 +727,22 @@ export function nornStep(act?: NornAct,
 }
 
 /**
- * Each `norn run` block of a text that does not run as written, and why:
+ * Each `norn run` or `norn 1 lib` block of a text that does not check as written, and why:
  * what whoever just wrote the text is told at once.
  */
 export function nornProgramProblems(body: string): { source: string; problem: string }[] {
-  return nornBlocks(body).flatMap(block => {
-    const problem = nornBlockProblem(block);
+  const libProblems = nornLibBlocks(body).flatMap(block => {
+    const tag = block.edition === undefined ? `\`\`\`norn lib ${block.name}` : `\`\`\`norn ${block.edition} lib ${block.name}`;
+    if (block.problem) return [{ source: tag, problem: block.problem }];
+    const loaded = loadProgramLibraries({ [block.name]: block.source });
+    return loaded.refusal ? [{ source: tag, problem: loaded.refusal }] : [];
+  });
+  const libraries = pageSpaceLibraries(body);
+  const runProblems = nornBlocks(body).flatMap(block => {
+    const problem = nornBlockProblem(block, Object.keys(libraries).length ? libraries : undefined);
     return problem === undefined ? [] : [{ source: nornBlockSource(block.name, block.edition), problem }];
   });
+  return [...libProblems, ...runProblems];
 }
 
 /** How a block's opening line reads, to say which block a problem is about. */
@@ -594,7 +752,7 @@ export const nornBlockSource = (name: string, edition?: string): string =>
 /** The ledger a program starts from. */
 export const nornStartLedger = (nowMs: number): Ledger => emptyLedger(nowMs);
 
-/** An outside stream as a program named it: `ciFailed("acme/app")`, `appEvent("sentry", ~feature="issue.created")`. */
+/** An outside stream as a program named it: `ciFailed("acme/app")`, `appEvent("sentry", ~feature="issue.created")`, or `Events.events(...)`. */
 export type NornStream = Extract<Value, { type: "source" }>;
 
 export function isNornStream(value: unknown): value is NornStream {
@@ -604,6 +762,17 @@ export function isNornStream(value: unknown): value is NornStream {
 /** The text a program wrote in a stream's position or label, when it wrote text there. */
 const streamText = (value: { type: string; value?: unknown } | undefined): string | undefined =>
   value?.type === "string" && typeof value.value === "string" ? value.value : undefined;
+
+/** Which `Events.events(Events.kind(app, kind), ~source=?, ~subject=?)` streams a CloudEvent matches. */
+export const eventsStream = (app: string, kind: string, source?: string, subject?: string) => (stream: NornStream): boolean => {
+  if (stream.name !== "Events.events") return false;
+  const kindArg = stream.args[0];
+  if (!kindArg || kindArg.type !== "variant" || kindArg.name !== "EventKind" || kindArg.args.length !== 2) return false;
+  if (streamText(kindArg.args[0]) !== app || streamText(kindArg.args[1]) !== kind) return false;
+  if (stream.labels?.source !== undefined && streamText(stream.labels.source) !== source) return false;
+  if (stream.labels?.subject !== undefined && streamText(stream.labels.subject) !== subject) return false;
+  return true;
+};
 
 /** Which streams a GitHub event on a repository's default branch is an occurrence of. */
 export const githubStream = (kind: "ci-failed" | "merged", repository: string) => (stream: NornStream): boolean =>

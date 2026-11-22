@@ -3,7 +3,7 @@ import type { NornRequestView, PageProgramStatus, PageScheduleProblem } from "@x
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./page-restriction";
 import { deterministicConversationId } from "./deterministic-id";
-import { checkNornProgram, nornBlocks, nornBlockSource, nornStartLedger, nornStep, plainAnswer as answerText, plainResult as resultText } from "./norn-host";
+import { checkNornProgram, nornBlocks, nornBlockSource, nornStartLedger, nornStep, pageSpaceLibraries, plainAnswer as answerText, plainResult as resultText } from "./norn-host";
 import { nornFlow } from "./norn-plan";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
@@ -62,6 +62,8 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
   ]);
   // The head may have moved past the revision that asked; its blocks are what holds now.
   const blocks = nornBlocks(page.body);
+  const libraries = pageSpaceLibraries(page.body);
+  const libOpts = Object.keys(libraries).length ? { libraries } : undefined;
   const repository = async (channelId: string, requestId: string) =>
     new PostgresNornProgramRepository(db, await postgresMessageRoute(env, channelId, requestId, { database: db }));
 
@@ -82,11 +84,11 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
 
   for (const block of blocks) await each(block.name, async () => {
     const current = programs.find(program => program.name === block.name);
-    if (block.problem || current?.source === block.source || deleted.has(block.name) || "refusal" in checkNornProgram(block.source)) return;
+    if (block.problem || current?.source === block.source || deleted.has(block.name) || "refusal" in checkNornProgram(block.source, libOpts)) return;
     if (current?.state === "running") {
       const requestId = `norn-page-revise:${current.programId}:${crypto.randomUUID()}`;
       await (await repository(current.channelId, requestId)).revise({ requestId, channelId: current.channelId,
-        programId: current.programId, source: block.source, authorityUserId: userId }, nornStep());
+        programId: current.programId, source: block.source, authorityUserId: userId }, nornStep(undefined, undefined, libOpts));
       await wakeAgentLaunchCoordinator(env, current.channelId, ["norn"]);
       return;
     }
@@ -107,7 +109,7 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
     if (!response.ok) throw new Error(`Norn page program message append failed (${response.status})`);
     const requestId = `norn-page-start:${programId}`;
     await (await repository(channelId, requestId)).start({ requestId, channelId, programId, authorKind: "user", authorId: userId,
-      authorityUserId: userId, source: block.source, page: { pageId, name: block.name }, ledger: nornStartLedger }, nornStep());
+      authorityUserId: userId, source: block.source, page: { pageId, name: block.name }, ledger: nornStartLedger }, nornStep(undefined, undefined, libOpts));
     await wakeAgentLaunchCoordinator(env, channelId, ["norn"]);
   });
   if (failures.length) throw new Error(failures.join("; "));
@@ -142,9 +144,11 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
  * started is read from too.
  */
 function programStatus(name: string, source: string, problem: string | undefined,
-  program: { channelId: string; state: string; ledger: unknown } | undefined): PageProgramStatus {
-  const checked = problem === undefined ? checkNornProgram(source) : { refusal: problem };
-  const ledger = program?.ledger as Ledger | undefined;
+  program: { channelId: string; state: string; ledger: unknown } | undefined,
+  libraries?: Readonly<Record<string, string>>): PageProgramStatus {
+  const ledger = program?.ledger as (Ledger & { pinnedLibraries?: Record<string, string> }) | undefined;
+  const activeLibraries = libraries && Object.keys(libraries).length ? libraries : ledger?.pinnedLibraries;
+  const checked = problem === undefined ? checkNornProgram(source, activeLibraries ? { libraries: activeLibraries } : undefined) : { refusal: problem };
   const now = Date.now();
   return {
     name,
@@ -168,11 +172,13 @@ export async function pageProgramStatus(env: Env, input: { spaceId: string; page
   const db = database(env);
   const programs = await readPageNornPrograms(db, { requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId });
   const blocks = nornBlocks(input.body);
+  const libraries = pageSpaceLibraries(input.body);
   const deleted = await deletedBlocks(db, input.spaceId, input.pageId, blocks.map(block => block.name));
   return blocks.map(block => programStatus(block.name, block.source,
     block.problem ?? (deleted.has(block.name) ? DELETED_PROBLEM : undefined),
     // A deleted conversation is cleared away over minutes: its program is gone from the page at once.
-    deleted.has(block.name) ? undefined : programs.find(candidate => candidate.name === block.name)));
+    deleted.has(block.name) ? undefined : programs.find(candidate => candidate.name === block.name),
+    libraries));
 }
 
 /**

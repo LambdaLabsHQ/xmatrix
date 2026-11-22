@@ -1,6 +1,6 @@
 # Norn snapshot
 
-Source: https://github.com/norn-lang/norn/tree/38245c85e0afacad4ce937b6b84fa1d72442af9a
+Source: https://github.com/norn-lang/norn/tree/9882eceec0c609c362a64144ad5bef227268bac4
 
 Apache-2.0; see LICENSE. The parser, the checker, the compiler, the evaluator and
 the request ledger are included. A program stores no state of its own: each pass
@@ -18,15 +18,19 @@ Refresh with `node scripts/vendor-norn-core.mjs <local-norn-checkout>`.
 - `frontend/check/diagnostics.ts`
 - `frontend/check/effects.ts`
 - `frontend/check/elaborate.ts`
+- `frontend/check/events.ts`
 - `frontend/check/exhaustiveness.ts`
 - `frontend/check/forms.ts`
 - `frontend/check/index.ts`
 - `frontend/check/infer.ts`
 - `frontend/check/interface.ts`
+- `frontend/check/modules.ts`
 - `frontend/check/removed.ts`
 - `frontend/check/source.ts`
 - `frontend/check/types.ts`
 - `frontend/diagnostics.ts`
+- `frontend/fix.ts`
+- `frontend/format.ts`
 - `frontend/index.ts`
 - `frontend/json.ts`
 - `frontend/lexer.ts`
@@ -46,6 +50,7 @@ Refresh with `node scripts/vendor-norn-core.mjs <local-norn-checkout>`.
 Never edit these files by hand. The script applies every change:
 
 - every file: a provenance header, and `.ts` import suffixes rewritten to `.js`
+- `frontend/parser.ts`: unused `noAnnotation` helper removed for Hub noUnusedLocals
 - `runtime/machine.ts`: unused parameter `env` renamed `_env`
 - `runtime/std.ts`: local `module` renamed `linkedModule`
 - `runtime/std.ts`: its one use renamed with it

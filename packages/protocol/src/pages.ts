@@ -436,9 +436,60 @@ export type PageProgramStep =
 
 /** A program's name: a letter, then letters, digits, `_` or `-`, 40 characters at most. */
 const NORN_PROGRAM_NAME = /^\p{L}[\p{L}\p{N}_-]{0,39}$/u;
-/** An edition token written between `norn` and `run`, as in `norn 1 run <name>`. */
+/** A Norn Space library module name: an uppercase ASCII letter followed by letters, digits, or `_`. */
+const NORN_LIBRARY_NAME = /^[A-Z][A-Za-z0-9_]{0,39}$/u;
+/** An edition token written between `norn` and `run`/`lib`, as in `norn 1 run <name>` or `norn 1 lib <Name>`. */
 const NORN_EDITION = /^\d+(?:\.\d+)*$/u;
 const SUPPORTED_NORN_EDITIONS = new Set(["1"]);
+
+/** Shared parser for `norn [edition] <keyword> [name]` fenced block headers. */
+function parseNornNamedBlock(
+  info: unknown,
+  spec: {
+    keyword: "run" | "lib";
+    defaultName?: string;
+    namePattern: RegExp;
+    badNameProblem: (tag: string) => string;
+    unsupportedEditionProblem: (tag: string, edition: string) => string;
+  },
+): { name: string; edition?: string; problem?: string } | null {
+  const words = String(info ?? "").trim().split(/\s+/u).filter(Boolean);
+  if (words[0] !== "norn") return null;
+  let edition: string | undefined;
+  let rest: string[];
+  if (words[1] === spec.keyword) {
+    rest = words.slice(2);
+  } else if (words.length >= 3 && NORN_EDITION.test(words[1]!) && words[2] === spec.keyword) {
+    edition = words[1];
+    rest = words.slice(3);
+  } else {
+    return null;
+  }
+  const name = rest.length ? rest.join(" ") : (spec.defaultName ?? "");
+  const tag = edition === undefined
+    ? `norn ${spec.keyword}${name ? ` ${name}` : ""}`
+    : `norn ${edition} ${spec.keyword}${name ? ` ${name}` : ""}`;
+  const meta = edition === undefined ? {} : { edition };
+  if (!name || !spec.namePattern.test(name)) return { name, ...meta, problem: spec.badNameProblem(tag) };
+  if (edition !== undefined && !SUPPORTED_NORN_EDITIONS.has(edition)) {
+    return { name, ...meta, problem: spec.unsupportedEditionProblem(tag, edition) };
+  }
+  return { name, ...meta };
+}
+
+/**
+ * What a fenced block's info string makes of it as a Space library
+ * (`norn 1 lib <Name>`): defines a reusable Norn library module on a Page.
+ * Returns null for anything that is not a `norn <edition> lib` or `norn lib` block.
+ */
+export function nornLibBlock(info: unknown): { name: string; edition?: string; problem?: string } | null {
+  return parseNornNamedBlock(info, {
+    keyword: "lib",
+    namePattern: NORN_LIBRARY_NAME,
+    badNameProblem: (tag) => `\`${tag}\` names no library: a library name starts with an uppercase letter followed by letters, digits, or _ (at most 40 characters), as in \`norn 1 lib Review\`.`,
+    unsupportedEditionProblem: (tag, edition) => `\`${tag}\` uses Norn edition ${edition}, which this host does not support yet (supported: edition 1).`,
+  });
+}
 
 /**
  * What a fenced block's info string makes of it (docs/architecture/norn-host.md,
@@ -446,38 +497,17 @@ const SUPPORTED_NORN_EDITIONS = new Set(["1"]);
  * program under that name, and without a name it is `main`. A block whose name
  * or edition cannot run here is still that block, with why, so an unsupported
  * edition never silently removes a running program. Anything else (`norn` alone,
- * `norn 1`, or future `norn 1 lib`) is null. The Hub and every client read a
+ * `norn 1`, or `norn 1 lib`) is null. The Hub and every client read a
  * block through this one function.
  */
 export function nornRunBlock(info: unknown): { name: string; edition?: string; problem?: string } | null {
-  const words = String(info ?? "").trim().split(/\s+/u).filter(Boolean);
-  if (words[0] !== "norn") return null;
-  let edition: string | undefined;
-  let rest: string[];
-  if (words[1] === "run") {
-    rest = words.slice(2);
-  } else if (words.length >= 3 && NORN_EDITION.test(words[1]!) && words[2] === "run") {
-    edition = words[1];
-    rest = words.slice(3);
-  } else {
-    return null;
-  }
-  const name = rest.length ? rest.join(" ") : "main";
-  const tag = edition === undefined ? `norn run ${name}` : `norn ${edition} run ${name}`;
-  const meta = edition === undefined ? {} : { edition };
-  if (!NORN_PROGRAM_NAME.test(name)) {
-    return {
-      name, ...meta,
-      problem: `\`${tag}\` names no program: a program's name is one word, a letter and then letters, digits, _ or -, at most 40 characters. Rename the block.`,
-    };
-  }
-  if (edition !== undefined && !SUPPORTED_NORN_EDITIONS.has(edition)) {
-    return {
-      name, ...meta,
-      problem: `\`${tag}\` uses Norn edition ${edition}, which this host does not support yet (supported: edition 1). Keep the block or change its edition to 1 to update it.`,
-    };
-  }
-  return { name, ...meta };
+  return parseNornNamedBlock(info, {
+    keyword: "run",
+    defaultName: "main",
+    namePattern: NORN_PROGRAM_NAME,
+    badNameProblem: (tag) => `\`${tag}\` names no program: a program's name is one word, a letter and then letters, digits, _ or -, at most 40 characters. Rename the block.`,
+    unsupportedEditionProblem: (tag, edition) => `\`${tag}\` uses Norn edition ${edition}, which this host does not support yet (supported: edition 1). Keep the block or change its edition to 1 to update it.`,
+  });
 }
 
 /** How one `norn run` block of a Page stands (docs/architecture/norn-host.md). */

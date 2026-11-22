@@ -6,6 +6,7 @@ import * as polling from "../src/connectors/gmail-poll-client.ts";
 import { gmailIncomingChanges } from "../src/connectors/gmail-notification-api.ts";
 import { parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
 import { ProviderRequestError } from "../src/connectors/http.ts";
+import { extractGmailEventData } from "../src/norn-libraries.ts";
 
 const load=await compileCommonJsSourceModule(new URL("../src/connectors/gmail-notification-drain.ts",import.meta.url));
 const env={CONNECTOR_GOOGLE_CLIENT_ID:"fixture-google",CONNECTOR_GOOGLE_CLIENT_SECRET:"fixture-secret",
@@ -43,6 +44,7 @@ async function drainer() {
       for(const route of targets)await append(_env,route.channelId,{channelId:route.channelId,body:event.body,
         messageId:`app:${provider}:${event.eventId}:${route.channelId}`,appMetadata,stored:calls.stored.length});}},
     "../product-message-append":{dispatchProductMessageAppend:async(_env,_channel,message)=>{calls.append.push(message);return new Response();}},
+    "../norn-libraries":{extractGmailEventData},
     "../outside-events":{connectorEventArrived:async(_env,event)=>{calls.automation.push(event);}}};
   const {drainGmailNotifications}=load(name=>imports[name]);
   return {job,state,calls,routes,autoRead,run:()=>drainGmailNotifications(env)};

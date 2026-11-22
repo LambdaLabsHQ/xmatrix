@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The effects shown for review (docs/types.md §8, spec §12 item 5): the effect
  * families a program may perform, and the participant and ref literals that
@@ -49,9 +49,15 @@ interface Call {
 }
 
 /** The effects of a checked program, family by family, in the order of §8. */
-export function effectsSummary(program: A.Program, resolutions: ReadonlyMap<A.Identifier, ValueBinding>, std: Library | null): EffectSummary[] {
-  const all = new Map(resolutions);
+export function effectsSummary(
+  program: A.Program,
+  resolutions: ReadonlyMap<A.Identifier | A.QualifiedIdentifier, ValueBinding>,
+  std: Library | null,
+  libraries: Readonly<Record<string, Library>> = {},
+): EffectSummary[] {
+  const all = new Map<A.Identifier | A.QualifiedIdentifier, ValueBinding>(resolutions);
   for (const [node, value] of std?.resolutions ?? []) all.set(node, value);
+  for (const lib of Object.values(libraries)) for (const [node, value] of lib.resolutions) all.set(node, value);
   const summaries = new Map<A.Lambda | null, Summary>();
   const pending: (A.Lambda | null)[] = [null];
   const owners = new Map<A.Lambda | null, A.AstNode[]>([[null, program.body]]);
@@ -95,11 +101,11 @@ export function effectsSummary(program: A.Program, resolutions: ReadonlyMap<A.Id
 }
 
 /** The direct effects and calls in some code, `owner`'s or, for null, the program's. */
-function summarize(nodes: readonly A.AstNode[], owner: A.Lambda | null, resolutions: ReadonlyMap<A.Identifier, ValueBinding>): Summary {
+function summarize(nodes: readonly A.AstNode[], owner: A.Lambda | null, resolutions: ReadonlyMap<A.Identifier | A.QualifiedIdentifier, ValueBinding>): Summary {
   const defaults = new Map<string, A.Expression>();
   if (owner !== null) for (const param of owner.params) if (param.kind === "LabelledParam" && param.defaultValue !== null) defaults.set(param.label, param.defaultValue);
   const summary: Summary = { defaults, families: new Set(), literals: new Set(), parameters: [], calls: [] };
-  const callees = new Set<A.Identifier>();
+  const callees = new Set<A.Identifier | A.QualifiedIdentifier>();
   const stack: unknown[] = [...nodes].reverse();
   for (let item = stack.pop(); item !== undefined; item = stack.pop()) {
     if (Array.isArray(item)) {
@@ -108,7 +114,7 @@ function summarize(nodes: readonly A.AstNode[], owner: A.Lambda | null, resoluti
     }
     if (typeof item !== "object" || item === null || !("kind" in item)) continue;
     const node = item as A.AstNode;
-    if ((node.kind === "Call" || node.kind === "Pipe") && node.callee.kind === "Identifier") {
+    if ((node.kind === "Call" || node.kind === "Pipe") && (node.callee.kind === "Identifier" || node.callee.kind === "QualifiedIdentifier")) {
       const value = resolutions.get(node.callee);
       if (value !== undefined) {
         callees.add(node.callee);
@@ -123,14 +129,17 @@ function summarize(nodes: readonly A.AstNode[], owner: A.Lambda | null, resoluti
           summary.calls.push({ callee: value.lambda, positional, labelled });
         }
       }
-    } else if (node.kind === "Identifier" && !callees.has(node)) {
+    } else if ((node.kind === "Identifier" || node.kind === "QualifiedIdentifier") && !callees.has(node)) {
       // A function passed as a value may be called anywhere.
       const value = resolutions.get(node);
       if (value?.family != null) summary.families.add(value.family);
       else if (value?.lambda != null) summary.calls.push({ callee: value.lambda, positional: null, labelled: new Map() });
     }
     const fields = NODE_FIELDS[node.kind] as readonly string[];
-    for (let index = fields.length - 1; index >= 0; index -= 1) stack.push((node as unknown as Record<string, unknown>)[fields[index]!]);
+    for (let index = fields.length - 1; index >= 0; index -= 1) {
+      const child = (node as unknown as Record<string, unknown>)[fields[index]!];
+      if (child !== undefined) stack.push(child);
+    }
   }
   return summary;
 }
@@ -141,7 +150,7 @@ function summarize(nodes: readonly A.AstNode[], owner: A.Lambda | null, resoluti
  * expression of a block, and the parameters of the function the effect is in.
  * Returns whether any is new.
  */
-function target(summary: Summary, owner: A.Lambda | null, family: Family, argument: A.Expression, resolutions: ReadonlyMap<A.Identifier, ValueBinding>): boolean {
+function target(summary: Summary, owner: A.Lambda | null, family: Family, argument: A.Expression, resolutions: ReadonlyMap<A.Identifier | A.QualifiedIdentifier, ValueBinding>): boolean {
   let added = false;
   for (const value of values(argument)) {
     const text = literalText(value);
