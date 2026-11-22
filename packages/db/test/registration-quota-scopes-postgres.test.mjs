@@ -83,6 +83,34 @@ integration("a pool reading keeps an account part and a scoped part, and a usage
     await sql(`DELETE FROM control.registration_quota_observations`);
     assert.equal((await limit({ resetsAt: soon })).usedUp, "account");
     assert.equal((await row()).source, "daemon");
+
+    // Current daemon wire: no quotaScope, raw resetsAt + reading attributed once in TS (#1725).
+    await sql(`DELETE FROM control.registration_quota_observations`);
+    const rawScoped = await limit({ resetsAt: refused, usage: reading(1000, 55, 100) });
+    assert.deepEqual([rawScoped.usedUp, rawScoped.scope], ["scope", "Fable"]);
+    const rawStored = await row();
+    assert.deepEqual([rawStored.source, registrationQuotaReading(rawStored).remainingPercent,
+      registrationQuotaReading(rawStored, fable).remainingPercent], ["provider", 45, 0]);
+
+    // Raw refusal with both account and Fable at 100% -> account wins.
+    await sql(`DELETE FROM control.registration_quota_observations`);
+    assert.equal((await limit({ resetsAt: refused, usage: reading(1000, 100, 100) })).usedUp, "account");
+    assert.equal((await row()).source, "provider");
+    assert.equal(registrationQuotaReading(await row()).remainingPercent, 0);
+
+    // Raw refusal with two distinct used-up scopes and open account -> unresolved hold.
+    await sql(`DELETE FROM control.registration_quota_observations`);
+    const twoScopes = { ...reading(1000, 55, 100), scopedQuotaUsages: [
+      { label: "1w", percent: 100, resetAt: week, scope: "Fable" },
+      { label: "1w", percent: 100, resetAt: week, scope: "Sonnet" },
+    ] };
+    assert.equal((await limit({ resetsAt: refused, usage: twoScopes })).usedUp, "unresolved");
+    assert.equal((await row()).source, "daemon");
+
+    // Raw refusal where the daemon could not read usage (quotaScopeReason, no quotaScope) -> unresolved hold.
+    await sql(`DELETE FROM control.registration_quota_observations`);
+    assert.equal((await limit({ resetsAt: soon, quotaScopeReason: "usage_read_failed" })).usedUp, "unresolved");
+    assert.equal((await row()).source, "daemon");
   } finally { await close(); }
 });
 

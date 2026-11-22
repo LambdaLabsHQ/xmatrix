@@ -60,6 +60,14 @@ export interface RoutingQuotaWindow {
 export const ROUTING_QUOTA_MAX_WINDOWS = 8;
 /** The longest scope a scoped window may name, in UTF-8 bytes. */
 export const ROUTING_QUOTA_MAX_SCOPE_BYTES = 64;
+/** How far apart a refusal's reset and a window's reset may lie and still
+ * name the same window: the provider states whole seconds in one place and
+ * the instant it computed in another. */
+export const ROUTING_QUOTA_RESET_MATCH_MS = 2_000;
+/** `account`: a usage limit used up an account window. */
+export const ACCOUNT_QUOTA_SCOPE = "account";
+/** The refusal could not be attributed to one window. */
+export const UNRESOLVED_QUOTA_SCOPE = "unresolved";
 
 export type RoutingQuotaProbeResult = RoutingQuotaProbeTarget & (
   | { status: "observed"; quotaSource: "provider_api"; quotaObservedAt: string;
@@ -188,6 +196,111 @@ export function currentRoutingQuotaWindows(value: unknown, now: number): Routing
 /** A stored reading's windows back in usage form (`percent`), for `routingQuotaObservation`. */
 export function routingQuotaUsageWindows(windows: readonly RoutingQuotaWindow[]) {
   return windows.map(({ usedPercent, ...window }) => ({ ...window, percent: usedPercent }));
+}
+
+/** Which window a provider refusal used up, together with the reading that
+ * marks that window used up. */
+export type RoutingQuotaRefusalAttribution =
+  | { usedUp: "account"; record: RoutingQuotaRecord }
+  | { usedUp: "scope"; scope: string; record: RoutingQuotaRecord };
+
+/**
+ * Attribute a provider refusal resetting at `resetsAt` to one window of
+ * `record`, returning the attributed scope and the reading with that window
+ * marked used up. A refusal names the window by its reset (within
+ * `ROUTING_QUOTA_RESET_MATCH_MS`), whatever share the reading rounds it to.
+ * `scope`, when supplied by an older daemon, narrows matching to account
+ * windows (`account`) or that scope's windows. When several windows share the
+ * reset (an account week and a model week), an already used-up window decides;
+ * the account's wins if it is used up too (it stops every model); two
+ * different used-up scopes without an account window remain ambiguous.
+ */
+export function attributeRoutingQuotaRefusal(
+  record: RoutingQuotaRecord,
+  resetsAt: number,
+  now: number,
+  scope?: string,
+): RoutingQuotaRefusalAttribution | undefined {
+  const wantedScope = scope?.trim() || undefined;
+  if (!Number.isFinite(resetsAt) || wantedScope === UNRESOLVED_QUOTA_SCOPE) return undefined;
+  const resetsWithRefusal = (window: RoutingQuotaWindow) =>
+    window.resetAt !== undefined && Math.abs(Date.parse(window.resetAt) - resetsAt) <= ROUTING_QUOTA_RESET_MATCH_MS;
+  const scopeMatches = (entryScope: string) =>
+    wantedScope === undefined || (wantedScope === ACCOUNT_QUOTA_SCOPE
+      ? entryScope === ACCOUNT_QUOTA_SCOPE
+      : entryScope !== ACCOUNT_QUOTA_SCOPE && entryScope.toLowerCase() === wantedScope.toLowerCase());
+  const candidates: Array<{ scope: string; window: RoutingQuotaWindow }> = [
+    ...record.windows
+      .filter(window => scopeMatches(ACCOUNT_QUOTA_SCOPE) && resetsWithRefusal(window))
+      .map(window => ({ scope: ACCOUNT_QUOTA_SCOPE, window })),
+    ...(record.scoped?.windows ?? [])
+      .filter(window => typeof window.scope === "string" && window.scope.trim().length > 0
+        && scopeMatches(window.scope) && resetsWithRefusal(window))
+      .map(window => ({ scope: window.scope!, window })),
+  ];
+  if (!candidates.length) return undefined;
+  const usedUp = candidates.filter(candidate => candidate.window.usedPercent >= 100);
+  let matched: { scope: string; window: RoutingQuotaWindow } | undefined;
+  if (candidates.length === 1) {
+    matched = candidates[0];
+  } else if (usedUp.length === 1) {
+    matched = usedUp[0];
+  } else {
+    const accountUsedUp = usedUp.find(candidate => candidate.scope === ACCOUNT_QUOTA_SCOPE);
+    if (accountUsedUp) {
+      matched = accountUsedUp;
+    } else if (usedUp.length > 1) {
+      const scopes = new Set(usedUp.map(candidate => candidate.scope.toLowerCase()));
+      if (scopes.size === 1) matched = usedUp[0];
+    }
+  }
+  if (!matched) return undefined;
+  const soleWindow = candidates.length === 1 ? matched.window : undefined;
+  const mark = (windows: readonly RoutingQuotaWindow[]) =>
+    windows.map(window => window === soleWindow ? { ...window, usedPercent: 100 } : window);
+  const windows = mark(record.windows);
+  const scoped = record.scoped ? mark(record.scoped.windows) : undefined;
+  const updated = routingQuotaRecord({
+    quotaSource: "provider_api",
+    quotaObservedAt: record.observedAt,
+    quotaUsages: routingQuotaUsageWindows(windows),
+    ...(scoped ? { scopedQuotaUsages: routingQuotaUsageWindows(scoped) } : {}),
+    ...(record.quotaAccount ? { quotaAccount: record.quotaAccount } : {}),
+  }, now);
+  if (!updated) return undefined;
+  return matched.scope === ACCOUNT_QUOTA_SCOPE
+    ? { usedUp: "account", record: updated }
+    : { usedUp: "scope", scope: matched.scope, record: updated };
+}
+
+/**
+ * Merge fresh windows against stored windows of the same part, keeping the
+ * larger share used for any window with the same label, same scope (or both
+ * account windows), and a reset within `ROUTING_QUOTA_RESET_MATCH_MS`. A
+ * window marked used up by a refusal is not reopened by a later reading that
+ * rounds or lags it below 100%; its reset moves `resetAt`, making it a new
+ * window.
+ */
+export function mergeRoutingQuotaWindows(
+  incoming: readonly RoutingQuotaWindow[],
+  stored: readonly RoutingQuotaWindow[],
+): RoutingQuotaWindow[] {
+  if (!stored.length) return [...incoming];
+  return incoming.map(window => {
+    const incomingReset = window.resetAt ? Date.parse(window.resetAt) : NaN;
+    if (!Number.isFinite(incomingReset)) return window;
+    let keptUsed = window.usedPercent;
+    for (const previous of stored) {
+      if ((previous.label ?? undefined) !== (window.label ?? undefined)) continue;
+      if ((previous.scope ?? undefined) !== (window.scope ?? undefined)) continue;
+      const previousReset = previous.resetAt ? Date.parse(previous.resetAt) : NaN;
+      if (!Number.isFinite(previousReset)) continue;
+      if (Math.abs(previousReset - incomingReset) <= ROUTING_QUOTA_RESET_MATCH_MS && previous.usedPercent > keptUsed) {
+        keptUsed = previous.usedPercent;
+      }
+    }
+    return keptUsed > window.usedPercent ? { ...window, usedPercent: keptUsed } : window;
+  });
 }
 
 const QUOTA_WINDOW_UNIT_MS: Record<string, number> = {

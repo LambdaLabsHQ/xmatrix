@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { currentRoutingQuotaWindows, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
-  routingQuotaPace, routingQuotaProbeObservations } from '../dist/agent-routing-quota-probe.js';
+import { attributeRoutingQuotaRefusal, currentRoutingQuotaWindows, mergeRoutingQuotaWindows,
+  parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse, routingQuotaPace,
+  routingQuotaProbeObservations, routingQuotaRecord } from '../dist/agent-routing-quota-probe.js';
 
 const now = Date.parse('2026-09-21T20:00:00Z');
 const target = { targetId: 'registration:a', configurationDigest: 'a'.repeat(64) };
@@ -257,4 +258,65 @@ test('a Cursor reading in the pre-scope wire reads its pools as scoped windows; 
     quotaUsages: old.quotaUsages.map(({ window: _window, ...window }) => window) }] }, asked, now);
   assert.equal(fact.record.account, undefined);
   assert.deepEqual(fact.record.scoped.windows.map(window => window.scope), ['Auto', 'API']);
+});
+
+test('attributeRoutingQuotaRefusal resolves raw reset times and tie-breaks in one place (#1725)', () => {
+  const refusalNow = Date.parse('2026-11-15T12:00:00Z');
+  const makeRecord = (session, week, scoped) => routingQuotaRecord({
+    quotaSource: 'provider_api',
+    quotaObservedAt: '2026-11-15T12:00:00Z',
+    quotaUsages: [
+      { label: '5h', percent: session, resetAt: '2026-11-15T23:00:00.312Z' },
+      { label: '1w', percent: week, resetAt: '2026-11-19T17:59:59.768Z' },
+    ],
+    scopedQuotaUsages: scoped,
+  }, refusalNow);
+
+  const fable = (percent) => [{ label: '1w', percent, resetAt: '2026-11-19T17:59:59.769Z', scope: 'Fable' }];
+  // Model week used up beside an open account week resetting at the same second -> Fable.
+  const modelWeek = attributeRoutingQuotaRefusal(makeRecord(0, 55, fable(100)), Date.parse('2026-11-19T18:00:00Z'), refusalNow);
+  assert.equal(modelWeek?.usedUp, 'scope');
+  assert.equal(modelWeek?.scope, 'Fable');
+
+  // Both account and Fable week used up -> account wins (stops every model).
+  const bothWeeks = attributeRoutingQuotaRefusal(makeRecord(0, 100, fable(100)), Date.parse('2026-11-19T18:00:00Z'), refusalNow);
+  assert.equal(bothWeeks?.usedUp, 'account');
+
+  // Sole window resetting within 2s is marked used up even if rounded to 99%.
+  const soleWindow = attributeRoutingQuotaRefusal(makeRecord(99, 55, fable(100)), Date.parse('2026-11-15T23:00:01Z'), refusalNow);
+  assert.equal(soleWindow?.usedUp, 'account');
+  assert.equal(soleWindow?.record.windows.find(w => w.label === '5h')?.usedPercent, 100);
+
+  // Beyond 2s tolerance -> unresolved.
+  assert.equal(attributeRoutingQuotaRefusal(makeRecord(100, 55, fable(100)), Date.parse('2026-11-15T23:00:03Z'), refusalNow), undefined);
+
+  // Two candidates sharing a reset with neither at 100% -> ambiguous (unresolved).
+  assert.equal(attributeRoutingQuotaRefusal(makeRecord(0, 99, fable(99)), Date.parse('2026-11-19T18:00:00Z'), refusalNow), undefined);
+
+  // Two distinct used-up scopes sharing a reset with an open account -> ambiguous (unresolved).
+  const twoUsedUpScopes = makeRecord(0, 55, [
+    { label: '1w', percent: 100, resetAt: '2026-11-19T17:59:59.769Z', scope: 'Fable' },
+    { label: '1w', percent: 100, resetAt: '2026-11-19T17:59:59.769Z', scope: 'Sonnet' },
+  ]);
+  assert.equal(attributeRoutingQuotaRefusal(twoUsedUpScopes, Date.parse('2026-11-19T18:00:00Z'), refusalNow), undefined);
+
+  // Legacy daemon explicit scope narrows the match and marks the matched window used up.
+  const explicit = attributeRoutingQuotaRefusal(makeRecord(0, 55, fable(97)), Date.parse('2026-11-19T18:00:00Z'), refusalNow, 'Fable');
+  assert.equal(explicit?.usedUp, 'scope');
+  assert.equal(explicit?.scope, 'Fable');
+  assert.equal(explicit?.record.scoped?.windows[0]?.usedPercent, 100);
+});
+
+test('mergeRoutingQuotaWindows preserves higher usedPercent within 2s reset match and resets on new window', () => {
+  const stored = [
+    { label: '1w', usedPercent: 100, resetAt: '2026-11-19T18:00:00.000Z', scope: 'Fable' },
+  ];
+  const lagging = [
+    { label: '1w', usedPercent: 98, resetAt: '2026-11-19T17:59:58.500Z', scope: 'Fable' },
+  ];
+  assert.equal(mergeRoutingQuotaWindows(lagging, stored)[0]?.usedPercent, 100);
+  const nextWeek = [
+    { label: '1w', usedPercent: 5, resetAt: '2026-11-26T18:00:00.000Z', scope: 'Fable' },
+  ];
+  assert.equal(mergeRoutingQuotaWindows(nextWeek, stored)[0]?.usedPercent, 5);
 });

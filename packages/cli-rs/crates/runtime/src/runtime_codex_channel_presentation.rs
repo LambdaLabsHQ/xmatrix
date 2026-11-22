@@ -441,7 +441,7 @@ pub(crate) fn send_agent_lifecycle_with_reset(
         detail: detail.map(str::to_string),
         snapshot,
         resets_at: usage_limit.and_then(|limit| limit.resets_at.clone()),
-        quota_scope: usage_limit.map(|limit| limit.quota_scope.clone()),
+        quota_scope: None,
         quota_scope_reason: usage_limit
             .and_then(|limit| limit.quota_scope_reason)
             .map(str::to_string),
