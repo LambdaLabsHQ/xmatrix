@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: full Top6 website i18n (`en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `es`)
+
+Expanded public website localization across 6 languages (`/` English, `/zh` Simplified Chinese, `/zh-tw` Traditional Chinese, `/ja` Japanese, `/ko` Korean, and `/es` Spanish) covering the homepage, all 19 `/<competitor>-alternatives` landing pages (plus legacy brand 308 redirects), `/download`, `/support`, and all 10 `/docs` user guide pages, while keeping legal pages English-only. Every localized route sets the matching `<html lang>`, canonical URL, 6-way bidirectional `hreflang` + `x-default` alternates, localized OpenGraph/JSON-LD metadata, site-wide footer language switcher preserving the current path, direct localized footer links to all 19 competitor pages, `sitemap.xml` entries with `xhtml:link` alternates (196 URLs total), and `site-host.mjs` site-origin allowlisting. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: direct root `/<competitor>-alternatives` landing pages with live product preview
 
 Removed the `/alternatives` hub page (which risked targeting negative brand queries) and moved all 19 competitor comparison landing pages to flat root-level `/<competitor>-alternatives` URLs (`/raft-alternatives`, `/t3-code-alternatives`, `/conductor-alternatives`, `/jules-alternatives`, etc.), with permanent redirects for legacy names (`/superset-alternatives`, `/slock-alternatives`, `/lobechat-alternatives`, `/evermemos-alternatives`, `/google-jules-alternatives`). Tightened `<title>` tags (<=60 chars, front-loaded `<Competitor> Alternatives (2026)`) and `<h1>` headings to match competitor search intent, embedded the live xMatrix `<AppWindow />` preview directly below the hero, added `SoftwareApplication` structured data, and replaced the single footer hub link with direct `<Competitor> Alternatives` links from every page. Web only. Recovery is a CI-validated beta reverting this change.

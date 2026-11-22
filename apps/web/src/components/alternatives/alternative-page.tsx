@@ -6,11 +6,14 @@ import { Footer } from "@/components/landing/footer";
 import { Navbar } from "@/components/shared/navbar";
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { relatedAlternatives, type AlternativePage } from "@/lib/alternatives";
+import { SITE_LOCALES, localizedPath, type SiteLocale } from "@/lib/site-locales";
+import { sitePagesCopy } from "@/lib/site-pages-copy";
 import { shareImage, siteUrl } from "@/lib/site-url";
 
-function alternativeStructuredData(page: AlternativePage): string {
+function alternativeStructuredData(page: AlternativePage, locale: SiteLocale): string {
   const abs = (href: string) => new URL(href, siteUrl).href;
   const org = { "@type": "Organization", name: "xMatrix", url: abs("/") };
+  const chrome = sitePagesCopy[locale].alternatives;
   return JSON.stringify({
     "@context": "https://schema.org",
     "@graph": [
@@ -19,14 +22,15 @@ function alternativeStructuredData(page: AlternativePage): string {
         name: page.metaTitle,
         description: page.metaDescription,
         url: abs(page.href),
-        inLanguage: "en",
+        inLanguage: SITE_LOCALES[locale].htmlLang,
         publisher: org,
         primaryImageOfPage: abs(shareImage.url),
       },
       {
         "@type": "SoftwareApplication",
         name: "xMatrix",
-        url: abs("/"),
+        url: abs(localizedPath(locale, "/")),
+        inLanguage: SITE_LOCALES[locale].htmlLang,
         applicationCategory: "DeveloperApplication",
         operatingSystem: "macOS, Windows, Linux, Android, Web",
         offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
@@ -35,8 +39,8 @@ function alternativeStructuredData(page: AlternativePage): string {
       {
         "@type": "BreadcrumbList",
         itemListElement: [
-          { "@type": "ListItem", position: 1, name: "xMatrix", item: abs("/") },
-          { "@type": "ListItem", position: 2, name: `${page.name} Alternatives`, item: abs(page.href) },
+          { "@type": "ListItem", position: 1, name: "xMatrix", item: abs(localizedPath(locale, "/")) },
+          { "@type": "ListItem", position: 2, name: chrome.breadcrumbLabel(page.name), item: abs(page.href) },
         ],
       },
       {
@@ -54,24 +58,34 @@ function alternativeStructuredData(page: AlternativePage): string {
   }).replace(/</gu, "\\u003c");
 }
 
-export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
-  const siblings = relatedAlternatives(page);
+export function AlternativeDetailPage({
+  page,
+  locale = "en",
+}: {
+  page: AlternativePage;
+  locale?: SiteLocale;
+}) {
+  const siblings = relatedAlternatives(page, locale);
+  const chrome = sitePagesCopy[locale].alternatives;
+  const homeHref = localizedPath(locale, "/");
+  const downloadHref = localizedPath(locale, "/download");
+  const docsHref = localizedPath(locale, "/docs");
 
   return (
     <div className="site-page">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: alternativeStructuredData(page) }}
+        dangerouslySetInnerHTML={{ __html: alternativeStructuredData(page, locale) }}
       />
-      <Navbar />
+      <Navbar locale={locale} />
       <main>
         <section className="mx-auto max-w-5xl px-6 pt-32 pb-12">
           <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2 text-xs font-semibold text-muted-foreground">
-            <Link href="/" className="transition-colors hover:text-foreground">
+            <Link href={homeHref} className="transition-colors hover:text-foreground">
               xMatrix
             </Link>
             <span aria-hidden>/</span>
-            <span className="text-foreground">{page.name} Alternatives</span>
+            <span className="text-foreground">{chrome.breadcrumbLabel(page.name)}</span>
           </nav>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -79,7 +93,9 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
               {page.eyebrow}
               {page.alsoKnownAs ? ` · ${page.alsoKnownAs}` : ""}
             </p>
-            <span className="text-xs text-muted-foreground">Verified {page.verifiedDate}</span>
+            <span className="text-xs text-muted-foreground">
+              {chrome.verifiedPrefix} {page.verifiedDate}
+            </span>
           </div>
 
           <h1 className="site-display mt-4 max-w-4xl text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
@@ -99,20 +115,20 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
               href="/login"
               className="site-wood-pill inline-flex h-12 items-center gap-2 px-6 text-sm"
             >
-              Start Free with xMatrix
+              {chrome.startFreeCta}
               <ArrowRight className="size-4" aria-hidden />
             </WoodPanel>
             <Link
-              href="/download"
+              href={downloadHref}
               className="inline-flex h-12 items-center rounded-full border border-[var(--site-wood-line)] px-5 text-sm font-semibold text-foreground transition-colors hover:bg-foreground/[0.04]"
             >
-              Download desktop &amp; mobile
+              {chrome.downloadCta}
             </Link>
             <Link
-              href="/docs"
+              href={docsHref}
               className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
             >
-              Read the docs
+              {chrome.readDocsCta}
               <ArrowRight className="size-3.5" aria-hidden />
             </Link>
           </div>
@@ -120,9 +136,9 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
 
         <section className="mx-auto max-w-6xl px-6 py-8">
           <div className="mx-auto max-w-5xl">
-            <p className="x-eyebrow uppercase">Meet xMatrix</p>
+            <p className="x-eyebrow uppercase">{chrome.meetEyebrow}</p>
             <h2 className="site-display mt-2 text-2xl font-semibold text-foreground sm:text-3xl">
-              Living pages maintained by your coding agents.
+              {chrome.meetHeading}
             </h2>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">
               {page.productCaption}
@@ -135,18 +151,20 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
 
         <section className="mx-auto max-w-5xl px-6 py-12">
           <h2 className="site-display text-2xl font-semibold text-foreground sm:text-3xl">
-            Why teams look for a {page.name} alternative
+            {chrome.whyHeading(page.name)}
           </h2>
           <div className="mt-8 grid gap-5">
             {page.painPoints.map((point, index) => (
               <article key={point.title} className="site-paper-sheet p-6 sm:p-8">
                 <p className="text-xs font-bold tracking-wider text-[var(--site-wood-deep)] uppercase">
-                  0{index + 1} · {page.name} gap
+                  0{index + 1} · {chrome.gapSuffix(page.name)}
                 </p>
                 <h3 className="mt-2 text-xl font-semibold text-foreground">{point.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground sm:text-base">{point.problem}</p>
                 <div className="mt-5 border-t border-[var(--site-wood-line)] pt-4">
-                  <p className="text-xs font-bold tracking-wider text-foreground uppercase">How xMatrix handles it</p>
+                  <p className="text-xs font-bold tracking-wider text-foreground uppercase">
+                    {chrome.xmatrixAnswerLabel}
+                  </p>
                   <p className="mt-1.5 text-sm leading-7 text-foreground/90 sm:text-base">{point.xmatrixAnswer}</p>
                 </div>
               </article>
@@ -156,13 +174,13 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
 
         <section className="mx-auto max-w-5xl px-6 py-12">
           <h2 className="site-display text-2xl font-semibold text-foreground sm:text-3xl">
-            xMatrix vs. {page.name} at a glance
+            {chrome.atAGlanceHeading(page.name)}
           </h2>
           <div className="site-paper-sheet mt-6 overflow-x-auto">
             <table className="w-full min-w-[38rem] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-[var(--site-wood-line)]">
-                  <th className="w-1/4 px-5 py-4 font-semibold text-muted-foreground">Dimension</th>
+                  <th className="w-1/4 px-5 py-4 font-semibold text-muted-foreground">{chrome.dimensionCol}</th>
                   <th className="w-[37.5%] px-5 py-4 font-semibold text-foreground">xMatrix</th>
                   <th className="w-[37.5%] px-5 py-4 font-semibold text-muted-foreground">{page.name}</th>
                 </tr>
@@ -184,11 +202,11 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
 
         <section className="mx-auto max-w-5xl px-6 py-12">
           <h2 className="site-display text-2xl font-semibold text-foreground sm:text-3xl">
-            When to stay with {page.name} vs. switch to xMatrix
+            {chrome.stayVsSwitchHeading(page.name)}
           </h2>
           <div className="mt-6 grid gap-5 md:grid-cols-2">
             <div className="site-paper-sheet p-6">
-              <h3 className="text-base font-semibold text-foreground">Stay with {page.name} if…</h3>
+              <h3 className="text-base font-semibold text-foreground">{chrome.stayIf(page.name)}</h3>
               <ul className="mt-4 space-y-3">
                 {page.stayWhen.map((item) => (
                   <li key={item} className="flex gap-2.5 text-sm leading-6 text-muted-foreground">
@@ -199,7 +217,7 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
               </ul>
             </div>
             <div className="site-paper-sheet p-6">
-              <h3 className="text-base font-semibold text-foreground">Switch to xMatrix if…</h3>
+              <h3 className="text-base font-semibold text-foreground">{chrome.switchIf}</h3>
               <ul className="mt-4 space-y-3">
                 {page.switchWhen.map((item) => (
                   <li key={item} className="flex gap-2.5 text-sm leading-6 text-foreground/90">
@@ -214,13 +232,13 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
 
         <section className="mx-auto max-w-5xl px-6 py-12">
           <h2 className="site-display text-2xl font-semibold text-foreground sm:text-3xl">
-            Moving from {page.name} to xMatrix
+            {chrome.movingHeading(page.name)}
           </h2>
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             {page.migrationSteps.map((step, index) => (
               <div key={step.title} className="site-paper-sheet p-6">
                 <p className="text-xs font-bold tracking-wider text-[var(--site-wood-deep)] uppercase">
-                  Step {index + 1}
+                  {chrome.stepLabel(index + 1)}
                 </p>
                 <h3 className="mt-2 text-base font-semibold text-foreground">{step.title}</h3>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">{step.detail}</p>
@@ -231,7 +249,7 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
 
         <section className="mx-auto max-w-5xl px-6 py-12">
           <h2 className="site-display text-2xl font-semibold text-foreground sm:text-3xl">
-            Frequently asked questions
+            {chrome.faqHeading}
           </h2>
           <div className="mt-8 max-w-3xl divide-y divide-foreground/10 border-y border-foreground/10">
             {page.faqs.map((item) => (
@@ -254,12 +272,9 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
             <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
               <div className="max-w-2xl">
                 <h2 className="site-display text-2xl font-semibold sm:text-3xl">
-                  Try xMatrix free with your existing coding agents.
+                  {chrome.finalHeading}
                 </h2>
-                <p className="mt-3 text-sm leading-6">
-                  Keep your Claude Code, Codex, Cursor, Gemini, or Antigravity subscriptions. Up to 3 people and
-                  unlimited agents free; Pro is $10/human seat/month ($8/mo billed annually).
-                </p>
+                <p className="mt-3 text-sm leading-6">{chrome.finalBody}</p>
               </div>
               <div className="flex flex-wrap gap-3">
                 <LiquidGlassPill
@@ -267,15 +282,15 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
                   href="/login"
                   className="inline-flex h-11 items-center gap-2 px-5 text-sm font-semibold"
                 >
-                  Start Free
+                  {chrome.startFreeShort}
                   <ArrowRight className="size-4" aria-hidden />
                 </LiquidGlassPill>
                 <LiquidGlassPill
                   as={Link}
-                  href="/download"
+                  href={downloadHref}
                   className="inline-flex h-11 items-center px-5 text-sm font-semibold"
                 >
-                  Download
+                  {chrome.downloadShort}
                 </LiquidGlassPill>
               </div>
             </div>
@@ -285,7 +300,7 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
         {siblings.length > 0 && (
           <section className="mx-auto max-w-5xl px-6 pt-4 pb-24">
             <h2 className="text-sm font-bold tracking-wider text-muted-foreground uppercase">
-              More coding-agent comparisons
+              {chrome.moreComparisons}
             </h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {siblings.map((sibling) => (
@@ -294,7 +309,7 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
                   href={sibling.href}
                   className="site-paper-sheet group flex items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-foreground transition-colors hover:border-foreground/30"
                 >
-                  <span>{sibling.name} Alternatives</span>
+                  <span>{chrome.linkLabel(sibling.name)}</span>
                   <ArrowRight className="size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5" aria-hidden />
                 </Link>
               ))}
@@ -302,7 +317,7 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
           </section>
         )}
       </main>
-      <Footer />
+      <Footer locale={locale} basePath={page.basePath} />
     </div>
   );
 }
