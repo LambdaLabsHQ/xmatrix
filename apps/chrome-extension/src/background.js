@@ -234,7 +234,9 @@ async function askSend(tab, { body, invocationSelections }) {
   await chrome.storage.session.remove(`ask:${tab.id}`);
   await chrome.storage.local.set({ lastSpace: { id: result.space.id, name: result.space.name } });
   // The panel shows it: at once if its app is loaded, or opening straight onto it.
-  await chrome.storage.session.set({ openPath: {
+  // For the side panel of the window the question was asked in: another window's panel (or an extension page
+  // open in a tab) must not take it.
+  await chrome.storage.session.set({ openPath: { windowId: tab.windowId ?? null,
     path: `/app/${encodeURIComponent(result.space.id)}/channels/${encodeURIComponent(result.channel.id)}`, at: Date.now() } });
   return { spaceName: result.space.name };
 }
@@ -305,10 +307,12 @@ const panelHandlers = {
   async quickSelectAsked() {
     await chrome.storage.local.set({ quickSelectAsked: true });
   },
-  async takeOpenPath() {
+  async takeOpenPath({ windowId }) {
     const { openPath } = await chrome.storage.session.get("openPath");
+    if (!openPath || Date.now() - openPath.at >= 60_000) return null;
+    if (openPath.windowId !== null && windowId !== undefined && openPath.windowId !== windowId) return null;
     await chrome.storage.session.remove("openPath");
-    return openPath && Date.now() - openPath.at < 60_000 ? openPath.path : null;
+    return openPath.path;
   },
   queuePassage: ({ passage }) => queuePassage(pagePassage(passage ?? {})),
   quickSelect: () => chrome.permissions.contains({ origins: WEB_ORIGINS }),

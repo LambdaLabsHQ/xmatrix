@@ -44,13 +44,20 @@ function postToApp(message) {
   appWindow()?.postMessage({ protocol: PROTOCOL, ...message }, APP_ORIGIN);
 }
 
+/** The window this panel is beside: a conversation started from a page in it opens here. */
+let windowIdPromise = null;
+function panelWindow() {
+  windowIdPromise ??= chrome.windows.getCurrent().then((window) => window.id).catch(() => undefined);
+  return windowIdPromise;
+}
+
 /** Loads the app, straight onto a conversation the extension just started when there is one. */
 let opening = false;
 async function openApp() {
   if (opening || $("app").getAttribute("src")) return;
   opening = true;
   appReady = false;
-  const path = await ask("takeOpenPath").catch(() => null);
+  const path = await ask("takeOpenPath", { windowId: await panelWindow() }).catch(() => null);
   $("app").src = path ? `${APP_PAGE}?at=${encodeURIComponent(path)}` : APP_PAGE;
   opening = false;
 }
@@ -59,7 +66,7 @@ async function openApp() {
 async function showOpenPath() {
   if (!$("app").getAttribute("src")) return openApp();
   if (!appReady) return;
-  const path = await ask("takeOpenPath");
+  const path = await ask("takeOpenPath", { windowId: await panelWindow() });
   if (path) postToApp({ type: "open", path });
 }
 
