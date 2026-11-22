@@ -1,43 +1,41 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
+import {
+  absoluteSiteHref,
+  alternativesBreadcrumbGraph,
+  AlternativesCtaBand,
+  serializeJsonLd,
+} from "@/components/alternatives/alternatives-shared";
 import { Footer } from "@/components/landing/footer";
 import { Navbar } from "@/components/shared/navbar";
-import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { alternativeCategories, alternativePages, alternativePagesByCategory } from "@/lib/alternatives";
-import { siteUrl } from "@/lib/site-url";
 
 function alternativesIndexStructuredData(): string {
-  const url = (href: string) => new URL(href, siteUrl).href;
-  return JSON.stringify({
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "CollectionPage",
-        name: "xMatrix Alternatives & Competitor Comparisons",
-        description:
-          "Compare xMatrix with Raft, Lody, Multica, Paradev (Superset), Conductor, Orca, LobeHub, Cumora, T3 Code, herdr, Seedmux, Claude Code Desktop, Linear, Notion, Slack Code, Nowledge Mem, EverOS, YouMind, and Google Jules.",
-        url: url("/alternatives"),
-        inLanguage: "en",
-      },
-      {
-        "@type": "ItemList",
-        itemListElement: alternativePages.map((page, index) => ({
-          "@type": "ListItem",
-          position: index + 1,
-          name: `${page.name} Alternative`,
-          url: url(page.href),
-        })),
-      },
-      {
-        "@type": "BreadcrumbList",
-        itemListElement: [
-          { "@type": "ListItem", position: 1, name: "xMatrix", item: url("/") },
-          { "@type": "ListItem", position: 2, name: "Alternatives", item: url("/alternatives") },
-        ],
-      },
-    ],
-  }).replace(/</gu, "\\u003c");
+  return serializeJsonLd([
+    {
+      "@type": "CollectionPage",
+      name: "xMatrix Alternatives & Competitor Comparisons",
+      description:
+        "Compare xMatrix with Raft, Lody, Multica, Paradev (Superset), Conductor, Orca, LobeHub, Cumora, T3 Code, herdr, Seedmux, Claude Code Desktop, Linear, Notion, Slack Code, Nowledge Mem, EverOS, YouMind, and Google Jules.",
+      url: absoluteSiteHref("/alternatives"),
+      inLanguage: "en",
+    },
+    {
+      "@type": "ItemList",
+      itemListElement: alternativePages.map((page, index) => ({
+        "@type": "ListItem",
+        position: index + 1,
+        name: `${page.name} Alternative`,
+        url: absoluteSiteHref(page.href),
+      })),
+    },
+    alternativesBreadcrumbGraph([
+      { name: "xMatrix", href: "/" },
+      { name: "Alternatives", href: "/alternatives" },
+    ]),
+  ]);
 }
 
 export function AlternativesIndex() {
@@ -147,38 +145,11 @@ export function AlternativesIndex() {
           );
         })}
 
-        <section className="mx-auto max-w-6xl px-6 pt-8 pb-24">
-          <WoodPanel className="p-8 sm:p-10">
-            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-              <div className="max-w-2xl">
-                <h2 className="site-display text-2xl font-semibold sm:text-3xl">
-                  Living pages maintained by the coding agents you already pay for.
-                </h2>
-                <p className="mt-3 text-sm leading-6">
-                  Free for up to 3 people with unlimited agents. Pro is $10/human seat/month ($8/mo billed annually)
-                  with 5,000 pooled agent credits per seat and 20+ governed app connectors.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <LiquidGlassPill
-                  as={Link}
-                  href="/login"
-                  className="inline-flex h-11 items-center gap-2 px-5 text-sm font-semibold"
-                >
-                  Start Free
-                  <ArrowRight className="size-4" aria-hidden />
-                </LiquidGlassPill>
-                <LiquidGlassPill
-                  as={Link}
-                  href="/download"
-                  className="inline-flex h-11 items-center px-5 text-sm font-semibold"
-                >
-                  Download
-                </LiquidGlassPill>
-              </div>
-            </div>
-          </WoodPanel>
-        </section>
+        <AlternativesCtaBand
+          sectionClassName="mx-auto max-w-6xl px-6 pt-8 pb-24"
+          heading="Living pages maintained by the coding agents you already pay for."
+          body="Free for up to 3 people with unlimited agents. Pro is $10/human seat/month ($8/mo billed annually) with 5,000 pooled agent credits per seat and 20+ governed app connectors."
+        />
       </main>
       <Footer />
     </div>

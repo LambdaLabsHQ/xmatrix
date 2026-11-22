@@ -1,48 +1,46 @@
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Check, Plus } from "lucide-react";
 
+import {
+  absoluteSiteHref,
+  alternativesBreadcrumbGraph,
+  AlternativesCtaBand,
+  serializeJsonLd,
+} from "@/components/alternatives/alternatives-shared";
 import { Footer } from "@/components/landing/footer";
 import { Navbar } from "@/components/shared/navbar";
-import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { relatedAlternatives, type AlternativePage } from "@/lib/alternatives";
-import { shareImage, siteUrl } from "@/lib/site-url";
+import { shareImage } from "@/lib/site-url";
 
 function alternativeStructuredData(page: AlternativePage): string {
-  const url = (href: string) => new URL(href, siteUrl).href;
-  const publisher = { "@type": "Organization", name: "xMatrix", url: url("/") };
-  return JSON.stringify({
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "WebPage",
-        name: page.metaTitle,
-        description: page.metaDescription,
-        url: url(page.href),
-        inLanguage: "en",
-        publisher,
-        primaryImageOfPage: url(shareImage.url),
-      },
-      {
-        "@type": "BreadcrumbList",
-        itemListElement: [
-          { "@type": "ListItem", position: 1, name: "xMatrix", item: url("/") },
-          { "@type": "ListItem", position: 2, name: "Alternatives", item: url("/alternatives") },
-          { "@type": "ListItem", position: 3, name: `${page.name} Alternative`, item: url(page.href) },
-        ],
-      },
-      {
-        "@type": "FAQPage",
-        mainEntity: page.faqs.map((item) => ({
-          "@type": "Question",
-          name: item.question,
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: item.answer,
-          },
-        })),
-      },
-    ],
-  }).replace(/</gu, "\\u003c");
+  return serializeJsonLd([
+    {
+      "@type": "WebPage",
+      name: page.metaTitle,
+      description: page.metaDescription,
+      url: absoluteSiteHref(page.href),
+      inLanguage: "en",
+      publisher: { "@type": "Organization", name: "xMatrix", url: absoluteSiteHref("/") },
+      primaryImageOfPage: absoluteSiteHref(shareImage.url),
+    },
+    alternativesBreadcrumbGraph([
+      { name: "xMatrix", href: "/" },
+      { name: "Alternatives", href: "/alternatives" },
+      { name: `${page.name} Alternative`, href: page.href },
+    ]),
+    {
+      "@type": "FAQPage",
+      mainEntity: page.faqs.map((item) => ({
+        "@type": "Question",
+        name: item.question,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: item.answer,
+        },
+      })),
+    },
+  ]);
 }
 
 export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
@@ -229,38 +227,11 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
           </div>
         </section>
 
-        <section className="mx-auto max-w-5xl px-6 pt-6 pb-14">
-          <WoodPanel className="p-8 sm:p-10">
-            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
-              <div className="max-w-2xl">
-                <h2 className="site-display text-2xl font-semibold sm:text-3xl">
-                  Try xMatrix free with your existing coding agents.
-                </h2>
-                <p className="mt-3 text-sm leading-6">
-                  Keep your Claude Code, Codex, Cursor, Gemini, or Antigravity subscriptions. Up to 3 people and
-                  unlimited agents free; Pro is $10/human seat/month ($8/mo billed annually).
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <LiquidGlassPill
-                  as={Link}
-                  href="/login"
-                  className="inline-flex h-11 items-center gap-2 px-5 text-sm font-semibold"
-                >
-                  Start Free
-                  <ArrowRight className="size-4" aria-hidden />
-                </LiquidGlassPill>
-                <LiquidGlassPill
-                  as={Link}
-                  href="/download"
-                  className="inline-flex h-11 items-center px-5 text-sm font-semibold"
-                >
-                  Download
-                </LiquidGlassPill>
-              </div>
-            </div>
-          </WoodPanel>
-        </section>
+        <AlternativesCtaBand
+          sectionClassName="mx-auto max-w-5xl px-6 pt-6 pb-14"
+          heading="Try xMatrix free with your existing coding agents."
+          body="Keep your Claude Code, Codex, Cursor, Gemini, or Antigravity subscriptions. Up to 3 people and unlimited agents free; Pro is $10/human seat/month ($8/mo billed annually)."
+        />
 
         {siblings.length > 0 && (
           <section className="mx-auto max-w-5xl px-6 pt-4 pb-24">
