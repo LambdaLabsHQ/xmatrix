@@ -172,3 +172,42 @@ test("a program whose conversation a person deleted stays ended, says so on the 
   assert.deepEqual(shown.map(program => [program.name, program.state, /names no program/u.test(program.problem ?? "")]),
     [["uno", "running", false], ["2nd", "not_started", true]]);
 }));
+
+test("moving a page block between norn run, norn 1 run and an unsupported edition preserves an open request across upgrade and rollback", () => pageScene("norn-edition", async ({ worker, scenario, daemon, call, pages, until }) => {
+  const { page } = await call(pages, "POST", { title: "Edition", body: `# Edition\n\n${block(REVIEW, "norn run review")}\n` });
+  const programs = async () => (await call(`${pages}/${page.pageId}/programs`)).programs;
+  const edit = async body => call(`${pages}/${page.pageId}`, "PUT", { body, baseRevision: (await call(`${pages}/${page.pageId}`)).page.headRevision });
+  const running = await until(async () => (await programs()).find(program => program.state === "running" && program.requests.length), "the program");
+  const spawn = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&
+    message.channelId === running.channelId && isSpawnOf(message, scenario.registration), "the holder's spawn");
+  const history = await channelHistory(worker, MOCK_TOKEN, running.channelId, 20);
+  const delivery = history.messages.find(message => message.body.startsWith("@codex\n"));
+  const requestRef = /`request:(r[a-z0-9]+)`/u.exec(delivery.body)[1];
+
+  // Upgrade header to `norn 1 run review`: same running program, same open request, no stop.
+  await edit(`# Edition\n\n${block(REVIEW, "norn 1 run review")}\n`);
+  const upgraded = await programs();
+  assert.deepEqual(upgraded.map(p => [p.name, p.channelId, p.state, p.problem]), [["review", running.channelId, "running", undefined]]);
+
+  // Unsupported edition (`norn 2 run review`): keeps running program alive and explains why it cannot update yet.
+  const unsupportedSave = await edit(`# Edition\n\n${block(REVIEW, "norn 2 run review")}\n`);
+  assert.equal(unsupportedSave.scheduleProblems.length, 1);
+  assert.equal(unsupportedSave.scheduleProblems[0].source, "```norn 2 run review");
+  assert.match(unsupportedSave.scheduleProblems[0].problem, /does not support yet/u);
+  const kept = await programs();
+  assert.equal(kept[0].state, "running");
+  assert.equal(kept[0].channelId, running.channelId);
+  assert.match(kept[0].problem ?? "", /does not support yet/u);
+
+  // Roll back header to `norn run review` and settle using the original request reference.
+  await edit(`# Edition\n\n${block(REVIEW, "norn run review")}\n`);
+  const runToken = await mintAgentRunToken(worker, daemon, spawn, running.channelId);
+  assert.equal((await run(worker, runToken, ["reply", requestRef, "Sound"])).exitCode, 0);
+  const ended = await until(async () => (await programs()).find(program => program.state === "completed"), "the program's end");
+  assert.equal(ended.channelId, running.channelId);
+
+  // A brand-new page created directly with `norn 1 run` starts its program on creation.
+  const created = await call(pages, "POST", { title: "V1 Direct", body: `# V1\n\n${block(`say(@codex, "Edition 1 live")`, "norn 1 run direct")}\n` });
+  const direct = await until(async () => (await call(`${pages}/${created.page.pageId}/programs`)).programs.find(p => p.state === "completed"), "v1 direct start");
+  assert.equal(direct.name, "direct");
+}));
