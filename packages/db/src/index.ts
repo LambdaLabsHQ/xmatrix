@@ -353,3 +353,5 @@ export { PostgresStripeAccountRepository, type StripeAccountGrant,
   type StripeAccountSnapshot, type StripeRefreshClaim } from "./stripe-account-control.js";
 
 export { PostgresAppleCommerceRepository, type AppleCommerceJob, type AppleCommerceState, type AppleCommerceChange } from "./apple-commerce-control.js";
+export { MAIL_SNAPSHOT_KEY_PATTERN, MAIL_SNAPSHOT_KEY_PREFIX, PostgresMailSnapshotLeaseRepository,
+  type MailSnapshotLease, type MailSnapshotLeaseState } from "./connector-mail-snapshot-leases.js";

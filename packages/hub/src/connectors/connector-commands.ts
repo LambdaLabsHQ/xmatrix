@@ -16,7 +16,7 @@ import { connectionCredentialGrant, credentialRenewal } from "./connection-crede
 import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
-import { connectorPermissionRepository, connectorActionRequestRepository, connectorCredentialRepository } from "./credentials";
+import { connectorPermissionRepository, connectorActionRequestRepository, connectorCredentialRepository, connectorMailSnapshotLeaseRepository } from "./credentials";
 import { ConnectorRemedy, ProviderRequestError } from "./http";
 import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
@@ -392,7 +392,11 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const saveCredentials = grant ? credentialRenewal(input.env, spaceId, providerId, grant.version) : undefined;
   const usage = upstreamMeter(input.env, { spaceId, connector: providerId, action: actionId });
   const mailSnapshot = providerId === "gmail" && ["send_draft", "send", "reply"].includes(actionId)
-    && input.env.ATTACHMENT_BUCKET && input.env.HUB_URL ? mailSnapshotLinks(input.env.ATTACHMENT_BUCKET, input.env.HUB_URL) : undefined;
+    && input.env.ATTACHMENT_BUCKET && input.env.HUB_URL
+    ? mailSnapshotLinks(input.env.ATTACHMENT_BUCKET, input.env.HUB_URL, Date.now, {
+      leases: connectorMailSnapshotLeaseRepository(input.env),
+      commandId: billingKey,
+    }) : undefined;
   const mailAttachments = providerId === "gmail" ? commandMailAttachments(actionId, input) : undefined;
   const files = providerId === "googleplay" && ["api_plan", "api_write"].includes(actionId) ? commandFiles(input) : undefined;
   const egress = providerEgress(input.env, providerId);
