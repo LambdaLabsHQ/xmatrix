@@ -24,6 +24,8 @@ test("the feedback email says it is free, how to reply, and carries the unsubscr
     assert.ok(part.includes("github.com/LambdaLabsHQ/xmatrix/issues"));
   }
   assert.ok(mail.text.includes(link));
+  assert.ok(!/issues[）)，,]/u.test(mail.text), "no punctuation touches the issues URL");
+  assert.ok(mail.html.includes('<a href="https://github.com/LambdaLabsHQ/xmatrix/issues">'));
   assert.ok(mail.html.includes(link.replaceAll("&", "&amp;")));
 });
 
