@@ -204,11 +204,12 @@ Anyone who can act in a conversation can control the instances in it, and so can
 
 **Handoff** confirms the predecessor has stopped before starting a different instance, often another harness. Routing uses the ordinary summon authorization and validation. A source launched with an explicit machine condition keeps that machine, including automatic quota handoffs; implicit placement remains portable. If the required machine has no eligible successor, the handoff is refused visibly. A pending stop starts no successor; retry the handoff after the source's daemon confirms exit.
 
-Conditions immediately after the successor address use the ordinary summon syntax. An explicit machine override replaces the inherited condition and must pass current access and availability checks. Model, effort and harness parameters are validated normally. Repository or directory conditions must match the source work site; use a new assignment to change sites. The first non-condition word starts the task:
+Conditions immediately after the successor address use the ordinary summon syntax. You can also open the successor directly with a condition (`@claude:1:handoff:@machine:Laptop`, `@claude:1:handoff:@model:<id> effort:high`), leaving the harness to routing just like `@machine:Laptop` in a summon. An explicit machine override replaces the inherited condition and must pass current access and availability checks. Model, effort and harness parameters are validated normally; when explicit model, effort or harness parameters are given, a fresh instance may start on the source's own registration if no other registration is preferred. Repository or directory conditions must match the source work site; use a new assignment to change sites. The first non-condition word starts the task:
 
 ```text
 @claude:1:handoff:@codex you have the branch; finish the migration and open the PR
 @claude:1:handoff:@codex machine:Laptop effort:high continue in the original browser
+@claude:1:handoff:@machine:Laptop model:<id> effort:high finish the migration
 ```
 
 The successor is always new, so it is a name without a number. `@auto` leaves the harness to routing as well.

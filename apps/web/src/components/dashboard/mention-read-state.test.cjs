@@ -408,6 +408,12 @@ test("a summon paints its whole written expression, flagging malformed condition
   ]);
   assert.equal(spans[0].invalid, undefined);
   assert.equal(spans[1].invalid, true);
+  const handoffText = "@codex:1:handoff:@claude machine:Laptop model:opus 继续 @codex:2:handoff:@codex harness:claude";
+  const handoffSpans = composerMentionSpans(handoffText, INDEX);
+  assert.deepEqual(handoffSpans.map(({ start, end, kind, invalid }) => ({ text: handoffText.slice(start, end), kind, ...(invalid ? { invalid } : {}) })), [
+    { text: "@codex:1:handoff:@claude machine:Laptop model:opus", kind: "summon" },
+    { text: "@codex:2:handoff:@codex harness:claude", kind: "summon", invalid: true },
+  ]);
 });
 
 test("a draft mention carries the face its sent chip leads with; @auto has no one yet", () => {

@@ -245,12 +245,26 @@ test("every startup speaks the same four-word vocabulary and only a startup in p
   assert.deepEqual([...seen].sort(), [...VOCABULARY].sort(), "no word in the vocabulary is dead");
 });
 
-test("a written handoff splits out as a card with both Agents, @auto included", () => {
+test("a written handoff splits out as a card with both Agents, @auto and conditions included", () => {
   assert.deepEqual(splitHandoffMentions("@claude:1:handoff:@auto"), [{ kind: "handoff", text: "@claude:1:handoff:@auto",
-    sourceName: "claude", sourceOrdinal: 1, successorName: "auto" }]);
+    sourceName: "claude", sourceOrdinal: 1, successorName: "auto", successorText: "@auto",
+    headText: "@claude:1:handoff:@auto", conditionFirst: false, tags: {}, conditions: [] }]);
   assert.deepEqual(splitHandoffMentions("please @codex:12:handoff:@claude finish it").map(segment => segment.kind === "handoff"
     ? [segment.text, segment.sourceName, segment.sourceOrdinal, segment.successorName] : segment.text),
   ["please ", ["@codex:12:handoff:@claude", "codex", 12, "claude"], " finish it"]);
+  const parameterized = splitHandoffMentions("move @claude:1:handoff:@codex machine:Laptop model:gpt-5.4 now");
+  assert.equal(parameterized[1].kind, "handoff");
+  assert.equal(parameterized[1].text, "@claude:1:handoff:@codex machine:Laptop model:gpt-5.4");
+  assert.equal(parameterized[1].successorText, "@codex machine:Laptop model:gpt-5.4");
+  assert.equal(parameterized[1].headText, "@claude:1:handoff:@codex");
+  assert.deepEqual(parameterized[1].tags, { machine: "Laptop", model: "gpt-5.4" });
+  assert.equal(parameterized[1].conditions.length, 2);
+  const condFirst = splitHandoffMentions("@claude:1:handoff:@machine:Laptop effort:high go");
+  assert.equal(condFirst[0].kind, "handoff");
+  assert.equal(condFirst[0].conditionFirst, true);
+  assert.equal(condFirst[0].successorName, "auto");
+  assert.equal(condFirst[0].successorText, "@machine:Laptop effort:high");
+  assert.deepEqual(condFirst[0].tags, { machine: "Laptop", effort: "high" });
   // Destination ordinals are not handoffs, and a disallowed position stays text.
   assert.deepEqual(splitHandoffMentions("@codex:1:handoff:@claude:2"), [{ kind: "text", text: "@codex:1:handoff:@claude:2" }]);
   assert.deepEqual(splitHandoffMentions("x @codex:1:handoff:@claude", () => false),

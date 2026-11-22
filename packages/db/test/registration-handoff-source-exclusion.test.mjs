@@ -71,3 +71,29 @@ test("unknown or unauthorized predecessor and replay to the source cannot launch
   assert.deepEqual((await fixture({ prior: { key: other } }).dispatchInput(input,
     async () => assert.fail("a valid replay must not choose again"))).key, other);
 });
+
+test("explicit model, effort or harness-parameter handoff may use the source registration", async () => {
+  for (const [tags, extra] of [
+    [{ model: "model" }, {}],
+    [{ effort: "high" }, { effort: "high" }],
+    [{ parameters: JSON.stringify({ fast: "on" }) }, { parameters: { fast: "on" } }],
+  ]) {
+    const repo = fixture({ keys: [source] });
+    repo.candidatesFor = async () => ({
+      offered: [{ key: source, models: ["model"], workspaces: [], workspaceReferences: [],
+        supportsRequestedParameters: true, parameters: [{ id: "fast", label: "Fast", options: ["on", "off"] }] }],
+      blocked: [], offlineOnly: false,
+    });
+    const result = await repo.dispatchInput({ ...input, tags }, async ({ candidates }) => {
+      assert.deepEqual(candidates.map(candidate => candidate.key), [source]);
+      return { key: source, model: "model", ...extra };
+    });
+    assert.deepEqual(result.key, source);
+  }
+  // Machine-only or harness-only without parameter overrides still excludes the source registration.
+  await assert.rejects(
+    fixture({ keys: [source] }).dispatchInput({ ...input, tags: { machine: source.machineId } },
+      async () => assert.fail("machine-only still excludes source")),
+    error => error.code === "registration_not_found",
+  );
+});

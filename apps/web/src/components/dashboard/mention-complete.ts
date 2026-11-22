@@ -1139,8 +1139,8 @@ function agentReferenceCandidates(
       action: "handoff-instance",
       description:
         instance.status === "offline"
-          ? `Move @${mention}'s checkout to a new Agent on the same machine`
-          : `Stop @${mention} and move its checkout to a new Agent on the same machine`,
+          ? `Move @${mention}'s work to a new Agent`
+          : `Stop @${mention} and move its work to a new Agent`,
       completionSuffix: AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA.next?.delimiter || ":",
       schemaNodeId: AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA.id,
     });

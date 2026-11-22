@@ -133,7 +133,9 @@ successor starts in a fresh one. Every source's conversation travels (§2.3):
    After confirmation Hub starts the successor through an ordinary
    any-input launch as the handoff's author, pinned to `repo:<repository>` and,
    for a named successor, `harness:<harness>`. Conditions immediately after the
-   successor address use the ordinary launch parser and admission. An original
+   successor address—or directly after `:handoff:@` in condition-first form
+   (`@<name>:<n>:handoff:@machine:<machine> model:<model> effort:<effort>`)—use
+   the ordinary launch parser and admission. An original
    explicit machine condition is read from its immutable launch request and
    inherited by stable machine ID, including across reborns and quota handoffs.
    An authored machine override replaces it and is reauthorized; missing quota,
@@ -143,8 +145,12 @@ successor starts in a fresh one. Every source's conversation travels (§2.3):
    The dispatch carries
    `excludeSourceInstanceId`: the authority reads that Instance's durable
    registration binding, verifies its owner, and excludes that exact Agent
-   before selection and on replay. The same harness on another machine
-   remains eligible. The successor prompt always names the handoff's stable
+   before selection and on replay for plain, machine-only, or automatic quota
+   handoffs. When the author explicitly specifies `model:`, `effort:`, or a
+   harness parameter, the source registration remains eligible so a handoff can
+   change model/effort/parameters even when only one matching Agent exists.
+   The same harness on another machine remains eligible either way. The
+   successor prompt always names the handoff's stable
    branch and gives bounded fetch retries, then recovery from the source's
    existing branch or pull request if the export never appears. Stop/export
    observations do not change this launch request: a replay after the source
@@ -251,8 +257,10 @@ Composer completion:
 Work controls: the Instance toolbar in the Channel's agent work dock shows
 **Handoff** beside Reborn / Stop for the same Instances Reborn is offered on.
 It opens a picker of `Auto` plus the Space's registered harnesses (the
-registration catalog the composer completes from) and posts exactly
-`@<name>:<n>:handoff:@<successor>` as the person; it adds no new authority.
+registration catalog the composer completes from), with optional parameter
+chips for machine, model, effort, and advertised harness parameters, and posts
+`@<name>:<n>:handoff:@<successor>` (with any chosen launch conditions) as the
+person; it adds no new authority.
 
 Rejected alternatives:
 

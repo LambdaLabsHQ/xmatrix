@@ -19,6 +19,8 @@ const ARGUMENT_FORMATS = grammar.argumentFormats;
 
 export const MESSAGE_INTERACTION_LIMITS = Object.freeze(grammar.limits);
 export const INTERACTION_LAUNCH_FIELDS = Object.freeze(grammar.launchFields);
+export const INTERACTION_CONDITION_FIELDS_SOURCE =
+  `${grammar.launchFields.filter((field: string) => field !== "parameters").join("|")}|param\\.[a-zA-Z][a-zA-Z0-9_.-]{0,63}|fast`;
 
 function literal(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");

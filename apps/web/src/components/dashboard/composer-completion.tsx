@@ -21,6 +21,7 @@ import {
   Wrench,
 } from "lucide-react";
 import {
+  HANDOFF_INSTANCE_MENTION_AT_CARET_RE,
   WEB_PROXY_ROUTES,
   faceInitials,
   pageBlocks,
@@ -47,7 +48,7 @@ import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
 import { HARNESS_PROFILE_COPY } from "@/lib/harness-profile-copy";
 import { useOnboardingLocale } from "@/lib/onboarding-locale";
-import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, summonAtCompletion, summonConditionCandidates, summonStartCandidates } from "./auto-launch-completion";
+import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, handoffSuccessorConditionCandidates, summonAtCompletion, summonConditionCandidates, summonStartCandidates } from "./auto-launch-completion";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
@@ -333,11 +334,37 @@ export function useComposerCompletion({
   const bodySummon = launchActive
     ? summonAtCompletion(draft.slice(0, launchActive.start), launchActive.start) : boundarySummon;
   const mentionCompletion = useMemo(() => {
+    if (!fieldCompletion && registrationMentionCompletion.stage === "handoff-successor" && registrationMentionCompletion.active) {
+      const parsed = HANDOFF_INSTANCE_MENTION_AT_CARET_RE.exec(`@${registrationMentionCompletion.active.query}`);
+      const sourceMention = registrationMentionCompletion.active.query.split(":handoff:")[0] ?? "";
+      const query = parsed?.[2] ?? "";
+      const registrations = registrationCatalog.data?.registrations ?? [];
+      const hasAuto = autoLaunchCandidates(undefined, {}, registrations, profileCopy.auto)
+        .some(candidate => candidate.id === "launch:auto");
+      const autoRow: MentionCandidate[] = hasAuto && (!query || "auto".startsWith(query.toLowerCase())) ? [{
+        id: `handoff:${sourceMention}:auto`,
+        name: "auto",
+        kind: "agent",
+        status: "offline",
+        mention: `${sourceMention}:handoff:@auto`,
+        action: "handoff-instance",
+        description: profileCopy.auto,
+        completionSuffix: " ",
+        schemaNodeId: "handoff-successor-profiles",
+      }] : [];
+      const conditions = query
+        ? handoffSuccessorConditionCandidates(sourceMention, registrations, query, profileCopy.auto)
+        : [];
+      return {
+        ...registrationMentionCompletion,
+        candidates: [...autoRow, ...registrationMentionCompletion.candidates, ...conditions],
+      };
+    }
     if (!fieldCompletion && registrationMentionCompletion.stage !== "target" ||
         !launchActive && !continuingLaunch) return registrationMentionCompletion;
     const query = launchActive?.query ?? "";
-    const allChoices = autoLaunchCandidates(launchTargets, bodySummon?.tags ?? {},
-      registrationCatalog.data?.registrations, profileCopy.auto);
+    const allChoices = autoLaunchCandidates(bodySummon?.handoffPrefix ? undefined : launchTargets,
+      bodySummon?.tags ?? {}, registrationCatalog.data?.registrations, profileCopy.auto);
     // auto starts a summon; it is not a condition on one. After a summon it is
     // offered only to an `@` typed there, which begins the next summon.
     const typingSummon = !fieldCompletion && Boolean(registrationMentionCompletion.active);
@@ -640,6 +667,10 @@ export function useComposerCompletion({
       return;
     }
     const next = completeMention(draft, cursor, candidate);
+    if (candidate.action === "handoff-instance" && (candidate.completionSuffix ?? " ") === " ") {
+      pickedLaunch(next.value, next.cursor, () => onDraftChange(next.value));
+      return;
+    }
     setDismissedCompletionDraft(null);
     if (candidate.invocationTarget && activeMention && onInvocationSelect) {
       const text = `@${candidate.mention || candidate.name}`;
@@ -985,7 +1016,8 @@ export function useComposerCompletion({
                     const isAiService = candidate.kind === "service";
                     // Launch rows keep their tags wherever they are listed:
                     // Auto and runtimes sit among the Agents at a fresh `@`.
-                    const isLaunch = Boolean(candidate.launchTags);
+                    const isLaunch = Boolean(candidate.launchTags) || candidate.kind === "launch" ||
+                      candidate.id.endsWith(":auto");
                     const isAppCommand = candidate.action === "app-command";
                     const isAgentGoal = candidate.action?.startsWith("agent-goal-") || false;
                     const isAgentCommand =

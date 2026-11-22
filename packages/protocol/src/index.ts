@@ -179,7 +179,7 @@ export type {
   ParsedHandoffInstanceMention,
 } from "./agent-mention.js";
 export {
-  AUTO_LAUNCH_FIELDS, formatAutoLaunchMention, hasRetiredAgentLaunchMention,
+  AUTO_LAUNCH_FIELDS, formatAutoLaunchMention, formatHandoffMention, hasRetiredAgentLaunchMention,
   launchHarnessParameters, machineLaunchTagValue, machineMentionValue, machineTagSelects,
   parseAutoLaunchMentions, parseLaunchConditions, isConditionSummonText, isAutoLaunchSummonText,
   RETIRED_AGENT_LAUNCH_NOTICE,

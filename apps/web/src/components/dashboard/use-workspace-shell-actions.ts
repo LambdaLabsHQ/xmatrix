@@ -77,7 +77,7 @@ import {
   spaceAppPath,
 } from "@/components/dashboard/channel-links";
 import { APP_CONNECTORS } from "@/lib/app-connectors";
-import { AGENT_PRESETS, WEB_PROXY_ROUTES, agentLaunchExecutable, canonicalRegistrationHarness, parseHandoffInstanceTarget, type AgentRegistrationDetails } from "@xmatrix/protocol";
+import { AGENT_PRESETS, WEB_PROXY_ROUTES, agentLaunchExecutable, canonicalRegistrationHarness, formatHandoffMention, isAutoHandoffSuccessor, parseHandoffInstanceMentions, type AgentRegistrationDetails, type AutoLaunchTags } from "@xmatrix/protocol";
 import type {
   AgentInvocationSelection,
   ChannelMessage,
@@ -2322,22 +2322,28 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setReborningAgentInstanceIds);
   }
 
-  /** Posts the same `@<name>:<n>:handoff:@<successor>` mention a person would type. */
+  /** Posts the same `@<name>:<n>:handoff:@<successor> [conditions]` mention a person would type. */
   async function handoffAgentInstance(
     agentId: string,
     instance: SerializedAgentInstance,
     agentLabel: string,
     successor: string,
+    tags?: AutoLaunchTags,
   ) {
     if (lifecycleControlBlocked(instance.id)) return;
 
     const channelInstanceId = instance.channelInstanceId?.trim();
     const mentionName = lifecycleMentionName(agentId, agentLabel);
     const successorName = successor.trim().replace(/^[@＠]/, "");
+    const handoffTags: AutoLaunchTags = {
+      ...tags,
+      ...(!isAutoHandoffSuccessor(successorName) && successorName ? { harness: successorName } : {}),
+    };
     const body = channelInstanceId && /^[1-9]\d*$/.test(channelInstanceId) && mentionName && successorName
-      ? `@${mentionName}:${channelInstanceId}:handoff:@${successorName}`
+      ? formatHandoffMention(`${mentionName}:${channelInstanceId}`, handoffTags)
       : "";
-    if (!body || mentionName.toLowerCase() === "xmatrix" || !parseHandoffInstanceTarget(body.slice(1))) {
+    const parsed = body ? parseHandoffInstanceMentions(body) : [];
+    if (!body || mentionName.toLowerCase() === "xmatrix" || parsed.length !== 1 || parsed[0]!.error) {
       const message = "This instance cannot be handed off from the work controls.";
       setAgentsError(message);
       setHistoryError(message);

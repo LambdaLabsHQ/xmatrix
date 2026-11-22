@@ -1,12 +1,16 @@
 import { registrationMachineName } from "./machine-name-presentation";
 import {
   AUTO_LAUNCH_FIELDS,
-  launchHarnessParameters,
+  agentPresetForLauncher,
   formatAutoLaunchMention,
+  formatHandoffMention,
+  isAutoHandoffSuccessor,
+  launchHarnessParameters,
   machineLaunchTagValue,
   machineMentionValue,
   machineTagSelects,
   parseAutoLaunchMentions,
+  parseHandoffInstanceMentions,
   routingModelOptionNamed,
   routingModelWrittenName,
   type AutoLaunchField,
@@ -218,6 +222,30 @@ export function summonConditionCandidates(candidates: MentionCandidate[], query:
   return matched.map(candidate => ({ ...candidate, name: `@${candidate.name}` }));
 }
 
+/**
+ * Condition-first candidates for `:handoff:@<query>`, e.g. `:handoff:@Lap` ->
+ * `@<source>:<n>:handoff:@machine:Laptop`. Locations (`repo:`, `pwd:`) are
+ * excluded because a handoff inherits the source work site.
+ */
+export function handoffSuccessorConditionCandidates(
+  sourceMention: string,
+  registrations: readonly AgentRegistrationSummary[] = [],
+  query: string,
+  autoDescription?: string,
+): MentionCandidate[] {
+  const all = autoLaunchCandidates(undefined, {}, registrations, autoDescription);
+  return summonConditionCandidates(all, query)
+    .filter(candidate => candidate.launchTags && Object.keys(candidate.launchTags).length > 0)
+    .map(candidate => ({
+      ...candidate,
+      id: `handoff:${sourceMention}:${candidate.id}`,
+      mention: formatHandoffMention(sourceMention, candidate.launchTags!, true).slice(1),
+      action: "handoff-instance" as const,
+      completionSuffix: " " as const,
+      launchTags: undefined,
+    }));
+}
+
 /** Only an explicit completion replaces the active fragment; surrounding text is immutable. */
 export function completeLaunchFragment(body: string, active: ActiveMention, picked: AutoLaunchTags) {
   const prefix = body.slice(0, active.start);
@@ -225,7 +253,8 @@ export function completeLaunchFragment(body: string, active: ActiveMention, pick
   const summon = summonAtCompletion(prefix, active.start);
   if (picked.harness) {
     const start = summon?.start ?? active.start;
-    const fragment = formatAutoLaunchMention({ ...summon?.tags, ...picked }, true);
+    const head = summon?.handoffPrefix ?? "";
+    const fragment = `${head}${formatAutoLaunchMention({ ...summon?.tags, ...picked }, true)}`;
     const suffix = body.slice(active.tokenEnd);
     const inserted = fragment + (/^\s/u.test(suffix) ? "" : " ");
     return { value: body.slice(0, start) + inserted + suffix, cursor: start + inserted.length };
@@ -240,18 +269,38 @@ export function completeLaunchFragment(body: string, active: ActiveMention, pick
   return { value: prefix + inserted + suffix, cursor: prefix.length + inserted.length };
 }
 
+export type CompletionSummon = AutoLaunchMention & {
+  /** Present when continuing a handoff (`@source:n:handoff:`), so picking a harness keeps it. */
+  handoffPrefix?: string;
+};
+
 /**
- * The summon a condition typed at `tokenStart` is being added to.
+ * The summon or handoff a condition typed at `tokenStart` is being added to.
  *
- * A message may summon several Agents, so a picked condition belongs to the
- * summon it was typed onto — the one this `@` word continues — rather than to
- * whichever summon happens to come first. Only whitespace may separate them:
- * once a word intervenes, the author has moved on and is writing a new one.
+ * A message may summon or hand off several Agents, so a picked condition
+ * belongs to the one this word continues rather than to whichever comes first.
+ * Only whitespace may separate them: once a word intervenes, the author has
+ * moved on and is writing prose or a new one.
  */
-export function summonAtCompletion(body: string, tokenStart: number): AutoLaunchMention | undefined {
-  const summons = parseAutoLaunchMentions(body);
-  for (let index = summons.length - 1; index >= 0; index--) {
-    const summon = summons[index]!;
+export function summonAtCompletion(body: string, tokenStart: number): CompletionSummon | undefined {
+  const handoffs: CompletionSummon[] = parseHandoffInstanceMentions(body).map(handoff => {
+    const harness = !handoff.conditionFirst && !isAutoHandoffSuccessor(handoff.successorName)
+      ? agentPresetForLauncher(handoff.successorName)?.id ?? handoff.successorName
+      : handoff.tags.harness;
+    return {
+      start: handoff.start,
+      end: handoff.end,
+      text: body.slice(handoff.start, handoff.end),
+      tags: { ...handoff.tags, ...(harness ? { harness } : {}) },
+      conditions: handoff.conditions,
+      ...(handoff.error ? { error: handoff.error } : {}),
+      handoffPrefix: body.slice(handoff.start, handoff.successorStart),
+    };
+  });
+  const candidates: CompletionSummon[] = [...parseAutoLaunchMentions(body), ...handoffs]
+    .sort((left, right) => left.end - right.end);
+  for (let index = candidates.length - 1; index >= 0; index--) {
+    const summon = candidates[index]!;
     if (summon.end > tokenStart) continue;
     return summon.error || /\S/u.test(body.slice(summon.end, tokenStart)) ? undefined : summon;
   }

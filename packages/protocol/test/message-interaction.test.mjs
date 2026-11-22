@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { matchInteractionGrammar, parseMessageInteraction, MessageInteractionRegistry,
   parseConnectorActionCommand, parseConnectorInvocation, parseAgentControlCommands, parseAgentControlInvocations, parseAgentStopCommand, parseAgentStopInvocation,
   summarizeStopReceipts, agentInteractionTarget, connectorInteractionTarget,
-  humanInteractionTarget, interactionRegistry } from "../dist/index.js";
+  humanInteractionTarget, interactionRegistry, formatHandoffMention, parseHandoffInstanceMentions, hasOperationalAgentInvocation } from "../dist/index.js";
 
 const vectors = JSON.parse(await readFile(new URL("./message-interaction-vectors.json", import.meta.url), "utf8"));
 for (const { rule, body, matches } of vectors) {
@@ -215,4 +215,43 @@ test("connector catalogs retain actions beyond 64 and reject overflow explicitly
   const target = connectorInteractionTarget("store", ids);
   assert.equal(new MessageInteractionRegistry([target]).resolve("store", "action_79").status, "resolved");
   assert.throws(() => connectorInteractionTarget("store", Array.from({ length: 257 }, (_, index) => `action_${index}`)), /catalog exceeds its limit/u);
+});
+
+test("handoff mentions parse trailing and condition-first launch parameters cleanly", () => {
+  const trailing = '@claude:2:handoff:@codex machine:"My Laptop" model:gpt-5.4 effort:high fast:on finish';
+  const [t] = parseHandoffInstanceMentions(trailing);
+  assert.equal(t.sourceAgentName, "claude");
+  assert.equal(t.channelInstanceId, 2);
+  assert.equal(t.successorName, "codex");
+  assert.equal(t.conditionFirst, false);
+  assert.equal(trailing.slice(t.start, t.headEnd), "@claude:2:handoff:@codex");
+  assert.equal(trailing.slice(t.start, t.end), '@claude:2:handoff:@codex machine:"My Laptop" model:gpt-5.4 effort:high fast:on');
+  assert.deepEqual(t.tags, { machine: "My Laptop", model: "gpt-5.4", effort: "high", parameters: '{"fast":"on"}' });
+  assert.equal(t.conditions.length, 4);
+  assert.equal(t.error, undefined);
+
+  const condFirst = '@claude:2:handoff:@machine:"My Laptop" model:claude-opus-4-6 effort:high continue';
+  const [c] = parseHandoffInstanceMentions(condFirst);
+  assert.equal(c.successorName, "auto");
+  assert.equal(c.conditionFirst, true);
+  assert.equal(condFirst.slice(c.successorStart, c.end), '@machine:"My Laptop" model:claude-opus-4-6 effort:high');
+  assert.deepEqual(c.tags, { machine: "My Laptop", model: "claude-opus-4-6", effort: "high" });
+  assert.equal(hasOperationalAgentInvocation(condFirst), true);
+
+  const plan = parseMessageInteraction(condFirst, ["claude"]);
+  assert.equal(plan.handoff.length, 1);
+  assert.deepEqual(plan.launches, []);
+  assert.deepEqual(plan.mentions, []);
+
+  // Conflicting harness is flagged, incomplete condition-first stays prose, and quoted/backticked examples do not execute.
+  assert.ok(parseHandoffInstanceMentions("@claude:2:handoff:@codex harness:claude")[0].error);
+  assert.deepEqual(parseHandoffInstanceMentions("@claude:2:handoff:@machine:"), []);
+  assert.deepEqual(parseHandoffInstanceMentions("`@claude:2:handoff:@machine:Laptop`"), []);
+
+  // Round-trip formatting matches both named and condition-first handoff spellings.
+  assert.equal(formatHandoffMention("claude:2", { harness: "codex", machine: "My Laptop", model: "gpt-5.4" }),
+    '@claude:2:handoff:@codex machine:"My Laptop" model:gpt-5.4');
+  assert.equal(formatHandoffMention("claude:2", { machine: "My Laptop", model: "gpt-5.4" }, true),
+    '@claude:2:handoff:@machine:"My Laptop" model:gpt-5.4');
+  assert.equal(formatHandoffMention("claude:2", {}), "@claude:2:handoff:@auto");
 });

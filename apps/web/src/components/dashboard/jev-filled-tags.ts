@@ -1,4 +1,4 @@
-import { machineMentionValue, type AutoLaunchMention, type LaunchParameterEvidence, type RoutingBoundMachine } from "@xmatrix/protocol";
+import { machineMentionValue, type AutoLaunchMention, type AutoLaunchTags, type LaunchParameterEvidence, type RoutingBoundMachine } from "@xmatrix/protocol";
 
 /** One parameter a decision filled and the author did not write. */
 export interface JevFilledTag {
@@ -90,15 +90,23 @@ export function launchMachineLabel(decision: {
   });
 }
 
-/** A handoff names its successor in the mention, not as a `harness:` condition.
- *  `@auto` left that choice open, so the harness Jev picked is a fill. A
- *  successor the author named is already on the chip, and is not drawn again.
- *  The Machine routing bound is the same tag a summon shows. */
-export function jevFilledTagsForHandoff(successorName: string, parameters: LaunchParameterEvidence | undefined, machine?: string): JevFilledTag[] {
+/** A handoff names its successor in the mention (or opens with a condition).
+ *  `@auto` and condition-first handoffs leave the harness open, so the harness
+ *  Jev picked is a fill. Any field the author already wrote is not drawn again. */
+export function jevFilledTagsForHandoff(
+  successorName: string,
+  parameters: LaunchParameterEvidence | undefined,
+  machine?: string,
+  writtenTags: AutoLaunchTags = {},
+): JevFilledTag[] {
   const named = successorName.trim().toLowerCase();
+  const tags: AutoLaunchTags = {
+    ...writtenTags,
+    ...(named && named !== "auto" && !writtenTags.harness ? { harness: named } : {}),
+  };
   return jevFilledTags({
     start: 0, end: 0, text: "",
-    tags: named && named !== "auto" ? { harness: named } : {},
+    tags,
     conditions: [],
   }, parameters, machine);
 }

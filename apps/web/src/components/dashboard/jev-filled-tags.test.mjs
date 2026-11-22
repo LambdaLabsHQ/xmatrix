@@ -106,6 +106,9 @@ test("@auto shows the harness Jev picked; a named successor does not repeat it",
   assert.deepEqual(picked.find(tag => tag.field === "machine"), { field: "machine", value: "星豆号", source: "routing" });
   assert.deepEqual(jevFilledTagsForHandoff("Grok", evidence(), "Workstation").map(tag => tag.field),
     ["model", "effort", "repo", "machine"]);
+  // Fields the author already wrote on a handoff are not drawn again as Jev fills.
+  assert.deepEqual(jevFilledTagsForHandoff("auto", evidence(), "Workstation", { machine: "Laptop", model: "grok-4" }).map(tag => tag.field),
+    ["harness", "effort", "repo"]);
 });
 
 test("a broken summon and a missing decision add nothing", () => {
