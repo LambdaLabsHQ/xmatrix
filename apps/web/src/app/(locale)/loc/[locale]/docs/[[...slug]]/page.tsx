@@ -1,0 +1,20 @@
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { GuideDocument } from "@/components/docs/guide-document";
+import { findGuidePage, guidePageMetadata } from "@/lib/docs/guide";
+import { isNonDefaultSiteLocale } from "@/lib/site-locales";
+
+type Params = { params: Promise<{ locale: string; slug?: string[] }> };
+
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
+  const { locale, slug } = await params;
+  return isNonDefaultSiteLocale(locale) ? guidePageMetadata(slug, locale) : {};
+}
+
+export default async function LocalizedGuidePage({ params }: Params) {
+  const { locale, slug } = await params;
+  if (!isNonDefaultSiteLocale(locale)) notFound();
+  const page = findGuidePage(slug, locale);
+  if (!page) notFound();
+  return <GuideDocument page={page} locale={locale} />;
+}

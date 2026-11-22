@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
+import { localizedPath } from "@/lib/site-locales";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 const GLASS_REVEAL_DISTANCE_PX = 120;
 
 export function Navbar({ locale = "en" }: { locale?: Locale }) {
   const { home, nav: copy } = landingCopy[locale];
+  const docsHref = localizedPath(locale, "/docs");
   const [glassReveal, setGlassReveal] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -88,7 +90,7 @@ export function Navbar({ locale = "en" }: { locale?: Locale }) {
                 GitHub
               </a>
               <Link
-                href="/docs"
+                href={docsHref}
                 className="text-[13px] font-medium tracking-[-0.015em] text-foreground/65 transition-colors hover:text-foreground"
               >
                 {copy.docs}
@@ -147,7 +149,7 @@ export function Navbar({ locale = "en" }: { locale?: Locale }) {
               </LiquidGlassPill>
               <LiquidGlassPill
                 as={Link}
-                href="/docs"
+                href={docsHref}
                 onClick={() => setMenuOpen(false)}
                 className="inline-flex h-10 w-full items-center px-3 text-sm font-medium"
               >

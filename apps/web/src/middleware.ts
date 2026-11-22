@@ -1,6 +1,26 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { findAlternativePageByRouteSlug, findAlternativeRedirect } from "@/lib/alternatives";
 import { isAppShellPath } from "@/lib/app-shell-route";
+import { isNonDefaultSiteLocale, localizedPath, type SiteLocale } from "@/lib/site-locales";
+
+function handleAlternativeRoute(
+  request: NextRequest,
+  routeSlug: string,
+  locale: SiteLocale,
+): NextResponse | null {
+  const redirectTarget = findAlternativeRedirect(routeSlug);
+  if (redirectTarget) {
+    const target = request.nextUrl.clone();
+    target.pathname = localizedPath(locale, redirectTarget);
+    return NextResponse.redirect(target, 308);
+  }
+  if (findAlternativePageByRouteSlug(routeSlug, locale)) {
+    const url = request.nextUrl.clone();
+    url.pathname = locale === "en" ? `/alternatives/${routeSlug}` : `/loc/${locale}/alternatives/${routeSlug}`;
+    return NextResponse.rewrite(url, { request });
+  }
+  return null;
+}
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -11,23 +31,47 @@ export function middleware(request: NextRequest) {
     return NextResponse.rewrite(url, { request });
   }
 
-  // Direct requests to the internal `/alternatives` render prefix are never public.
-  if (pathname === "/alternatives" || pathname.startsWith("/alternatives/")) {
+  // Internal render prefixes are never publicly addressable directly.
+  if (
+    pathname === "/loc" ||
+    pathname.startsWith("/loc/") ||
+    pathname === "/alternatives" ||
+    pathname.startsWith("/alternatives/")
+  ) {
     return new NextResponse(null, { status: 404 });
   }
 
-  // Flat root-level competitor landing pages: `/raft-alternatives`, `/t3-code-alternatives`, …
+  // Flat root-level English competitor landing pages: `/raft-alternatives`, …
   if (pathname.endsWith("-alternatives") && !pathname.slice(1).includes("/")) {
-    const routeSlug = pathname.slice(1);
-    const redirectTarget = findAlternativeRedirect(routeSlug);
-    if (redirectTarget) {
-      const target = request.nextUrl.clone();
-      target.pathname = redirectTarget;
-      return NextResponse.redirect(target, 308);
-    }
-    if (findAlternativePageByRouteSlug(routeSlug)) {
+    const response = handleAlternativeRoute(request, pathname.slice(1), "en");
+    if (response) return response;
+  }
+
+  // Localized public routes: `/zh`, `/zh-tw`, `/ja`, `/ko`, `/es` and their subpaths.
+  const segments = pathname.slice(1).split("/");
+  const maybeLocale = segments[0];
+  if (maybeLocale && isNonDefaultSiteLocale(maybeLocale)) {
+    const rest = segments.slice(1);
+    if (rest.length === 0) {
       const url = request.nextUrl.clone();
-      url.pathname = `/alternatives/${routeSlug}`;
+      url.pathname = `/loc/${maybeLocale}`;
+      return NextResponse.rewrite(url, { request });
+    }
+    const [head, ...tail] = rest;
+    if (head === "alternatives") {
+      return new NextResponse(null, { status: 404 });
+    }
+    if (tail.length === 0 && head && head.endsWith("-alternatives")) {
+      const response = handleAlternativeRoute(request, head, maybeLocale);
+      if (response) return response;
+    }
+    if (
+      (head === "download" && tail.length === 0) ||
+      (head === "support" && tail.length === 0) ||
+      head === "docs"
+    ) {
+      const url = request.nextUrl.clone();
+      url.pathname = `/loc/${maybeLocale}/${rest.join("/")}`;
       return NextResponse.rewrite(url, { request });
     }
   }
