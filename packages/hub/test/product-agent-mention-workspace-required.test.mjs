@@ -50,7 +50,7 @@ test("Reborn lookup refusal publishes a visible error instead of rejecting silen
     } });
   assert.equal(result.spawned, 0);
   assert.equal(notices.length, 1);
-  assert.match(notices[0], /reborn_target_lookup_failed.*No recovery was queued/);
+  assert.match(notices[0], /^xMatrix couldn't read @codex:1\. .*Nothing was started\. .* \[reborn_target_lookup_failed\]$/u);
   assert.equal(notices[0].includes("private diagnostic"), false);
   assert.deepEqual(result.notices, notices);
 });
@@ -272,7 +272,7 @@ test("a refused registration reborn names its code in the Channel", async () => 
     body: "@codex:1:reborn", actorUserId: "user-1", port });
   assert.equal(result.spawned, 0);
   assert.equal(port.notices.length, 1);
-  assert.match(port.notices[0], /registration_reborn_unregistered.*No recovery was queued/);
+  assert.match(port.notices[0], /couldn't be restarted\. .*Nothing was started\. .* \[registration_reborn_unregistered\]$/u);
 });
 
 function repoSource(overrides = {}) {
@@ -384,7 +384,7 @@ test("a handoff that cannot start says why, once", async () => {
     assert.equal(port.codes[0], code);
     assert.match(port.notices[0], new RegExp(`@claude:2.*@codex.* \\[${code}\\]$`, "u"));
     if (code === "registration_quota_exhausted") assert.match(port.notices[0],
-      /^@claude:2 stopped and its work is kept, but @codex did not start: every @codex .* used up its provider quota\. .*@claude:2:handoff:@auto/u);
+      /^@codex couldn't take over @claude:2: out of quota\. @claude:2 has stopped and its work is kept, .*used up its provider quota.*@claude:2:handoff:@auto/u);
   }
 });
 

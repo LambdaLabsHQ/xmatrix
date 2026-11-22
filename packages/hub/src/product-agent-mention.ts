@@ -13,8 +13,7 @@ export type { ProductRebornInstanceMention, ProductHandoffInstanceMention };
  */
 
 import type { HandoffSuccessor } from "./handoff-successor";
-import { handoffRefusalText } from "./handoff-refusal";
-import { agentPresetForLauncher, isAutoHandoffSuccessor, sha256Hex,
+import { agentPresetForLauncher, isAutoHandoffSuccessor, lifecycleRefusalText, sha256Hex,
   type ChannelAttachment } from "@xmatrix/protocol";
 
 export interface ProductRebornTarget {
@@ -259,7 +258,9 @@ async function orchestrateProductAgentRebornMentions(
   input: ProductAgentMentionOrchestrationInput,
   mentions: readonly ProductRebornInstanceMention[],
 ): Promise<ProductAgentMentionOrchestrationResult> {
-  const notices: { address: string; text: string }[] = [];
+  const notices: { address: string; text: string; code?: string }[] = [];
+  const refuse = (address: string, code: string) =>
+    refusal(address, lifecycleRefusalText("reborn", code, { source: address }), code);
   let spawned = 0;
   for (const mention of mentions) {
     const address = `@${mention.agentName}:${mention.channelInstanceId}`;
@@ -270,16 +271,15 @@ async function orchestrateProductAgentRebornMentions(
     } catch (error) {
       input.port.reportDiagnostic?.({ stage: "summon", channelId: input.channelId,
         messageId: input.messageId, error: error instanceof Error ? error.message : "Reborn target lookup failed" });
-      notices.push(refusal(address, `Reborn failed [reborn_target_lookup_failed] for ${address}. ` +
-        "The original Instance could not be read or access was refused. No recovery was queued. Check the Instance and Channel access before retrying."));
+      notices.push(refuse(address, "reborn_target_lookup_failed"));
       continue;
     }
     if (!target) {
-      notices.push(refusal(address, `xMatrix could not find ${address} to reborn.`));
+      notices.push(refuse(address, "lifecycle_source_not_found"));
       continue;
     }
     if (target.channelId !== input.channelId || target.channelInstanceId !== mention.channelInstanceId) {
-      notices.push(refusal(address, `xMatrix refused an invalid reborn target for ${address}.`));
+      notices.push(refuse(address, "lifecycle_source_invalid"));
       continue;
     }
     try {
@@ -291,8 +291,7 @@ async function orchestrateProductAgentRebornMentions(
     } catch (error) {
       const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
         ? (error as { code: string }).code : "registration_reborn_failed";
-      notices.push(refusal(address, `Reborn failed [${code}] for ${address}. ` +
-        "No recovery was queued. Check the Agent's registration and Channel access before retrying."));
+      notices.push(refuse(address, /^[a-z][a-z0-9_]{0,79}$/u.test(code) ? code : "registration_reborn_failed"));
     }
   }
   await publishContinuationNotices(input, notices);
@@ -307,7 +306,7 @@ async function orchestrateProductAgentHandoffMentions(
     input.port.getRebornTarget.bind(input.port);
   const notices: { address: string; text: string; code?: string }[] = [];
   const refuse = (address: string, successor: string, code: string) =>
-    refusal(address, handoffRefusalText(address, successor, code), code);
+    refusal(address, lifecycleRefusalText("handoff", code, { source: address, successor }), code);
   let spawned = 0;
   for (const mention of mentions) {
     const address = `@${mention.sourceAgentName}:${mention.channelInstanceId}`;
@@ -323,11 +322,11 @@ async function orchestrateProductAgentHandoffMentions(
     const target = await resolveSource({ channelId: input.channelId,
       agentName: mention.sourceAgentName, channelInstanceId: mention.channelInstanceId });
     if (!target) {
-      notices.push(refusal(address, `xMatrix could not find ${address} to hand off.`));
+      notices.push(refuse(address, successorLabel, "lifecycle_source_not_found"));
       continue;
     }
     if (target.channelId !== input.channelId || target.channelInstanceId !== mention.channelInstanceId) {
-      notices.push(refusal(address, `xMatrix refused an invalid handoff source for ${address}.`));
+      notices.push(refuse(address, successorLabel, "lifecycle_source_invalid"));
       continue;
     }
     // Management and direct-conversation directories belong to their purpose.

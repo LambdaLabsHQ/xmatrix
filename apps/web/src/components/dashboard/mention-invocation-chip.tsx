@@ -6,10 +6,10 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useId, use
 import { Popover } from "@base-ui/react/popover";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
-import { preparationFailureSummary, rejectionCause, type FaceOf } from "@xmatrix/protocol";
+import { launchRejectionCause, lifecycleRefusalCode, lifecycleRefusalWords, rejectionCause, type FaceOf, type LifecycleKind } from "@xmatrix/protocol";
 import { noteJevReading } from "./jev-filled-tags";
 import type { AgentControlInvocation, AgentControlOutcomeRecord, AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
-import { summonView, instanceCallView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, controlNextStep, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, handoffRefusalCode, handoffRefusalKey, type InvocationView, type InvocationStep } from "./mention-invocation-state";
+import { summonView, instanceCallView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, controlNextStep, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
 import type { CommandNotice } from "./command-notices";
 import { MentionChipFace } from "./mention-chip-face";
 import { formatZonedDateTime } from "./time-display";
@@ -130,6 +130,10 @@ export function MentionInvocationRejectionChip({ rejection, unavailable, labelCo
   const ordinal = rejection.invocationId.split(":").at(-1);
   const decisionInvocationId = rejection.code === "routing_parameter_selection_failed" && ordinal !== undefined
     ? `auto:${rejection.sourceMessageId}:${ordinal}` : undefined;
+  // English keeps the Hub's own sentence, which names machines and versions; another language words the code.
+  const locale = useBrowserOnboardingLocale();
+  const cause = locale === "en" ? rejectionCause(rejection.message)
+    : launchRejectionCause(rejection.code, locale) ?? rejectionCause(rejection.message);
   return <InvocationChip label={rejection.sourceMention.replace(/^[@＠]/u, "")} name={rejection.targetRef}
     labelContent={labelContent} announcement={announcement} sourceAddress={rejection.sourceMention}
     face={addressedAgentFace({ name: rejection.targetRef, address: rejection.sourceMention,
@@ -144,8 +148,7 @@ export function MentionInvocationRejectionChip({ rejection, unavailable, labelCo
     </>}
     // The subtitle already says nothing was started, so the detail is the cause alone.
     view={{ ...invocationChipStatus("Failed", unavailable
-      ? `${rejectionCause(rejection.message)} Status could not be refreshed; this is the last confirmed outcome.`
-      : rejectionCause(rejection.message)),
+      ? `${cause} Status could not be refreshed; this is the last confirmed outcome.` : cause),
       terminal: true, steps: [] }} />;
 }
 
@@ -319,36 +322,31 @@ export function MentionControlChip({ invocation, outcome, notice, sentAt, onRunC
 }
 
 /** A reborn or handoff the Hub refused before any Run existed. The refusal
- * is drawn on the address that asked for it instead of as a message. A
- * handoff's refusal is worded from its code in the reader's language: what
- * happened, what it left behind, and what to write next; the code and the
- * Hub's own text stay in Details. */
+ * is drawn on the address that asked for it instead of as a message, worded
+ * from its code in the reader's language (problem-catalog.ts): what happened,
+ * what it left behind, and what to write next. The code and the Hub's own
+ * text stay in Details; a note with no code keeps its text as the answer. */
 export function MentionRefusedLifecycleChip({ kind, text, agentName, ordinal, successor, notices }: {
-  kind: "reborn" | "handoff"; text: string; agentName: string; ordinal: number; successor?: string;
+  kind: LifecycleKind; text: string; agentName: string; ordinal: number; successor?: string;
   notices: readonly CommandNotice[];
 }) {
-  const copy = PROBLEM_COPY[useBrowserOnboardingLocale()].handoff;
-  const source = `@${agentName}:${ordinal}`;
-  const code = kind === "handoff" ? handoffRefusalCode(notices[0]) : undefined;
-  const key = handoffRefusalKey(code);
-  const problem = kind === "handoff" && successor ? key ? copy[key] : copy.failed : undefined;
+  const locale = useBrowserOnboardingLocale();
+  const chrome = PROBLEM_COPY[locale].lifecycle;
+  const code = lifecycleRefusalCode(notices[0]);
   let view = lifecycleRefusalView(notices, kind);
   let lead: ReactNode;
   let details: ReactNode;
-  if (problem && successor) {
-    const other = /^@auto$/iu.test(successor.trim()) ? `${source}:handoff:@<agent>` : `${source}:handoff:@auto`;
-    // An unworded code keeps the Hub's own sentence as its explanation rather than a guessed cause.
-    const explanation = key ? problem.explanation(source, successor) : notices.map(notice => notice.body).join("\n\n");
-    const steps = problem.steps(source, successor, other);
-    view = { ...view, detail: problem.title(source, successor) };
+  if (code) {
+    const words = lifecycleRefusalWords(kind, code, locale, { source: `@${agentName}:${ordinal}`, successor });
+    view = { ...view, detail: words.title };
     lead = <>
-      {explanation && <p className="app-invocation-description">{explanation}</p>}
-      {steps.length > 0 && <>
-        <p className="app-invocation-description"><strong>{copy.stepsLabel}</strong></p>
-        {steps.map((step, index) => <p key={step} className="app-invocation-description">{steps.length > 1 ? `${index + 1}. ` : ""}{step}</p>)}
+      {words.explanation && <p className="app-invocation-description">{words.explanation}</p>}
+      {words.steps.length > 0 && <>
+        <p className="app-invocation-description"><strong>{chrome.stepsLabel}</strong></p>
+        {words.steps.map((step, index) => <p key={step} className="app-invocation-description">{words.steps.length > 1 ? `${index + 1}. ` : ""}{step}</p>)}
       </>}
     </>;
-    if (key) details = <><p className="app-invocation-description">{copy.rawLabel}</p>
+    details = <><p className="app-invocation-description">{chrome.rawLabel}</p>
       {notices.map(notice => <p key={notice.messageId} className="app-invocation-code">{notice.body}</p>)}</>;
   }
   return <InvocationChip label={text.replace(/^[@＠]/u, "")} labelContent={text}
@@ -374,7 +372,7 @@ export function MentionLaunchHintChip({ rejection, labelContent }: {
 }) {
   const card = useInvocationPopover();
   const title = LAUNCH_HINT_TITLES[rejection.code] ?? "How to start";
-  const detail = preparationFailureSummary(rejection.code) ?? rejection.message;
+  const detail = launchRejectionCause(rejection.code, useBrowserOnboardingLocale()) ?? rejection.message;
   return <MentionProseCard card={card} sourceMention={rejection.sourceMention} labelContent={labelContent} title={title}
     className="app-mention-intent-declined app-mention-launch-hint"
     ariaLabel={`${rejection.sourceMention}: ${title}. Show details`}>
