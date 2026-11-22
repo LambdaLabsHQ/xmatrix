@@ -6,7 +6,6 @@ import { siteUrl } from "@/lib/site-url";
 const publicPaths = [
   "/",
   "/zh",
-  "/alternatives",
   ...alternativePages.map((page) => page.href),
   ...guidePages.map((page) => page.href),
   "/download",

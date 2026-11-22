@@ -7,7 +7,8 @@ const env = { XMATRIX_SITE_ORIGIN: "https://site.example", XMATRIX_APP_ORIGIN: "
 
 test("the site origin serves the site's pages, files and assets", () => {
   for (const path of [
-    "/", "/zh", "/alternatives", "/alternatives/raft", "/docs", "/docs/setup", "/download", "/support", "/releases", "/releases/1.0.304", "/terms", "/privacy",
+    "/", "/zh", "/raft-alternatives", "/t3-code-alternatives", "/conductor-alternatives", "/superset-alternatives",
+    "/docs", "/docs/setup", "/download", "/support", "/releases", "/releases/1.0.304", "/terms", "/privacy",
     "/subprocessors", "/cookies", "/robots.txt", "/sitemap.xml", "/llms.txt", "/index.md", "/pricing.md",
     "/install.sh", "/_next/static/chunks/main-0123456789abcdef.js", "/brand/xmatrix-share-card.jpg",
     "/fonts/inter.0123456789.woff2", "/icon-192.png", "/api/releases/latest",
@@ -19,7 +20,7 @@ test("the site origin serves the site's pages, files and assets", () => {
 });
 
 test("everything else at the site origin goes to the app origin, path and query kept", () => {
-  for (const path of ["/app", "/app/space-1", "/login", "/workspace", "/connect/oauth", "/p/space-1", "/settings", "/docsx", "/alternativesx"]) {
+  for (const path of ["/app", "/app/space-1", "/login", "/workspace", "/connect/oauth", "/p/space-1", "/settings", "/docsx", "/alternatives", "/alternatives/raft"]) {
     assert.equal(isSitePath(path), false, path);
     const response = siteOriginRedirect(new URL(`https://site.example${path}?next=%2Fapp`), env);
     assert.equal(response?.status, 302, path);
