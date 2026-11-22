@@ -23,6 +23,7 @@ function alternativeStructuredData(page: AlternativePage, locale: SiteLocale): s
         description: page.metaDescription,
         url: abs(page.href),
         inLanguage: SITE_LOCALES[locale].htmlLang,
+        dateModified: page.verifiedDateIso,
         publisher: org,
         primaryImageOfPage: abs(shareImage.url),
       },
@@ -161,6 +162,24 @@ export function AlternativeDetailPage({
                 </p>
                 <h3 className="mt-2 text-xl font-semibold text-foreground">{point.title}</h3>
                 <p className="mt-3 text-sm leading-7 text-muted-foreground sm:text-base">{point.problem}</p>
+                {point.sources && point.sources.length > 0 && (
+                  <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <span>{chrome.sourcesLabel}:</span>
+                    {point.sources.map((src, srcIdx) => (
+                      <span key={src.href} className="inline-flex items-center gap-2">
+                        {srcIdx > 0 && <span aria-hidden>·</span>}
+                        <a
+                          href={src.href}
+                          target="_blank"
+                          rel="noopener noreferrer nofollow"
+                          className="underline decoration-foreground/25 underline-offset-2 transition-colors hover:text-foreground"
+                        >
+                          {src.label}
+                        </a>
+                      </span>
+                    ))}
+                  </p>
+                )}
                 <div className="mt-5 border-t border-[var(--site-wood-line)] pt-4">
                   <p className="text-xs font-bold tracking-wider text-foreground uppercase">
                     {chrome.xmatrixAnswerLabel}

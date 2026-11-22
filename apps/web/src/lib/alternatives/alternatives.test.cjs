@@ -9,6 +9,7 @@ const { landingCopy } = require("../landing-copy.ts");
 const { sitePagesCopy } = require("../site-pages-copy.ts");
 const {
   alternativePages,
+  footerAlternativePages,
   findAlternativePageByRouteSlug,
   findAlternativeRedirect,
   relatedAlternatives,
@@ -39,6 +40,13 @@ test("every competitor alternative page works across all 6 site locales and reso
       assert.ok(localized.headline.length >= 10, `${locale}/${page.slug} needs headline`);
       assert.ok(localized.productCaption.length >= 15, `${locale}/${page.slug} needs productCaption`);
       assert.ok(localized.painPoints.length >= 3, `${locale}/${page.slug} needs concrete pain points`);
+      for (const point of localized.painPoints) {
+        assert.ok(Array.isArray(point.sources) && point.sources.length >= 1, `${locale}/${page.slug} pain point "${point.title}" needs verified source link`);
+        for (const src of point.sources) {
+          assert.match(src.href, /^https:\/\//u, `source href must be https: ${src.href}`);
+        }
+      }
+      assert.match(localized.verifiedDateIso, /^\d{4}-\d{2}-\d{2}$/u, `${locale}/${page.slug} needs ISO verifiedDateIso`);
       assert.ok(localized.comparisonRows.length >= 5, `${locale}/${page.slug} needs comparison rows`);
       assert.ok(localized.stayWhen.length >= 1 && localized.switchWhen.length >= 2, `${locale}/${page.slug} needs stay/switch guidance`);
       assert.equal(localized.migrationSteps.length, 3, `${locale}/${page.slug} needs three migration steps`);
@@ -54,6 +62,24 @@ test("every competitor alternative page works across all 6 site locales and reso
   }
 
   assert.equal(findAlternativePageByRouteSlug("does-not-exist-alternatives", "en"), undefined);
+
+  assert.equal(footerAlternativePages.length, 8, "footer links stay focused on 8 flagship/window competitors");
+  const bySlug = new Map(alternativePages.map((p) => [p.slug, p]));
+  const hops = new Map(footerAlternativePages.map((p) => [p.slug, 0]));
+  const queue = footerAlternativePages.map((p) => p.slug);
+  while (queue.length > 0) {
+    const current = queue.shift();
+    const depth = hops.get(current);
+    for (const next of bySlug.get(current).relatedSlugs) {
+      if (!hops.has(next)) {
+        hops.set(next, depth + 1);
+        queue.push(next);
+      }
+    }
+  }
+  for (const page of alternativePages) {
+    assert.ok(hops.has(page.slug) && hops.get(page.slug) <= 2, `${page.slug} must be reachable within 2 hops from footer`);
+  }
 });
 
 test("legacy competitor brand names redirect to canonical alternative pages in every locale", async () => {

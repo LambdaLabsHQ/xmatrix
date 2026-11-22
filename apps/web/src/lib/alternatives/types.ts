@@ -22,10 +22,16 @@ export const ALTERNATIVE_SLUGS = [
 
 export type AlternativeSlug = (typeof ALTERNATIVE_SLUGS)[number];
 
+export interface AlternativeSource {
+  label: string;
+  href: string;
+}
+
 interface AlternativePainPoint {
   title: string;
   problem: string;
   xmatrixAnswer: string;
+  sources?: readonly AlternativeSource[];
 }
 
 interface AlternativeComparisonRow {
@@ -67,4 +73,5 @@ export interface AlternativePage extends AlternativeEntry {
   routeSlug: string;
   basePath: string;
   href: string;
+  verifiedDateIso: string;
 }
