@@ -1,6 +1,7 @@
 import { BrandMark } from "@/components/shared/brand-mark";
 import { WoodPanel } from "@/components/ui/material-surfaces";
 import { agentDocFiles, aiAskLinks } from "@/lib/agent-docs";
+import { alternativePages } from "@/lib/alternatives";
 import { landingCopy, type LandingCopy, type Locale } from "@/lib/landing-copy";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
@@ -15,7 +16,6 @@ function footerLinks(copy: LandingCopy) {
       { label: links.download, href: "/download" },
       { label: links.pricing, href: `${copy.home}#pricing` },
       { label: links.docs, href: "/docs" },
-      { label: links.alternatives, href: "/alternatives" },
       { label: links.support, href: "/support" },
       { label: "GitHub", href: REPOSITORY_URL },
       { label: "X", href: X_ACCOUNT_URL },
@@ -64,6 +64,22 @@ export function Footer({ locale = "en" }: { locale?: Locale }) {
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="space-y-4 border-b border-border py-8">
+          <h4 className="text-sm font-bold text-foreground">{copy.footer.compare}</h4>
+          <ul className="flex flex-wrap gap-x-5 gap-y-2">
+            {alternativePages.map((page) => (
+              <li key={page.slug}>
+                <a
+                  href={page.href}
+                  className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {page.name} Alternatives
+                </a>
+              </li>
+            ))}
+          </ul>
         </div>
 
         <div className="space-y-4 border-b border-border py-8">

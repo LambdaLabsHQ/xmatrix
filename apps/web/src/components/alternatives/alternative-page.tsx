@@ -1,46 +1,57 @@
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Check, Plus } from "lucide-react";
+import { ArrowRight, Check, Plus } from "lucide-react";
 
-import {
-  absoluteSiteHref,
-  alternativesBreadcrumbGraph,
-  AlternativesCtaBand,
-  serializeJsonLd,
-} from "@/components/alternatives/alternatives-shared";
+import { AppWindow } from "@/components/landing/app-window";
 import { Footer } from "@/components/landing/footer";
 import { Navbar } from "@/components/shared/navbar";
-import { WoodPanel } from "@/components/ui/material-surfaces";
+import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { relatedAlternatives, type AlternativePage } from "@/lib/alternatives";
-import { shareImage } from "@/lib/site-url";
+import { shareImage, siteUrl } from "@/lib/site-url";
 
 function alternativeStructuredData(page: AlternativePage): string {
-  return serializeJsonLd([
-    {
-      "@type": "WebPage",
-      name: page.metaTitle,
-      description: page.metaDescription,
-      url: absoluteSiteHref(page.href),
-      inLanguage: "en",
-      publisher: { "@type": "Organization", name: "xMatrix", url: absoluteSiteHref("/") },
-      primaryImageOfPage: absoluteSiteHref(shareImage.url),
-    },
-    alternativesBreadcrumbGraph([
-      { name: "xMatrix", href: "/" },
-      { name: "Alternatives", href: "/alternatives" },
-      { name: `${page.name} Alternative`, href: page.href },
-    ]),
-    {
-      "@type": "FAQPage",
-      mainEntity: page.faqs.map((item) => ({
-        "@type": "Question",
-        name: item.question,
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: item.answer,
-        },
-      })),
-    },
-  ]);
+  const abs = (href: string) => new URL(href, siteUrl).href;
+  const org = { "@type": "Organization", name: "xMatrix", url: abs("/") };
+  return JSON.stringify({
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        name: page.metaTitle,
+        description: page.metaDescription,
+        url: abs(page.href),
+        inLanguage: "en",
+        publisher: org,
+        primaryImageOfPage: abs(shareImage.url),
+      },
+      {
+        "@type": "SoftwareApplication",
+        name: "xMatrix",
+        url: abs("/"),
+        applicationCategory: "DeveloperApplication",
+        operatingSystem: "macOS, Windows, Linux, Android, Web",
+        offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+        publisher: org,
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "xMatrix", item: abs("/") },
+          { "@type": "ListItem", position: 2, name: `${page.name} Alternatives`, item: abs(page.href) },
+        ],
+      },
+      {
+        "@type": "FAQPage",
+        mainEntity: page.faqs.map((item) => ({
+          "@type": "Question",
+          name: item.question,
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: item.answer,
+          },
+        })),
+      },
+    ],
+  }).replace(/</gu, "\\u003c");
 }
 
 export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
@@ -54,17 +65,13 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
       />
       <Navbar />
       <main>
-        <section className="mx-auto max-w-5xl px-6 pt-32 pb-14">
+        <section className="mx-auto max-w-5xl px-6 pt-32 pb-12">
           <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2 text-xs font-semibold text-muted-foreground">
             <Link href="/" className="transition-colors hover:text-foreground">
               xMatrix
             </Link>
             <span aria-hidden>/</span>
-            <Link href="/alternatives" className="transition-colors hover:text-foreground">
-              Alternatives
-            </Link>
-            <span aria-hidden>/</span>
-            <span className="text-foreground">{page.name}</span>
+            <span className="text-foreground">{page.name} Alternatives</span>
           </nav>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -96,18 +103,33 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
               <ArrowRight className="size-4" aria-hidden />
             </WoodPanel>
             <Link
-              href="/docs"
+              href="/download"
               className="inline-flex h-12 items-center rounded-full border border-[var(--site-wood-line)] px-5 text-sm font-semibold text-foreground transition-colors hover:bg-foreground/[0.04]"
             >
-              Read the guide
+              Download desktop &amp; mobile
             </Link>
             <Link
-              href="/alternatives"
+              href="/docs"
               className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
             >
-              <ArrowLeft className="size-3.5" aria-hidden />
-              All alternatives
+              Read the docs
+              <ArrowRight className="size-3.5" aria-hidden />
             </Link>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-6xl px-6 py-8">
+          <div className="mx-auto max-w-5xl">
+            <p className="x-eyebrow uppercase">Meet xMatrix</p>
+            <h2 className="site-display mt-2 text-2xl font-semibold text-foreground sm:text-3xl">
+              Living pages maintained by your coding agents.
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">
+              {page.productCaption}
+            </p>
+          </div>
+          <div className="mt-8">
+            <AppWindow />
           </div>
         </section>
 
@@ -227,16 +249,43 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
           </div>
         </section>
 
-        <AlternativesCtaBand
-          sectionClassName="mx-auto max-w-5xl px-6 pt-6 pb-14"
-          heading="Try xMatrix free with your existing coding agents."
-          body="Keep your Claude Code, Codex, Cursor, Gemini, or Antigravity subscriptions. Up to 3 people and unlimited agents free; Pro is $10/human seat/month ($8/mo billed annually)."
-        />
+        <section className="mx-auto max-w-5xl px-6 pt-6 pb-14">
+          <WoodPanel className="p-8 sm:p-10">
+            <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+              <div className="max-w-2xl">
+                <h2 className="site-display text-2xl font-semibold sm:text-3xl">
+                  Try xMatrix free with your existing coding agents.
+                </h2>
+                <p className="mt-3 text-sm leading-6">
+                  Keep your Claude Code, Codex, Cursor, Gemini, or Antigravity subscriptions. Up to 3 people and
+                  unlimited agents free; Pro is $10/human seat/month ($8/mo billed annually).
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <LiquidGlassPill
+                  as={Link}
+                  href="/login"
+                  className="inline-flex h-11 items-center gap-2 px-5 text-sm font-semibold"
+                >
+                  Start Free
+                  <ArrowRight className="size-4" aria-hidden />
+                </LiquidGlassPill>
+                <LiquidGlassPill
+                  as={Link}
+                  href="/download"
+                  className="inline-flex h-11 items-center px-5 text-sm font-semibold"
+                >
+                  Download
+                </LiquidGlassPill>
+              </div>
+            </div>
+          </WoodPanel>
+        </section>
 
         {siblings.length > 0 && (
           <section className="mx-auto max-w-5xl px-6 pt-4 pb-24">
             <h2 className="text-sm font-bold tracking-wider text-muted-foreground uppercase">
-              Related comparisons
+              More coding-agent comparisons
             </h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {siblings.map((sibling) => (
@@ -245,7 +294,7 @@ export function AlternativeDetailPage({ page }: { page: AlternativePage }) {
                   href={sibling.href}
                   className="site-paper-sheet group flex items-center justify-between gap-2 px-4 py-3 text-sm font-semibold text-foreground transition-colors hover:border-foreground/30"
                 >
-                  <span>{sibling.name}</span>
+                  <span>{sibling.name} Alternatives</span>
                   <ArrowRight className="size-3.5 shrink-0 transition-transform group-hover:translate-x-0.5" aria-hidden />
                 </Link>
               ))}

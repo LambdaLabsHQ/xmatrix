@@ -1,11 +1,3 @@
-export type AlternativeCategoryId = "workspaces" | "control-planes" | "platforms";
-
-export interface AlternativeCategory {
-  id: AlternativeCategoryId;
-  label: string;
-  description: string;
-}
-
 interface AlternativePainPoint {
   title: string;
   problem: string;
@@ -27,7 +19,6 @@ export interface AlternativeEntry {
   slug: string;
   name: string;
   alsoKnownAs?: string;
-  category: AlternativeCategoryId;
   verifiedDate: string;
   statusNote?: string;
   metaTitle: string;
@@ -35,7 +26,7 @@ export interface AlternativeEntry {
   eyebrow: string;
   headline: string;
   lead: string;
-  indexSummary: string;
+  productCaption: string;
   painPoints: readonly AlternativePainPoint[];
   comparisonRows: readonly AlternativeComparisonRow[];
   stayWhen: readonly string[];
@@ -46,5 +37,6 @@ export interface AlternativeEntry {
 }
 
 export interface AlternativePage extends AlternativeEntry {
+  routeSlug: string;
   href: string;
 }

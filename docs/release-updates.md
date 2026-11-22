@@ -1,8 +1,8 @@
 # Release Updates
 
-## Unreleased: competitor alternative landing pages at `/alternatives`
+## Unreleased: direct root `/<competitor>-alternatives` landing pages with live product preview
 
-Added `/alternatives` and 19 competitor comparison landing pages (`/alternatives/<slug>` for Raft, Lody, Multica, Paradev/Superset, Conductor, Orca, LobeHub, Cumora, T3 Code, herdr, Seedmux, Claude Code Desktop, Linear Agents, Notion Custom Agents, Slack Code, Nowledge Mem, EverOS, YouMind, and Google Jules), rendered per request on the Web Worker with canonical URLs, OpenGraph/Twitter cards, `FAQPage` + `BreadcrumbList` structured data, sitemap entries, `site-host.mjs` site-origin routing, and a footer link. Web only. Recovery is a CI-validated beta reverting this change.
+Removed the `/alternatives` hub page (which risked targeting negative brand queries) and moved all 19 competitor comparison landing pages to flat root-level `/<competitor>-alternatives` URLs (`/raft-alternatives`, `/t3-code-alternatives`, `/conductor-alternatives`, `/jules-alternatives`, etc.), with permanent redirects for legacy names (`/superset-alternatives`, `/slock-alternatives`, `/lobechat-alternatives`, `/evermemos-alternatives`, `/google-jules-alternatives`). Tightened `<title>` tags (<=60 chars, front-loaded `<Competitor> Alternatives (2026)`) and `<h1>` headings to match competitor search intent, embedded the live xMatrix `<AppWindow />` preview directly below the hero, added `SoftwareApplication` structured data, and replaced the single footer hub link with direct `<Competitor> Alternatives` links from every page. Web only. Recovery is a CI-validated beta reverting this change.
 
 ## Unreleased: Antigravity quota uses native `agy -p "/usage"` instead of direct OAuth token reads
 

@@ -5,15 +5,14 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
   {
     slug: "t3-code",
     name: "T3 Code",
-    category: "control-planes",
     verifiedDate: "November 22, 2026",
-    metaTitle: "T3 Code Alternative for Teams, Living Pages & Auto Quota Handoff — xMatrix",
+    metaTitle: "T3 Code Alternatives (2026): T3 Code vs xMatrix",
     metaDescription:
-      "Outgrowing T3 Code? Get the exact three things T3 Code users keep requesting: real multiplayer identity, living project Pages, and automatic cross-provider quota handoff.",
-    eyebrow: "T3 Code Alternative",
-    headline: "A T3 Code alternative when one developer's control plane needs a team, living docs, and quota handoff.",
+      "Searching for T3 Code alternatives? Get the three features T3 Code users keep asking for: real multiplayer Spaces (#27974), living project Pages (#15858), and automatic quota handoff (#15846).",
+    eyebrow: "T3 Code Alternative · T3 Code vs xMatrix",
+    headline: "The T3 Code Alternative for Teams, Living Pages, and Automatic Quota Handoff",
     lead: "T3 Code is an impressive free single-player coding workbench, but it binds each environment to one account, stops cold at 'Limited' when a provider quota runs out, and has no shared project pages. xMatrix delivers the exact three upgrades T3 Code's own community keeps asking for.",
-    indexSummary: "Single-user account binding (multiplayer requests #27974, #12283, #27708 unanswered), no living project memory (#15858), no automatic cross-provider quota failover (#15846), and Full access default on new threads.",
+    productCaption: "Inside xMatrix: real multiplayer Channels where Claude Code and Codex work together across all your machines, hand off capped quotas automatically, and keep living Pages current.",
     painPoints: [
       {
         title: "No real multiplayer identity or shared team channels",
@@ -109,15 +108,14 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
   {
     slug: "herdr",
     name: "herdr",
-    category: "control-planes",
     verifiedDate: "November 22, 2026",
-    metaTitle: "herdr Alternative with Auth, Approvals, Living Pages & Zero Lock-In — xMatrix",
+    metaTitle: "herdr Alternatives (2026): herdr vs xMatrix",
     metaDescription:
-      "Comparing herdr (herdr-core) vs xMatrix? Get built-in authentication, multi-user permissions, per-app approvals, Space secrets, and living Pages instead of an unauthenticated preview socket.",
-    eyebrow: "herdr Alternative",
-    headline: "A herdr alternative with real auth, team permissions, and living Pages—not an unauthenticated preview socket.",
+      "Evaluating herdr (herdr-core) alternatives? Get built-in auth, team permissions, live cross-device relay today (no waitlist), per-app approvals, and living Pages in xMatrix.",
+    eyebrow: "herdr Alternative · herdr vs xMatrix",
+    headline: "The herdr Alternative With Built-In Auth, Team Approvals, and Living Pages Today",
     lead: "herdr evolved from a beloved Rust TUI multiplexer into herdr-core plus native apps, bringing breaking protocol changes and Reddit pushback over GUI lock-in—while still lacking multi-user auth, approvals, secrets, and a live cloud relay. xMatrix gives you a complete, governed collaboration layer today.",
-    indexSummary: "Zero multi-user auth or permission boundaries (socket access equals shell access), Herdr Cloud still on waitlist, breaking protocol shifts (v0.9.2 graphics removal), and TUI-to-GUI lock-in backlash.",
+    productCaption: "Inside xMatrix: cross-device desktop, web, and mobile coordination live today—with authenticated Spaces, Space secrets, and living Pages instead of an unauthenticated preview socket.",
     painPoints: [
       {
         title: "No authentication, permission boundaries, approvals, or secrets",
@@ -213,15 +211,14 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
   {
     slug: "seedmux",
     name: "Seedmux",
-    category: "control-planes",
     verifiedDate: "November 22, 2026",
-    metaTitle: "Seedmux Alternative for Cross-Platform Teams, Android & Living Pages — xMatrix",
+    metaTitle: "Seedmux Alternatives (2026): Seedmux vs xMatrix",
     metaDescription:
-      "Comparing Seedmux vs xMatrix? Go beyond closed-source macOS + iPhone-only terminal panes and default YOLO phone sessions with cross-OS teamwork, living Pages, and governed app approvals.",
-    eyebrow: "Seedmux Alternative",
-    headline: "A Seedmux alternative that isn't locked to macOS, iPhone, solo panes, or YOLO phone sessions.",
+      "Looking for Seedmux alternatives? Escape macOS + iPhone lock-in, closed-source binaries, and YOLO phone defaults with xMatrix across macOS, Windows, Linux, Android, and iOS.",
+    eyebrow: "Seedmux Alternative · Seedmux vs xMatrix",
+    headline: "The Seedmux Alternative for Cross-OS Teams, Android, and Governed Mobile Control",
     lead: "Seedmux pairs a slick Ghostty + tmux macOS terminal with an iPhone companion app, but it is closed-source, Mac-only, single-player, and launches phone-initiated sessions in YOLO mode by default. xMatrix brings cross-OS multi-machine coordination, real team Spaces, and living Pages to macOS, Windows, Linux, Android, and iOS.",
-    indexSummary: "Closed-source, macOS + iPhone only (no Windows, Linux desktop, or Android), single-player only, phone-started sessions default to YOLO, and no shared living docs or ops connectors.",
+    productCaption: "Inside xMatrix: one workspace across macOS, Windows, Linux, Web, Android, and iOS TestFlight—with governed app approvals instead of YOLO phone defaults.",
     painPoints: [
       {
         title: "macOS + iPhone lock-in leaves Windows, Linux, and Android behind",
@@ -315,17 +312,16 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
   },
   {
     slug: "claude-code",
-    name: "Claude Code Desktop",
-    alsoKnownAs: "Claude Desktop, Cowork & Dispatch",
-    category: "control-planes",
+    name: "Claude Code",
+    alsoKnownAs: "Claude Code Desktop, Cowork & Dispatch",
     verifiedDate: "November 22, 2026",
-    metaTitle: "Claude Code Desktop Alternative for Multi-Vendor Quotas, Teams & Living Pages — xMatrix",
+    metaTitle: "Claude Code Alternatives (2026): Avoid Quota Walls",
     metaDescription:
-      "Hitting Claude Code 5-hour or weekly quota walls? Keep using Claude Code inside xMatrix—and add automatic handoff to Codex/Gemini, multiplayer Channels, living Pages, and Space secrets.",
-    eyebrow: "Claude Code Desktop Alternative",
-    headline: "Keep Claude Code. Leave behind single-vendor quota walls, solo silos, and vanished context.",
+      "Hitting Claude Code 5-hour or weekly quota limits? Keep Claude Code inside xMatrix and add automatic handoff to Codex/Gemini, multiplayer Channels, living Pages, and Space secrets.",
+    eyebrow: "Claude Code Alternative · Claude Code vs xMatrix",
+    headline: "The Claude Code Alternative That Keeps Claude—and Adds Codex/Gemini Quota Handoff",
     lead: "Claude Code Desktop and Cowork are excellent for pairing with one Claude session, but November 2026 community reports highlight 3x faster quota burn across shared Pro/Max allowances—and Anthropic will never hand your work to Codex or Gemini when Claude caps out. xMatrix orchestrates Claude Code alongside every other harness in multiplayer Channels and living Pages.",
-    indexSummary: "Single-vendor lock-in (no Codex/Gemini failover when shared 5h/weekly limits burn out), solo sessions without multiplayer channels or shared living Pages, and no Space-level secrets.",
+    productCaption: "Inside xMatrix: keep running your local Claude Code CLI while teammates collaborate in the same Channel and Codex or Gemini picks up automatically when Claude hits a quota wall.",
     painPoints: [
       {
         title: "Shared 5-hour and weekly quota walls stop work dead",
