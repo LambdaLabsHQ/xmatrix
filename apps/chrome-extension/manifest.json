@@ -27,6 +27,9 @@
   "permissions": ["activeTab", "alarms", "contextMenus", "scripting", "sidePanel", "storage"],
   "host_permissions": ["https://xmatrix-hub.xmatrix.sh/*"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "web_accessible_resources": [
+    { "resources": ["assets/fonts/inter-latin.woff2"], "matches": ["https://*/*", "http://*/*"] }
+  ],
   "commands": {
     "_execute_action": {
       "suggested_key": { "default": "Alt+Shift+X" },
