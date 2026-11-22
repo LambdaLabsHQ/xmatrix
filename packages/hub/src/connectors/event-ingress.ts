@@ -263,5 +263,8 @@ export async function deliverConnectorRoom(env: Env, rooms: Pick<PostgresTeamsRo
   await effects.deliver(env, effects.apps(env), currentConnectorAppend(effects.append, current), scope.provider,
     binding.connectionId, event, undefined, scope.provider === "googlechat" ? grant : undefined,
     undefined, undefined, undefined, scope.provider === "teams" ? grant : undefined);
-  if (await current()) await effects.events(env, { spaceId: binding.spaceId, provider: scope.provider, event });
+  if (await current()) {
+    await effects.events(env, { spaceId: binding.spaceId, provider: scope.provider, event })
+      .catch(() => console.error("Connector event did not reach its programs", scope.provider));
+  }
 }

@@ -240,7 +240,7 @@ const SPACE_CHANNELS = "(SELECT channel_id FROM data.channels WHERE space_id=$1)
  */
 export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] = Object.freeze([
   ...["data.norn_shadow_observations","data.norn_shadow_transitions","data.norn_shadow_comparisons",
-    "data.norn_notices","data.norn_requests","data.norn_programs"].map(table => ({ table,predicate: "space_id=$1" })),
+    "data.norn_event_deliveries","data.norn_notices","data.norn_requests","data.norn_programs"].map(table => ({ table,predicate: "space_id=$1" })),
   ...["data.run_agent_registrations", "data.registration_stop_intents"]
     .map((table) => ({ table, predicate: "space_id=$1" })),
   ...[

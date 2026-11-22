@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
-import { createAuthorityDatabase, PostgresNornProgramRepository, readNornRequest, readWaitingNornPrograms, NORN_CHANNEL_DUE_SQL } from "../../db/dist/index.js";
+import { createAuthorityDatabase, enqueueNornEventDeliveries, PostgresNornProgramRepository, readNornRequest, readWaitingNornPrograms, NORN_CHANNEL_DUE_SQL } from "../../db/dist/index.js";
 import { fenceChannelRunsForStop } from "../../db/dist/channel-stop-fence.js";
 import { initialMessageSource } from "../../db/dist/runtime-initial-input.js";
 import { integration, isolatedPostgres, seedOwnedTestSpace } from "../../db/test/postgres-database.fixture.mjs";
@@ -425,4 +425,61 @@ integration("an Agent that delegates the request its Run was started for is let 
     await sql("UPDATE data.norn_requests SET delegated_away_instance_id='channel:3' WHERE request_id=$1", [first.requestId]);
     await sql("UPDATE data.norn_requests SET instance_id='channel:3',delivered_at=now() WHERE request_id=$1", [second.requestId]);
     assert.deepEqual((await programs.channelWork(scope())).delegatedAway, []);
+  }));
+
+integration("outside-event obligations persist, page boundedly, recover through coordinator work, and respect revoked access (#1642)", () =>
+  conversation("norn_event_deliveries", async ({ sql, message, programs, scope, due, database }) => {
+    const eventSource = `ciFailed("acme/app")->forEach(what => ask(@codex, what)->wait)`;
+    for (const [idx, id] of [[1, "prog-a"], [2, "prog-b"], [3, "prog-c"]]) {
+      await message(id, idx, "user", "owner");
+      await programs.start({ ...scope(id), authorKind: "user", authorId: "owner", authorityUserId: "owner",
+        source: eventSource, ledger: nornStartLedger }, nornStep());
+    }
+
+    // Keyset paging reads waiting programs cleanly in bounded pages without losing later programs.
+    const page1 = await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space", limit: 2 });
+    assert.deepEqual(page1.map(p => p.programId), ["prog-a", "prog-b"]);
+    const page2 = await readWaitingNornPrograms(database, {
+      requestId: randomUUID(), spaceId: "space", afterProgramId: page1.at(-1).programId, limit: 2,
+    });
+    assert.deepEqual(page2.map(p => p.programId), ["prog-c"]);
+
+    // Enqueue durable obligations at ingress (idempotent on duplicate event_id).
+    const payload = { what: "Workflow CI failed on main", streams: page1[0].waits };
+    const batch = ["prog-a", "prog-b", "prog-c"].map(programId => ({
+      spaceId: "space", channelId: "channel", programId, eventId: "evt-1", payload,
+    }));
+    assert.equal(await enqueueNornEventDeliveries(database, { requestId: randomUUID(), deliveries: batch }), 3);
+    assert.equal(await enqueueNornEventDeliveries(database, { requestId: randomUUID(), deliveries: batch }), 0,
+      "duplicate ingress delivery enqueues nothing new");
+    assert.equal(await due(), true, "undelivered outside-event obligations make the Channel due");
+
+    // Simulate interruption before commit on prog-a (rescheduled with backoff) while prog-b succeeds independently.
+    await programs.rescheduleEventDelivery({ ...scope("prog-a"), eventId: "evt-1", delayMs: 60_000 });
+    const afterBackoff = await programs.channelWork(scope());
+    assert.deepEqual(afterBackoff.eventDeliveries.map(row => row.programId), ["prog-b", "prog-c"],
+      "a deferred failing program does not starve later programs");
+
+    // Deliver prog-b atomically; replaying deliverEvent after a lost response is an idempotent no-op.
+    const step = nornStep(undefined, { id: "evt-1", streams: payload.streams, what: payload.what });
+    await programs.deliverEvent({ ...scope("prog-b"), eventId: "evt-1" }, step);
+    await programs.deliverEvent({ ...scope("prog-b"), eventId: "evt-1" }, step);
+    const deliveriesForB = (await programs.channelWork(scope())).deliveries.filter(d => d.programId === "prog-b");
+    assert.equal(deliveriesForB.length, 1, "replayed commit records the event once");
+
+    // Coordinator recovery picks up prog-a once its retry window arrives.
+    await sql("UPDATE data.norn_event_deliveries SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE program_id='prog-a'");
+    const recoveredWork = await programs.channelWork(scope());
+    assert.ok(recoveredWork.eventDeliveries.some(row => row.programId === "prog-a" && row.attempts === 1));
+    await programs.deliverEvent({ ...scope("prog-a"), eventId: "evt-1" }, step);
+    assert.equal((await programs.channelWork(scope())).deliveries.filter(d => d.programId === "prog-a").length, 1);
+
+    // Revoked Space access marks authorityAllowed=false so the coordinator settles without advancing the ledger.
+    await sql("UPDATE data.space_members SET role='viewer' WHERE space_id='space' AND user_id='owner'");
+    const revokedWork = await programs.channelWork(scope());
+    const forC = revokedWork.eventDeliveries.find(row => row.programId === "prog-c");
+    assert.equal(forC?.authorityAllowed, false);
+    await programs.settleEventDelivery({ ...scope("prog-c"), eventId: "evt-1" });
+    assert.equal((await programs.channelWork(scope())).deliveries.filter(d => d.programId === "prog-c").length, 0);
+    assert.equal((await programs.channelWork(scope())).eventDeliveries.length, 0);
   }));

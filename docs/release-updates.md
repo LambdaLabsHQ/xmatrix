@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: Norn outside events record durable per-program delivery obligations and isolate webhook effects
+
+Outside events reaching Norn (`occurNornEvent`) now scan waiting programs in bounded keyset pages, record durable per-program delivery obligations in `data.norn_event_deliveries` (expand migration `0265`) before attempting immediate delivery, and isolate per-program failures so one blocked program cannot starve later programs or suppress other webhook/drain effects (GitHub, Gmail, Sentry, App Store Connect commerce, and native rooms). Owed deliveries remain due in `NORN_CHANNEL_DUE_SQL` and are retried independently through the Channel coordinator (`reconcileNornPrograms`) in bounded pages with current Space-role and app-grant rechecks and exponential backoff. DB and Hub. Older Hubs ignore the new table while draining. Recovery is a CI-validated beta reverting this change; the new table is left unused.
+
 ## Unreleased: direct root `/<competitor>-alternatives` landing pages with live product preview
 
 Removed the `/alternatives` hub page (which risked targeting negative brand queries) and moved all 19 competitor comparison landing pages to flat root-level `/<competitor>-alternatives` URLs (`/raft-alternatives`, `/t3-code-alternatives`, `/conductor-alternatives`, `/jules-alternatives`, etc.), with permanent redirects for legacy names (`/superset-alternatives`, `/slock-alternatives`, `/lobechat-alternatives`, `/evermemos-alternatives`, `/google-jules-alternatives`). Tightened `<title>` tags (<=60 chars, front-loaded `<Competitor> Alternatives (2026)`) and `<h1>` headings to match competitor search intent, embedded the live xMatrix `<AppWindow />` preview directly below the hero, added `SoftwareApplication` structured data, and replaced the single footer hub link with direct `<Competitor> Alternatives` links from every page. Web only. Recovery is a CI-validated beta reverting this change.

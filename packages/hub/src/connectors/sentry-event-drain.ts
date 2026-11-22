@@ -132,9 +132,10 @@ async function deliverSentryJob(env: Env, job: SentryEventJob, dependencies: Sen
     const eventGrant = await current();
     if (!eventGrant) return false;
     if (eventGrant.credentialVersion !== resolved.version) throw new Error("Sentry credentials changed before event delivery");
-    // Failure remains durable retry work; already committed ids make repeats safe.
+    // Norn delivery records its own durable obligations and must never block Sentry drain completion.
     progress.stage = "automation";
-    await dependencies.events(env, { spaceId: job.spaceId, provider: "sentry", event });
+    await dependencies.events(env, { spaceId: job.spaceId, provider: "sentry", event })
+      .catch(() => console.error("Connector event did not reach its programs", "sentry"));
   }
   return true;
 }

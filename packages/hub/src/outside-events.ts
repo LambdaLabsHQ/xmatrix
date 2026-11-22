@@ -190,6 +190,7 @@ export async function githubEventArrived(env: Env, event: string, payload: Recor
   const matchLegacy = arrived.kind === "issue-opened" ? () => false : githubStream(arrived.kind, arrived.repository);
   const matches = (stream: NornStream): boolean => matchLegacy(stream) || matchEvents(stream);
   await occurNornEvent(env, { id: arrived.id, what: inWords(arrived), cloudEvent, matches,
+    grant: { kind: "github", repository: arrived.repository, installationId: arrived.installationId },
     allowed: (program) => spaceConnected(program.spaceId, program.authorityUserId) });
 }
 
@@ -212,5 +213,7 @@ export async function connectorEventArrived(env: Env, input: ConnectorOutsideEve
   const matches = (stream: NornStream): boolean => matchLegacy(stream) || matchEvents(stream);
   await occurNornEvent(env, { id: JSON.stringify(["connector", input.provider, input.event.eventId]),
     spaceId: input.spaceId, what: inWords(input.event), cloudEvent, matches,
+    grant: { kind: "connector", provider: input.provider,
+      ...(input.authorizedUserId ? { authorizedUserId: input.authorizedUserId } : {}) },
     allowed: async (program) => !input.authorizedUserId || program.authorityUserId === input.authorizedUserId });
 }
