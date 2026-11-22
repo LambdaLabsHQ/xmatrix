@@ -40,14 +40,14 @@ type AskContext = {
 };
 
 type Extension = {
-  runtime: { sendMessage: (message: unknown) => Promise<{ ok: boolean; value?: unknown; error?: string } | undefined> };
+  runtime: { sendMessage: (message: unknown) => Promise<{ ok: boolean; value?: unknown; error?: string; code?: string } | undefined> };
   sidePanel?: { open: (options: { windowId: number }) => Promise<void> };
 };
 const extension = (globalThis as unknown as { chrome: Extension }).chrome;
 
 async function ask<T>(type: string, args?: unknown): Promise<T> {
   const answer = await extension.runtime.sendMessage({ type, args });
-  if (!answer?.ok) throw new Error(answer?.error ?? "xMatrix could not be reached.");
+  if (!answer?.ok) throw Object.assign(new Error(answer?.error ?? "xMatrix could not be reached."), { code: answer?.code });
   return answer.value as T;
 }
 
@@ -112,7 +112,10 @@ function Surface() {
       markExtensionAskSurface(next.token);
       setContext(next);
     }).catch((error: unknown) => {
-      if (live) setProblem(error instanceof Error ? error.message : String(error));
+      if (!live) return;
+      // Signed out is the person's to fix, so it says so; otherwise the box has no passage to ask about, and stays away.
+      if ((error as { code?: unknown }).code === "signed_out") setProblem((error as Error).message);
+      else tellFrame({ type: "close" });
     });
     return () => { live = false; };
   }, [round]);
