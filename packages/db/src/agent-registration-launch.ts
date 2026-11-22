@@ -1017,7 +1017,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const actorUserId = text(input.actorUserId), channelId = text(input.channelId), commandId = text(input.commandId, 200);
     if (typeof input.body !== "string" || !input.body.trim()) throw new RegistrationAccessError("invalid_registration_launch", 400);
     const excludeSourceInstanceId = input.excludeSourceInstanceId;
-    const excluded = excludeSourceInstanceId === undefined ? undefined
+    const sourceKey = excludeSourceInstanceId === undefined ? undefined
       : await this.database.transaction({ requestId: commandId, operation: "registration.launch.exclude-source",
         placement: this.placement }, async tx => {
         const row = (await tx.query({ name: "registration_launch_excluded_source_v1", text: `SELECT
@@ -1029,6 +1029,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         return parseSpaceAgentRegistrationKey({ spaceId: row.space_id, ownerUserId: row.owner_user_id,
           machineId: row.machine_id, harness: row.harness });
       });
+    // Explicit model, effort or harness-parameter constraints may start a fresh
+    // Run on the source's own registration (e.g. single-machine model switch via
+    // handoff). Without them — including automatic usage-limit handoffs — the
+    // source registration itself stays excluded.
+    const excluded = input.tags?.model || input.tags?.effort || input.tags?.parameters ? undefined : sourceKey;
     const prior = await this.database.transaction({ requestId: commandId, operation: "registration.launch.input-read",
       placement: this.placement }, async tx => {
       return tx.query({ name: "registration_launch_input_existing_v1", text: `SELECT launch_request_json,state

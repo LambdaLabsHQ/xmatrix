@@ -309,6 +309,46 @@ test("Handoff picks a successor and posts the handoff mention", async ({ page })
     .toEqual(["@Codex:1:handoff:@claude"]);
 });
 
+test("Handoff picker supports choosing machine, model and effort parameters", async ({ page }) => {
+  await openWorkspaceWithStubs(page, {
+    spaces: [E2E_SPACE],
+    channels: [ACTIVE_AGENT_CHANNEL],
+    registrations: [
+      {
+        key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-laptop", harness: "claude" },
+        machineName: "Laptop",
+        models: ["claude-opus-4-6"],
+        modelCatalog: [{ model: "claude-opus-4-6", efforts: [{ value: "high" }, { value: "max" }] }],
+      },
+      {
+        key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-server", harness: "codex" },
+        machineName: "Server",
+        models: ["gpt-5.4"],
+        modelCatalog: [{ model: "gpt-5.4", efforts: [{ value: "medium" }] }],
+      },
+    ],
+  });
+  const { toolbar } = await hoverCodexControlsWithSend(page, "handoff-params");
+  await toolbar.getByRole("button", { name: "Hand off codex:1" }).click();
+  await toolbar.getByRole("button", { name: "Handoff parameters" }).click();
+
+  await toolbar.getByRole("button", { name: "Laptop" }).click();
+  await toolbar.getByRole("button", { name: "claude-opus-4-6" }).click();
+  await toolbar.getByRole("button", { name: "high" }).click();
+  await toolbar.getByRole("button", { name: "Back to handoff targets" }).click();
+
+  await expect(toolbar.getByRole("button", { name: "Remove machine:Laptop" })).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: "Remove model:claude-opus-4-6" })).toBeVisible();
+  await expect(toolbar.getByRole("button", { name: "Remove effort:high" })).toBeVisible();
+  // Only compatible successors remain under the chosen parameters.
+  await expect(toolbar.getByRole("button", { name: /^Hand off codex:1 to/ })).toHaveText([/^Auto/, "@claude"]);
+
+  await toolbar.getByRole("button", { name: "Hand off codex:1 to a new @claude" }).click();
+  await toolbar.getByRole("button", { name: "Confirm hand off codex:1 to a new @claude" }).click();
+  await expect.poll(async () => (await fixtureRequestBodies(page, "handoff-params")).map((body) => body.body))
+    .toEqual(["@Codex:1:handoff:@claude machine:Laptop model:claude-opus-4-6 effort:high"]);
+});
+
 test("right-side Agent navigation is limited to a flat avatar button", async ({ page }) => {
   await openActiveAgentWorkspace(page);
 

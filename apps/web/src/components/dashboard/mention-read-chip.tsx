@@ -248,8 +248,10 @@ function InteractionSegmentView({ segment, scope, starting }: {
       return "record" in segment
         ? <MentionContinuationChip record={segment.record} unavailable={scope?.launchStatusUnavailable} />
         : <HandoffCard sourceName={segment.written.sourceName} sourceOrdinal={segment.written.sourceOrdinal}
-          successorName={segment.written.successorName} sentAt={scope?.sentAt}
-          launch={handoffSuccessorLaunch(scope?.launches, segment.text)}
+          successorName={segment.written.successorName} successorText={segment.written.successorText}
+          conditionFirst={segment.written.conditionFirst} tags={segment.written.tags}
+          conditions={segment.written.conditions} sentAt={scope?.sentAt}
+          launch={handoffSuccessorLaunch(scope?.launches, segment.text, segment.written.headText)}
           fillKey={scope?.sequence !== undefined ? `${scope.sequence}:${segment.text}` : undefined} />;
     case "launch.v1": {
       if (!segment.mention) {

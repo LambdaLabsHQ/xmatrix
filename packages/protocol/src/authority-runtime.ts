@@ -147,8 +147,8 @@ export const MENTION_COMMAND_COMPLETION_SCHEMA: CommandCompletionSchemaNode = {
 export const AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA: CommandCompletionSchemaNode = {
   id: "agent-reference:handoff",
   token: "handoff",
-  label: "Hand off checkout",
-  description: "Transfer this instance's checkout to a new same-machine instance.",
+  label: "Hand off work",
+  description: "Transfer this instance's work to a new Agent with optional launch conditions.",
   action: "handoff-instance",
   next: {
     delimiter: ":",

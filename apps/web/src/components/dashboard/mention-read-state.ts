@@ -20,8 +20,8 @@ import type {
   ChannelSnapshot,
   LiveChannel,
 } from "@xmatrix/protocol";
-import { MENTION_BROADCAST_NAMES, isChannelResidentInstance, isOperationalMentionStart, mentionAddressTokens, nonOperationalMentionRanges, parseAutoLaunchMentions,
-  parseHarnessCapabilityMentions, scanMentionAddresses } from "@xmatrix/protocol";
+import { MENTION_BROADCAST_NAMES, agentPresetForLauncher, isAutoHandoffSuccessor, isChannelResidentInstance, isOperationalMentionStart, mentionAddressTokens, nonOperationalMentionRanges, parseAutoLaunchMentions,
+  parseHandoffInstanceMentions, parseHarnessCapabilityMentions, scanMentionAddresses } from "@xmatrix/protocol";
 
 import type { MentionCandidate } from "./mention-complete";
 import { addressedAgentFace, launchFace } from "./mention-invocation-state";
@@ -337,11 +337,25 @@ export type ComposerMentionSpan = {
 export function composerMentionSpans(text: string, index: MentionReadIndex | null,
   currentUserIdentityId?: string): ComposerMentionSpan[] {
   if (!/[@＠]/u.test(text)) return [];
-  const spans: ComposerMentionSpan[] = parseAutoLaunchMentions(text).map(mention => ({
-    start: mention.start, end: mention.end, kind: "summon",
-    ...(mention.error ? { invalid: true } : {}),
-    ...(mention.tags.harness ? { face: { kind: "agent" as const, name: mention.tags.harness, harness: mention.tags.harness } } : {}),
-  }));
+  const handoffs: ComposerMentionSpan[] = parseHandoffInstanceMentions(text).map(mention => {
+    const harness = mention.tags.harness ?? (!mention.conditionFirst && !isAutoHandoffSuccessor(mention.successorName)
+      ? agentPresetForLauncher(mention.successorName)?.id : undefined);
+    return {
+      start: mention.start, end: mention.end, kind: "summon",
+      ...(mention.error ? { invalid: true } : {}),
+      ...(harness ? { face: { kind: "agent" as const, name: harness, harness } } : {}),
+    };
+  });
+  const spans: ComposerMentionSpan[] = [
+    ...handoffs,
+    ...parseAutoLaunchMentions(text)
+      .filter(mention => !handoffs.some(span => mention.start >= span.start && mention.start < span.end))
+      .map(mention => ({
+        start: mention.start, end: mention.end, kind: "summon" as const,
+        ...(mention.error ? { invalid: true } : {}),
+        ...(mention.tags.harness ? { face: { kind: "agent" as const, name: mention.tags.harness, harness: mention.tags.harness } } : {}),
+      })),
+  ];
   const written = withWrittenInvocationTargets(index ?? { tokens: [], byToken: new Map() }, text);
   if (written.tokens.length) {
     const ranges = nonOperationalMentionRanges(text);

@@ -1,6 +1,6 @@
-import { agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type SerializedAgentLaunch, type SerializedAgentStop,
+import { agentPresetForLauncher, cleanRuntimeOperationFailure, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type SerializedAgentLaunch, type SerializedAgentStop,
   type SerializedAgentMessageExecution, type SerializedAgentInvocationRejection, type SerializedAgentContinuation, type AgentLaunchActivity, type AgentStopInvocation,
-  type AutoLaunchMention, type AgentControlInvocation, type AgentControlOutcomeRecord,
+  type AutoLaunchCondition, type AutoLaunchMention, type AutoLaunchTags, type AgentControlInvocation, type AgentControlOutcomeRecord,
   agentControlHandoffStatement, parseRebornInstanceMentions, parseHandoffInstanceMentions, type FaceOf } from "@xmatrix/protocol";
 import { noticesNaming, type CommandNotice } from "./command-notices";
 
@@ -211,10 +211,15 @@ export function continuationView(record: SerializedAgentContinuation, unavailabl
   });
 }
 
-/** The registration launch a handoff started, matched by the mention as written.
- *  The newest one wins, the same way a summon binds its launch. */
-export function handoffSuccessorLaunch(launches: readonly SerializedAgentLaunch[] | undefined, mentionText: string): SerializedAgentLaunch | undefined {
-  return launches?.filter(launch => launch.sourceMention === mentionText)
+/** The registration launch a handoff started, matched by the mention as written
+ *  (or its head before conditions for historical records). The newest one wins. */
+export function handoffSuccessorLaunch(
+  launches: readonly SerializedAgentLaunch[] | undefined,
+  mentionText: string,
+  headText?: string,
+): SerializedAgentLaunch | undefined {
+  return launches?.filter(launch => launch.sourceMention === mentionText ||
+    (headText !== undefined && launch.sourceMention === headText))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
@@ -257,21 +262,32 @@ export function splitMentionContinuations(text: string, records: readonly Serial
   }, allowed);
 }
 
-/** Written handoffs (`@source:n:handoff:@successor`), parsed with the shared
- *  grammar the Hub executes, so the card draws exactly what runs. */
+/** Written handoffs (`@source:n:handoff:@successor [conditions]`), parsed with
+ *  the shared grammar the Hub executes, so the card draws exactly what runs. */
 export function splitHandoffMentions(text: string, allowed?: (start: number) => boolean) {
-  const segments: Array<{ kind: "text"; text: string } | { kind: "handoff"; text: string;
-    sourceName: string; sourceOrdinal: number; successorName: string }> = [];
+  const segments: Array<{ kind: "text"; text: string } | ({ kind: "handoff"; text: string } & WrittenHandoff)> = [];
   let start = 0;
-  for (const match of text.matchAll(handoffInstanceMentionScanner())) {
-    const at = match.index! + match[0].search(/[@＠]/u);
-    const parsed = parseHandoffInstanceTarget(match[1] || "");
-    if (!parsed || (allowed && !allowed(at))) continue;
-    const end = at + 1 + match[1]!.length;
-    if (at > start) segments.push({ kind: "text", text: text.slice(start, at) });
-    segments.push({ kind: "handoff", text: text.slice(at, end), sourceName: parsed.sourceAgentName,
-      sourceOrdinal: parsed.channelInstanceId, successorName: parsed.successorName });
-    start = end;
+  for (const mention of parseHandoffInstanceMentions(text)) {
+    if (allowed && !allowed(mention.start)) continue;
+    if (mention.start > start) segments.push({ kind: "text", text: text.slice(start, mention.start) });
+    segments.push({
+      kind: "handoff",
+      text: text.slice(mention.start, mention.end),
+      sourceName: mention.sourceAgentName,
+      sourceOrdinal: mention.channelInstanceId,
+      successorName: mention.successorName,
+      successorText: text.slice(mention.successorStart, mention.end),
+      headText: text.slice(mention.start, mention.headEnd),
+      conditionFirst: mention.conditionFirst,
+      tags: mention.tags,
+      conditions: mention.conditions.map(condition => ({
+        field: condition.field,
+        start: condition.start - mention.successorStart,
+        end: condition.end - mention.successorStart,
+        valueStart: condition.valueStart - mention.successorStart,
+      })),
+    });
+    start = mention.end;
   }
   if (start < text.length) segments.push({ kind: "text", text: text.slice(start) });
   return segments;
@@ -517,7 +533,16 @@ function writtenHarness(sourceMention: string | undefined): string | undefined {
   return sourceMention ? parseAutoLaunchMentions(sourceMention)[0]?.tags.harness : undefined;
 }
 
-type WrittenHandoff = { sourceName: string; sourceOrdinal: number; successorName: string };
+export type WrittenHandoff = {
+  sourceName: string;
+  sourceOrdinal: number;
+  successorName: string;
+  successorText: string;
+  headText: string;
+  conditionFirst: boolean;
+  tags: AutoLaunchTags;
+  conditions: AutoLaunchCondition[];
+};
 type InteractionMention<Target> = { kind: "mention"; text: string; target: Target; token?: string };
 
 /** A text run's pieces, each tagged with the presentation contract it renders
@@ -627,8 +652,11 @@ export function segmentMessageInteraction<Target>(text: string, records: Interac
   if (!records.launchStatusUnavailable) {
     segments = refine(segments, (run, offset) => splitHandoffMentions(run, start => allowed(start + offset))
       .map(part => part.kind === "handoff"
-        ? { presentationRef: "handoff.v1", text: part.text, written: { sourceName: part.sourceName,
-          sourceOrdinal: part.sourceOrdinal, successorName: part.successorName } }
+        ? { presentationRef: "handoff.v1", text: part.text, written: {
+          sourceName: part.sourceName, sourceOrdinal: part.sourceOrdinal, successorName: part.successorName,
+          successorText: part.successorText, headText: part.headText, conditionFirst: part.conditionFirst,
+          tags: part.tags, conditions: part.conditions,
+        } }
         : plain(part.text)));
   }
   const rejections = records.rejections ?? [];

@@ -1,6 +1,7 @@
 import { parseMarkdown } from "./markdown.js";
 import { decodeString } from "micromark-util-decode-string";
-import { createInstanceMentionScanner, existingInstanceMentionScanner, handoffInstanceMentionScanner, rebornInstanceMentionScanner } from "./agent-mention.js";
+import { AGENT_NAME_SOURCE, createInstanceMentionScanner, existingInstanceMentionScanner, handoffInstanceMentionScanner, rebornInstanceMentionScanner } from "./agent-mention.js";
+import { INTERACTION_CONDITION_FIELDS_SOURCE } from "./message-interaction-grammar.js";
 
 export interface NonOperationalMentionRange { start: number; end: number }
 
@@ -105,7 +106,11 @@ export function filterOperationalMentions<T extends { start: number }>(body: str
 }
 
 export function hasOperationalAgentInvocation(body: string): boolean {
-  const candidates = [createInstanceMentionScanner(), rebornInstanceMentionScanner(), handoffInstanceMentionScanner(), existingInstanceMentionScanner()]
+  const conditionHandoff = new RegExp(
+    `(?:^|[\\s([{])[@＠](${AGENT_NAME_SOURCE}:[1-9]\\d{0,15}:handoff:[@＠](?:${INTERACTION_CONDITION_FIELDS_SOURCE}):)`,
+    "giu",
+  );
+  const candidates = [createInstanceMentionScanner(), rebornInstanceMentionScanner(), handoffInstanceMentionScanner(), conditionHandoff, existingInstanceMentionScanner()]
     .flatMap(scanner => [...body.matchAll(scanner)].map(match => ({
       start: match.index! + match[0].length - match[1]!.length - 1,
     })));

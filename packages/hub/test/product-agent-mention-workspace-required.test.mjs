@@ -313,6 +313,7 @@ test("handoff conditions use launch validation and cannot become task prose", as
     body: '@claude:2:handoff:@codex machine:"My Laptop" model:chosen effort:high finish', actorUserId: "user-1", port });
   assert.deepEqual(port.handoffs[0].tags, { machine: "My Laptop", model: "chosen", effort: "high" });
   assert.equal(port.handoffs[0].request, "finish");
+  assert.equal(port.handoffs[0].sourceMention, '@claude:2:handoff:@codex machine:"My Laptop" model:chosen effort:high');
   for (const tail of ['machine:Laptop machine:Server', 'machine:', 'harness:claude', 'repo:acme/app pwd:/srv/app']) {
     const refused = basePort({ getRebornTarget: repoSource() });
     const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "invalid",
@@ -321,6 +322,20 @@ test("handoff conditions use launch validation and cannot become task prose", as
     assert.equal(refused.handoffs.length, 0, tail);
     assert.match(refused.notices[0], /invalid_registration_launch/, tail);
   }
+});
+
+test("condition-first handoff routes with explicit machine, model, effort and harness parameters", async () => {
+  const port = basePort({ getRebornTarget: repoSource() });
+  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "cond-first",
+    body: '@claude:2:handoff:@machine:"My Laptop" model:claude-opus-4-6 effort:high fast:on finish it',
+    actorUserId: "user-1", port });
+  assert.equal(result.spawned, 1);
+  assert.equal(port.handoffs[0].harness, undefined);
+  assert.deepEqual(port.handoffs[0].tags, {
+    machine: "My Laptop", model: "claude-opus-4-6", effort: "high", parameters: '{"fast":"on"}',
+  });
+  assert.equal(port.handoffs[0].request, "finish it");
+  assert.equal(port.handoffs[0].sourceMention, '@claude:2:handoff:@machine:"My Laptop" model:claude-opus-4-6 effort:high fast:on');
 });
 
 test("automatic handoff retains the source's explicit machine; only an authored override replaces it", async () => {

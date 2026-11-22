@@ -1,4 +1,5 @@
 import { isOperationalMentionStart, nonOperationalMentionRanges } from "./operational-mention-context.js";
+import { formatHandoffMention } from "./agent-auto-mention.js";
 import { matchInteractionGrammar, MESSAGE_INTERACTION_LIMITS } from "./message-interaction-grammar.js";
 
 export type AgentControlKind = "model" | "effort";
@@ -63,8 +64,7 @@ export interface AgentControlQuotaExhausted {
 /** The statement that moves an Instance's work to another Machine's Agent on
  * `model`: an ordinary handoff, written as a person would write it. */
 export function agentControlHandoffStatement(target: string, harness: string, machineName: string, model: string): string {
-  const quoted = (value: string) => /\s/u.test(value) ? `"${value}"` : value;
-  return `@${target}:handoff:@${harness} machine:${quoted(machineName)} model:${model}`;
+  return formatHandoffMention(target, { harness, machine: machineName, model });
 }
 
 /**

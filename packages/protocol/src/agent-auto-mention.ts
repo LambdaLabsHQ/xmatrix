@@ -1,4 +1,4 @@
-import { INTERACTION_LAUNCH_FIELDS, MESSAGE_INTERACTION_LIMITS, matchInteractionGrammar } from "./message-interaction-grammar.js";
+import { INTERACTION_CONDITION_FIELDS_SOURCE, INTERACTION_LAUNCH_FIELDS, MESSAGE_INTERACTION_LIMITS, matchInteractionGrammar } from "./message-interaction-grammar.js";
 import { isHarnessParameterId, parseHarnessParameterValues } from "./harness-parameters.js";
 import { agentPresetForLauncher } from "./agent-presets.js";
 import { createInstanceMentionScanner, isAbsoluteLocalPath, repoSummonReference } from "./agent-mention.js";
@@ -83,6 +83,20 @@ export function formatAutoLaunchMention(tags: AutoLaunchTags, directHarness = fa
   }, harness ? `@${harness}` : "@auto");
 }
 
+/**
+ * The portable text of a handoff: `@<source>:<n>:handoff:@<successor> [conditions]`.
+ * With `conditionFirst` and no explicit harness, writes `@<source>:<n>:handoff:@<field>:<value>`
+ * instead of `@auto <field>:<value>`.
+ */
+export function formatHandoffMention(sourceAddress: string, tags: AutoLaunchTags, conditionFirst = false): string {
+  const source = sourceAddress.trim().replace(/^[@＠]/u, "");
+  const successor = formatAutoLaunchMention(tags, true);
+  const target = conditionFirst && !tags.harness && successor.startsWith("@auto ")
+    ? `@${successor.slice("@auto ".length)}`
+    : successor;
+  return `@${source}:handoff:${target}`;
+}
+
 function conditionValue(source: string): string {
   return source.startsWith('"') ? source.slice(1, -1).replaceAll('""', '"') : source;
 }
@@ -120,7 +134,7 @@ function validateTags(tags: AutoLaunchTags): void {
  * like a space. A newline does not: message prose may start on the next line.
  */
 const CONDITION_BREAK = "[\\t\\p{Zs}]";
-const CONDITION_FIELDS = `${AUTO_LAUNCH_FIELDS.filter(field => field !== "parameters").join("|")}|param\\.[a-zA-Z][a-zA-Z0-9_.-]{0,63}|fast`;
+const CONDITION_FIELDS = INTERACTION_CONDITION_FIELDS_SOURCE;
 const CONDITION = new RegExp(
   `^${CONDITION_BREAK}+(${CONDITION_FIELDS}):("(?:[^"]|"")*"|[^\\s"]+)(?=\\s|$)`, "u");
 const BROKEN_CONDITION = new RegExp(`^${CONDITION_BREAK}+(?:${CONDITION_FIELDS}|param\\.[^\\s:]*):`, "u");
