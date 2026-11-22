@@ -166,3 +166,27 @@ export async function occurNornEvent(env: Env, input: {
   }
   return heard;
 }
+
+/**
+ * Checks whether at least one authorized running Norn program is currently
+ * waiting on a stream matching `input.matches` (e.g. so Gmail notification
+ * drain reads structured message headers even when no ordinary Channel
+ * subscription exists).
+ */
+export async function hasWaitingNornProgram(env: Env, input: {
+  spaceId?: string;
+  matches: (stream: NornStream) => boolean;
+  allowed?: (program: { spaceId: string; authorityUserId: string }) => Promise<boolean>;
+}): Promise<boolean> {
+  for (const shard of createPostgresAuthorityFleet(env, { applicationName: "xmatrix-norn-events", statementTimeoutMs: 5_000,
+    transactionTimeoutMs: 15_000, lockTimeoutMs: 2_000 }).physicalShards) {
+    const programs = await readWaitingNornPrograms(shard.database, { requestId: crypto.randomUUID(),
+      ...(input.spaceId ? { spaceId: input.spaceId } : {}) });
+    for (const program of programs) {
+      if (!program.waits.filter(isNornStream).some(input.matches)) continue;
+      if (input.allowed && !await input.allowed(program)) continue;
+      return true;
+    }
+  }
+  return false;
+}

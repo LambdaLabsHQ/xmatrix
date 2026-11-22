@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@3a8adebc52c4e8af22a0b40ddf7a2dfd7ca36f03; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The Norn type checker (docs/types.md).
  *
@@ -18,7 +18,7 @@ export { CODES, type CheckDiagnostic, type Code, type DiagnosticFix, type Diagno
 export type { EffectSummary } from "./effects.js";
 export { elaborate, type FormEvidencePlan } from "./elaborate.js";
 export {
-  EVENTS_INTERFACE_SOURCE, validateEventKindAgainstManifests,
+  EVENTS_INTERFACE_SOURCE, manifestEventForm, validateEventKindAgainstManifests,
   type ConnectorEventSpec, type ConnectorFieldSpec, type ConnectorManifest,
 } from "./events.js";
 export type { Form, FormDefinition, FormRefusal, ReportForm } from "./forms.js";

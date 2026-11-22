@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as subscriptionDomain from "../src/github-subscription-domain.ts";
-import { appStream, githubStream } from "../src/norn-host.ts";
+import { appStream, eventsStream, githubStream } from "../src/norn-host.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 
 const load = await compileCommonJsSourceModule(new URL("../src/outside-events.ts", import.meta.url));
@@ -23,23 +23,25 @@ function ingress({ connection = { status: "configured" }, delegated = true } = {
     "./apps": { findAppConnection: async () => connection },
     "./github-subscription-domain": subscriptionDomain,
     "./norn-events": { occurNornEvent: async (_env, input) => { heard.push(input); return 1; } },
-    "./norn-host": { appStream, githubStream },
+    "./norn-host": { appStream, eventsStream, githubStream },
   })[name]);
   return { heard, asked, githubOutsideEvent, githubEventArrived, connectorEventArrived };
 }
 
-test("a merged pull request and a failed workflow are outside events; other webhooks are not", () => {
+test("GitHub webhooks emit structured outside events; incomplete webhooks emit none", () => {
   const { githubOutsideEvent } = ingress();
   assert.deepEqual(githubOutsideEvent("pull_request", { action: "closed", installation, repository,
     pull_request: { number: 9, merged: true, title: "Split the router", base: { ref: "main" },
       html_url: "https://github.com/acme/widgets/pull/9" } }), {
     repository: "acme/widgets", defaultBranch: "main", installationId: "42", kind: "merged", branch: "main",
-    pullRequest: 9, id: "github:acme/widgets#9:merged", summary: "Pull request #9 “Split the router” was merged into main",
+    pullRequest: 9, merged: true, title: "Split the router", id: "github:acme/widgets#9:merged",
+    summary: "Pull request #9 “Split the router” was merged into main",
     url: "https://github.com/acme/widgets/pull/9" });
+  // Unmerged closed PR and successful workflow_run still pass through for Events libraries (not legacy ciFailed/prMerged).
   assert.equal(githubOutsideEvent("pull_request", { action: "closed", installation, repository,
-    pull_request: { number: 9, merged: false, base: { ref: "main" } } }), undefined);
+    pull_request: { number: 9, merged: false, base: { ref: "main" } } })?.kind, "pull-closed");
   assert.equal(githubOutsideEvent("workflow_run", { action: "completed", installation, repository,
-    workflow_run: { id: 5, name: "CI", conclusion: "success", head_branch: "main" } }), undefined);
+    workflow_run: { id: 5, name: "CI", conclusion: "success", head_branch: "main" } })?.kind, "workflow-completed");
   assert.equal(githubOutsideEvent("workflow_run", { action: "completed", installation, repository,
     workflow_run: { id: 5, run_attempt: 2, name: "CI", conclusion: "failure", head_branch: "main" } })?.id,
   "github:run:5:2");
@@ -70,11 +72,20 @@ test("a GitHub event on the default branch reaches the programs waiting on its r
   }
 });
 
-test("a GitHub event off the default branch, and a webhook that is no event, reach nothing", async () => {
+test("non-default-branch workflows reach Events libraries but NOT legacy ciFailed; incomplete webhooks reach nothing", async () => {
   const f = ingress();
   await f.githubEventArrived({}, "workflow_run", failedRun("release"));
   await f.githubEventArrived({}, "issues", { action: "opened", installation, repository });
-  assert.equal(f.heard.length, 0);
+  assert.equal(f.heard.length, 1);
+  const [releaseRun] = f.heard;
+  // Legacy `ciFailed` does NOT match off-default-branch runs.
+  assert.equal(releaseRun.matches(stream("ciFailed", "acme/widgets")), false);
+  // Standard `Events.events(Events.kind("github", "workflow_run.completed"), ~source="acme/widgets")` DOES match so libraries filter it.
+  assert.equal(releaseRun.matches({
+    type: "source", kind: "stream", name: "Events.events",
+    args: [{ type: "variant", name: "EventKind", args: [{ type: "string", value: "github" }, { type: "string", value: "workflow_run.completed" }] }],
+    labels: { source: { type: "string", value: "acme/widgets" } },
+  }), true);
   assert.deepEqual(f.asked, []);
 });
 
