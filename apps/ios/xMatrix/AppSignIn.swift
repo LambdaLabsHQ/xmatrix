@@ -22,7 +22,7 @@ final class AppSignIn: NSObject {
     static let callbackURL = "xmatrix://auth"
     /// The browser defect report keeps 300 characters, including the Web's
     /// "Apple sign-in native authorization failed: " prefix (43). Stay under it.
-    static let diagnosticCharacterLimit = 250
+    nonisolated static let diagnosticCharacterLimit = 250
 
     /// The view whose window the sign-in sheet is shown over.
     weak var anchorView: UIView?
@@ -311,7 +311,16 @@ final class AppSignIn: NSObject {
     }
 
     private var presentationWindow: ASPresentationAnchor {
-        existingWindow() ?? ASPresentationAnchor()
+        existingWindow() ?? sceneAnchor()
+    }
+
+    /// A fresh window on the app's scene; `UIWindow()` without a scene is deprecated since iOS 26.
+    private func sceneAnchor() -> ASPresentationAnchor {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else {
+            return ASPresentationAnchor()
+        }
+        return ASPresentationAnchor(windowScene: scene)
     }
 }
 
@@ -329,7 +338,7 @@ extension AppSignIn: ASAuthorizationControllerPresentationContextProviding, ASAu
                 attemptFacts.presented = true
                 attemptFacts.anchor = anchorToken(returning: window)
             }
-            return window ?? ASPresentationAnchor()
+            return window ?? sceneAnchor()
         }
     }
 
