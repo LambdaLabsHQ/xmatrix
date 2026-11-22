@@ -3,27 +3,31 @@ const test = require("node:test");
 require("../../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  alternativeCategories,
   alternativePages,
-  alternativePagesByCategory,
-  findAlternativePage,
+  findAlternativePageByRouteSlug,
+  findAlternativeRedirect,
   relatedAlternatives,
 } = require("./index.ts");
 
-test("every competitor alternative page has a unique URL-safe slug and resolves at the site origin", async () => {
+test("every competitor alternative page uses a flat root /<slug>-alternatives URL served at the site origin", async () => {
   const { isSitePath } = await import("../../../site-host.mjs");
   const slugs = new Set();
 
-  assert.ok(alternativePages.length >= 15, "publishes the full competitor alternatives set");
-  assert.equal(isSitePath("/alternatives"), true, "/alternatives must be served at the site origin");
+  assert.ok(alternativePages.length >= 19, "publishes the full competitor alternatives set");
+  assert.equal(isSitePath("/alternatives"), false, "no /alternatives hub page is exposed at the site origin");
 
   for (const page of alternativePages) {
     assert.match(page.slug, /^[a-z0-9]+(?:-[a-z0-9]+)*$/u, `slug must be kebab-case: ${page.slug}`);
     assert.equal(slugs.has(page.slug), false, `duplicate slug: ${page.slug}`);
     slugs.add(page.slug);
-    assert.equal(page.href, `/alternatives/${page.slug}`);
-    assert.equal(findAlternativePage(page.slug), page);
+    assert.equal(page.routeSlug, `${page.slug}-alternatives`);
+    assert.equal(page.href, `/${page.slug}-alternatives`);
+    assert.equal(findAlternativePageByRouteSlug(page.routeSlug), page);
     assert.equal(isSitePath(page.href), true, `${page.href} must not redirect away from the site origin`);
+    assert.match(page.metaTitle, /Alternatives/u, `${page.slug} metaTitle must target the search phrase`);
+    assert.ok(page.metaTitle.length <= 60, `${page.slug} metaTitle too long for SERP (${page.metaTitle.length})`);
+    assert.match(page.headline, /Alternative/u, `${page.slug} H1 must include Alternative`);
+    assert.ok(page.productCaption.length > 30, `${page.slug} needs a product showcase caption`);
     assert.ok(page.painPoints.length >= 3, `${page.slug} needs concrete pain points`);
     assert.ok(page.comparisonRows.length >= 5, `${page.slug} needs a side-by-side comparison table`);
     assert.ok(page.stayWhen.length >= 1 && page.switchWhen.length >= 2, `${page.slug} needs honest stay/switch guidance`);
@@ -37,15 +41,20 @@ test("every competitor alternative page has a unique URL-safe slug and resolves 
     }
   }
 
-  assert.equal(findAlternativePage("does-not-exist"), undefined);
+  assert.equal(findAlternativePageByRouteSlug("does-not-exist-alternatives"), undefined);
 });
 
-test("every alternatives category groups at least one published page", () => {
-  let total = 0;
-  for (const category of alternativeCategories) {
-    const pages = alternativePagesByCategory(category.id);
-    assert.ok(pages.length > 0, `category ${category.id} has no pages`);
-    total += pages.length;
+test("legacy competitor brand names redirect to their current canonical alternative page", async () => {
+  const { isSitePath } = await import("../../../site-host.mjs");
+  for (const [legacy, target] of [
+    ["superset-alternatives", "/paradev-alternatives"],
+    ["slock-alternatives", "/raft-alternatives"],
+    ["lobechat-alternatives", "/lobehub-alternatives"],
+    ["evermemos-alternatives", "/everos-alternatives"],
+    ["google-jules-alternatives", "/jules-alternatives"],
+  ]) {
+    assert.equal(isSitePath(`/${legacy}`), true, `/${legacy} must be served at the site origin to redirect`);
+    assert.equal(findAlternativeRedirect(legacy), target);
+    assert.ok(findAlternativePageByRouteSlug(target.slice(1)), `redirect target ${target} must exist`);
   }
-  assert.equal(total, alternativePages.length);
 });

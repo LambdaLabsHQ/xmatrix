@@ -15,15 +15,15 @@ const SITE_PATHS = new Set([
 
 /** Path prefixes of the site's pages, its assets and the public API its pages read. */
 const SITE_PREFIXES = [
-  "/alternatives/", "/docs/", "/releases/", "/_next/", "/api/", "/brand/", "/fonts/", "/textures/",
+  "/docs/", "/releases/", "/_next/", "/api/", "/brand/", "/fonts/", "/textures/",
   "/agent-vendors/", "/app-connectors/", "/role-avatars/", "/skills/", "/prompts/",
 ];
 
-/** Top-level files: the Markdown the site publishes, app icons and search-engine key files. */
-const SITE_FILE = /^\/(?:[a-z0-9-]+\.md|(?:icon|android-chrome)-[0-9x]+\.png|[0-9a-f]{32}\.txt)$/u;
+/** Top-level files and flat competitor alternative pages (`/raft-alternatives`, …). */
+const SITE_FILE = /^\/(?:[a-z0-9-]+\.md|(?:icon|android-chrome)-[0-9x]+\.png|[0-9a-f]{32}\.txt|[a-z0-9]+(?:-[a-z0-9]+)*-alternatives)$/u;
 
 export function isSitePath(pathname) {
-  if (SITE_PATHS.has(pathname) || pathname === "/alternatives" || pathname === "/docs" || pathname === "/releases") return true;
+  if (SITE_PATHS.has(pathname) || pathname === "/docs" || pathname === "/releases") return true;
   return SITE_PREFIXES.some((prefix) => pathname.startsWith(prefix)) || SITE_FILE.test(pathname);
 }
 

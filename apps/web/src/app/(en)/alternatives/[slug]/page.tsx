@@ -2,18 +2,19 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { AlternativeDetailPage } from "@/components/alternatives/alternative-page";
-import { findAlternativePage } from "@/lib/alternatives";
+import { findAlternativePageByRouteSlug } from "@/lib/alternatives";
 import { shareImage } from "@/lib/site-url";
 
 /**
- * Competitor alternative landing pages: /alternatives/raft, /alternatives/t3-code, …
- * Rendered per request: the deployed Worker keeps no prerendered pages, so a
- * route limited to static params would answer 404 for every one of them.
+ * Internal render target for flat root-level `/<competitor>-alternatives` URLs
+ * rewritten by `src/middleware.ts`. Direct requests to `/alternatives/*` are
+ * rejected with 404 by middleware so only the canonical `/<slug>-alternatives`
+ * addresses are reachable.
  */
 type Params = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  const page = findAlternativePage((await params).slug);
+  const page = findAlternativePageByRouteSlug((await params).slug);
   if (!page) return {};
   return {
     title: page.metaTitle,
@@ -36,8 +37,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   };
 }
 
-export default async function AlternativeSlugPage({ params }: Params) {
-  const page = findAlternativePage((await params).slug);
+export default async function InternalAlternativeRoutePage({ params }: Params) {
+  const page = findAlternativePageByRouteSlug((await params).slug);
   if (!page) notFound();
   return <AlternativeDetailPage page={page} />;
 }
