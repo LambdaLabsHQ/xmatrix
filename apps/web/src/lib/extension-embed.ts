@@ -17,7 +17,7 @@
  * reading (a passage, or the page itself), to quote in the open conversation
  * or to start a new one with.
  */
-import { CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AuthUser } from "@xmatrix/protocol";
+import { CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AuthUser, type SerializedChannel } from "@xmatrix/protocol";
 import canonicalVersion from "../../../../version.json" with { type: "json" };
 import { EXTENSION_EMBED_ORIGINS } from "./extension-embed-origins";
 
@@ -189,8 +189,21 @@ export function subscribeEmbedPassages(onPassage: (passage: EmbedPassage) => voi
 /** A conversation of this app, as `/app/<space>/channels/<conversation>`; nothing else. */
 const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-9_-]{1,128}$/u;
 
-/** What shows an address of this app in the open app; false when it shows nothing for it. */
-type AddressOpener = (path: string) => boolean;
+/**
+ * What shows an address of this app in the open app; false when it shows
+ * nothing for it. `channel` is the conversation at that address as the Hub
+ * answered its creation, when the extension just started it: the open app may
+ * not list it yet.
+ */
+type AddressOpener = (path: string, channel?: SerializedChannel) => boolean;
+
+/** A conversation the extension hands over with an address: the one at that address, and bounded. */
+function parseOpenedChannel(value: unknown, path: string): SerializedChannel | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { id, spaceId } = value as { id?: unknown; spaceId?: unknown };
+  if (typeof id !== "string" || typeof spaceId !== "string" || !path.endsWith(`/channels/${id}`)) return undefined;
+  return JSON.stringify(value).length <= 256_000 ? value as SerializedChannel : undefined;
+}
 const addressOpeners = new Set<AddressOpener>();
 
 /**
@@ -202,7 +215,9 @@ const addressOpeners = new Set<AddressOpener>();
 export function subscribeEmbedOpen(onOpen: AddressOpener): () => void {
   addressOpeners.add(onOpen);
   const stop = subscribeParent("open", (data) => {
-    if (typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path)) onOpen(data.path);
+    if (typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path)) {
+      onOpen(data.path, parseOpenedChannel(data.channel, data.path));
+    }
   });
   return () => {
     addressOpeners.delete(onOpen);

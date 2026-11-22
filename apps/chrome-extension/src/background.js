@@ -236,7 +236,9 @@ async function askSend(tab, { body, invocationSelections }) {
   // The panel shows it: at once if its app is loaded, or opening straight onto it.
   // For the side panel of the window the question was asked in: another window's panel (or an extension page
   // open in a tab) must not take it.
-  await chrome.storage.session.set({ openPath: { windowId: tab.windowId ?? null,
+  // The conversation as the Hub answered it: the panel's app may not list it yet (it lists a window of a large
+  // catalog, and a new conversation reaches it only with the next refresh), and opens it from this.
+  await chrome.storage.session.set({ openPath: { windowId: tab.windowId ?? null, channel: result.channel.snapshot ?? null,
     path: `/app/${encodeURIComponent(result.space.id)}/channels/${encodeURIComponent(result.channel.id)}`, at: Date.now() } });
   return { spaceName: result.space.name };
 }
@@ -312,7 +314,7 @@ const panelHandlers = {
     if (!openPath || Date.now() - openPath.at >= 60_000) return null;
     if (openPath.windowId !== null && windowId !== undefined && openPath.windowId !== windowId) return null;
     await chrome.storage.session.remove("openPath");
-    return openPath.path;
+    return { path: openPath.path, channel: openPath.channel ?? null };
   },
   queuePassage: ({ passage }) => queuePassage(pagePassage(passage ?? {})),
   quickSelect: () => chrome.permissions.contains({ origins: WEB_ORIGINS }),

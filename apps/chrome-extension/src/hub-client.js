@@ -233,7 +233,7 @@ export async function createConversation(deps, token, { spaceId, name, memberNam
     body: { spaceId, name, mode: "open", metadata: { createdBy: "chrome-extension", autoName: true }, memberName },
   });
   if (typeof json.channel?.id !== "string") throw new HubError(502, "xMatrix did not start the conversation.");
-  return { id: json.channel.id, spaceId: json.channel.spaceId ?? spaceId };
+  return { id: json.channel.id, spaceId: json.channel.spaceId ?? spaceId, snapshot: json.channel };
 }
 
 /**

@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { appViewSelectionQuery, discussionHead, isAppSelectionView, presenceInstanceId } from "@xmatrix/protocol";
+import { appViewSelectionQuery, decodeChannelSnapshot, discussionHead, isAppSelectionView, presenceInstanceId, type SerializedChannel } from "@xmatrix/protocol";
 
 import { pageShellActions } from "./page-shell-actions";
 import { invocationSelectionsEnvelope } from "./composer-invocation-bindings";
@@ -1637,8 +1637,14 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     if (shownSpaceId && shownSpaceName) announceEmbedSpace({ id: shownSpaceId, name: shownSpaceName });
   }, [shownSpaceId, shownSpaceName]);
 
-  const handleEmbedOpen = useStableCallback((path: string) =>
-    openInternalAppLink(new URL(path, appAddressOrigin()).toString()));
+  const handleEmbedOpen = useStableCallback((path: string, channel?: SerializedChannel) => {
+    // A conversation the extension just started may be past the window of the catalog this app lists.
+    if (channel && !s.realtimeChannels.get(channel.id)) {
+      const opened = decodeChannelSnapshot(channel);
+      setChannels((current) => (current.some((item) => item.id === opened.id) ? current : [opened, ...current]));
+    }
+    return openInternalAppLink(new URL(path, appAddressOrigin()).toString());
+  });
   useEffect(() => subscribeEmbedOpen(handleEmbedOpen), [handleEmbedOpen]);
 
   useEffect(() => {
