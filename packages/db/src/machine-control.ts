@@ -1043,15 +1043,17 @@ export class PostgresMachineControlRepository {
       // An offline daemon stays offline since the moment it went offline: a
       // repeated unregister or failed delivery does not move that moment, which
       // is when a launch stops waiting for the daemon to reconnect.
+      // Each new connection replaces its advertised capabilities, even if empty.
       const rows = await tx.query<QueryResultRow>({ name: "machine_control_daemon_update_v3", text: `UPDATE
         data.machine_daemons SET owner_email=$1,hostname=COALESCE($2,hostname),
         display_name=COALESCE($3,display_name),status=$4,
-        capabilities_json=CASE WHEN jsonb_array_length($5::jsonb)>0 THEN $5::jsonb ELSE capabilities_json END,
+        capabilities_json=COALESCE($5::jsonb,capabilities_json),
         metadata_json=CASE WHEN $6::jsonb<>'{}'::jsonb THEN $6::jsonb ELSE metadata_json END,
         connection_epoch=connection_epoch+$7,version=version+1,
         updated_at=CASE WHEN status='offline' AND $4='offline' THEN updated_at ELSE $8 END
         WHERE daemon_id=$9 RETURNING *`, values: [input.ownerEmail, hostName, displayName, status,
-      JSON.stringify(capabilities), JSON.stringify(hostnameMetadata(body)), input.action === "connect" ? 1 : 0,
+      input.action === "connect" || capabilities.length ? JSON.stringify(capabilities) : null,
+      JSON.stringify(hostnameMetadata(body)), input.action === "connect" ? 1 : 0,
       input.at, input.daemonId], maxRows: 1 });
       return rows[0]!;
     }
