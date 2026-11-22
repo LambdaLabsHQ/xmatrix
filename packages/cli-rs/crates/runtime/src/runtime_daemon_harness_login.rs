@@ -588,6 +588,9 @@ async fn finish(
         failed.exit_code = exit_code.flatten().map(i64::from);
         return failed;
     }
+    if preset.id == "antigravity" {
+        xmatrix_harness::quota::antigravity::invalidate_antigravity_quota_cache();
+    }
     answer(
         &preset.id,
         action,

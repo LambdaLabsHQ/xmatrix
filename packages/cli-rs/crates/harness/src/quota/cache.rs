@@ -276,6 +276,12 @@ impl KeyedProviderUsageCache {
         if force { None } else { self.hit(key) }
     }
 
+    pub(crate) fn clear(&self) {
+        if let Ok(mut cache) = self.slots().lock() {
+            cache.clear();
+        }
+    }
+
     pub(crate) async fn fetch_json(
         &self,
         key: &str,

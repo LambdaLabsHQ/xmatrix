@@ -1,248 +1,368 @@
-//! Google Antigravity (`agy`) account quota, read from the Cloud Code API
-//! behind the CLI's stored OAuth login.
+//! Google Antigravity (`agy`) account quota, read through the official
+//! `agy -p "/usage" --output-format json` command.
 //!
-//! `agy` stores its OAuth token JSON at
-//! `~/.gemini/antigravity-cli/antigravity-oauth-token` (or under
-//! `ANTIGRAVITY_APP_DATA_DIR`), and also honours `JETSKI_OAUTH_TOKEN`.
+//! Delegating to the unmodified `agy` CLI lets Antigravity handle its own
+//! authentication (including system keyring sign-ins on macOS and Windows where
+//! no plaintext OAuth token file exists) without reading local OAuth token
+//! files or calling private Cloud Code endpoints directly.
 //!
-//! Antigravity separates quota into model pools rather than one account-wide
-//! window:
-//! - `retrieveUserQuotaSummary` reports grouped 5h and weekly buckets (such as
-//!   `Claude & GPT` models via `3p-5h` / `3p-weekly`, and any Gemini group the
-//!   backend includes).
-//! - `fetchAvailableModels` reports per-model `quotaInfo` (`remainingFraction`,
-//!   `resetTime`), which carries the live `Gemini` pool window when
-//!   `retrieveUserQuotaSummary` omits Gemini.
-//!
-//! Every window travels in `scoped_quota_usages`, paired with `quota_scopes` on
+//! `agy -p "/usage" --output-format json` executes without creating a
+//! conversation or spending model tokens (`num_turns: 0`, `total_tokens: 0`)
+//! and returns grouped pool buckets (`Gemini Models`, `Claude and GPT models`)
+//! with full floating-point `remaining_fraction` and `reset_time`. Every window
+//! travels in `scoped_quota_usages`, paired with `quota_scopes` on
 //! Antigravity's ACP model catalog so one pool's exhaustion never stops models
 //! in another pool.
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
 
+use colored::Colorize;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
-use super::cache::{KeyedProviderUsageCache, fetch_provider_json};
+use super::cache::KeyedProviderUsageCache;
 use super::windows::percent_window;
 use crate::fields::first_string;
-use crate::host::{home_dir_path, lowercase_hex, provider_client};
+use crate::host::{home_dir_path, lowercase_hex};
 use crate::usage::{LlmQuotaUsage, LlmUsage};
 
 /// Environment variables that make an `agy` spawn bill something other than
-/// the default `~/.gemini/antigravity-cli/antigravity-oauth-token` login.
+/// the default CLI sign-in.
 pub const ANTIGRAVITY_LOGIN_OVERRIDE_KEYS: &[&str] = &[
     "JETSKI_OAUTH_TOKEN",
     "ANTIGRAVITY_APP_DATA_DIR",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
+    "AGY_ADC_AUTH",
 ];
 
-const ANTIGRAVITY_CLOUD_CODE_BASE_URL: &str = "https://daily-cloudcode-pa.googleapis.com";
-/// Fallback Antigravity CLI version sent in the Cloud Code `User-Agent`.
-/// `retrieveUserQuotaSummary` gates the native `Gemini Models` group (5h and
-/// weekly buckets) behind `antigravity/cli/1.2.0+` and omits Gemini entirely
-/// for unversioned strings like `antigravity/xmatrix`.
-const FALLBACK_ANTIGRAVITY_CLI_VERSION: &str = "1.5.13";
-const MIN_QUOTA_SUMMARY_CLI_VERSION: (u64, u64, u64) = (1, 2, 0);
+/// Opt-out environment variable that disables Antigravity quota probing
+/// completely (both daemon pre-launch probes and live ACP session probes).
+pub const ANTIGRAVITY_QUOTA_DISABLE_ENV: &str = "XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE";
+
+/// First `agy` release that answers read-only `-p "/usage" --output-format json`
+/// non-interactively without starting an LLM turn or spending tokens.
+const MIN_PRINT_USAGE_CLI_VERSION: (u64, u64, u64) = (1, 1, 11);
 const AGY_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
-const EXPIRY_BUFFER_SECS: i64 = 60;
-const WEEKLY_RESET_THRESHOLD_SECS: i64 = 24 * 60 * 60;
+const AGY_USAGE_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_VERSION_STDOUT_BYTES: usize = 4 * 1024;
+const MAX_USAGE_STDOUT_BYTES: usize = 256 * 1024;
+const MAX_USAGE_STDERR_BYTES: usize = 32 * 1024;
 
 const SCOPE_GEMINI: &str = "Gemini";
 const SCOPE_CLAUDE_GPT: &str = "Claude & GPT";
 const MAX_SCOPE_BYTES: usize = 64;
 
-static ANTIGRAVITY_QUOTA: KeyedProviderUsageCache =
-    KeyedProviderUsageCache::new(Duration::from_secs(120), Duration::from_secs(60));
+struct AntigravityQuotaStore {
+    cache: KeyedProviderUsageCache,
+    /// Monotonic generation bumped whenever cached Antigravity readings are
+    /// invalidated (for example after completing remote sign-in), so an
+    /// in-flight `agy -p "/usage"` reading from the previous account is
+    /// discarded.
+    generation: AtomicU64,
+}
 
-struct AntigravityCredential {
-    access_token: String,
-    /// Credential source plus a one-way fingerprint of its bytes; used only as
-    /// an in-memory cache key and never logged or sent.
-    cache_key: String,
+impl AntigravityQuotaStore {
+    const fn new(fresh_ttl: Duration, error_ttl: Duration) -> Self {
+        Self {
+            cache: KeyedProviderUsageCache::new(fresh_ttl, error_ttl),
+            generation: AtomicU64::new(0),
+        }
+    }
+
+    fn invalidate(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        self.cache.clear();
+    }
+}
+
+/// Conservative cache TTL (3m success, 1m failure) so background probes avoid
+/// frequent `agy` subprocess invocations.
+static ANTIGRAVITY_QUOTA: AntigravityQuotaStore =
+    AntigravityQuotaStore::new(Duration::from_secs(180), Duration::from_secs(60));
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BinaryFingerprint {
+    path: PathBuf,
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+#[derive(Clone, Debug)]
+struct CachedCliVersion {
+    fingerprint: BinaryFingerprint,
+    version: (u64, u64, u64),
+}
+
+static AGY_VERSION_CACHE: OnceLock<Mutex<Option<CachedCliVersion>>> = OnceLock::new();
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AgyEnvMode {
+    /// Inherit the current process environment (used by live ACP Runs).
+    Process,
+    /// Strip [`ANTIGRAVITY_LOGIN_OVERRIDE_KEYS`] so the command resolves only
+    /// the machine's default `agy` sign-in.
+    DefaultLogin,
+}
+
+/// Whether `value` turns on a boolean disable flag (`1`, `true`, `yes`, `on`).
+pub fn is_quota_probe_disabled_value(value: Option<&str>) -> bool {
+    value.is_some_and(|raw| {
+        matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+/// Whether Antigravity quota probing is disabled in the given environment view.
+pub fn is_quota_probe_disabled_in(env: impl Fn(&str) -> Option<String>) -> bool {
+    is_quota_probe_disabled_value(env(ANTIGRAVITY_QUOTA_DISABLE_ENV).as_deref())
+}
+
+/// Whether Antigravity quota probing is disabled in the current process
+/// environment (`XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE`).
+pub fn antigravity_quota_probe_disabled() -> bool {
+    is_quota_probe_disabled_in(|key| std::env::var(key).ok())
+}
+
+/// Drop cached Antigravity quota readings and fence any in-flight read so a
+/// newly signed-in account never inherits the previous account's snapshot.
+pub fn invalidate_antigravity_quota_cache() {
+    ANTIGRAVITY_QUOTA.invalidate();
+}
+
+fn debug_report(detail: &str) {
+    if std::env::var("XMATRIX_ANTIGRAVITY_QUOTA_DEBUG").is_ok() {
+        eprintln!("{} antigravity quota {detail}", "⚠".yellow().bold());
+    }
 }
 
 fn fingerprint(raw: &str) -> String {
     lowercase_hex(&Sha256::digest(raw.as_bytes()))
 }
 
-fn default_oauth_token_path() -> Option<PathBuf> {
-    Some(
-        home_dir_path()?
-            .join(".gemini")
-            .join("antigravity-cli")
-            .join("antigravity-oauth-token"),
-    )
-}
-
-fn credential_from_file(path: &PathBuf, now: OffsetDateTime) -> Option<AntigravityCredential> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    let access_token = access_token_from_oauth_json(&raw, now)?;
-    Some(AntigravityCredential {
-        access_token,
-        cache_key: format!("{}\u{0}{}", path.to_string_lossy(), fingerprint(&raw)),
-    })
-}
-
-/// Extract an unexpired OAuth access token from `antigravity-oauth-token`.
-pub(crate) fn access_token_from_oauth_json(raw: &str, now: OffsetDateTime) -> Option<String> {
-    let value: Value = serde_json::from_str(raw).ok()?;
-    let root = value.as_object()?;
-    let token_obj = root.get("token").and_then(Value::as_object).unwrap_or(root);
-    let access_token = first_string(token_obj, &["access_token", "accessToken"])?;
-    if let Some(expiry) = first_string(token_obj, &["expiry", "expires_at", "expiresAt"])
-        && let Ok(parsed) = OffsetDateTime::parse(&expiry, &Rfc3339)
-        && parsed <= now + time::Duration::seconds(EXPIRY_BUFFER_SECS)
-    {
-        return None;
-    }
-    Some(access_token)
-}
-
-fn process_credential() -> Option<AntigravityCredential> {
-    if let Ok(token) = std::env::var("JETSKI_OAUTH_TOKEN") {
-        let trimmed = token.trim();
-        if !trimmed.is_empty() {
-            return Some(AntigravityCredential {
-                access_token: trimmed.to_string(),
-                cache_key: format!("env\u{0}{}", fingerprint(trimmed)),
-            });
+fn cache_key_for_mode(
+    mode: AgyEnvMode,
+    env: &(dyn Fn(&str) -> Option<String> + Sync),
+    home: Option<&Path>,
+) -> String {
+    let home_part = home
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    match mode {
+        AgyEnvMode::DefaultLogin => format!("default\u{0}{home_part}"),
+        AgyEnvMode::Process => {
+            let mut parts = vec!["process".to_string(), home_part];
+            for key in ANTIGRAVITY_LOGIN_OVERRIDE_KEYS {
+                let value = env(key)
+                    .map(|raw| raw.trim().to_string())
+                    .filter(|trimmed| !trimmed.is_empty());
+                match value {
+                    Some(raw) if *key == "ANTIGRAVITY_APP_DATA_DIR" => {
+                        parts.push(format!("{key}={raw}"));
+                    }
+                    Some(raw) => {
+                        // Hash in-process override values so credentials never
+                        // sit verbatim in cache keys.
+                        parts.push(format!("{key}#{}", fingerprint(&raw)));
+                    }
+                    None => {}
+                }
+            }
+            parts.join("\u{0}")
         }
     }
-    let now = OffsetDateTime::now_utc();
-    if let Ok(app_data_dir) = std::env::var("ANTIGRAVITY_APP_DATA_DIR") {
-        let trimmed = app_data_dir.trim();
-        if !trimmed.is_empty() {
-            return credential_from_file(
-                &PathBuf::from(trimmed).join("antigravity-oauth-token"),
-                now,
-            );
-        }
-    }
-    let path = default_oauth_token_path()?;
-    credential_from_file(&path, now)
 }
 
-fn default_account_credential() -> Option<AntigravityCredential> {
-    let path = default_oauth_token_path()?;
-    credential_from_file(&path, OffsetDateTime::now_utc())
+fn process_env_lookup(key: &str) -> Option<String> {
+    std::env::var(key).ok()
 }
 
 /// Read Antigravity quota for the login resolved by the current process
-/// environment (`JETSKI_OAUTH_TOKEN`, `ANTIGRAVITY_APP_DATA_DIR`, or
-/// `~/.gemini/antigravity-cli/antigravity-oauth-token`).
+/// environment by invoking `agy -p "/usage" --output-format json`.
 pub async fn read_antigravity_quota_usage(force: bool) -> Option<LlmUsage> {
-    let credential = process_credential()?;
-    read_antigravity_quota_from_base(
-        credential,
+    if antigravity_quota_probe_disabled() {
+        return None;
+    }
+    let program = resolve_agy_program()?;
+    read_antigravity_quota_with_program(
+        &ANTIGRAVITY_QUOTA,
+        &program,
+        AgyEnvMode::Process,
         force,
-        ANTIGRAVITY_CLOUD_CODE_BASE_URL,
-        process_credential,
+        AGY_USAGE_TIMEOUT,
+        &process_env_lookup,
+        home_dir_path().as_deref(),
     )
     .await
 }
 
-/// Read Antigravity quota for the default login
-/// (`~/.gemini/antigravity-cli/antigravity-oauth-token`), ignoring process
-/// overrides. Callers must first prove a registered spawn sees no override.
+/// Read Antigravity quota for the default CLI sign-in, ignoring process
+/// login-override variables. Callers must first prove a registered spawn sees
+/// no override.
 pub(crate) async fn read_antigravity_quota_usage_for_default_account(
     force: bool,
 ) -> Option<LlmUsage> {
-    let credential = default_account_credential()?;
-    read_antigravity_quota_from_base(
-        credential,
+    if antigravity_quota_probe_disabled() {
+        return None;
+    }
+    let program = resolve_agy_program()?;
+    read_antigravity_quota_with_program(
+        &ANTIGRAVITY_QUOTA,
+        &program,
+        AgyEnvMode::DefaultLogin,
         force,
-        ANTIGRAVITY_CLOUD_CODE_BASE_URL,
-        default_account_credential,
+        AGY_USAGE_TIMEOUT,
+        &process_env_lookup,
+        home_dir_path().as_deref(),
     )
     .await
 }
 
-async fn read_antigravity_quota_from_base<F>(
-    credential: AntigravityCredential,
+async fn read_antigravity_quota_with_program(
+    store: &AntigravityQuotaStore,
+    program: &Path,
+    mode: AgyEnvMode,
     force: bool,
-    base_url: &str,
-    reread_credential: F,
-) -> Option<LlmUsage>
-where
-    F: Fn() -> Option<AntigravityCredential>,
-{
-    let key = credential.cache_key.as_str();
-    if let Some(cached) = ANTIGRAVITY_QUOTA.hit_unless_forced(key, force) {
+    timeout: Duration,
+    env: &(dyn Fn(&str) -> Option<String> + Sync),
+    home: Option<&Path>,
+) -> Option<LlmUsage> {
+    let key = cache_key_for_mode(mode, env, home);
+    if let Some(cached) = store.cache.hit_unless_forced(&key, force) {
         return cached;
     }
-    ANTIGRAVITY_QUOTA
-        .single_flight(key, || async {
-            let user_agent = antigravity_user_agent().await;
-            let Some(load_resp) = fetch_provider_json(
-                "antigravity",
-                cloud_code_post(
-                    base_url,
-                    "loadCodeAssist",
-                    &credential.access_token,
-                    &user_agent,
-                    &serde_json::json!({ "metadata": { "ideType": "ANTIGRAVITY" } }),
-                ),
-            )
-            .await
-            else {
-                ANTIGRAVITY_QUOTA.store(key, None);
-                return None;
-            };
-
-            let project = load_resp
-                .as_object()
-                .and_then(|map| first_string(map, &["cloudaicompanionProject"]));
-            let body = match project {
-                Some(project) => serde_json::json!({ "project": project }),
-                None => serde_json::json!({}),
-            };
-
-            let (summary, models) = tokio::join!(
-                fetch_provider_json(
-                    "antigravity",
-                    cloud_code_post(
-                        base_url,
-                        "retrieveUserQuotaSummary",
-                        &credential.access_token,
-                        &user_agent,
-                        &body,
-                    ),
-                ),
-                fetch_provider_json(
-                    "antigravity",
-                    cloud_code_post(
-                        base_url,
-                        "fetchAvailableModels",
-                        &credential.access_token,
-                        &user_agent,
-                        &body,
-                    ),
-                ),
-            );
-
-            // The requests may outlive a login switch; never file a reading
-            // under or return it for a different account.
-            if reread_credential().map(|next| next.cache_key).as_deref() != Some(key) {
+    store
+        .cache
+        .single_flight(&key, || async {
+            let gen_before = store.generation.load(Ordering::Acquire);
+            if !agy_supports_print_usage(program, home).await {
+                if store.generation.load(Ordering::Acquire) == gen_before {
+                    store.cache.store(&key, None);
+                }
                 return None;
             }
-
-            let mut usage = antigravity_quota_usage_from_values(
-                summary.as_ref(),
-                models.as_ref(),
-                OffsetDateTime::now_utc(),
-            );
+            let Some(payload) = run_agy_usage_command(program, mode, home, timeout).await else {
+                if store.generation.load(Ordering::Acquire) == gen_before {
+                    store.cache.store(&key, None);
+                }
+                return None;
+            };
+            // Discard the reading if the cache was invalidated or the process
+            // override environment changed while `agy` was running.
+            if store.generation.load(Ordering::Acquire) != gen_before
+                || cache_key_for_mode(mode, env, home) != key
+            {
+                return None;
+            }
+            let mut usage = antigravity_cli_usage_from_value(&payload);
             if let Some(usage) = usage.as_mut() {
                 usage.quota_observed_at = super::observed_now();
             }
-            ANTIGRAVITY_QUOTA.store(key, usage.clone());
+            store.cache.store(&key, usage.clone());
             usage
         })
         .await
+}
+
+fn configure_agy_command(program: &Path, home: Option<&Path>) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(program);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
+        .kill_on_drop(true);
+    if let Some(home) = home.filter(|path| path.is_dir()) {
+        command.current_dir(home);
+    }
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
+fn resolve_agy_program() -> Option<PathBuf> {
+    if let Some(path_var) = std::env::var_os("PATH")
+        && let Some(found) = find_agy_in_paths(&path_var)
+    {
+        return Some(found);
+    }
+    #[cfg(not(windows))]
+    if let Some(home) = home_dir_path() {
+        let local_bin = home.join(".local").join("bin").join("agy");
+        if local_bin.is_file() {
+            return Some(local_bin);
+        }
+    }
+    #[cfg(windows)]
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        let install_bin = PathBuf::from(local_app_data)
+            .join("agy")
+            .join("bin")
+            .join("agy.exe");
+        if install_bin.is_file() {
+            return Some(install_bin);
+        }
+    }
+    None
+}
+
+fn find_agy_in_paths(path_var: &OsStr) -> Option<PathBuf> {
+    #[cfg(windows)]
+    const CANDIDATES: &[&str] = &["agy.exe", "agy.cmd", "agy.bat", "agy"];
+    #[cfg(not(windows))]
+    const CANDIDATES: &[&str] = &["agy"];
+
+    for dir in std::env::split_paths(path_var) {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        for name in CANDIDATES {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn binary_fingerprint(program: &Path) -> Option<BinaryFingerprint> {
+    let metadata = std::fs::metadata(program).ok()?;
+    Some(BinaryFingerprint {
+        path: program.to_path_buf(),
+        modified: metadata.modified().ok(),
+        len: metadata.len(),
+    })
+}
+
+fn cached_cli_version(fingerprint: &BinaryFingerprint) -> Option<(u64, u64, u64)> {
+    let cache = AGY_VERSION_CACHE.get_or_init(|| Mutex::new(None));
+    let guard = cache.lock().ok()?;
+    guard
+        .as_ref()
+        .filter(|entry| entry.fingerprint == *fingerprint)
+        .map(|entry| entry.version)
+}
+
+fn store_cli_version(fingerprint: BinaryFingerprint, version: (u64, u64, u64)) {
+    let cache = AGY_VERSION_CACHE.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some(CachedCliVersion {
+            fingerprint,
+            version,
+        });
+    }
 }
 
 fn parse_cli_semver(raw: &str) -> Option<(u64, u64, u64)> {
@@ -259,74 +379,193 @@ fn parse_cli_semver(raw: &str) -> Option<(u64, u64, u64)> {
         })
 }
 
-fn format_antigravity_user_agent(detected: Option<&str>) -> String {
-    if let Some((major, minor, patch)) = detected.and_then(parse_cli_semver)
-        && (major, minor, patch) >= MIN_QUOTA_SUMMARY_CLI_VERSION
+async fn read_agy_version(program: &Path, home: Option<&Path>) -> Option<(u64, u64, u64)> {
+    let fingerprint = binary_fingerprint(program);
+    if let Some(fp) = fingerprint.as_ref()
+        && let Some(cached) = cached_cli_version(fp)
     {
-        return format!("antigravity/cli/{major}.{minor}.{patch}");
+        return Some(cached);
     }
-    format!("antigravity/cli/{FALLBACK_ANTIGRAVITY_CLI_VERSION}")
-}
-
-async fn read_agy_version_from(program: &std::ffi::OsStr) -> Option<String> {
-    let mut command = tokio::process::Command::new(program);
-    command
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let output = tokio::time::timeout(AGY_VERSION_TIMEOUT, command.output())
+    let mut command = configure_agy_command(program, home);
+    command.arg("--version").stderr(Stdio::null());
+    let mut child = command.spawn().ok()?;
+    let stdout = child.stdout.take()?;
+    let read = async {
+        let mut bytes = Vec::new();
+        let mut limited = stdout.take((MAX_VERSION_STDOUT_BYTES + 1) as u64);
+        let (read_res, status_res) = tokio::join!(limited.read_to_end(&mut bytes), child.wait());
+        read_res.ok()?;
+        let status = status_res.ok()?;
+        if !status.success() || bytes.len() > MAX_VERSION_STDOUT_BYTES {
+            return None;
+        }
+        let text = String::from_utf8(bytes).ok()?;
+        parse_cli_semver(&text)
+    };
+    let version = tokio::time::timeout(AGY_VERSION_TIMEOUT, read)
         .await
-        .ok()?
-        .ok()?;
-    if !output.status.success() {
-        return None;
+        .ok()
+        .flatten()?;
+    if let Some(fp) = fingerprint {
+        store_cli_version(fp, version);
     }
-    String::from_utf8(output.stdout).ok()
+    Some(version)
 }
 
-async fn detect_installed_agy_version() -> Option<String> {
-    if let Some(output) = read_agy_version_from(std::ffi::OsStr::new("agy")).await {
-        return Some(output);
-    }
-    #[cfg(not(windows))]
-    if let Some(home) = home_dir_path() {
-        let local_bin = home.join(".local").join("bin").join("agy");
-        if local_bin.is_file() {
-            return read_agy_version_from(local_bin.as_os_str()).await;
+async fn agy_supports_print_usage(program: &Path, home: Option<&Path>) -> bool {
+    match read_agy_version(program, home).await {
+        Some(version) if version >= MIN_PRINT_USAGE_CLI_VERSION => true,
+        Some((major, minor, patch)) => {
+            debug_report(&format!(
+                "skipping agy {major}.{minor}.{patch}: requires >= {}.{}.{} for non-interactive /usage",
+                MIN_PRINT_USAGE_CLI_VERSION.0,
+                MIN_PRINT_USAGE_CLI_VERSION.1,
+                MIN_PRINT_USAGE_CLI_VERSION.2
+            ));
+            false
+        }
+        None => {
+            debug_report("could not determine agy CLI version");
+            false
         }
     }
-    None
 }
 
-async fn antigravity_user_agent() -> String {
-    if let Ok(version) = std::env::var("ANTIGRAVITY_CLI_VERSION")
-        && parse_cli_semver(&version).is_some_and(|v| v >= MIN_QUOTA_SUMMARY_CLI_VERSION)
-    {
-        return format_antigravity_user_agent(Some(&version));
+/// Detect when an unauthenticated `agy -p "/usage"` enters its interactive
+/// 60-second OAuth sign-in prompt so the probe can kill it immediately instead
+/// of waiting out the probe timeout.
+fn stderr_requests_interactive_auth(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("authentication required")
+        || lower.contains("please visit the url to log in")
+        || lower.contains("waiting for authentication")
+        || lower.contains("paste the authorization code")
+}
+
+fn build_agy_usage_command(
+    program: &Path,
+    mode: AgyEnvMode,
+    home: Option<&Path>,
+) -> tokio::process::Command {
+    let mut command = configure_agy_command(program, home);
+    command.args(["-p", "/usage", "--output-format", "json"]);
+    if mode == AgyEnvMode::DefaultLogin {
+        for key in ANTIGRAVITY_LOGIN_OVERRIDE_KEYS {
+            command.env_remove(key);
+        }
     }
-    let detected = detect_installed_agy_version().await;
-    format_antigravity_user_agent(detected.as_deref())
+    command
 }
 
-fn cloud_code_post(
-    base_url: &str,
-    method: &str,
-    access_token: &str,
-    user_agent: &str,
-    body: &Value,
-) -> reqwest::RequestBuilder {
-    let base = base_url.trim_end_matches('/');
-    provider_client()
-        .post(format!("{base}/v1internal:{method}"))
-        .header(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {access_token}"),
-        )
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .header(reqwest::header::ACCEPT, "application/json")
-        .header(reqwest::header::USER_AGENT, user_agent)
-        .json(body)
+async fn run_agy_usage_command(
+    program: &Path,
+    mode: AgyEnvMode,
+    home: Option<&Path>,
+    timeout: Duration,
+) -> Option<Value> {
+    let mut command = build_agy_usage_command(program, mode, home);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            debug_report(&format!("failed to spawn agy: {err}"));
+            return None;
+        }
+    };
+    let stdout = child.stdout.take()?;
+    let stderr = child.stderr.take()?;
+
+    let (auth_tx, auth_rx) = tokio::sync::oneshot::channel::<()>();
+    let auth_prompted = async move {
+        if auth_rx.await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    };
+
+    let stdout_fut = async move {
+        let mut bytes = Vec::new();
+        let mut limited = stdout.take((MAX_USAGE_STDOUT_BYTES + 1) as u64);
+        limited.read_to_end(&mut bytes).await.ok()?;
+        (bytes.len() <= MAX_USAGE_STDOUT_BYTES).then_some(bytes)
+    };
+
+    let stderr_fut = async move {
+        let mut reader = BufReader::new(stderr.take(MAX_USAGE_STDERR_BYTES as u64));
+        let mut line = String::new();
+        let mut tx = Some(auth_tx);
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {
+                    if stderr_requests_interactive_auth(&line) {
+                        if let Some(tx) = tx.take() {
+                            let _ = tx.send(());
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    };
+
+    enum RunOutcome {
+        Completed {
+            stdout: Option<Vec<u8>>,
+            status: std::io::Result<std::process::ExitStatus>,
+        },
+        AuthPrompted,
+    }
+
+    let run = async {
+        tokio::select! {
+            biased;
+            () = auth_prompted => RunOutcome::AuthPrompted,
+            (stdout, (), status) = async {
+                tokio::join!(stdout_fut, stderr_fut, child.wait())
+            } => RunOutcome::Completed { stdout, status },
+        }
+    };
+
+    let outcome = match tokio::time::timeout(timeout, run).await {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            debug_report("agy -p \"/usage\" timed out");
+            return None;
+        }
+    };
+
+    match outcome {
+        RunOutcome::AuthPrompted => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            debug_report("agy is signed out (aborted interactive auth prompt)");
+            None
+        }
+        RunOutcome::Completed { stdout, status } => {
+            let Ok(status) = status else {
+                debug_report("agy wait failed");
+                return None;
+            };
+            if !status.success() {
+                debug_report(&format!("agy -p \"/usage\" exited with {status}"));
+                return None;
+            }
+            let Some(stdout) = stdout else {
+                debug_report("agy -p \"/usage\" stdout exceeded bound");
+                return None;
+            };
+            let trimmed = String::from_utf8(stdout).ok()?;
+            match serde_json::from_str::<Value>(trimmed.trim()) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    debug_report(&format!("agy -p \"/usage\" JSON parse failed: {err}"));
+                    None
+                }
+            }
+        }
+    }
 }
 
 /// The quota pool an Antigravity model spends (`Gemini` or `Claude & GPT`), or
@@ -342,20 +581,30 @@ pub fn antigravity_quota_scope_for_model(model: &str) -> Option<&'static str> {
     }
 }
 
-/// Parse Antigravity's `retrieveUserQuotaSummary` and `fetchAvailableModels`
-/// responses into scoped pool windows.
-pub(crate) fn antigravity_quota_usage_from_values(
-    summary: Option<&Value>,
-    models: Option<&Value>,
-    now: OffsetDateTime,
-) -> Option<LlmUsage> {
+/// Parse `agy -p "/usage" --output-format json` stdout JSON into scoped pool
+/// windows (`Gemini` and `Claude & GPT`, 5h and 1w, preserving floating-point
+/// precision).
+pub fn antigravity_cli_usage_from_value(value: &Value) -> Option<LlmUsage> {
+    let root = value.as_object()?;
+    let status = root.get("status").and_then(Value::as_str)?;
+    if !status.eq_ignore_ascii_case("SUCCESS") {
+        return None;
+    }
+    if root
+        .get("num_turns")
+        .and_then(Value::as_u64)
+        .is_some_and(|turns| turns > 0)
+    {
+        return None;
+    }
+    let command = root.get("command")?.as_object()?;
+    let command_name = command.get("name").and_then(Value::as_str)?;
+    if !command_name.eq_ignore_ascii_case("usage") && !command_name.eq_ignore_ascii_case("quota") {
+        return None;
+    }
+    let data = command.get("data")?;
     let mut scoped = Vec::new();
-    if let Some(summary) = summary {
-        collect_summary_windows(summary, &mut scoped);
-    }
-    if let Some(models) = models {
-        collect_missing_model_pool_windows(models, now, &mut scoped);
-    }
+    collect_summary_windows(data, &mut scoped);
     dedupe_and_sort_windows(&mut scoped);
     if scoped.is_empty() {
         return None;
@@ -395,7 +644,7 @@ fn collect_summary_windows(summary: &Value, out: &mut Vec<LlmQuotaUsage>) {
         for bucket in buckets {
             let Some(scope) = bucket
                 .as_object()
-                .and_then(|map| first_string(map, &["bucketId", "bucket_id"]))
+                .and_then(|map| first_string(map, &["id", "bucketId", "bucket_id"]))
                 .and_then(|id| scope_from_bucket_id(&id))
             else {
                 continue;
@@ -408,7 +657,7 @@ fn collect_summary_windows(summary: &Value, out: &mut Vec<LlmQuotaUsage>) {
 }
 
 fn summary_group_scope(group: &Map<String, Value>, buckets: &[Value]) -> Option<String> {
-    if let Some(display_name) = first_string(group, &["displayName", "display_name"]) {
+    if let Some(display_name) = first_string(group, &["name", "displayName", "display_name"]) {
         let lower = display_name.to_ascii_lowercase();
         if lower.contains("claude") && lower.contains("gpt") {
             return Some(SCOPE_CLAUDE_GPT.to_string());
@@ -421,7 +670,7 @@ fn summary_group_scope(group: &Map<String, Value>, buckets: &[Value]) -> Option<
     buckets.iter().find_map(|bucket| {
         bucket
             .as_object()
-            .and_then(|map| first_string(map, &["bucketId", "bucket_id"]))
+            .and_then(|map| first_string(map, &["id", "bucketId", "bucket_id"]))
             .and_then(|id| scope_from_bucket_id(&id))
             .map(str::to_string)
     })
@@ -455,7 +704,7 @@ fn summary_bucket_window(bucket: &Value, scope: &str) -> Option<LlmQuotaUsage> {
         return None;
     }
     let label = summary_bucket_label(map)?;
-    let reset_at = first_string(map, &["resetTime", "reset_time"]);
+    let reset_at = first_string(map, &["reset_time", "resetTime"]);
     let used_percent = used_percent_from_remaining_fraction(map, reset_at.is_some())?;
     let mut window = percent_window(
         label,
@@ -470,7 +719,7 @@ fn summary_bucket_window(bucket: &Value, scope: &str) -> Option<LlmQuotaUsage> {
 
 fn summary_bucket_label(map: &Map<String, Value>) -> Option<&'static str> {
     let candidate = first_string(map, &["window"]).or_else(|| {
-        first_string(map, &["bucketId", "bucket_id"])
+        first_string(map, &["id", "bucketId", "bucket_id"])
             .and_then(|id| id.rsplit(['-', '_']).next().map(str::to_string))
     })?;
     match candidate
@@ -488,17 +737,17 @@ fn summary_bucket_label(map: &Map<String, Value>) -> Option<&'static str> {
     }
 }
 
-/// Convert proto3 `remainingFraction` (0..=1 remaining) to xMatrix used
-/// percent (0..=100 used). Proto3 JSON omits float fields at `0.0`, so an
-/// omitted `remainingFraction` alongside a `resetTime` means 0% remaining
-/// (100% used).
+/// Convert `remaining_fraction` (`0..=1` remaining) to xMatrix used percent
+/// (`0..=100` used) without rounding. Proto3 JSON omits float fields at `0.0`,
+/// so an omitted `remaining_fraction` alongside a `reset_time` means 0%
+/// remaining (100% used).
 fn used_percent_from_remaining_fraction(
     map: &Map<String, Value>,
     has_reset_time: bool,
 ) -> Option<f64> {
     let raw = map
-        .get("remainingFraction")
-        .or_else(|| map.get("remaining_fraction"));
+        .get("remaining_fraction")
+        .or_else(|| map.get("remainingFraction"));
     match raw.and_then(Value::as_f64) {
         Some(fraction) if fraction.is_finite() && (0.0..=1.0).contains(&fraction) => {
             Some(((1.0 - fraction) * 100.0).clamp(0.0, 100.0))
@@ -506,116 +755,6 @@ fn used_percent_from_remaining_fraction(
         Some(_) => None,
         None if has_reset_time => Some(100.0),
         None => None,
-    }
-}
-
-struct PoolReading {
-    used_percent: f64,
-    reset_at: Option<String>,
-}
-
-fn collect_missing_model_pool_windows(
-    models_resp: &Value,
-    now: OffsetDateTime,
-    out: &mut Vec<LlmQuotaUsage>,
-) {
-    let Some(models) = models_resp.get("models").and_then(Value::as_object) else {
-        return;
-    };
-    let has_scope = |prefix: &str| {
-        out.iter().any(|window| {
-            window
-                .scope
-                .as_deref()
-                .is_some_and(|scope| scope.to_ascii_lowercase().starts_with(prefix))
-        })
-    };
-    let need_gemini = !has_scope("gemini");
-    let need_third_party = !has_scope("claude");
-    if !need_gemini && !need_third_party {
-        return;
-    }
-
-    let mut tightest_gemini: Option<PoolReading> = None;
-    let mut tightest_third_party: Option<PoolReading> = None;
-
-    for (model_id, entry) in models {
-        let Some(scope) = antigravity_quota_scope_for_model(model_id) else {
-            continue;
-        };
-        let slot = match scope {
-            SCOPE_GEMINI if need_gemini => &mut tightest_gemini,
-            SCOPE_CLAUDE_GPT if need_third_party => &mut tightest_third_party,
-            _ => continue,
-        };
-        let Some(quota_info) = entry
-            .get("quotaInfo")
-            .or_else(|| entry.get("quota_info"))
-            .and_then(Value::as_object)
-        else {
-            continue;
-        };
-        let reset_at = first_string(quota_info, &["resetTime", "reset_time"]);
-        let Some(used_percent) =
-            used_percent_from_remaining_fraction(quota_info, reset_at.is_some())
-        else {
-            continue;
-        };
-        let replace = match slot.as_ref() {
-            None => true,
-            Some(current) => {
-                // Prefer entries with a reset time; among equal presence, take
-                // the tightest (highest used%) reading, breaking ties by latest reset.
-                match (reset_at.is_some(), current.reset_at.is_some()) {
-                    (true, false) => true,
-                    (false, true) => false,
-                    _ => {
-                        used_percent > current.used_percent
-                            || ((used_percent - current.used_percent).abs() < f64::EPSILON
-                                && reset_at > current.reset_at)
-                    }
-                }
-            }
-        };
-        if replace {
-            *slot = Some(PoolReading {
-                used_percent,
-                reset_at,
-            });
-        }
-    }
-
-    for (scope, reading) in [
-        (SCOPE_GEMINI, tightest_gemini),
-        (SCOPE_CLAUDE_GPT, tightest_third_party),
-    ] {
-        let Some(reading) = reading else {
-            continue;
-        };
-        let label = infer_window_label(reading.reset_at.as_deref(), now);
-        let mut window = percent_window(
-            label,
-            "antigravity",
-            reading.used_percent,
-            reading.used_percent >= 100.0,
-            reading.reset_at,
-        );
-        window.scope = Some(scope.to_string());
-        out.push(window);
-    }
-}
-
-fn infer_window_label(reset_at: Option<&str>, now: OffsetDateTime) -> &'static str {
-    let Some(reset_at) = reset_at else {
-        return "5h";
-    };
-    let Ok(parsed) = OffsetDateTime::parse(reset_at, &Rfc3339) else {
-        return "5h";
-    };
-    if (parsed - now).whole_seconds() > WEEKLY_RESET_THRESHOLD_SECS {
-        "1w"
-    } else {
-        "5h"
     }
 }
 
@@ -654,137 +793,157 @@ fn dedupe_and_sort_windows(windows: &mut Vec<LlmQuotaUsage>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use std::net::TcpListener;
 
-    fn now() -> OffsetDateTime {
-        OffsetDateTime::parse("2026-11-19T11:00:00Z", &Rfc3339).expect("now")
-    }
-
-    #[test]
-    fn oauth_json_accepts_unexpired_token_and_rejects_stale_one() {
-        let fresh = serde_json::json!({
-            "token": {
-                "access_token": "ya29.fresh",
-                "expiry": "2026-11-19T11:35:51Z"
+    fn sample_cli_usage_payload() -> Value {
+        serde_json::json!({
+            "conversation_id": "",
+            "status": "SUCCESS",
+            "response": "Gemini Models\tWeekly Limit Remaining\t89%\t2026-11-28T09:31:21Z\n",
+            "duration_seconds": 0,
+            "num_turns": 0,
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "thinking_tokens": 0,
+                "cache_read_tokens": 0,
+                "total_tokens": 0
             },
-            "auth_method": "consumer"
-        })
-        .to_string();
-        assert_eq!(
-            access_token_from_oauth_json(&fresh, now()).as_deref(),
-            Some("ya29.fresh")
-        );
-
-        let expired = serde_json::json!({
-            "token": {
-                "access_token": "ya29.stale",
-                "expiry": "2026-11-19T11:00:30Z"
-            }
-        })
-        .to_string();
-        assert_eq!(access_token_from_oauth_json(&expired, now()), None);
-    }
-
-    #[test]
-    fn merges_summary_third_party_windows_with_gemini_model_quota() {
-        let summary = serde_json::json!({
-            "groups": [{
-                "displayName": "Claude and GPT models",
-                "buckets": [
-                    {
-                        "bucketId": "3p-weekly",
-                        "window": "weekly",
-                        "resetTime": "2026-11-26T11:00:00Z",
-                        "remainingFraction": 1
-                    },
-                    {
-                        "bucketId": "3p-5h",
-                        "window": "5h",
-                        "resetTime": "2026-11-19T16:00:00Z",
-                        "remainingFraction": 0.75
-                    }
-                ]
-            }]
-        });
-        let models = serde_json::json!({
-            "models": {
-                "gemini-2.5-pro": {
-                    "quotaInfo": {
-                        "remainingFraction": 0.95,
-                        "resetTime": "2026-11-19T14:30:00Z"
-                    }
-                },
-                "claude-opus-5-5-high": {
-                    "quotaInfo": {
-                        "remainingFraction": 0.75,
-                        "resetTime": "2026-11-19T16:00:00Z"
-                    }
-                },
-                "tab_flash_lite_preview": {
-                    "quotaInfo": { "remainingFraction": 1 }
+            "command": {
+                "name": "usage",
+                "data": {
+                    "groups": [
+                        {
+                            "name": "Gemini Models",
+                            "buckets": [
+                                {
+                                    "id": "gemini-weekly",
+                                    "name": "Weekly Limit Remaining",
+                                    "window": "weekly",
+                                    "remaining_fraction": 0.8899799585342407,
+                                    "reset_time": "2026-11-28T09:31:21Z"
+                                },
+                                {
+                                    "id": "gemini-5h",
+                                    "name": "Five Hour Limit Remaining",
+                                    "window": "5h",
+                                    "remaining_fraction": 0.9539,
+                                    "reset_time": "2026-11-22T22:28:39Z"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Claude and GPT models",
+                            "buckets": [
+                                {
+                                    "id": "3p-weekly",
+                                    "name": "Weekly Limit Remaining",
+                                    "window": "weekly",
+                                    "remaining_fraction": 1,
+                                    "reset_time": "2026-11-29T17:30:43Z"
+                                },
+                                {
+                                    "id": "3p-5h",
+                                    "name": "Five Hour Limit Remaining",
+                                    "window": "5h",
+                                    "remaining_fraction": 0.75,
+                                    "reset_time": "2026-11-22T22:30:43Z"
+                                }
+                            ]
+                        }
+                    ]
                 }
             }
-        });
+        })
+    }
 
-        let usage =
-            antigravity_quota_usage_from_values(Some(&summary), Some(&models), now()).unwrap();
+    #[test]
+    fn parses_native_cli_usage_json_with_unrounded_float_precision() {
+        let usage = antigravity_cli_usage_from_value(&sample_cli_usage_payload()).unwrap();
         assert_eq!(usage.quota_source.as_deref(), Some("provider_api"));
+        assert!(usage.quota_observed_at.is_some());
         assert!(usage.quota_usages.is_none());
         let scoped = usage.scoped_quota_usages.unwrap();
-        assert_eq!(scoped.len(), 3);
+        assert_eq!(scoped.len(), 4);
 
         assert_eq!(scoped[0].scope.as_deref(), Some("Gemini"));
         assert_eq!(scoped[0].label.as_deref(), Some("5h"));
-        assert!((scoped[0].percent.unwrap() - 5.0).abs() < 1e-6);
-        assert_eq!(scoped[0].reset_at.as_deref(), Some("2026-11-19T14:30:00Z"));
+        // Preserves floating-point precision rather than rounding to 5% (#1851).
+        assert!((scoped[0].percent.unwrap() - 4.61).abs() < 1e-6);
+        assert_eq!(scoped[0].reset_at.as_deref(), Some("2026-11-22T22:28:39Z"));
 
         assert_eq!(scoped[1].scope.as_deref(), Some("Claude & GPT"));
         assert_eq!(scoped[1].label.as_deref(), Some("5h"));
         assert!((scoped[1].percent.unwrap() - 25.0).abs() < 1e-6);
 
-        assert_eq!(scoped[2].scope.as_deref(), Some("Claude & GPT"));
+        assert_eq!(scoped[2].scope.as_deref(), Some("Gemini"));
         assert_eq!(scoped[2].label.as_deref(), Some("1w"));
-        assert_eq!(scoped[2].percent, Some(0.0));
+        assert!((scoped[2].percent.unwrap() - 11.00200414657593).abs() < 1e-6);
+        assert_eq!(scoped[2].reset_at.as_deref(), Some("2026-11-28T09:31:21Z"));
+
+        assert_eq!(scoped[3].scope.as_deref(), Some("Claude & GPT"));
+        assert_eq!(scoped[3].label.as_deref(), Some("1w"));
+        assert_eq!(scoped[3].percent, Some(0.0));
     }
 
     #[test]
     fn proto3_omitted_remaining_fraction_with_reset_time_means_exhausted() {
-        let summary = serde_json::json!({
-            "groups": [{
-                "displayName": "Claude and GPT models",
-                "buckets": [{
-                    "bucketId": "3p-5h",
-                    "window": "5h",
-                    "resetTime": "2026-11-19T16:00:00Z"
-                }, {
-                    "bucketId": "3p-weekly",
-                    "window": "weekly",
-                    "disabled": true,
-                    "resetTime": "2026-11-26T11:00:00Z"
-                }]
-            }]
-        });
-        let models = serde_json::json!({
-            "models": {
-                "gemini-3-flash": {
-                    "quotaInfo": { "resetTime": "2026-11-25T11:00:00Z" }
+        let payload = serde_json::json!({
+            "status": "SUCCESS",
+            "num_turns": 0,
+            "command": {
+                "name": "usage",
+                "data": {
+                    "groups": [{
+                        "name": "Claude and GPT models",
+                        "buckets": [
+                            {
+                                "id": "3p-5h",
+                                "window": "5h",
+                                "reset_time": "2026-11-22T16:00:00Z"
+                            },
+                            {
+                                "id": "3p-weekly",
+                                "window": "weekly",
+                                "disabled": true,
+                                "reset_time": "2026-11-29T11:00:00Z"
+                            }
+                        ]
+                    }]
                 }
             }
         });
-        let usage =
-            antigravity_quota_usage_from_values(Some(&summary), Some(&models), now()).unwrap();
+        let usage = antigravity_cli_usage_from_value(&payload).unwrap();
         let scoped = usage.scoped_quota_usages.unwrap();
-        assert_eq!(scoped.len(), 2);
+        assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].scope.as_deref(), Some("Claude & GPT"));
         assert_eq!(scoped[0].label.as_deref(), Some("5h"));
         assert_eq!(scoped[0].percent, Some(100.0));
         assert_eq!(scoped[0].remaining, Some(0.0));
+    }
 
-        assert_eq!(scoped[1].scope.as_deref(), Some("Gemini"));
-        assert_eq!(scoped[1].label.as_deref(), Some("1w"));
-        assert_eq!(scoped[1].percent, Some(100.0));
-        assert_eq!(scoped[1].remaining, Some(0.0));
+    #[test]
+    fn rejects_error_other_commands_and_llm_turn_outputs() {
+        let error_payload = serde_json::json!({
+            "status": "ERROR",
+            "error": "authentication failed or timed out",
+            "num_turns": 0
+        });
+        assert!(antigravity_cli_usage_from_value(&error_payload).is_none());
+
+        let mut llm_turn = sample_cli_usage_payload();
+        llm_turn["num_turns"] = serde_json::json!(1);
+        assert!(antigravity_cli_usage_from_value(&llm_turn).is_none());
+
+        let mut other_command = sample_cli_usage_payload();
+        other_command["command"]["name"] = serde_json::json!("help");
+        assert!(antigravity_cli_usage_from_value(&other_command).is_none());
+
+        let empty_groups = serde_json::json!({
+            "status": "SUCCESS",
+            "num_turns": 0,
+            "command": { "name": "usage", "data": { "groups": [] } }
+        });
+        assert!(antigravity_cli_usage_from_value(&empty_groups).is_none());
     }
 
     #[test]
@@ -809,95 +968,343 @@ mod tests {
     }
 
     #[test]
-    fn user_agent_uses_cli_semver_and_clamps_legacy_versions() {
-        assert_eq!(
-            format_antigravity_user_agent(Some("1.5.13\n")),
-            "antigravity/cli/1.5.13"
-        );
-        assert_eq!(
-            format_antigravity_user_agent(Some("agy 2.0.4")),
-            "antigravity/cli/2.0.4"
-        );
-        assert_eq!(
-            format_antigravity_user_agent(Some("1.1.9")),
-            format!("antigravity/cli/{FALLBACK_ANTIGRAVITY_CLI_VERSION}")
-        );
-        assert_eq!(
-            format_antigravity_user_agent(None),
-            format!("antigravity/cli/{FALLBACK_ANTIGRAVITY_CLI_VERSION}")
-        );
+    fn semver_and_disable_switch_parsing() {
+        assert_eq!(parse_cli_semver("1.5.14\n"), Some((1, 5, 14)));
+        assert_eq!(parse_cli_semver("agy 1.1.11"), Some((1, 1, 11)));
+        assert!(parse_cli_semver("1.1.10").unwrap() < MIN_PRINT_USAGE_CLI_VERSION);
+        assert!(parse_cli_semver("1.1.11").unwrap() >= MIN_PRINT_USAGE_CLI_VERSION);
+
+        for truthy in ["1", "true", "TRUE", "yes", " on "] {
+            assert!(is_quota_probe_disabled_value(Some(truthy)), "{truthy:?}");
+        }
+        for falsy in ["", "0", "false", "no", "off"] {
+            assert!(!is_quota_probe_disabled_value(Some(falsy)), "{falsy:?}");
+        }
+        assert!(!is_quota_probe_disabled_value(None));
     }
 
-    #[tokio::test]
-    async fn loopback_read_calls_cloud_code_endpoints_and_parses_pools() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let addr = listener.local_addr().expect("addr");
-        listener.set_nonblocking(true).expect("nonblocking");
+    #[test]
+    fn cache_key_isolates_default_login_and_env_overrides_without_raw_secrets() {
+        let home = PathBuf::from("/fixture/home");
+        let empty = |_: &str| None;
+        let with_dir =
+            |key: &str| (key == "ANTIGRAVITY_APP_DATA_DIR").then(|| "/fixture/alt-agy".to_string());
+        let with_token =
+            |key: &str| (key == "JETSKI_OAUTH_TOKEN").then(|| "ya29.secret-value".to_string());
 
-        let server = std::thread::spawn(move || {
-            for _ in 0..3 {
-                let (mut stream, req) = super::super::read_fixture_http_request(
-                    &listener,
-                    "expected antigravity cloud code request",
-                );
-                assert!(req.contains("authorization: bearer test-antigravity-token"));
-                let has_versioned_cli_ua = req
-                    .lines()
-                    .find_map(|line| line.strip_prefix("user-agent: "))
-                    .and_then(|ua| ua.strip_prefix("antigravity/cli/"))
-                    .and_then(parse_cli_semver)
-                    .is_some_and(|version| version >= MIN_QUOTA_SUMMARY_CLI_VERSION);
-                assert!(
-                    has_versioned_cli_ua,
-                    "expected versioned antigravity/cli/<semver> user-agent, got request:\n{req}"
-                );
-                let body = if req.contains("v1internal:loadcodeassist") {
-                    r#"{"cloudaicompanionProject":"test-project-1"}"#
-                } else if req.contains("v1internal:retrieveuserquotasummary") {
-                    r#"{"groups":[{"displayName":"Gemini Models","buckets":[{"bucketId":"gemini-weekly","window":"weekly","resetTime":"2026-11-26T09:34:53Z","remainingFraction":0.87},{"bucketId":"gemini-5h","window":"5h","resetTime":"2026-11-20T20:34:53Z","remainingFraction":0.96}]},{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-weekly","window":"weekly","resetTime":"2026-11-27T16:00:00Z","remainingFraction":1},{"bucketId":"3p-5h","window":"5h","resetTime":"2026-11-20T21:00:00Z","remainingFraction":1}]}]}"#
-                } else if req.contains("v1internal:fetchavailablemodels") {
-                    r#"{"models":{"gemini-4-neon-high":{"quotaInfo":{"remainingFraction":0.96,"resetTime":"2026-11-20T20:34:53Z"}}}}"#
-                } else {
-                    panic!("unexpected request: {req}");
-                };
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                stream.write_all(response.as_bytes()).expect("write");
-                stream.flush().expect("flush");
-                let _ = stream.shutdown(std::net::Shutdown::Write);
-            }
-        });
+        let default_key = cache_key_for_mode(AgyEnvMode::DefaultLogin, &empty, Some(&home));
+        let process_key = cache_key_for_mode(AgyEnvMode::Process, &empty, Some(&home));
+        let dir_key = cache_key_for_mode(AgyEnvMode::Process, &with_dir, Some(&home));
+        let token_key = cache_key_for_mode(AgyEnvMode::Process, &with_token, Some(&home));
 
-        let make_cred = || AntigravityCredential {
-            access_token: "test-antigravity-token".to_string(),
-            cache_key: format!("loopback-test-{addr}"),
-        };
-        let usage =
-            read_antigravity_quota_from_base(make_cred(), true, &format!("http://{addr}"), || {
-                Some(make_cred())
+        assert_ne!(default_key, process_key);
+        assert_ne!(process_key, dir_key);
+        assert_ne!(process_key, token_key);
+        assert!(!token_key.contains("ya29.secret-value"));
+    }
+
+    #[test]
+    fn detects_unauthenticated_stderr_prompts() {
+        assert!(stderr_requests_interactive_auth(
+            "Authentication required. Please visit the URL to log in:"
+        ));
+        assert!(stderr_requests_interactive_auth(
+            "Waiting for authentication (timeout 60s)..."
+        ));
+        assert!(!stderr_requests_interactive_auth(
+            "Fetching usage summary..."
+        ));
+    }
+
+    #[test]
+    fn default_login_command_removes_all_login_override_env_keys() {
+        let cmd = build_agy_usage_command(Path::new("agy"), AgyEnvMode::DefaultLogin, None);
+        let envs: Vec<(String, Option<String>)> = cmd
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|val| val.to_string_lossy().into_owned()),
+                )
             })
-            .await
-            .expect("usage");
-        server.join().expect("server");
+            .collect();
+        for key in ANTIGRAVITY_LOGIN_OVERRIDE_KEYS {
+            assert!(
+                envs.iter().any(|(k, v)| k == key && v.is_none()),
+                "expected {key} to be removed for DefaultLogin, got {envs:?}"
+            );
+        }
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "AGY_CLI_DISABLE_AUTO_UPDATE" && v.as_deref() == Some("true"))
+        );
 
-        assert_eq!(usage.quota_source.as_deref(), Some("provider_api"));
-        let scoped = usage.scoped_quota_usages.expect("scoped");
-        assert_eq!(scoped.len(), 4);
-        assert_eq!(scoped[0].scope.as_deref(), Some("Gemini"));
-        assert_eq!(scoped[0].label.as_deref(), Some("5h"));
-        assert!((scoped[0].percent.unwrap() - 4.0).abs() < 1e-6);
-        assert_eq!(scoped[1].scope.as_deref(), Some("Claude & GPT"));
-        assert_eq!(scoped[1].label.as_deref(), Some("5h"));
-        assert_eq!(scoped[1].percent, Some(0.0));
-        assert_eq!(scoped[2].scope.as_deref(), Some("Gemini"));
-        assert_eq!(scoped[2].label.as_deref(), Some("1w"));
-        assert!((scoped[2].percent.unwrap() - 13.0).abs() < 1e-6);
-        assert_eq!(scoped[3].scope.as_deref(), Some("Claude & GPT"));
-        assert_eq!(scoped[3].label.as_deref(), Some("1w"));
-        assert_eq!(scoped[3].percent, Some(0.0));
+        let process_cmd = build_agy_usage_command(Path::new("agy"), AgyEnvMode::Process, None);
+        let process_envs: Vec<_> = process_cmd.as_std().get_envs().collect();
+        for key in ANTIGRAVITY_LOGIN_OVERRIDE_KEYS {
+            assert!(
+                !process_envs
+                    .iter()
+                    .any(|(k, v)| *k == OsStr::new(key) && v.is_none()),
+                "Process mode must inherit {key}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    mod unix_cli_tests {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn unique_temp_dir(name: &str) -> PathBuf {
+            let nanos = SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "xmatrix-agy-quota-{name}-{}-{nanos}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).expect("temp dir");
+            dir
+        }
+
+        fn write_fake_agy(dir: &Path, script: &str) -> PathBuf {
+            let path = dir.join("agy");
+            std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).expect("write fake agy");
+            let mut perms = std::fs::metadata(&path).expect("meta").permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).expect("chmod");
+            path
+        }
+
+        #[tokio::test]
+        async fn invokes_native_usage_command_caches_and_invalidates() {
+            let store =
+                AntigravityQuotaStore::new(Duration::from_secs(180), Duration::from_secs(60));
+            let dir = unique_temp_dir("native-usage");
+            let count_file = dir.join("calls");
+            let payload = sample_cli_usage_payload().to_string();
+            let script = format!(
+                r#"
+if [ "$1" = "--version" ]; then
+  echo "1.5.14"
+  exit 0
+fi
+if [ "$1" = "-p" ] && [ "$2" = "/usage" ] && [ "$3" = "--output-format" ] && [ "$4" = "json" ]; then
+  echo x >> "{}"
+  printf '%s\n' '{}'
+  exit 0
+fi
+exit 2
+"#,
+                count_file.display(),
+                payload
+            );
+            let program = write_fake_agy(&dir, &script);
+            let empty = |_: &str| None;
+
+            let first = read_antigravity_quota_with_program(
+                &store,
+                &program,
+                AgyEnvMode::DefaultLogin,
+                true,
+                Duration::from_secs(4),
+                &empty,
+                Some(&dir),
+            )
+            .await
+            .expect("first reading");
+            let scoped = first.scoped_quota_usages.as_ref().expect("scoped");
+            assert_eq!(scoped.len(), 4);
+            assert!((scoped[0].percent.unwrap() - 4.61).abs() < 1e-6);
+
+            // Second non-forced read hits cache without spawning agy again.
+            let second = read_antigravity_quota_with_program(
+                &store,
+                &program,
+                AgyEnvMode::DefaultLogin,
+                false,
+                Duration::from_secs(4),
+                &empty,
+                Some(&dir),
+            )
+            .await
+            .expect("cached reading");
+            assert_eq!(second.quota_observed_at, first.quota_observed_at);
+            assert_eq!(
+                std::fs::read_to_string(&count_file)
+                    .unwrap()
+                    .lines()
+                    .count(),
+                1
+            );
+
+            // Invalidating cache forces a fresh subprocess on the next read.
+            store.invalidate();
+            let third = read_antigravity_quota_with_program(
+                &store,
+                &program,
+                AgyEnvMode::DefaultLogin,
+                false,
+                Duration::from_secs(4),
+                &empty,
+                Some(&dir),
+            )
+            .await
+            .expect("post-invalidation reading");
+            assert_eq!(third.scoped_quota_usages.unwrap().len(), 4);
+            assert_eq!(
+                std::fs::read_to_string(&count_file)
+                    .unwrap()
+                    .lines()
+                    .count(),
+                2
+            );
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[tokio::test]
+        async fn old_agy_version_never_invokes_print_usage() {
+            let store =
+                AntigravityQuotaStore::new(Duration::from_secs(180), Duration::from_secs(60));
+            let dir = unique_temp_dir("old-version");
+            let marker = dir.join("prompt-invoked");
+            let script = format!(
+                r#"
+if [ "$1" = "--version" ]; then
+  echo "1.1.10"
+  exit 0
+fi
+echo invoked > "{}"
+exit 0
+"#,
+                marker.display()
+            );
+            let program = write_fake_agy(&dir, &script);
+            let empty = |_: &str| None;
+
+            let result = read_antigravity_quota_with_program(
+                &store,
+                &program,
+                AgyEnvMode::DefaultLogin,
+                true,
+                Duration::from_secs(4),
+                &empty,
+                Some(&dir),
+            )
+            .await;
+            assert!(result.is_none());
+            assert!(
+                !marker.exists(),
+                "older agy releases must not be called with -p /usage"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[tokio::test]
+        async fn signed_out_auth_prompt_aborts_quickly_without_waiting_for_timeout() {
+            let store =
+                AntigravityQuotaStore::new(Duration::from_secs(180), Duration::from_secs(60));
+            let dir = unique_temp_dir("signed-out");
+            let script = r#"
+if [ "$1" = "--version" ]; then
+  echo "1.5.14"
+  exit 0
+fi
+echo "Authentication required. Please visit the URL to log in:" >&2
+echo "  https://accounts.google.com/o/oauth2/auth" >&2
+sleep 30
+"#;
+            let program = write_fake_agy(&dir, script);
+            let empty = |_: &str| None;
+            let started = std::time::Instant::now();
+
+            let result = read_antigravity_quota_with_program(
+                &store,
+                &program,
+                AgyEnvMode::DefaultLogin,
+                true,
+                Duration::from_secs(5),
+                &empty,
+                Some(&dir),
+            )
+            .await;
+            assert!(result.is_none());
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "expected fast abort on auth prompt, took {:?}",
+                started.elapsed()
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[tokio::test]
+        async fn hanging_cli_respects_timeout_and_discards_on_midflight_invalidation() {
+            let store =
+                AntigravityQuotaStore::new(Duration::from_secs(180), Duration::from_secs(60));
+            let dir = unique_temp_dir("timeout-and-invalidation");
+            let hang_script = r#"
+if [ "$1" = "--version" ]; then
+  echo "1.5.14"
+  exit 0
+fi
+sleep 30
+"#;
+            let hang_program = write_fake_agy(&dir, hang_script);
+            let empty = |_: &str| None;
+            let started = std::time::Instant::now();
+            let timed_out = read_antigravity_quota_with_program(
+                &store,
+                &hang_program,
+                AgyEnvMode::DefaultLogin,
+                true,
+                Duration::from_millis(200),
+                &empty,
+                Some(&dir),
+            )
+            .await;
+            assert!(timed_out.is_none());
+            assert!(started.elapsed() < Duration::from_secs(2));
+
+            let slow_dir = unique_temp_dir("midflight-switch");
+            let payload = sample_cli_usage_payload().to_string();
+            let slow_script = format!(
+                r#"
+if [ "$1" = "--version" ]; then
+  echo "1.5.14"
+  exit 0
+fi
+sleep 0.3
+printf '%s\n' '{}'
+"#,
+                payload
+            );
+            let slow_program = write_fake_agy(&slow_dir, &slow_script);
+            let read_fut = read_antigravity_quota_with_program(
+                &store,
+                &slow_program,
+                AgyEnvMode::DefaultLogin,
+                true,
+                Duration::from_secs(4),
+                &empty,
+                Some(&slow_dir),
+            );
+            let invalidate_fut = async {
+                tokio::time::sleep(Duration::from_millis(120)).await;
+                store.invalidate();
+            };
+            let (result, ()) = tokio::join!(read_fut, invalidate_fut);
+            assert!(
+                result.is_none(),
+                "reading from before account switch must be discarded"
+            );
+
+            let _ = std::fs::remove_dir_all(&dir);
+            let _ = std::fs::remove_dir_all(&slow_dir);
+        }
     }
 
     #[tokio::test]
@@ -907,7 +1314,7 @@ mod tests {
         }
         let usage = read_antigravity_quota_usage(true)
             .await
-            .expect("antigravity quota should resolve with local OAuth token");
+            .expect("antigravity quota should resolve via native agy /usage");
         assert_eq!(usage.quota_source.as_deref(), Some("provider_api"));
         let scoped = usage.scoped_quota_usages.as_ref().expect("scoped windows");
         assert!(

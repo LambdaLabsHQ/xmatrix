@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: Antigravity quota uses native `agy -p "/usage"` instead of direct OAuth token reads
+
+The Antigravity quota reader previously read `~/.gemini/antigravity-cli/antigravity-oauth-token`
+directly and sent HTTP requests to Google's private `v1internal` Cloud Code
+endpoints with a synthesized `antigravity/cli/<ver>` `User-Agent`. That created
+unnecessary ToS/anti-abuse risk and failed on `agy` 1.5+ macOS and Windows
+installs that store sign-ins in the system keyring instead of a plaintext token
+file. The reader now invokes the official unmodified `agy -p "/usage" --output-format json`
+command (gated on `agy >= 1.1.11`, bounded by timeout and `kill_on_drop`,
+hiding the console window on Windows, fast-aborting unauthenticated login
+prompts, caching with a 3-minute success / 1-minute failure TTL, and
+invalidating the cache when remote Antigravity sign-in completes). Set
+`XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` to disable Antigravity quota
+probing explicitly. CLI / daemon only. Recovery is a CI-validated CLI release
+reverting this change.
+
 ## Unreleased: Repeated outside events do not repeat a Norn round
 
 GitHub and connector events now carry their provider identity into the Norn

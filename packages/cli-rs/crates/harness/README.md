@@ -9,8 +9,11 @@ library:
 - **Normalized usage.** `LlmUsage` and `LlmQuotaUsage` describe token,
   context, cost, and account-quota usage the same way for every harness.
 - **Account-quota probes.** These read what a provider says a login has left.
-  Claude, Codex, Cursor, Grok, OpenCode, and Z.ai have readers, and Kimi has a
-  parser.
+  Antigravity, Claude, Codex, Cursor, DeepSeek, Grok, OpenCode, and Z.ai have
+  readers, and Kimi has a parser. Antigravity delegates to the unmodified
+  `agy -p "/usage" --output-format json` command instead of reading local OAuth
+  token files or calling private Cloud Code endpoints directly (set
+  `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` to opt out).
 - **Record stream (planned).** Harness frames will be turned into one
   normalized record stream. See "Not yet extracted" below.
 
