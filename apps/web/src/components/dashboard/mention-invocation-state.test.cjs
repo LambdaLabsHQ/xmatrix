@@ -6,7 +6,7 @@ require("./typescript-require.cjs").installTypeScriptRequire();
 const {
   summonView, invocationVendorHarness, addressedAgentFace, launchFace, continuationFaces,
   splitMentionRejections, continuationView, splitMentionContinuations, splitHandoffMentions, handoffView,
-  handoffSuccessorLaunch, segmentMessageInteraction, instanceCallView,
+  handoffSuccessorLaunch, segmentMessageInteraction, instanceCallView, handoffRefusalCode, handoffRefusalKey,
 } = require("./mention-invocation-state.ts");
 const { agentFaceUrl, staticFace } = require("@xmatrix/protocol");
 
@@ -364,4 +364,27 @@ test("a page's call to a live Instance says what the Instance is doing with it, 
   assert.equal(instanceCallView({ ...call, execution: { ...execution, state: "completed" } }).label, "Done");
   assert.equal(instanceCallView({ ...call, execution: { ...execution, state: "interrupted" } }).label, "Failed");
   assert.equal(instanceCallView({ ...call, failure: "Its conversation is no longer open to you." }).label, "Failed");
+});
+
+test("a refused handoff is worded from its recorded code, or the code an older note carried", () => {
+  const recorded = { messageId: "n1", sentAt: "2026-11-22T03:03:21Z", code: "registration_quota_exhausted",
+    body: "@claude:1 stopped and its work is kept, but @claude did not start: … [registration_quota_exhausted]" };
+  const legacy = { messageId: "n2", sentAt: "2026-11-22T03:03:21Z",
+    body: "xMatrix could not hand off @claude:1 to @claude (registration_quota_exhausted)." };
+  assert.equal(handoffRefusalCode(recorded), "registration_quota_exhausted");
+  assert.equal(handoffRefusalCode(legacy), "registration_quota_exhausted");
+  assert.equal(handoffRefusalCode({ messageId: "n3", sentAt: "", body: "Something else (registration_quota_exhausted)." }), undefined);
+  assert.equal(handoffRefusalKey("registration_quota_exhausted"), "registration_quota_exhausted");
+  assert.equal(handoffRefusalKey("registration_harness_unavailable"), "no_machine");
+  assert.equal(handoffRefusalKey("registration_handoff_failed"), "failed");
+  assert.equal(handoffRefusalKey("something_new"), undefined, "an unworded code keeps the Hub's text");
+});
+
+test("a refused handoff segment names the successor it asked for", () => {
+  const notices = [{ messageId: "n", sentAt: "2026-11-22T03:03:21Z", code: "registration_quota_exhausted",
+    body: "@claude:1 stopped and its work is kept, but @claude did not start. [registration_quota_exhausted]" }];
+  const segment = segmentMessageInteraction("@claude:1:handoff:@claude", { notices })
+    .find(part => part.presentationRef === "handoff.v1");
+  assert.equal(segment?.successor, "@claude");
+  assert.equal(segment?.ordinal, 1);
 });

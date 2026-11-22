@@ -16,6 +16,8 @@ export type CommandNotice = {
   stopOutcome?: "stopped" | "not_stopped";
   /** The Run it is about: the summon chip that started that Run shows it. */
   runId?: string;
+  /** The refusal's stable code, so the chip words it in the reader's language. */
+  code?: string;
 };
 
 function noticeSource(message: ChannelMessage): string | undefined {
@@ -100,7 +102,8 @@ function recordedNotices(message: ChannelMessage): CommandNotice[] {
     ...(result.controls ? [{ messageId: `${message.messageId}:controls`, body: "", sentAt: message.sentAt,
       controlOutcomes: result.controls }] : []),
     ...(result.notes ?? []).map((note) => ({ messageId: note.id, body: note.text, sentAt: note.at,
-      ...(note.stopOutcome ? { stopOutcome: note.stopOutcome } : {}), ...(note.runId ? { runId: note.runId } : {}) })),
+      ...(note.stopOutcome ? { stopOutcome: note.stopOutcome } : {}), ...(note.runId ? { runId: note.runId } : {}),
+      ...(note.code ? { code: note.code } : {}) })),
   ];
 }
 

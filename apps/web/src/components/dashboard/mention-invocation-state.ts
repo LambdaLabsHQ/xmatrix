@@ -435,6 +435,32 @@ export function lifecycleRefusalView(notices: readonly CommandNotice[], kind: "r
   ] };
 }
 
+/** Which wording a refused handoff gets (problem-copy.ts `handoff`). */
+type HandoffRefusalKey = "registration_quota_exhausted" | "no_machine" | "registration_daemon_offline" |
+  "handoff_source_stop_pending" | "handoff_source_stop_unavailable" | "handoff_location_conflict" |
+  "handoff_source_not_transferable" | "invalid_registration_launch" | "failed";
+
+/** The refusal's code: recorded beside the note, or, for a note written
+ * before codes were, the one its fixed `(code).` sentence carried. */
+export function handoffRefusalCode(notice: CommandNotice | undefined): string | undefined {
+  if (notice?.code) return notice.code;
+  return notice?.body.match(/^xMatrix could not hand off \S+ to .+ \(([a-z][a-z0-9_]{0,79})\)\./u)?.[1];
+}
+
+/** A code xMatrix has words for; any other keeps its recorded text as the explanation. */
+export function handoffRefusalKey(code: string | undefined): HandoffRefusalKey | undefined {
+  switch (code) {
+    case "registration_not_found": case "registration_harness_unavailable": case "registration_machine_unavailable":
+      return "no_machine";
+    case "registration_quota_exhausted": case "registration_daemon_offline": case "handoff_source_stop_pending":
+    case "handoff_source_stop_unavailable": case "handoff_location_conflict": case "handoff_source_not_transferable":
+    case "invalid_registration_launch":
+      return code;
+    case "registration_handoff_failed": return "failed";
+    default: return undefined;
+  }
+}
+
 /** Match only the exact, server-recorded address within a normal Markdown text run. */
 export function splitMentionRejections(text: string, rejections: readonly SerializedAgentInvocationRejection[], allowed?: (start: number) => boolean) {
   const tokens = mentionAddressTokens(rejections.map((rejection) => rejection.targetRef));
@@ -557,7 +583,7 @@ export type InteractionSegment<Target = unknown> =
   | { presentationRef: "runtime-control.v1"; text: string; invocation: AgentControlInvocation;
     outcome?: AgentControlOutcomeRecord; notice?: CommandNotice }
   | { presentationRef: "handoff.v1" | "reborn.v1"; text: string; refused: readonly CommandNotice[];
-    agentName: string; ordinal: number }
+    agentName: string; ordinal: number; successor?: string }
   | { presentationRef: "mention.v1"; text: string; target: Target; token?: string };
 
 export interface InteractionRecords<Target> {
@@ -631,7 +657,8 @@ export function segmentMessageInteraction<Target>(text: string, records: Interac
   if (notices?.length) {
     segments = refine(segments, (run, offset) => {
       const refused = [
-        ...parseHandoffInstanceMentions(run).map(m => ({ ...m, kind: "handoff.v1" as const, agentName: m.sourceAgentName })),
+        ...parseHandoffInstanceMentions(run).map(m => ({ ...m, kind: "handoff.v1" as const, agentName: m.sourceAgentName,
+          successor: m.conditionFirst ? run.slice(m.successorStart, m.end) : `@${m.successorName}` })),
         ...parseRebornInstanceMentions(run).map(m => ({ ...m, kind: "reborn.v1" as const })),
       ].filter(m => allowed(m.start + offset)).sort((a, b) => a.start - b.start)
         .map(m => ({ ...m, notices: noticesNaming(notices, m.agentName, m.channelInstanceId) }))
@@ -642,7 +669,7 @@ export function segmentMessageInteraction<Target>(text: string, records: Interac
         if (m.start < cursor) continue;
         if (m.start > cursor) out.push(plain(run.slice(cursor, m.start)));
         out.push({ presentationRef: m.kind, text: run.slice(m.start, m.end), refused: m.notices,
-          agentName: m.agentName, ordinal: m.channelInstanceId });
+          agentName: m.agentName, ordinal: m.channelInstanceId, ...("successor" in m ? { successor: m.successor } : {}) });
         cursor = m.end;
       }
       if (cursor < run.length) out.push(plain(run.slice(cursor)));

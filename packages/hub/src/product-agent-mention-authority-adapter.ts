@@ -243,9 +243,9 @@ export function createProductAgentMentionAuthorityPort(input: {
       return this.getRebornTarget(input);
     },
 
-    async recordResult(channelId, text, key) {
+    async recordResult(channelId, text, key, code) {
       await recordCommandResult(input.env as Env, { channelId, messageId: input.sourceMessageId,
-        key, entry: { note: { text } } });
+        key, entry: { note: { text, ...(code ? { code } : {}) } } });
     },
 
     reportDiagnostic({ stage, error, ...where }) {

@@ -13,6 +13,7 @@ export type { ProductRebornInstanceMention, ProductHandoffInstanceMention };
  */
 
 import type { HandoffSuccessor } from "./handoff-successor";
+import { handoffRefusalText } from "./handoff-refusal";
 import { agentPresetForLauncher, isAutoHandoffSuccessor, sha256Hex,
   type ChannelAttachment } from "@xmatrix/protocol";
 
@@ -86,7 +87,7 @@ export interface ProductAgentMentionPort {
     Promise<{ claimed: boolean; harness?: string }>;
   /** Why a reborn or handoff was refused, recorded on the address that asked
    * (`key` names it) rather than posted as a message. */
-  recordResult?(channelId: string, text: string, key: string): Promise<void>;
+  recordResult?(channelId: string, text: string, key: string, code?: string): Promise<void>;
   /** Bounded operational diagnostics; must not include message or command payloads. */
   reportDiagnostic?(input: {
     stage: "summon" | "system_notice";
@@ -230,16 +231,16 @@ export async function orchestrateProductNewConversationStart(input: {
  * either. Without this the whole refusal existed only as a notice count in a
  * log line, and the mention looked like nothing had happened at all.
  */
-const refusal = (address: string, text: string) => ({ address, text });
+const refusal = (address: string, text: string, code?: string) => ({ address, text, ...(code ? { code } : {}) });
 
 async function publishContinuationNotices(
   input: ProductAgentMentionOrchestrationInput,
-  notices: readonly { address: string; text: string }[],
+  notices: readonly { address: string; text: string; code?: string }[],
 ): Promise<void> {
   if (!input.port.recordResult) return;
   for (const notice of notices) {
     try {
-      await input.port.recordResult(input.channelId, notice.text, notice.address.toLowerCase());
+      await input.port.recordResult(input.channelId, notice.text, notice.address.toLowerCase(), notice.code);
     } catch (error) {
       input.port.reportDiagnostic?.({
         stage: "system_notice",
@@ -304,7 +305,9 @@ async function orchestrateProductAgentHandoffMentions(
 ): Promise<ProductAgentMentionOrchestrationResult> {
   const resolveSource = input.port.getHandoffTarget?.bind(input.port) ??
     input.port.getRebornTarget.bind(input.port);
-  const notices: { address: string; text: string }[] = [];
+  const notices: { address: string; text: string; code?: string }[] = [];
+  const refuse = (address: string, successor: string, code: string) =>
+    refusal(address, handoffRefusalText(address, successor, code), code);
   let spawned = 0;
   for (const mention of mentions) {
     const address = `@${mention.sourceAgentName}:${mention.channelInstanceId}`;
@@ -314,7 +317,7 @@ async function orchestrateProductAgentHandoffMentions(
     const auto = mention.conditionFirst ? !mention.tags.harness : isAutoHandoffSuccessor(mention.successorName);
     const harness = mention.tags.harness ?? (auto ? undefined : agentPresetForLauncher(mention.successorName)?.id);
     if (mention.error) {
-      notices.push(refusal(address, `xMatrix could not hand off ${address} to ${successorLabel} (invalid_registration_launch).`));
+      notices.push(refuse(address, successorLabel, "invalid_registration_launch"));
       continue;
     }
     const target = await resolveSource({ channelId: input.channelId,
@@ -330,11 +333,11 @@ async function orchestrateProductAgentHandoffMentions(
     // Management and direct-conversation directories belong to their purpose.
     const routedAs = metadataString(target.metadata, "routedAs");
     if (routedAs?.startsWith("management_") || routedAs === "direct_conversation") {
-      notices.push(refusal(address, `xMatrix could not hand off ${address} to ${successorLabel} (handoff_source_not_transferable).`));
+      notices.push(refuse(address, successorLabel, "handoff_source_not_transferable"));
       continue;
     }
     if (!input.port.handOff || (!auto && !harness)) {
-      notices.push(refusal(address, `xMatrix could not hand off ${address} to ${successorLabel} (registration_handoff_failed).`));
+      notices.push(refuse(address, successorLabel, "registration_handoff_failed"));
       continue;
     }
     // Placement is inherited only when it was an explicit launch condition.
@@ -357,9 +360,7 @@ async function orchestrateProductAgentHandoffMentions(
     } catch (error) {
       const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
         ? (error as { code: string }).code : "registration_handoff_failed";
-      const pending = code === "handoff_source_stop_pending"
-        ? " The source stop awaits its daemon's confirmation; no successor started. Retry after exit is confirmed." : "";
-      notices.push(refusal(address, `xMatrix could not hand off ${address} to ${successorLabel} (${code}).${pending}`));
+      notices.push(refuse(address, successorLabel, /^[a-z][a-z0-9_]{0,79}$/u.test(code) ? code : "registration_handoff_failed"));
     }
   }
   await publishContinuationNotices(input, notices);
