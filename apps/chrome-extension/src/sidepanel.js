@@ -57,7 +57,7 @@ async function openApp() {
   if (opening || $("app").getAttribute("src")) return;
   opening = true;
   appReady = false;
-  const path = await ask("takeOpenPath", { windowId: await panelWindow() }).catch(() => null);
+  const path = (await ask("takeOpenPath", { windowId: await panelWindow() }).catch(() => null))?.path;
   $("app").src = path ? `${APP_PAGE}?at=${encodeURIComponent(path)}` : APP_PAGE;
   opening = false;
 }
@@ -66,8 +66,8 @@ async function openApp() {
 async function showOpenPath() {
   if (!$("app").getAttribute("src")) return openApp();
   if (!appReady) return;
-  const path = await ask("takeOpenPath", { windowId: await panelWindow() });
-  if (path) postToApp({ type: "open", path });
+  const opened = await ask("takeOpenPath", { windowId: await panelWindow() });
+  if (opened) postToApp({ type: "open", path: opened.path, ...(opened.channel ? { channel: opened.channel } : {}) });
 }
 
 function closeApp() {
