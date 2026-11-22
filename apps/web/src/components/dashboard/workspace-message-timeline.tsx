@@ -309,6 +309,7 @@ import {
 } from "@/components/dashboard/secret-request-card";
 
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { StartupFailureProblem } from "./startup-failure-problem";
 
 
 import type {
@@ -1737,8 +1738,16 @@ function NamedMachineRunFailureNotice({ body, metadata, spaceId, token }: {
   const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", Boolean(spaceId && token));
   const machineId = typeof metadata?.machineId === "string" ? metadata.machineId : undefined;
   const ownerUserId = typeof metadata?.machineOwnerUserId === "string" ? metadata.machineOwnerUserId : undefined;
+  const machineName = registrationMachineName(catalog.data?.registrations ?? [], machineId, ownerUserId)
+    ?? (typeof metadata?.machineName === "string" ? metadata.machineName : undefined);
+  const text = (key: string) => typeof metadata?.[key] === "string" && metadata[key] ? metadata[key] as string : undefined;
+  // A notice that recorded its code is worded from it; an older one keeps its own text.
+  const code = text("failureCode");
+  const agent = text("agentName") ?? body.match(/^Couldn't start (@\S+?)(?: on |\.| during )/u)?.[1];
+  if (code && agent) return <StartupFailureProblem code={code} agent={agent.startsWith("@") ? agent : `@${agent}`}
+    machine={machineName} cause={text("failureDetail")} phase={text("statusPhase")} />;
   return <MachineRunFailureNotice body={body}
-    machineName={registrationMachineName(catalog.data?.registrations ?? [], machineId, ownerUserId)}
+    machineName={machineName}
     {...(typeof metadata?.harness === "string" && metadata.harness ? { harness: metadata.harness } : {})} />;
 }
 

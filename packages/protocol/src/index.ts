@@ -224,7 +224,7 @@ export type {
 export {
   HANDOFF_REFUSALS, REBORN_REFUSALS, LAUNCH_REJECTION_CAUSES_ZH,
   fillProblemTemplate, lifecycleRefusalRow, lifecycleRefusalWords, lifecycleRefusalText, lifecycleRefusalCode,
-  launchRejectionCause, otherHandoff,
+  launchRejectionCause, otherHandoff, STARTUP_FAILURES, startupFailureWords,
   type ProblemLocale, type ProblemWords, type ProblemRow, type LifecycleKind,
 } from "./problem-catalog.js";
 export {

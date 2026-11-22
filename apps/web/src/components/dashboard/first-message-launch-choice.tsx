@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
+import { useReaderLocale } from "@/lib/onboarding-locale";
 import { launchRejectionCause, type ProblemLocale, type InteractionDecisionWindow, type InteractionLaunchOption } from "@xmatrix/protocol";
 import { useFace } from "./face";
 import { avatarImageSrc } from "./identity-avatar";
@@ -133,7 +133,7 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, op
 }
 
 function DecidedLaunchChoice({ view, own }: { view: Extract<LaunchChoiceView, { kind: "chosen" | "none" }>; own: boolean }) {
-  const locale = useBrowserOnboardingLocale();
+  const locale = useReaderLocale();
   const by = view.by === "jev" ? "xMatrix's pick" : own ? "Your pick" : "Author's pick";
   if (view.kind === "none") {
     return (

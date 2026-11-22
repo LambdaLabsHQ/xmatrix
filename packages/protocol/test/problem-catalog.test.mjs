@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  HANDOFF_REFUSALS, REBORN_REFUSALS, LAUNCH_REJECTION_CAUSES_ZH, lifecycleRefusalCode, lifecycleRefusalRow,
+  HANDOFF_REFUSALS, REBORN_REFUSALS, STARTUP_FAILURES, startupFailureWords, LAUNCH_REJECTION_CAUSES_ZH, lifecycleRefusalCode, lifecycleRefusalRow,
   lifecycleRefusalText, lifecycleRefusalWords, launchRejectionCause,
 } from "../dist/problem-catalog.js";
+import { publicMachineStartupFailure } from "../dist/machine-startup-failure.js";
 import { PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/invocation-failure.js";
 
 const placeholders = (text) => [...text.matchAll(/\{([a-z]+)\}/gu)].map(match => match[1]);
@@ -66,4 +67,21 @@ test("a note's code is recorded beside it, or read from the fixed sentence older
   assert.equal(lifecycleRefusalCode({ body: "xMatrix could not find @codex:2 to reborn." }), "lifecycle_source_not_found");
   assert.equal(lifecycleRefusalCode({ body: "xMatrix refused an invalid handoff source for @codex:2." }), "lifecycle_source_invalid");
   assert.equal(lifecycleRefusalCode({ body: "Something else (registration_quota_exhausted)." }), undefined);
+});
+
+test("every startup failure code the classifier answers with has a row in both languages", () => {
+  const samples = ["something odd happened", "repository_access_unavailable: no", "machine_not_answering: no",
+    "harness_missing: codex", "harness_session_in_use: held", "base_ref_unresolved", "No space left on device",
+    "fetch_required_failed", "git fetch timed out", "remote repository x is not accessible"];
+  const codes = new Set([...samples.map(sample => publicMachineStartupFailure(sample).code), "machine_unavailable"]);
+  assert.equal(codes.size, 11, "each sample reaches its own code");
+  for (const code of codes) assert.ok(Object.hasOwn(STARTUP_FAILURES, code), `${code} has no row`);
+  for (const [code, row] of Object.entries(STARTUP_FAILURES)) {
+    assert.ok(codes.has(code), `${code} is not a startup failure code`);
+    assert.deepEqual([...used(row.zh)].sort(), [...used(row.en)].sort(), `${code} placeholders differ`);
+    for (const name of used(row.en)) assert.ok(["agent", "machine"].includes(name), `${code} names {${name}}`);
+    for (const words of Object.values(row)) assert.doesNotMatch(JSON.stringify(words), /\b[a-z]+_[a-z_]+\b/u, `${code} shows no code`);
+  }
+  assert.equal(startupFailureWords("machine_disk_full", "zh", { agent: "@codex", machine: "mac-mini" }).title, "mac-mini 磁盘满了");
+  assert.equal(startupFailureWords("brand_new", "en", { agent: "@codex" }).title, "@codex couldn't start on its computer");
 });

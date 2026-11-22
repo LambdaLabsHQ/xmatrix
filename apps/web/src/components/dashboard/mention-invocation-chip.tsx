@@ -6,7 +6,7 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useId, use
 import { Popover } from "@base-ui/react/popover";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
-import { launchRejectionCause, lifecycleRefusalCode, lifecycleRefusalWords, rejectionCause, type FaceOf, type LifecycleKind } from "@xmatrix/protocol";
+import { launchRejectionCause, lifecycleRefusalCode, lifecycleRefusalWords, rejectionCause, STARTUP_FAILURES, startupFailureWords, type FaceOf, type LifecycleKind } from "@xmatrix/protocol";
 import { noteJevReading } from "./jev-filled-tags";
 import type { AgentControlInvocation, AgentControlOutcomeRecord, AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
 import { summonView, instanceCallView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, controlNextStep, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
@@ -19,7 +19,7 @@ import { parsePresentedRoutingDecision, RoutingDecisionBoard, routingSelectionNo
 import { HandoffArrowLabel } from "./handoff-arrow";
 import { useAppPortalContainer } from "./app-portal-container";
 import { useNow } from "./agent-work-intent";
-import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
+import { useReaderLocale } from "@/lib/onboarding-locale";
 import { PROBLEM_COPY } from "@/lib/problem-copy";
 
 const InvocationPopoverContext = createContext<{
@@ -111,7 +111,7 @@ export function MentionInvocationChip({ label, labelContent, announcement, launc
     context={<>
       {shared && <p className="app-invocation-description">This mention shares the first invocation of this agent and lifecycle in this message.</p>}
       {execution && !unavailable && <MentionReplyRecovery key={execution.id} execution={execution} />}
-      {notes?.length ? <NoticeLines notices={notes} /> : null}
+      {notes?.length ? <NoticeLines notices={notes} agent={`@${launch.targetName || label}`} /> : null}
     </>}
     jev={{ channelId: launch.channelId, messageId: launch.sourceMessageId, sourceMention: launch.sourceMention || `@${label}`,
       ...(decision?.parameters ? { parameters: decision.parameters } : {}) }}
@@ -131,7 +131,7 @@ export function MentionInvocationRejectionChip({ rejection, unavailable, labelCo
   const decisionInvocationId = rejection.code === "routing_parameter_selection_failed" && ordinal !== undefined
     ? `auto:${rejection.sourceMessageId}:${ordinal}` : undefined;
   // English keeps the Hub's own sentence, which names machines and versions; another language words the code.
-  const locale = useBrowserOnboardingLocale();
+  const locale = useReaderLocale();
   const cause = locale === "en" ? rejectionCause(rejection.message)
     : launchRejectionCause(rejection.code, locale) ?? rejectionCause(rejection.message);
   return <InvocationChip label={rejection.sourceMention.replace(/^[@＠]/u, "")} name={rejection.targetRef}
@@ -275,8 +275,24 @@ export function MentionStopChip({ invocation, receipts, sentAt, pending, unavail
 }
 
 /** Hub receipts as the popover reads them: the receipt's own words, once each. */
-function NoticeLines({ notices }: { notices: readonly CommandNotice[] }) {
-  return <>{notices.map(notice => <p key={notice.messageId} className="app-invocation-description">{notice.body}</p>)}</>;
+/** What the Hub said, in its words; a failed start that recorded its code is
+ * worded from it in the reader's language, with the machine's own error as the
+ * cause (the paragraphs after the Hub's title line). */
+function NoticeLines({ notices, agent }: { notices: readonly CommandNotice[]; agent?: string }) {
+  const locale = useReaderLocale();
+  return <>{notices.map(notice => {
+    if (!agent || !notice.code || !Object.hasOwn(STARTUP_FAILURES, notice.code)) {
+      return <p key={notice.messageId} className="app-invocation-description">{notice.body}</p>;
+    }
+    const words = startupFailureWords(notice.code, locale, { agent });
+    const cause = notice.body.split(/\n\s*\n/u).slice(1).join("\n").trim();
+    return <Fragment key={notice.messageId}>
+      <p className="app-invocation-description"><strong>{words.title}</strong></p>
+      <p className="app-invocation-description">{words.explanation}</p>
+      {cause && <p className="app-invocation-code">{cause}</p>}
+      {words.steps.map((step, index) => <p key={step} className="app-invocation-description">{words.steps.length > 1 ? `${index + 1}. ` : ""}{step}</p>)}
+    </Fragment>;
+  })}</>;
 }
 
 /** A `/model` or `/effort` statement, highlighted whole like the `@` it starts
@@ -330,7 +346,7 @@ export function MentionRefusedLifecycleChip({ kind, text, agentName, ordinal, su
   kind: LifecycleKind; text: string; agentName: string; ordinal: number; successor?: string;
   notices: readonly CommandNotice[];
 }) {
-  const locale = useBrowserOnboardingLocale();
+  const locale = useReaderLocale();
   const chrome = PROBLEM_COPY[locale].lifecycle;
   const code = lifecycleRefusalCode(notices[0]);
   let view = lifecycleRefusalView(notices, kind);
@@ -372,7 +388,7 @@ export function MentionLaunchHintChip({ rejection, labelContent }: {
 }) {
   const card = useInvocationPopover();
   const title = LAUNCH_HINT_TITLES[rejection.code] ?? "How to start";
-  const detail = launchRejectionCause(rejection.code, useBrowserOnboardingLocale()) ?? rejection.message;
+  const detail = launchRejectionCause(rejection.code, useReaderLocale()) ?? rejection.message;
   return <MentionProseCard card={card} sourceMention={rejection.sourceMention} labelContent={labelContent} title={title}
     className="app-mention-intent-declined app-mention-launch-hint"
     ariaLabel={`${rejection.sourceMention}: ${title}. Show details`}>

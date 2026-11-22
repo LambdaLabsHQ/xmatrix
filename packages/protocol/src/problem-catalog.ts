@@ -232,6 +232,88 @@ export function lifecycleRefusalCode(note: { code?: string; body: string } | und
 }
 
 /* ---------------------------------------------------------------------------
+ * Startup failures: a Run that a machine began and could not bring up
+ * (machine-run-failure-notice.ts, metadata failureCode). The machine's own
+ * error is the cause and is shown as written; a row titles it and says what
+ * to do. Values: {agent} the Agent's address, {machine} its machine's name.
+ * ------------------------------------------------------------------------- */
+
+export const STARTUP_FAILURES = {
+  startup_failed: {
+    en: { title: "{agent} couldn't start on {machine}", explanation: "Nothing is running. The machine reported:",
+      steps: ["Send your message again.", "If it fails the same way, address another Agent."] },
+    zh: { title: "{agent} 没能在 {machine} 上启动", explanation: "现在没有任何东西在运行。那台电脑报告：",
+      steps: ["再发一次消息。", "如果还是同样失败，换一个 Agent。"] },
+  },
+  repository_access_unavailable: {
+    en: { title: "{agent} couldn't reach the repository", explanation: "This Space's GitHub connection can't access it, so {agent} didn't start on {machine}. GitHub said:",
+      steps: ["Check that the repository is in the GitHub app's installation for this Space.", "Then send your message again."] },
+    zh: { title: "{agent} 访问不到这个仓库", explanation: "这个 Space 的 GitHub 连接访问不了它，所以 {agent} 没有在 {machine} 上启动。GitHub 的原话：",
+      steps: ["确认这个仓库在这个 Space 的 GitHub 应用授权范围里。", "然后再发一次消息。"] },
+  },
+  machine_not_answering: {
+    en: { title: "{machine} didn't answer", explanation: "{machine} is connected but never answered the start command for {agent}. Nothing was started.",
+      steps: ["Restart xMatrix on {machine}.", "Then send your message again."] },
+    zh: { title: "{machine} 没有响应", explanation: "{machine} 连着，但一直没有响应启动 {agent} 的指令，什么都没有启动。",
+      steps: ["在 {machine} 上重启 xMatrix。", "然后再发一次消息。"] },
+  },
+  harness_missing: {
+    en: { title: "{agent}'s program isn't installed on {machine}", explanation: "The machine couldn't find the program that runs {agent}:",
+      steps: ["Install it on {machine}, or open a new terminal there if you just installed it.", "Then send your message again."] },
+    zh: { title: "{machine} 上没有装 {agent} 的程序", explanation: "那台电脑找不到运行 {agent} 的程序：",
+      steps: ["在 {machine} 上安装它；刚装好的话，在那台电脑上开一个新终端。", "然后再发一次消息。"] },
+  },
+  harness_session_in_use: {
+    en: { title: "{agent}'s session is open somewhere else", explanation: "Another program on {machine} still holds {agent}'s session, so it can't resume here:",
+      steps: ["Close the other program using this session on {machine}.", "Then send your message again."] },
+    zh: { title: "{agent} 的会话在别处开着", explanation: "{machine} 上还有别的程序占着 {agent} 的会话，所以没法在这里接着用：",
+      steps: ["在 {machine} 上关掉占用这个会话的程序。", "然后再发一次消息。"] },
+  },
+  repository_base_unresolved: {
+    en: { title: "{agent} couldn't find the repository's default branch", explanation: "{machine} couldn't work out which branch to start {agent} from:",
+      steps: ["Check that the repository has a default branch on GitHub.", "Then send your message again."] },
+    zh: { title: "{agent} 找不到仓库的默认分支", explanation: "{machine} 没法确定从哪个分支启动 {agent}：",
+      steps: ["确认这个仓库在 GitHub 上有默认分支。", "然后再发一次消息。"] },
+  },
+  machine_disk_full: {
+    en: { title: "{machine} is out of disk space", explanation: "{agent} couldn't start because {machine} has no space left:",
+      steps: ["Free up disk space on {machine}.", "Then send your message again."] },
+    zh: { title: "{machine} 磁盘满了", explanation: "{machine} 没有剩余空间，{agent} 没能启动：",
+      steps: ["清理 {machine} 的磁盘空间。", "然后再发一次消息。"] },
+  },
+  repository_fetch_failed: {
+    en: { title: "{machine} couldn't fetch the repository", explanation: "{agent} needs the latest code, and fetching it failed:",
+      steps: ["Check {machine}'s network and its access to GitHub.", "Then send your message again."] },
+    zh: { title: "{machine} 拉不下来仓库", explanation: "{agent} 需要最新的代码，拉取失败了：",
+      steps: ["检查 {machine} 的网络，以及它能不能访问 GitHub。", "然后再发一次消息。"] },
+  },
+  remote_repo_fetch: {
+    en: { title: "Fetching the repository on {machine} timed out", explanation: "{agent} didn't start because getting the code took too long:",
+      steps: ["Check {machine}'s network and proxy.", "Then send your message again; a second fetch is usually faster."] },
+    zh: { title: "{machine} 拉取仓库超时了", explanation: "获取代码太慢，{agent} 没有启动：",
+      steps: ["检查 {machine} 的网络和代理。", "然后再发一次消息，第二次拉取一般会快一些。"] },
+  },
+  remote_repo_access: {
+    en: { title: "{machine} can't access the repository", explanation: "{agent} didn't start because the repository refused {machine}:",
+      steps: ["Check that the repository exists and this Space's GitHub connection can reach it.", "Then send your message again."] },
+    zh: { title: "{machine} 访问不了这个仓库", explanation: "仓库拒绝了 {machine}，{agent} 没有启动：",
+      steps: ["确认仓库存在，并且这个 Space 的 GitHub 连接能访问它。", "然后再发一次消息。"] },
+  },
+  machine_unavailable: {
+    en: { title: "{machine} isn't reachable", explanation: "xMatrix couldn't hand {agent} to {machine}:",
+      steps: ["Make sure {machine} is on and xMatrix is open there.", "Then send your message again, or address another Agent."] },
+    zh: { title: "连不上 {machine}", explanation: "xMatrix 没法把 {agent} 交给 {machine}：",
+      steps: ["确认 {machine} 已开机，并且打开了 xMatrix。", "然后再发一次消息，或者换一个 Agent。"] },
+  },
+} as const satisfies Record<string, ProblemRow>;
+
+/** A startup failure's words; an unknown code reads as startup_failed. */
+export function startupFailureWords(code: string, locale: ProblemLocale, values: { agent: string; machine?: string }): ProblemWords {
+  const row: ProblemRow = Object.hasOwn(STARTUP_FAILURES, code) ? STARTUP_FAILURES[code as keyof typeof STARTUP_FAILURES] : STARTUP_FAILURES.startup_failed;
+  return fill(row[locale], { agent: values.agent, machine: values.machine?.trim() || (locale === "zh" ? "那台电脑" : "its computer") });
+}
+
+/* ---------------------------------------------------------------------------
  * Launch rejections: why a summon never allocated a launch. The English is
  * PREPARATION_REJECTION_MESSAGES (the Hub's wire text); this is every row's
  * Chinese cause, without "no launch was allocated", which the card says.
