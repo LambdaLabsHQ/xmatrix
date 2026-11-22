@@ -173,9 +173,10 @@ async function quickAskSpace(token, { fresh = false } = {}) {
  * passage is picked. Only this extension's content script in that tab, or its
  * context menu, sets it; the box reads it by the tab it is framed in.
  */
-async function setPendingAsk(tab, text) {
-  const passage = pagePassage({ text, title: tab.title, url: tab.url, target: "new" });
-  if (!passage || tab.id === undefined) return;
+async function setPendingAsk(tab, text, page = {}) {
+  // Chrome names a tab's address and title only where this extension may read the tab; the page's own script knows them.
+  const passage = pagePassage({ text, title: tab.title ?? page.title, url: tab.url ?? page.url, target: "new" });
+  if (!passage || tab.id === undefined) throw new Error("xMatrix can only ask about web pages.");
   await chrome.storage.session.set({ [`ask:${tab.id}`]: {
     text: passage.text, label: passage.label || new URL(passage.href).host, href: passage.href, windowId: tab.windowId ?? null } });
 }
@@ -191,7 +192,7 @@ async function pendingAsk(tabId) {
 async function askContext(tab) {
   const passage = await pendingAsk(tab.id);
   const session = await panelHandlers.session({});
-  if (!session?.user) throw new Error("Sign in to xMatrix in the side panel first.");
+  if (!session?.user) throw Object.assign(new Error("Sign in to xMatrix in the side panel first."), { code: "signed_out" });
   const { lastSpace } = await chrome.storage.local.get("lastSpace");
   return { token: session.token, user: session.user, spaceId: lastSpace?.id ?? null,
     passage: { text: passage.text, label: passage.label, href: passage.href }, windowId: passage.windowId };
@@ -321,12 +322,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== chrome.runtime.id) return false;
   const answer = (work) => {
     work.then((value) => reply({ ok: true, value }))
-      .catch((error) => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+      .catch((error) => reply({ ok: false, error: error instanceof Error ? error.message : String(error),
+        ...(typeof error?.code === "string" ? { code: error.code } : {}) }));
     return true;
   };
   // The selection script runs in web pages: it may only hand over a passage of its own tab.
   if (message?.type === "askPrepare" && sender.tab && !isExtensionPage(sender)) {
-    return answer(setPendingAsk(sender.tab, String(message.text ?? "")));
+    return answer(setPendingAsk(sender.tab, String(message.text ?? ""),
+      { title: typeof message.title === "string" ? message.title : undefined,
+        url: typeof message.url === "string" ? message.url : undefined }));
   }
   // The question box is this extension's page, framed in that tab: it reads and sends that tab's ask only.
   if (isExtensionPage(sender) && sender.tab?.id !== undefined) {
@@ -357,7 +361,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
     await setPendingAsk({ ...tab, url: info.pageUrl ?? tab.url }, info.menuItemId === MENU_ASK ? info.selectionText ?? "" : "");
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["src/selection.js"] });
-    await chrome.tabs.sendMessage(tab.id, { type: "open-ask", page: info.menuItemId === MENU_PAGE });
+    await chrome.tabs.sendMessage(tab.id, { type: "open-ask", page: info.menuItemId === MENU_PAGE, text: info.selectionText ?? "" });
   } catch {
     // A page no extension may enter (the Web Store, a PDF): the panel starts the conversation instead.
     openPanel(tab);
@@ -370,7 +374,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SIGN_IN_ALARM) pollSignIn();
 });
 
-chrome.permissions.onAdded.addListener(() => syncSelectionScript());
+chrome.permissions.onAdded.addListener(() => {
+  syncSelectionScript().then(reachOpenPages).catch(() => undefined);
+});
 chrome.permissions.onRemoved.addListener(() => syncSelectionScript());
 
 function start() {
@@ -380,8 +386,21 @@ function start() {
   refreshBadge();
 }
 
+/**
+ * Pages already open when the extension was installed or updated: their old
+ * script (if any) is cut off from the extension, and a registered script
+ * reaches only pages loaded after. The current one goes into each of them now.
+ */
+async function reachOpenPages() {
+  if (!(await chrome.permissions.contains({ origins: WEB_ORIGINS }))) return;
+  const tabs = await chrome.tabs.query({ url: WEB_ORIGINS });
+  await Promise.all(tabs.map((tab) => chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["src/selection.js"] })
+    .catch(() => undefined)));
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   installMenus();
   start();
+  reachOpenPages().catch(() => undefined);
 });
 chrome.runtime.onStartup.addListener(start);

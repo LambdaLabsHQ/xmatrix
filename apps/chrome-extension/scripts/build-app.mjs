@@ -243,7 +243,7 @@ const ASK_PAGE = `<!doctype html>
   <link rel="stylesheet" href="ask.css">
   <script src="document.js"></script>
 </head>
-<body class="antialiased" style="margin: 0; background: transparent; overflow: hidden">
+<body class="site-canvas antialiased" style="margin: 0; background: transparent; overflow: hidden">
   <script type="module" src="ask.js"></script>
 </body>
 </html>

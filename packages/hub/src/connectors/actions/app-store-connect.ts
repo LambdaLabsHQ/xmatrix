@@ -15,7 +15,24 @@ import { cell } from "./google-report";
 
 const PLATFORMS: Readonly<Record<string, string>> = { ios: "IOS", macos: "MAC_OS", tvos: "TV_OS", visionos: "VISION_OS" };
 const VERSION = /^\d{1,4}(?:\.\d{1,5}){0,3}$/u;
+const CURSOR_ARG = /^cursor:([A-Za-z0-9_-]{1,1400})$/u;
 export const MAX_OUTPUT = 12_000;
+
+/** Optional `cursor:<token>` continuation argument; empty text returns `""`, invalid text returns `undefined`. */
+export function parseCursorArg(rawText: string): string | undefined {
+  const trimmed = rawText.trim();
+  if (!trimmed) return "";
+  const match = CURSOR_ARG.exec(trimmed);
+  return match ? match[1]! : undefined;
+}
+
+/** `<bundle id>` with optional `cursor:<token>` continuation for read listings. */
+export function appCursorStatement(statement: ConnectorActionStatement): Record<string, string> | string {
+  const app = bundleId(statement.target);
+  const cursor = parseCursorArg(statement.text);
+  if (!app || cursor === undefined) return "name an app by its bundle ID: <com.example.app> [cursor:<token>]";
+  return cursor ? { app, cursor } : { app };
+}
 export const LOCALE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/u;
 const LOCALIZED = ["description", "keywords", "promotionalText", "whatsNew", "supportUrl", "marketingUrl"] as const;
 
@@ -141,8 +158,16 @@ interface AppStep { api: AppStoreConnectApi; app: AppleResource; input: Record<s
 
 /** An action on one app: the key and the app are resolved before the step runs, and the receipt links the app. */
 export function appAction(effect: ConnectorAction["effect"], parse: ConnectorAction["parse"],
-  step: (context: AppStep) => Promise<string>): ConnectorAction {
+  step: (context: AppStep) => Promise<string>,
+  prepare?: (context: AppStep) => Promise<Record<string, string>>): ConnectorAction {
   return { effect, requires: ["keyId", "privateKey"], parse,
+    ...(prepare ? {
+      async prepare({ credentials }, input) {
+        const api = appStoreConnect(credentials);
+        const app = await appleApp(api, input.app!);
+        return prepare({ api, app, input });
+      },
+    } : {}),
     async execute({ credentials }, input) {
       const api = appStoreConnect(credentials);
       const app = await appleApp(api, input.app!);
@@ -181,14 +206,20 @@ const BUILD_HEADER = "platform\tversion\tbuild\tprocessing\tuploaded\texpired";
 export const APP_STORE_CONNECT_READ_ACTIONS: Record<string, ConnectorAction> = {
   list_apps: {
     effect: "read", requires: ["keyId", "privateKey"],
-    parse: statement => statement.target === "*" && !statement.text.trim() ? {} : "use @appstoreconnect:list_apps:*",
-    async execute({ credentials }) {
-      const { rows, incomplete } = await appStoreConnect(credentials).listPreview("/v1/apps",
-        { "fields[apps]": "name,bundleId,sku,primaryLocale", sort: "name", limit: "200" });
+    parse: (statement): Record<string, string> | string => {
+      const cursor = parseCursorArg(statement.text);
+      if (statement.target !== "*" || cursor === undefined) return "use @appstoreconnect:list_apps:* [cursor:<token>]";
+      return cursor ? { cursor } : {};
+    },
+    async execute({ credentials }, input) {
+      const { rows, incomplete, cursor } = await appStoreConnect(credentials).listPreview("/v1/apps",
+        { "fields[apps]": "name,bundleId,sku,primaryLocale", sort: "name", limit: "200" },
+        input.cursor ? { cursor: input.cursor } : undefined);
       const lines = rows.slice(0, 250).map(app => [cell(app.attributes.bundleId), cell(app.attributes.name), cell(app.attributes.sku),
         cell(app.attributes.primaryLocale)].join("\t"));
-      return { summary: "App Store Connect apps:\n" + quoteRetrievedText(table("bundle id\tname\tsku\tprimary locale", lines, "(no apps for this API key)")) +
-        (incomplete || rows.length > 250 ? "\nApple returned more apps; this list is incomplete." : "") };
+      const more = incomplete || rows.length > 250
+        ? `\nApple returned more apps; this list is incomplete.${cursor ? ` Continue with cursor:${cursor}` : ""}` : "";
+      return { summary: "App Store Connect apps:\n" + quoteRetrievedText(table("bundle id\tname\tsku\tprimary locale", lines, "(no apps for this API key)")) + more };
     },
   },
   status: appAction("read",
