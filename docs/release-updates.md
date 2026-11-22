@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Repeated outside events do not repeat a Norn round
+
+GitHub and connector events now carry their provider identity into the Norn
+ledger. All matching streams are recorded in one transaction per program.
+Retries reuse that identity, and a Hub build that cannot evaluate the source
+saves the event for the scheduled recheck. This covers events delivered by
+the updated Hub. Hub and DB code only, with no schema or client migration.
+Recovery is a CI-validated beta reverting the change.
+
 ## Unreleased: Agent presence reads ship each distinct Instance catalog once
 
 Channel windows and exact Instance reads carried each Instance's model,

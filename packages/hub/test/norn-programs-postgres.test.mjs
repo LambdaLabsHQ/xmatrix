@@ -122,18 +122,27 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
 
     // A program that waits for an outside event is found by what it waits on, and hears the event in its ledger.
     await message("events", 4, "user", "owner");
+    const eventSource = `ciFailed("acme/app")->forEach(what => ask(@codex, what)->wait)`;
     await programs.start({ ...scope("events"), authorKind: "user", authorId: "owner", authorityUserId: "owner",
-      source: `ciFailed("acme/app")->forEach(what => ask(@codex, what)->wait)`, ledger: nornStartLedger }, nornStep());
+      source: eventSource, ledger: nornStartLedger }, nornStep());
     const [waiting] = await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space" });
     assert.deepEqual([waiting.programId, waiting.authorityUserId, waiting.waits.map(stream => stream.name)], ["events", "owner", ["ciFailed"]]);
-    await programs.advance(scope("events"), nornStep(undefined, { stream: waiting.waits[0], what: "Workflow CI failed on main" }));
+    const outside = nornStep(undefined, { id: "ci-1", streams: waiting.waits, what: "Workflow CI failed on main" });
+    // Simulate a rollback to a build that cannot read a source already admitted by a newer build.
+    await sql("UPDATE data.norn_programs SET source='(' WHERE program_id='events'");
+    assert.match((await programs.advance(scope("events"), outside)).refusal, /does not check/u);
+    assert.deepEqual((await programs.channelWork(scope())).deliveries, []);
+    await sql("UPDATE data.norn_programs SET source=$1 WHERE program_id='events'", [eventSource]);
+    await programs.advance(scope("events"), nornStep());
     assert.deepEqual((await programs.channelWork(scope())).deliveries.map(each => [each.programId, each.request.text]),
       [["events", "Workflow CI failed on main"]]);
     // While its round runs it still listens: an event then is kept for the loop, not lost.
     assert.deepEqual((await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space" })).map(program => program.programId), ["events"]);
+    await programs.advance(scope("events"), outside);
     await programs.advance(scope("events"), nornStep({ requestId: (await programs.channelWork(scope())).deliveries[0].requestId, epoch: 0,
       reply: { tag: "Refused", reason: "not now" } }));
     // The round over, it goes on listening; removed, it is gone from every later pass.
+    assert.deepEqual((await programs.channelWork(scope())).deliveries, []);
     assert.equal((await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space" })).length, 1);
     await programs.remove(scope("events"));
     assert.equal((await programs.advance(scope("events"), nornStep())).status, "failed");

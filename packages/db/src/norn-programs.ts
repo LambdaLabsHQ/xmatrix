@@ -43,10 +43,10 @@ export interface NornProgramWrite {
   notices: { noticeId: string; recipient: string; body: string }[];
 }
 /**
- * A pass that could not be made here and is to be tried again: the program
- * is left exactly as it is, and only the time of its next pass moves.
+ * A pass that could not be made here and is to be tried again. An incoming
+ * occurrence can be recorded before evaluation, without changing the request index.
  */
-export interface NornProgramRetry { retryAtMs: number }
+export interface NornProgramRetry { retryAtMs: number; ledger?: unknown }
 export type NornStep<T> = (state: NornProgramState) => { write: NornProgramWrite | NornProgramRetry | null; result: T };
 
 interface Scope { requestId: string; channelId: string; programId: string }
@@ -243,8 +243,11 @@ export class PostgresNornProgramRepository {
       requests: rows.filter(row => row.request_id !== null).map(requestRow) });
     if (!write) return result;
     if ("retryAtMs" in write) {
-      await tx.query({ name: "norn_program_retry_v1", text: `UPDATE data.norn_programs SET next_due_at=$3,updated_at=clock_timestamp()
-        WHERE space_id=$1 AND program_id=$2`, values: [...scope, new Date(write.retryAtMs).toISOString()], maxRows: 0 });
+      await tx.query({ name: "norn_program_retry_v2", text: `UPDATE data.norn_programs
+        SET next_due_at=CASE WHEN $4::jsonb IS NULL THEN $3::timestamptz ELSE LEAST(next_due_at,$3::timestamptz) END,
+        ledger_json=COALESCE($4::jsonb,ledger_json),updated_at=clock_timestamp()
+        WHERE space_id=$1 AND program_id=$2`, values: [...scope, new Date(write.retryAtMs).toISOString(),
+        write.ledger === undefined ? null : JSON.stringify(write.ledger)], maxRows: 0 });
       return result;
     }
     await tx.query({ name: "norn_program_write_v2", text: `UPDATE data.norn_programs SET ledger_json=$3::jsonb,state=$4,
