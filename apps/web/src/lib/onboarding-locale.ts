@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -42,4 +42,14 @@ export function useOnboardingLocale(spaceId: string | null | undefined, token: s
 export function useOnboardingCopy(spaceId: string | null | undefined, token: string | null | undefined,
   userId: string | undefined): OnboardingCopy {
   return ONBOARDING_COPY[useOnboardingLocale(spaceId, token, userId)];
+}
+
+/** The workspace's reader language (useOnboardingLocale), for surfaces deep
+ * in a message that do not hold the Space or session: refusal chips, launch
+ * hints. Outside a workspace it is the browser's language. */
+export const ReaderLocaleContext = createContext<OnboardingLocale | null>(null);
+
+export function useReaderLocale(): OnboardingLocale {
+  const browser = useBrowserOnboardingLocale();
+  return useContext(ReaderLocaleContext) ?? browser;
 }

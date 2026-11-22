@@ -61,7 +61,7 @@ export async function machineRunFailureNoticeCommand(input: MachineRunFailureNot
       "", humanized.summary, ...(humanized.action ? ["", humanized.action] : [])].join("\n"),
     messageKind: "xmatrix.system.runtime-failure", ...systemNoticeAuthor(input),
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
-      source: "machine_run_failure", ...(heldBy === undefined ? { runId: input.runId } : { instanceId: heldBy }), machineId: input.machineId, machineOwnerUserId: input.ownerUserId, machineName: input.machineName,
+      source: "machine_run_failure", agentName: input.agentName, ...(heldBy === undefined ? { runId: input.runId } : { instanceId: heldBy }), machineId: input.machineId, machineOwnerUserId: input.ownerUserId, machineName: input.machineName,
       failureCode: humanized.code, failureDetail: humanized.summary,
       ...(input.harness ? { harness: input.harness } : {}),
       ...(input.phase ? { statusPhase: input.phase } : {}) } },
@@ -72,8 +72,9 @@ export async function publishMachineRunFailureNotice(env: Env, input: MachineRun
   const command = await machineRunFailureNoticeCommand(input);
   // A summon's chip records one note per failure key, so later Runs failing
   // on the same held session add nothing to the message that asked.
+  const code = command.residual.appMetadata.failureCode;
   await deliverMachineNotice(env, command, input, "startup-failure",
-    command.residual.appMetadata.failureCode === HARNESS_SESSION_IN_USE ? command.messageId : undefined);
+    code === HARNESS_SESSION_IN_USE ? command.messageId : undefined, code);
 }
 
 /**
@@ -110,13 +111,13 @@ export async function publishSignedOutStartNotice(env: Env,
  * as a notice, because nothing else would.
  */
 async function deliverMachineNotice(env: Env, command: Record<string, unknown> & { channelId: string; body: string },
-  input: { runId: string; sourceMessageId?: string }, key: string, noteKey = input.runId): Promise<void> {
+  input: { runId: string; sourceMessageId?: string }, key: string, noteKey = input.runId, code?: string): Promise<void> {
   if (!input.sourceMessageId) {
     await appendChannelMessage(env, command.channelId, command);
     return;
   }
   await recordCommandResult(env, { channelId: command.channelId, messageId: input.sourceMessageId,
-    key: `${key}:${noteKey}`, entry: { note: { text: command.body, runId: input.runId } } });
+    key: `${key}:${noteKey}`, entry: { note: { text: command.body, runId: input.runId, ...(code ? { code } : {}) } } });
 }
 
 /** The same message went to another Agent after a failed start. Stable per

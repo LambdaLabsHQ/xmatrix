@@ -87,7 +87,7 @@ import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
 import { AGENT_PRESETS, WEB_PROXY_ROUTES, type ChannelSnapshot } from "@xmatrix/protocol";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
-import { useOnboardingLocale } from "@/lib/onboarding-locale";
+import { ReaderLocaleContext, useOnboardingLocale } from "@/lib/onboarding-locale";
 import { harnessSpaceKey } from "./harness-space-switch";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 import { SpaceAgentSetupCard } from "./space-agent-setup-card";
@@ -1518,6 +1518,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel} token={token}
       onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
     <FaceSpaceContext.Provider value={currentSpaceId}>
+    <ReaderLocaleContext.Provider value={welcomeLocale}>
     <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
     <RealtimeEventsContext.Provider value={model.realtimeEventViews}>
     <PresentedChannelTailContext.Provider value={model.presentedChannelTail}>
@@ -1824,6 +1825,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     </PresentedChannelTailContext.Provider>
     </RealtimeEventsContext.Provider>
     </RealtimeChannelsContext.Provider>
+    </ReaderLocaleContext.Provider>
     </FaceSpaceContext.Provider>
     </AttachmentDropZoneProvider>
   );
