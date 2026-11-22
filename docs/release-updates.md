@@ -4,6 +4,10 @@
 
 Removed the `/alternatives` hub page (which risked targeting negative brand queries) and moved all 19 competitor comparison landing pages to flat root-level `/<competitor>-alternatives` URLs (`/raft-alternatives`, `/t3-code-alternatives`, `/conductor-alternatives`, `/jules-alternatives`, etc.), with permanent redirects for legacy names (`/superset-alternatives`, `/slock-alternatives`, `/lobechat-alternatives`, `/evermemos-alternatives`, `/google-jules-alternatives`). Tightened `<title>` tags (<=60 chars, front-loaded `<Competitor> Alternatives (2026)`) and `<h1>` headings to match competitor search intent, embedded the live xMatrix `<AppWindow />` preview directly below the hero, added `SoftwareApplication` structured data, and replaced the single footer hub link with direct `<Competitor> Alternatives` links from every page. Web only. Recovery is a CI-validated beta reverting this change.
 
+## Unreleased: bound WebSocket hibernation attachments by V8 structured-clone size
+
+`hibernationBoundedJson` checked only UTF-8 JSON byte length against Cloudflare Durable Objects' 16 KiB `WebSocket.serializeAttachment` limit. Because V8's `ValueSerializer` encodes any string containing a UTF-16 code unit above `0xFF` (such as an em-dash or CJK character) as two-byte UTF-16 for the entire string plus alignment padding, an Agent Instance session whose JSON fit under 16 KiB could exceed 16 KiB in V8 structured clone (e.g. 16,449 bytes in Sentry `XMATRIX-HUB-E8`), bypassing hibernation compaction and throwing inside `serializeAttachment`. `hibernationBoundedJson` now enforces both UTF-8 JSON length and a sound upper bound on V8 structured-clone size on both input and normalized attachments so oversized Agent Instance presentations compact before serialization. Hub only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Antigravity quota uses native `agy -p "/usage"` instead of direct OAuth token reads
 
 The Antigravity quota reader previously read `~/.gemini/antigravity-cli/antigravity-oauth-token`
@@ -77,6 +81,27 @@ shifts left of the disc or would overflow the column stack their controls above
 the avatar (`panel` / `trace-panel`) so every button stays unobstructed and
 within the viewport. Web only. Recovery is a CI-validated beta reverting this
 change.
+
+## Unreleased: the Chrome extension has one action, ask, and asks in the Space you are looking at
+
+A question asked on a page went to the Space last used by the extension, or the
+person's first Space when none was recorded, not the one open in the side
+panel; a Space without Agents then answered "No Agent was asked". The panel's
+app now tells the extension which Space it shows (`{ type: "space" }` in
+`extension-embed.ts`), and questions go there; the box names that Space before
+it is sent. The message mentions nobody, so the Space's routing picks the Agent.
+
+The selection bar's *Ask* / *Quote* pair, the context menu's *Discuss* /
+*Quote* pair and the panel bar's *Quote* / *New chat* become one action: a
+field beside the selection, *Ask about this…*, that opens into the question
+box; *Ask about “…”* and *Ask about this page* in the context menu, which open
+the same box on the page through activeTab; and *Ask about this page* in the
+panel bar. The panel asks once, right after sign-in, whether to turn on the
+field beside selections, instead of a strip above the app. Source labels drop
+the unread counts sites put before their titles. Web (the Space announcement
+and the privacy policy wording) and the extension, which ships outside the
+release train; an extension built before it keeps its old Space choice.
+Recovery is reverting this change.
 
 ## Unreleased: the Chrome extension packages the app instead of framing the Web
 

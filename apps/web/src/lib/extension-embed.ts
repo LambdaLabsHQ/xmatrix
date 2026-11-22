@@ -101,6 +101,16 @@ export function announceEmbedAccount(parent: string, user: AuthUser) {
   postToParent(parent, { type: "account", user: { id: user.id, email: user.email, name: user.name, avatarUrl: user.avatarUrl } });
 }
 
+/**
+ * Tells the extension the Space this app is showing. A question the person
+ * asks right on a page goes to this Space, the one they are looking at in the
+ * panel, not to whichever Space happens to be listed first.
+ */
+export function announceEmbedSpace(space: { id: string; name: string }) {
+  const parent = extensionEmbedParent();
+  if (parent) postToParent(parent, { type: "space", space: { id: space.id, name: space.name.slice(0, MAX_LABEL_CHARS) } });
+}
+
 /** Tells the extension the person signed out here, so it ends its own session too. */
 export function announceEmbedSignOut(parent: string) {
   postToParent(parent, { type: "signed-out" });

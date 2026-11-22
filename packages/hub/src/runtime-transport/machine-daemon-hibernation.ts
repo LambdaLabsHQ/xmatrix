@@ -50,7 +50,7 @@ export function parseMachineDaemonHibernationAttachment(value: unknown): Machine
       !(principal.hostId === undefined || principal.hostId === "" || hibernationBoundedString(principal.hostId, 160)) ||
       !(principal.hostName === undefined || hibernationBoundedString(principal.hostName)) ||
       !(principal.hostname === undefined || principal.hostname === "" || hibernationBoundedString(principal.hostname, 160))) return undefined;
-  return {
+  const parsed: MachineDaemonHibernationAttachment = {
     version: 1,
     domain: "machine_daemon",
     expiresAt: value.expiresAt,
@@ -74,6 +74,7 @@ export function parseMachineDaemonHibernationAttachment(value: unknown): Machine
         : {}),
     },
   };
+  return hibernationBoundedJson(parsed) ? parsed : undefined;
 }
 
 /** A heal deadline is kept only within one interval from now; anything else checks again. */

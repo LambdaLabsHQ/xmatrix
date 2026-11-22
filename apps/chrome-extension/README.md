@@ -3,8 +3,10 @@
 A Manifest V3 extension that puts the person's xMatrix Space in Chrome's side panel, beside the page they are reading. The extension is about the moments when someone is actively browsing. Browser automation is out of scope: Playwright already covers it without an extension.
 
 - **The app beside every page.** The toolbar button (Alt+Shift+X) opens the side panel. The panel is the real workspace app, built from `apps/web` into the extension's own package, with its narrow-screen layout: live conversations, mentions, Agents, approval cards and Pages. Opening the panel loads nothing from the Web; the app's first requests go straight to the Hub.
-- **Ask right on the page.** Select text and click *Ask* on the small bar beside it: a box opens there, holding the passage. Write a question (mention an Agent to hand it the work) and press Enter. The extension starts the conversation through the Hub itself, in the Space last used, with the quoted passage and the question as its first message, so nothing waits for the app to load. The side panel then opens on that conversation.
-- **Discuss what you are reading.** Select text and choose one of two actions. *Discuss* starts a new conversation named by the passage. *Quote* adds the passage to the open conversation. In both cases the composer holds the passage as a quote with a link back to the page. Both actions are available from the context menu (*Discuss in xMatrix* also works on a whole page or a link), from the bar at the top of the panel (*Quote* / *New chat* for the page beside it), and, once the person turns it on, from a small button next to the selection.
+- **Ask right on the page.** One action, everywhere: ask. Select text and a slip with *Ask* appears beside it (the App's PaperPopover, as on a Page selection); a click opens the question box there: the passage, a white capsule field, and the Space it goes to. Press Enter: the extension starts the conversation through the Hub itself, in the Space the side panel shows, with the quoted passage and the question as its first message, so nothing waits for the app to load. Nobody needs to be mentioned: the Space's routing picks an Agent, as for any message (mention one to choose it). The side panel then opens on that conversation.
+  - The right-click menu has *Ask about “…”* for a selection and *Ask about this page*: it opens the same box on the page (activeTab), with no access to web pages granted.
+  - The bar at the top of the panel has *Ask about this page*, which starts a conversation about the page beside it in the app.
+  - Right after signing in, the panel asks once whether to turn on the field beside selections (it needs access to web pages). *Not now* goes straight to the app; the right-click menu works either way.
 - **Needs you badge.** The badge counts the conversations waiting on the person. It is the same `attention` count as the web's "Needs you" section.
 
 ## How it fits together
@@ -21,6 +23,7 @@ A Manifest V3 extension that puts the person's xMatrix Space in Chrome's side pa
   - Signing out in either place signs out both. When the Hub no longer admits the packaged app's version, the panel asks for the extension to be updated.
 - **Content policy.** The manifest's `content_security_policy` (written by `scripts/package.mjs`) is the Web's policy without the Web: scripts, styles and fonts from the package only, requests to the Hub only, and pictures from the package, the Hub or the Web. A message that names a picture by address cannot make the reader's browser ask that address.
 - **Extension ID.** `manifest.json` carries the Chrome Web Store item's public `key`, so an unpacked build has the store ID `kaickfjmldmlelnfijaahialjpnebnak`, the one the app takes as its side panel (`apps/web/src/lib/extension-embed-origins.ts`). The store upload is packaged without the key.
+- **The Space.** The app tells the panel which Space it shows (`{ type: "space" }`); questions asked on a page go there.
 - **Passages.** Passages are queued in `chrome.storage.session` until the app reports `ready`, then delivered as `{ type: "passage", text, label, href, target }`. The app quotes them through its existing passage-discussion path.
 - **Client identity.** Requests declare `component: app` and `platform: chrome-extension`, with the release the package was built for, so the Hub's compatibility gate admits them. A Hub that raises the app's minimum version needs a newer extension.
 
@@ -30,7 +33,7 @@ A Manifest V3 extension that puts the person's xMatrix Space in Chrome's side pa
   - `sidePanel`, `storage`, `alarms` and `contextMenus`.
   - `activeTab` and `scripting`, to read the selected text of the page the person acted on.
   - Host access to the Hub only.
-- **Quick select (optional):** the button beside selected text needs access to web pages, `https://*/*` and `http://*/*`. That access is requested only when the person clicks *Turn on* in the panel. The extension then registers `src/selection.js`, which reads nothing until the person clicks the button, and then only the selected text. Without that access, the context menu and the panel bar still work.
+- **Ask beside selections (optional):** the field beside selected text needs access to web pages, `https://*/*` and `http://*/*`. That access is requested only when the person clicks *Turn on* on the panel's screen after sign-in. The extension then registers `src/selection.js`, which reads nothing until the person clicks the field, and then only the selected text. Without that access, the context menu injects the same script into the one tab it was used on.
 
 ## Develop
 
