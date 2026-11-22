@@ -24,5 +24,10 @@ integration("a campaign mails each person once, and never anyone who unsubscribe
     assert.deepEqual(again.eligible, [], "a failed send is not retried automatically");
     assert.equal(again.skipped.alreadySent, 2);
     assert.deepEqual((await repo.eligible(randomUUID(), "c2", ["a"], false)).eligible, ["a"], "each campaign is separate");
+    await repo.addInternalAddress(randomUUID(), " Boss@Gmail.com ", "op");
+    await repo.addInternalAddress(randomUUID(), "boss@gmail.com", "op");
+    assert.deepEqual(await repo.internalAddresses(randomUUID()), ["boss@gmail.com"], "stored once, lowercased");
+    await repo.removeInternalAddress(randomUUID(), "BOSS@gmail.com");
+    assert.deepEqual(await repo.internalAddresses(randomUUID()), []);
   } finally { await f.close(); }
 });

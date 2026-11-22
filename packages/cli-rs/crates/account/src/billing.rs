@@ -109,9 +109,44 @@ pub async fn grant_give(
 
 /// POST an operator request and print the Hub's JSON answer.
 async fn post_and_print(hub: &str, token: &str, path: &str, body: serde_json::Value) -> Result<()> {
+    send_and_print(hub, token, "POST", path, Some(body)).await
+}
+
+/// The operator's internal addresses: list them, or add or remove one.
+pub async fn internal_addresses(
+    hub: &str,
+    token: &str,
+    change: Option<(&str, &str)>,
+) -> Result<()> {
+    let path = "/api/admin/internal-email-addresses";
+    match change {
+        None => send_and_print(hub, token, "GET", path, None).await,
+        Some((method, email)) => {
+            if !email.contains('@') {
+                return Err(CliError::Auth("Pass one email address".into()));
+            }
+            send_and_print(
+                hub,
+                token,
+                method,
+                path,
+                Some(serde_json::json!({ "email": email.trim() })),
+            )
+            .await
+        }
+    }
+}
+
+async fn send_and_print(
+    hub: &str,
+    token: &str,
+    method: &str,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> Result<()> {
     let url = protocol::with_route(hub, path);
     let value: serde_json::Value =
-        bounded(http::request_json(&url, "POST", Some(token), Some(body))).await?;
+        bounded(http::request_json(&url, method, Some(token), body)).await?;
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }

@@ -346,7 +346,8 @@ export type AdminAuditAction =
   | "agent-senders.repair"
   | "billing-grant.read"
   | "billing-grant.give"
-  | "email-campaign.send";
+  | "email-campaign.send"
+  | "internal-email.manage";
 
 export interface AdminAuditEvent {
   eventId: string;

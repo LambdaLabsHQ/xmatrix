@@ -8,6 +8,7 @@ test("operator domains, plus addresses and platform admins are internal; custome
   for (const address of ["hello@madebyrobot.net", "a@XMATRIX.sh", "x@madebyrobot.llc", "qa+1@gmail.com", "owner@example.com"]) {
     assert.equal(internalAddress(env, address), true, address);
   }
+  assert.equal(internalAddress(env, "Boss@Gmail.com", new Set(["boss@gmail.com"])), true, "a listed personal address");
   for (const address of ["someone@gmail.com", "x@madebyrobot.net.evil.com", "", undefined, "nobody"]) {
     assert.equal(internalAddress(env, address), false, String(address));
   }
