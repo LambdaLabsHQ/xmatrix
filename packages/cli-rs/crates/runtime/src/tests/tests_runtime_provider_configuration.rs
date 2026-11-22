@@ -430,6 +430,16 @@ fn grok_trusted_rules_use_native_session_metadata_not_user_input() {
     );
     assert_eq!(antigravity_load["sessionId"], "sess-1");
     assert_eq!(antigravity_load["_meta"], antigravity["_meta"]);
+    let grok_load = acp_session_load_params(
+        "sess-1",
+        "/workspace",
+        Some(&rules),
+        Some(AcpTrustedRules::MetaRules),
+    );
+    assert!(
+        grok_load.get("_meta").is_none(),
+        "Grok session/load keeps _meta omitted; fallback session/new still attaches _meta.rules"
+    );
 
     let base = acp_session_new_params("/workspace", None, Some(AcpTrustedRules::MetaRules));
     assert!(base.get("_meta").is_none());

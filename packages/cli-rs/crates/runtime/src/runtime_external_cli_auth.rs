@@ -3743,6 +3743,13 @@ impl AcpTrustedRules {
             }
         }
     }
+
+    /// Only Antigravity's `session/load` has been verified to accept `_meta`
+    /// without rejecting or stacking rules; Grok keeps `_meta.rules` on
+    /// `session/new` (including fallback after a failed `session/load`).
+    fn supports_session_load_meta(self) -> bool {
+        matches!(self, Self::AntigravitySystemPrompt)
+    }
 }
 
 fn acp_attach_trusted_rules(
@@ -3782,7 +3789,8 @@ fn acp_session_load_params(
         "cwd": workspace_path,
         "mcpServers": [],
     });
-    acp_attach_trusted_rules(&mut params, trusted_rules, channel);
+    let load_channel = channel.filter(|rules_channel| rules_channel.supports_session_load_meta());
+    acp_attach_trusted_rules(&mut params, trusted_rules, load_channel);
     params
 }
 

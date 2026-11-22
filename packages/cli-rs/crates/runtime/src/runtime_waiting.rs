@@ -94,8 +94,7 @@ impl ToolWaits {
     /// background tasks still in progress).
     pub(crate) fn drain_open(&mut self) -> Vec<(String, ToolWait, u64)> {
         let mut entries: Vec<_> = self.open.drain().collect();
-        entries
-            .sort_by(|(id_a, a), (id_b, b)| a.opened.cmp(&b.opened).then_with(|| id_a.cmp(id_b)));
+        entries.sort_by(|(id_a, a), (id_b, b)| a.opened.cmp(&b.opened).then_with(|| id_a.cmp(id_b)));
         entries
             .into_iter()
             .map(|(id, tool)| (id, tool.wait, tool.opened_millis))
@@ -469,7 +468,11 @@ pub(crate) fn read_antigravity_subagent_state(
     }
 }
 
-fn for_each_json_in_dir(dir: &Path, skip_read_json: bool, mut visit: impl FnMut(&Path, Value)) {
+fn for_each_json_in_dir(
+    dir: &Path,
+    skip_read_json: bool,
+    mut visit: impl FnMut(&Path, Value),
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -949,10 +952,7 @@ mod tests {
         // Spawn two alive subagents with initial assignments from parent.
         for child in [child_a, child_b] {
             write_json(
-                brain
-                    .join(parent)
-                    .join(".system_generated/subagents")
-                    .join(format!("{child}.json")),
+                brain.join(parent).join(".system_generated/subagents").join(format!("{child}.json")),
                 json!({
                     "conversationId": child,
                     "subagentDescriptor": { "typeName": "self", "role": "Worker" },
@@ -960,9 +960,7 @@ mod tests {
                 }),
             );
             write_json(
-                brain
-                    .join(child)
-                    .join(".system_generated/messages/assign-1.json"),
+                brain.join(child).join(".system_generated/messages/assign-1.json"),
                 json!({
                     "id": "assign-1",
                     "sender": parent,
@@ -981,9 +979,7 @@ mod tests {
 
         // Child A reports back via send_message, not yet read by parent -> still active.
         write_json(
-            brain
-                .join(parent)
-                .join(".system_generated/messages/rep-a1.json"),
+            brain.join(parent).join(".system_generated/messages/rep-a1.json"),
             json!({
                 "id": "rep-a1",
                 "sender": child_a,
@@ -1002,9 +998,7 @@ mod tests {
 
         // Once parent reads rep-a1, only Child B remains active.
         write_json(
-            brain
-                .join(parent)
-                .join(".system_generated/messages/read.json"),
+            brain.join(parent).join(".system_generated/messages/read.json"),
             json!({ "rep-a1": true }),
         );
         assert_eq!(
@@ -1017,9 +1011,7 @@ mod tests {
 
         // Child B finishes without send_message -> system idle report, marked read.
         write_json(
-            brain
-                .join(parent)
-                .join(".system_generated/messages/rep-b1.json"),
+            brain.join(parent).join(".system_generated/messages/rep-b1.json"),
             json!({
                 "id": "rep-b1",
                 "sender": "system",
@@ -1029,9 +1021,7 @@ mod tests {
             }),
         );
         write_json(
-            brain
-                .join(parent)
-                .join(".system_generated/messages/read.json"),
+            brain.join(parent).join(".system_generated/messages/read.json"),
             json!({ "rep-a1": true, "rep-b1": true }),
         );
         assert_eq!(
@@ -1044,9 +1034,7 @@ mod tests {
 
         // A follow-up assignment to Child A reactivates it.
         write_json(
-            brain
-                .join(child_a)
-                .join(".system_generated/messages/assign-2.json"),
+            brain.join(child_a).join(".system_generated/messages/assign-2.json"),
             json!({
                 "id": "assign-2",
                 "sender": parent,
@@ -1061,10 +1049,7 @@ mod tests {
 
         // Killing Child A clears it without bumping read_report_count.
         write_json(
-            brain
-                .join(parent)
-                .join(".system_generated/subagents")
-                .join(format!("{child_a}.json")),
+            brain.join(parent).join(".system_generated/subagents").join(format!("{child_a}.json")),
             json!({
                 "conversationId": child_a,
                 "state": "SUBAGENT_STATE_KILLED"
@@ -1080,9 +1065,7 @@ mod tests {
 
         // An undelivered message to Child B also counts as active.
         write_json(
-            brain
-                .join(child_b)
-                .join(".system_generated/messages/undelivered/u1.json"),
+            brain.join(child_b).join(".system_generated/messages/undelivered/u1.json"),
             json!({ "id": "u1" }),
         );
         assert_eq!(
