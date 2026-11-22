@@ -156,6 +156,11 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
     private var centerConstraint: NSLayoutConstraint?
     private var widthConstraint: NSLayoutConstraint?
     private var bottomConstraint: NSLayoutConstraint?
+    private var appActive = true
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 
     override func loadView() {
         let passthroughView = TabBarPassthroughView()
@@ -203,6 +208,18 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
             self,
             selector: #selector(followBackSwipe(_:)),
             name: .xmatrixBackSwipeFollow,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleWillResignActive),
+            name: UIApplication.willResignActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
 
@@ -384,23 +401,35 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
         applyStatusPulse()
     }
 
+    @objc private func handleWillResignActive() {
+        appActive = false
+        applyStatusPulse()
+    }
+
+    @objc private func handleDidBecomeActive() {
+        appActive = true
+        applyStatusPulse()
+    }
+
     /// While an Agent works, a break runs along the Status line left to right,
     /// the web dock's pulse. UITabBar takes no animation for an item, so the
     /// break is a mask swept over the item's symbol; if UIKit's layout hides
     /// the symbol from us, the line just stays whole.
     private func applyStatusPulse() {
-        let live = mobileTabState.visible && mobileTabState.statusLive && !UIAccessibility.isReduceMotionEnabled
+        let live = appActive && mobileTabState.visible && mobileTabState.statusLive && !UIAccessibility.isReduceMotionEnabled
         for imageView in statusSymbolViews() {
-            let mask = imageView.layer.mask as? CAGradientLayer
+            let mask = imageView.layer.mask
             guard live else {
                 if mask?.name == Self.statusPulseMaskName { imageView.layer.mask = nil }
                 continue
             }
-            if let mask, mask.name == Self.statusPulseMaskName {
-                mask.frame = imageView.bounds
-            } else {
-                imageView.layer.mask = Self.statusPulseMask(frame: imageView.bounds)
+            if let mask, mask.name == Self.statusPulseMaskName, mask.frame.equalTo(imageView.bounds) {
+                continue
             }
+            imageView.layer.mask = Self.statusPulseMask(
+                frame: imageView.bounds,
+                scale: view.window?.windowScene?.screen.scale ?? traitCollection.displayScale
+            )
         }
     }
 
@@ -427,29 +456,39 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
     private static let statusPulseMaskName = "xmatrix.statusPulse"
 
     /// Opaque everywhere but a band a sixth of the symbol wide, which travels
-    /// from off the left edge to off the right every two seconds.
-    private static func statusPulseMask(frame: CGRect) -> CAGradientLayer {
-        let mask = CAGradientLayer()
-        mask.name = statusPulseMaskName
-        mask.frame = frame
-        mask.startPoint = CGPoint(x: 0, y: 0.5)
-        mask.endPoint = CGPoint(x: 1, y: 0.5)
+    /// from off the left edge to off the right every two seconds. Translates a
+    /// static pre-rasterized gradient instead of mutating `locations` every
+    /// frame, and caps its cadence at 30 Hz so ProMotion devices do not hold
+    /// 120 Hz for an idle 18 pt indicator inside Liquid Glass.
+    static func statusPulseMask(frame: CGRect, scale: CGFloat = 2) -> CALayer {
+        let container = CALayer()
+        container.name = statusPulseMaskName
+        container.frame = frame
+        container.masksToBounds = true
+
+        let width = frame.width
+        let gradient = CAGradientLayer()
+        gradient.name = "xmatrix.statusPulseSweep"
+        gradient.frame = CGRect(x: -1.4 * width, y: 0, width: 2.4 * width, height: frame.height)
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint = CGPoint(x: 1, y: 0.5)
         let opaque = UIColor.black.cgColor
         let clear = UIColor.clear.cgColor
-        mask.colors = [opaque, opaque, clear, clear, opaque, opaque]
-        let band = 0.16
-        func stops(at start: Double) -> [NSNumber] {
-            [-0.5, start, start, start + band, start + band, 1.5].map { NSNumber(value: $0) }
-        }
-        mask.locations = stops(at: -band)
-        let sweep = CABasicAnimation(keyPath: "locations")
-        sweep.fromValue = stops(at: -band)
-        sweep.toValue = stops(at: 1)
+        gradient.colors = [opaque, opaque, clear, clear, opaque, opaque]
+        gradient.locations = [0, 0.4666667, 0.4666667, 0.5333333, 0.5333333, 1]
+        gradient.shouldRasterize = true
+        gradient.rasterizationScale = max(1, scale)
+
+        let sweep = CABasicAnimation(keyPath: "transform.translation.x")
+        sweep.fromValue = 0
+        sweep.toValue = 1.4 * width
         sweep.duration = 2
         sweep.repeatCount = .infinity
         sweep.isRemovedOnCompletion = false
-        mask.add(sweep, forKey: "sweep")
-        return mask
+        sweep.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
+        gradient.add(sweep, forKey: "sweep")
+        container.addSublayer(gradient)
+        return container
     }
 
     func tabBar(_ tabBar: UITabBar, didSelect item: UITabBarItem) {

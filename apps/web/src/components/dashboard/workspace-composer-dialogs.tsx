@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { useAnimationActivity } from "@/components/ui/decoration-animation";
 import { useRealtimeChannel } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
@@ -447,7 +448,8 @@ export const Composer = memo(function Composer({
     !intakeBusy &&
     !preparingSend &&
     !sending;
-  const composerHint = useComposerHint(writable && !placeholder && localDraft.length === 0);
+  const paneActive = useAnimationActivity();
+  const composerHint = useComposerHint(paneActive && writable && !placeholder && localDraft.length === 0);
   const completionApiRef = useRef<ComposerCompletionApi | null>(null);
   const setCursor = useCallback((value: number) => {
     completionApiRef.current?.setCursor(value);

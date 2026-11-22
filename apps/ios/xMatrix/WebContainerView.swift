@@ -519,6 +519,10 @@ struct WebContainerView: UIViewRepresentable {
         }
 
         fileprivate func navigationFinished() {
+            // Keep the WebView transparent only until the first page paints its
+            // own opaque paper, then switch to opaque so CoreAnimation skips
+            // full-screen alpha blending on every frame.
+            webView?.isOpaque = true
             publishTabBarHeight()
             publishDisplayRadius()
         }
@@ -551,6 +555,7 @@ struct WebContainerView: UIViewRepresentable {
 
         /// iOS reclaimed the page's process: open it again rather than leave blank paper.
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            webView.isOpaque = false
             webView.reload()
         }
 

@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 
 import { actionClass } from "@/components/ui/action-tone";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { useAnimationVisibility } from "@/components/ui/animation-visibility";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { statusInkClass } from "@/components/ui/status-tone";
@@ -98,6 +99,7 @@ export function MobileAvatarMatrix({
   addRow?: { open: boolean; onToggle: () => void; content: ReactNode };
 }) {
   const [choosingColumn, setChoosingColumn] = useState(false);
+  const pulseVisibilityRef = useAnimationVisibility(workingCount > 0 && attentionCount === 0);
   const selectedId = selected ? cellId(selected) : null;
   const hasAddableColumn = Boolean(addColumn && addColumn.options.length > 0);
   // Fewer than 3 agents: show a dashed + slot inline at the end of each online own row.
@@ -125,7 +127,7 @@ export function MobileAvatarMatrix({
               </span>
             ) : workingCount > 0 ? (
               <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
-                <span className="size-2 shrink-0 rounded-full bg-[var(--m-ink-running,currentColor)] animate-pulse" aria-hidden="true" />
+                <span ref={pulseVisibilityRef} className="size-2 shrink-0 rounded-full bg-[var(--m-ink-running,currentColor)] animate-pulse" aria-hidden="true" />
                 Working
               </span>
             ) : null}
@@ -267,6 +269,9 @@ function MobileAvatarCell({ cell, harness, machine, id, selected, offline, ghost
   ghostHint: boolean;
   onSelect: () => void;
 }) {
+  const working = cell.kind === "agent" && cell.working > 0;
+  const attention = cell.kind === "agent" && cell.state === "attention";
+  const ringVisibilityRef = useAnimationVisibility(working && !attention);
   if (cell.kind === "unknown") return <span className="flex flex-col items-center py-1" aria-hidden="true"><span className="size-8" /><span className="mt-1 h-1" /></span>;
   if (cell.kind === "unsupported") {
     return (
@@ -329,8 +334,6 @@ function MobileAvatarCell({ cell, harness, machine, id, selected, offline, ghost
     );
   }
 
-  const working = cell.working > 0;
-  const attention = cell.state === "attention";
   const worst = tightest(cell.usage)[0];
   const strainedQuota = worst && meterTone(worst.percent) !== "green" ? worst : null;
   const attentionBadge = attention && (
@@ -348,7 +351,7 @@ function MobileAvatarCell({ cell, harness, machine, id, selected, offline, ghost
       <span className={cn("relative flex size-8 items-center justify-center rounded-full",
         attention && "ring-2 ring-[var(--m-ink-attention,var(--accent))] ring-offset-2 ring-offset-[var(--app-panel-paper,var(--background))]")}>
         {working && !attention && (
-          <span aria-hidden="true"
+          <span ref={ringVisibilityRef} aria-hidden="true"
             className="pointer-events-none absolute -inset-1 rounded-full border-2 border-[var(--m-ink-running,var(--foreground))]/40 animate-pulse" />
         )}
         <Face of={{ kind: "agent", name: harness, harness }} size="sm" shape="circle" showKindBadge={false}

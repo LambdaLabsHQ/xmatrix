@@ -4,9 +4,25 @@ import { useCallback } from "react";
 
 type Root = Element | Document | null;
 type ObserverGroup = { root: Root; observer: IntersectionObserver; count: number };
-type Registration = { token: symbol; group: ObserverGroup; onVisible?: (visible: boolean) => void };
+type Registration = {
+  token: symbol;
+  group: ObserverGroup;
+  intersecting: boolean;
+  onVisible?: (visible: boolean) => void;
+};
 const observers = new Map<Root, ObserverGroup>();
 const registered = new Map<HTMLElement, Registration>();
+let watchingDocument = false;
+
+function publishVisibility(element: HTMLElement, registration: Registration) {
+  const visible = registration.intersecting && (typeof document === "undefined" || !document.hidden);
+  element.dataset.animationVisible = String(visible);
+  registration.onVisible?.(visible);
+}
+
+function onDocumentVisibilityChange() {
+  for (const [element, registration] of registered) publishVisibility(element, registration);
+}
 
 function observerFor(root: Root): ObserverGroup {
   let group = observers.get(root);
@@ -16,10 +32,9 @@ function observerFor(root: Root): ObserverGroup {
       const target = entry.target as HTMLElement;
       const registration = registered.get(target);
       if (registration?.group.observer !== source) continue;
-      const visible = entry.isIntersecting
+      registration.intersecting = entry.isIntersecting
         && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
-      target.dataset.animationVisible = String(visible);
-      registration.onVisible?.(visible);
+      publishVisibility(target, registration);
     }
   }, { root, threshold: [0, Number.EPSILON] });
   group = { root, observer, count: 0 };
@@ -36,6 +51,10 @@ function release(element: HTMLElement, registration: Registration) {
     group.observer.disconnect();
     observers.delete(group.root);
   }
+  if (!registered.size && watchingDocument) {
+    document.removeEventListener("visibilitychange", onDocumentVisibilityChange);
+    watchingDocument = false;
+  }
 }
 
 /** One observer per explicit root. The default viewport root and its clipping
@@ -49,9 +68,13 @@ export function observeAnimationVisibility(element: HTMLElement, onVisible?: (vi
   if (previous) release(element, previous);
   const group = observerFor(root);
   const token = Symbol();
-  const registration = { token, group, onVisible };
+  const registration: Registration = { token, group, intersecting: false, onVisible };
   group.count++;
   registered.set(element, registration);
+  if (!watchingDocument && typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", onDocumentVisibilityChange);
+    watchingDocument = true;
+  }
   element.dataset.animationVisible = "false";
   onVisible?.(false);
   group.observer.observe(element);

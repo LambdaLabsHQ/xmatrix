@@ -35,8 +35,15 @@ export function useAgentRegistrationCatalog(spaceId: string, token: string, enab
     },
   });
   const { refetch } = query;
+  const wasLive = useRef(live);
   useEffect(() => {
+    const resumed = live && !wasLive.current;
+    wasLive.current = live;
     if (!live) return;
+    if (resumed && enabled && user?.id) {
+      readQuota.current = true;
+      void refetch();
+    }
     // Coming back into view is the moment the reader looks again.
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
@@ -45,6 +52,6 @@ export function useAgentRegistrationCatalog(spaceId: string, token: string, enab
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [live, refetch]);
+  }, [enabled, live, refetch, user?.id]);
   return query;
 }

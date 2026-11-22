@@ -7250,10 +7250,10 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   min-height: 0;
   flex: 1;
   width: 400%;
-  transform: translate3d(calc(var(--app-mobile-dock-slot, 0) * -25%), 0, 0);
+  transform: translateX(calc(var(--app-mobile-dock-slot, 0) * -25%));
   /* Moved by use-dock-tab-slide.ts, with the bars, by the spring every phone
-     screen change shares; this is where it rests. */
-  will-change: transform;
+     screen change shares; this is where it rests. Using 2D translateX at rest
+     avoids Trivial3DTransform promoting a 400%-wide compositor texture when idle. */
 }
 
 .xmatrix-app .app-mobile-dock-page {
@@ -7912,7 +7912,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-composer-hint-sweep::before {
   content: ""; position: absolute; top: 0; bottom: 0; left: -168%; width: 240%;
   background: linear-gradient(100deg, transparent 20%, color-mix(in oklab, var(--hint-ink) 26%, transparent) 50%, transparent 80%);
-  animation: composer-hint-summon 2.4s cubic-bezier(.45, 0, .25, 1) 300ms infinite;
+  animation: composer-hint-summon 2.4s cubic-bezier(.45, 0, .25, 1) 300ms 1;
 }
 /* The composer's own caret (composer-editor.tsx draws it over the field):
    a rounded 2px bar over the font's box that fades instead of snapping on and
@@ -10023,6 +10023,7 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
 @media (max-width: 767px) {
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell[data-list-transition] .app-mobile-dock-pager {
     visibility: visible !important;
+    content-visibility: visible !important;
   }
 
   /* The conversation's paper moves with its rows (painted on them); under it lies the list. */

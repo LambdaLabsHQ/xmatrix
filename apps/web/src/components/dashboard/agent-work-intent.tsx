@@ -6,7 +6,7 @@ import type { AgentRuntimeWaiting } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
 import { statusInkClass } from "@/components/ui/status-tone";
-import { useDecorationSpin, useDecorationAnimationGroup } from "@/components/ui/decoration-animation";
+import { useAnimationActivity, useDecorationSpin, useDecorationAnimationGroup } from "@/components/ui/decoration-animation";
 import type { AgentWorkItem } from "./workspace-shell-message-model";
 
 /**
@@ -42,12 +42,22 @@ export function useIntentSince(items: readonly Pick<AgentWorkItem, "key" | "inte
   return since;
 }
 
-export function useNow(intervalMs = TICK_MS): number {
+export function useNow(intervalMs = TICK_MS, active = true): number {
+  const paneActive = useAnimationActivity();
+  const ticking = active && paneActive;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
-    return () => window.clearInterval(timer);
-  }, [intervalMs]);
+    if (!ticking) return;
+    const sync = () => {
+      if (!document.hidden) setNow(Date.now());
+    };
+    const timer = window.setInterval(sync, intervalMs);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [intervalMs, ticking]);
   return now;
 }
 
@@ -225,10 +235,14 @@ function clockLabel(millis: number): string {
 const TIMER_RADIUS = 7;
 const TIMER_CIRCUMFERENCE = 2 * Math.PI * TIMER_RADIUS;
 
+function timerRingVisibility(element: HTMLElement) {
+  return { element, root: element.closest<HTMLElement>(".app-agent-work-scroller") };
+}
+
 function TimerRing({ fraction }: { fraction: number }) {
   // Arc length is the elapsed share of the attention threshold. The ring
   // itself turns; reduced motion leaves the arc parked at 12 o'clock.
-  const animationRef = useDecorationSpin();
+  const animationRef = useDecorationSpin(true, timerRingVisibility);
   return (
     <span ref={animationRef} className="app-agent-work-intent-ring" aria-hidden="true">
       <svg className="app-agent-work-intent-ring-face" viewBox="0 0 18 18">

@@ -14,6 +14,7 @@ import {
   Check, ChevronLeft, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share, Trash2, Undo2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAnimationActivity } from "@/components/ui/decoration-animation";
 import { noticeClass } from "@/components/ui/status-tone";
 import { actionClass } from "@/components/ui/action-tone";
 import { useAuth } from "@/lib/auth-context";
@@ -105,11 +106,12 @@ function documentTitle(blocks: PageDocBlock[], markdown: string | undefined): st
 
 const PAGE_SERVER_OUTDATED_NOTICE = "Live editing is being updated; the page will open for editing in a moment.";
 
-export function usePageTree(spaceId: string | null, token: string) {
+export function usePageTree(spaceId: string | null, token: string, options: { live?: boolean } = {}) {
   const { user } = useAuth();
+  const live = options.live !== false;
   return useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-tree", [spaceId]),
-    enabled: Boolean(spaceId && token && user?.id), staleTime: 5_000, refetchInterval: 30_000,
+    enabled: Boolean(spaceId && token && user?.id), staleTime: 5_000, ...(live ? { refetchInterval: 30_000 } : {}),
     queryFn: ({ signal }) => pageApi.tree(spaceId!, token, signal).then((result) => result.pages),
   });
 }
@@ -121,11 +123,12 @@ interface PageTreeActivities {
   discussions: Map<string, PageTreeActivity["discussions"]>;
 }
 
-function usePageAgents(spaceId: string | null, token: string) {
+function usePageAgents(spaceId: string | null, token: string, options: { live?: boolean } = {}) {
   const { user } = useAuth();
+  const live = options.live !== false;
   return useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-tree-agents", [spaceId]),
-    enabled: Boolean(spaceId && token && user?.id), staleTime: 5_000, refetchInterval: 15_000,
+    enabled: Boolean(spaceId && token && user?.id), staleTime: 5_000, ...(live ? { refetchInterval: 15_000 } : {}),
     queryFn: ({ signal }) => pageApi.agents(spaceId!, token, signal).then((result): PageTreeActivities => ({
       agents: new Map(result.pages.map((page) => [page.pageId, page.agents])),
       discussions: new Map(result.pages.map((page) => [page.pageId, page.discussions])),
@@ -335,6 +338,7 @@ function preloadPageChunks() {
 }
 
 const PREFETCHED_PAGES = 40;
+const PHONE_PREFETCHED_PAGES = 8;
 
 export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, creation,
   layout = "sidebar", create }: {
@@ -350,8 +354,9 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
    */
   layout?: "sidebar" | "phone";
 }) {
-  const tree = usePageTree(spaceId, token);
-  const activity = usePageAgents(spaceId, token).data ?? NO_ACTIVITY;
+  const paneActive = useAnimationActivity();
+  const tree = usePageTree(spaceId, token, { live: paneActive });
+  const activity = usePageAgents(spaceId, token, { live: paneActive }).data ?? NO_ACTIVITY;
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -363,8 +368,10 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
     void queryClient.prefetchQuery(pageLinksQuery(userId, spaceId, pageId, token));
   }, [queryClient, spaceId, token, userId]);
   // The Space's pages are read ahead, a few at a time, so opening one does not wait on the network.
+  const prefetchLimit = layout === "phone" ? PHONE_PREFETCHED_PAGES : PREFETCHED_PAGES;
   useEffect(() => {
-    const pages = (tree.data ?? []).slice(0, PREFETCHED_PAGES);
+    if (!paneActive) return;
+    const pages = (tree.data ?? []).slice(0, prefetchLimit);
     let cancelled = false;
     void (async () => {
       for (let i = 0; i < pages.length && !cancelled; i += 4) {
@@ -373,7 +380,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
       }
     })();
     return () => { cancelled = true; };
-  }, [queryClient, spaceId, token, tree.data, userId]);
+  }, [paneActive, prefetchLimit, queryClient, spaceId, token, tree.data, userId]);
   const childrenOf = useMemo(() => pageChildren(tree.data ?? []), [tree.data]);
   const roots = childrenOf.get(null) ?? [];
   const [moveError, setMoveError] = useState<string | null>(null);
@@ -519,9 +526,16 @@ function useTicking(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return;
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
+    const sync = () => {
+      if (!document.hidden) setNow(Date.now());
+    };
+    sync();
+    const timer = window.setInterval(sync, 1000);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", sync);
+    };
   }, [active]);
   return now;
 }
