@@ -81,5 +81,7 @@ security mail is unaffected.
 Campaigns skip, and grants refuse (`billing_grant_internal_account`), any address
 on `xmatrix.sh`, `madebyrobot.net` or `madebyrobot.llc`, any plus address, and any
 platform admin (`PLATFORM_ADMIN_EMAILS`). The candidate lookup reports `internal`.
-An operator's personal address outside these rules is excluded by unsubscribing it
-(its unsubscribe link) and by listing its user id where the judging routine reads it.
+Personal addresses no rule catches (an operator's own Gmail) are listed in
+`control.internal_email_addresses`, managed with `xmatrix billing internal list|add|remove`
+(`/api/admin/internal-email-addresses`, same callers as the grant routes). The list
+lives in the database, never in this repository or its configuration.
