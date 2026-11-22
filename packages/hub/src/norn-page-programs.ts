@@ -3,7 +3,10 @@ import type { NornRequestView, PageProgramStatus, PageScheduleProblem } from "@x
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./page-restriction";
 import { deterministicConversationId } from "./deterministic-id";
-import { checkNornProgram, nornBlocks, nornBlockSource, nornStartLedger, nornStep, pageSpaceLibraries, plainAnswer as answerText, plainResult as resultText } from "./norn-host";
+import {
+  checkNornProgram, diffNornProgramUpgrade, nornBlocks, nornBlockSource, nornStartLedger, nornStep, pageSpaceLibraries,
+  pinNornProgram, plainAnswer as answerText, plainResult as resultText, previewNornEdit, verifyNornLedgerMigration,
+} from "./norn-host";
 import { nornFlow } from "./norn-plan";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
@@ -179,6 +182,45 @@ export async function pageProgramStatus(env: Env, input: { spaceId: string; page
     // A deleted conversation is cleared away over minutes: its program is gone from the page at once.
     deleted.has(block.name) ? undefined : programs.find(candidate => candidate.name === block.name),
     libraries));
+}
+
+/**
+ * Read-only preview of a proposed Page edit (or live migration readiness of the
+ * current Page): computes SHA-256 definition pins, two-text ledger edit
+ * preview, 3-way library upgrade diff, and fail-closed v1-to-v2 migration
+ * verification without mutating any ledger or program row.
+ */
+export async function pageProgramPreview(
+  env: Env,
+  input: { spaceId: string; pageId: string; currentBody: string; proposedBody?: string },
+): Promise<unknown[]> {
+  const db = database(env);
+  const programs = await readPageNornPrograms(db, { requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId });
+  const nextBody = input.proposedBody ?? input.currentBody;
+  const blocks = nornBlocks(nextBody);
+  const afterLibraries = pageSpaceLibraries(nextBody);
+  const beforePageLibraries = pageSpaceLibraries(input.currentBody);
+  const now = Date.now();
+  return blocks.map(block => {
+    const current = programs.find(candidate => candidate.name === block.name);
+    const ledger = (current?.ledger ?? nornStartLedger(now)) as Ledger & { pinnedLibraries?: Record<string, string> };
+    const beforeSource = current?.source ?? block.source;
+    const beforeLibraries = ledger.pinnedLibraries ?? beforePageLibraries;
+    return {
+      name: block.name,
+      pin: pinNornProgram(block.source, afterLibraries),
+      preview: previewNornEdit(beforeSource, block.source, ledger, now, { beforeLibraries, afterLibraries }),
+      upgrade: diffNornProgramUpgrade(
+        { source: beforeSource, libraries: beforeLibraries },
+        { source: block.source, libraries: afterLibraries },
+        ledger,
+        now,
+      ),
+      ...((ledger.identityScheme ?? 1) === 1
+        ? { migration: verifyNornLedgerMigration(beforeSource, ledger, now, [], { libraries: beforeLibraries }) }
+        : {}),
+    };
+  });
 }
 
 /**

@@ -1,7 +1,7 @@
 import { PostgresPageRepository } from "@xmatrix/db";
 import type { Hono } from "hono";
 import { requireAuth, requestErrorStatus } from "./index-shared";
-import { pageProgramStatus } from "./norn-page-programs";
+import { pageProgramPreview, pageProgramStatus } from "./norn-page-programs";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { runPrincipalOf } from "./run-principal";
 import type { Env } from "./types";
@@ -20,18 +20,32 @@ export function pageRequestFailure(error: unknown): Response {
   return Response.json({ error: (error as Error).message }, { status: requestErrorStatus(error) });
 }
 
+async function readAuthorizedPage(c: { req: { raw: Request; param: (k: string) => string | undefined }; env: Env }) {
+  const authUser = await requireAuth(c.req.raw, c.env);
+  const spaceId = c.req.param("spaceId")!, pageId = c.req.param("pageId")!;
+  const pages = new PostgresPageRepository(createPostgresAuthorityDatabase(c.env, {
+    applicationName: "xmatrix-page-automations", statementTimeoutMs: 5_000,
+    transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
+  }));
+  const { page } = await pages.read({ requestId: crypto.randomUUID(), spaceId, pageId,
+    principal: runPrincipalOf(authUser) });
+  return { spaceId, pageId, page };
+}
+
 export function registerPageProgramRoutes(app: Hono<{ Bindings: Env }>): void {
   // How each `norn run` block of the page stands. Reading the page as the caller is the access check.
   app.get("/api/spaces/:spaceId/pages/:pageId/programs", (c) => (async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const spaceId = c.req.param("spaceId")!, pageId = c.req.param("pageId")!;
-    const pages = new PostgresPageRepository(createPostgresAuthorityDatabase(c.env, {
-      applicationName: "xmatrix-page-automations", statementTimeoutMs: 5_000,
-      transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
-    }));
-    const { page } = await pages.read({ requestId: crypto.randomUUID(), spaceId, pageId,
-      principal: runPrincipalOf(authUser) });
+    const { spaceId, pageId, page } = await readAuthorizedPage(c);
     return c.json({ programs: await pageProgramStatus(c.env, { spaceId, pageId, body: page.body }) }, 200,
       { "cache-control": "no-store" });
+  })().catch(pageRequestFailure));
+
+  // Read-only preview of a proposed Page edit and v1-to-v2 ledger migration readiness.
+  app.post("/api/spaces/:spaceId/pages/:pageId/programs/preview", (c) => (async () => {
+    const { spaceId, pageId, page } = await readAuthorizedPage(c);
+    const payload = await c.req.json().catch(() => ({})) as { body?: unknown };
+    const proposedBody = typeof payload?.body === "string" ? payload.body : undefined;
+    const previews = await pageProgramPreview(c.env, { spaceId, pageId, currentBody: page.body, proposedBody });
+    return c.json({ previews }, 200, { "cache-control": "no-store" });
   })().catch(pageRequestFailure));
 }
