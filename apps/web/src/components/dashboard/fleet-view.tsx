@@ -8,6 +8,7 @@ import {
 } from "@xmatrix/protocol";
 
 import { Button } from "@/components/ui/button";
+import { useAnimationActivity } from "@/components/ui/decoration-animation";
 import { ErrorNotice } from "@/components/ui/error-notice";
 import { statusInkClass } from "@/components/ui/status-tone";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
@@ -110,6 +111,7 @@ export function FleetView({
   onOpenConversation: (channelId: string) => void;
 }) {
   const phone = useIsMobileViewport();
+  const paneActive = useAnimationActivity();
   // The cell being edited, as a spreadsheet has one cell chosen.
   const [cell, setCell] = useState<FleetMatrixCellKey | null>(null);
   // What is being done on a machine to the agent of a cell, by cell: it is said in the cell and outlives its editor.
@@ -118,11 +120,11 @@ export function FleetView({
   const [addedColumns, setAddedColumns] = useState<string[]>([]);
   const [addingMachine, setAddingMachine] = useState(false);
   const ready = Boolean(spaceId && token);
-  const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", ready, { live: true });
+  const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", ready, { live: paneActive });
   const fleet = useInstalledHarnesses(spaceId, token, currentUserId);
   const copy = useOnboardingCopy(spaceId, token, currentUserId);
   // Ticks with the catalog refresh, so ages, load samples and reset countdowns keep moving.
-  const now = useNow(AGENT_USAGE_REFRESH_MS);
+  const now = useNow(AGENT_USAGE_REFRESH_MS, paneActive);
   const status = useFleetStatus({ catalog: catalog.data, machines, channels, events });
   const [selectedAgentId, selectAgent] = useViewSelection("agents");
   const [selectedMachineId, selectMachine] = useViewSelection("machines");

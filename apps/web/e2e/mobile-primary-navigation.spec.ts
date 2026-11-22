@@ -1318,3 +1318,52 @@ test("retired Analytics routes return to the More task hub", async ({ page }) =>
     "page"
   );
 });
+
+test("phone shell skips desktop landmarks, rests dock track without will-change, hides covered pager with content-visibility, and pauses decorations when backgrounded", async ({ page }) => {
+  const space = workingAgentsSpace(1, "mobile-thermal");
+  const channels = [
+    space.channels[0]!,
+    ...Array.from({ length: 24 }, (_, index) => ({
+      ...E2E_CHANNEL,
+      id: `channel-pad-${index}`,
+      name: `pad-${index}`,
+      updatedAt: new Date(Date.parse(E2E_NOW) - (index + 1) * 60_000).toISOString(),
+    })),
+  ];
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels });
+  await page.goto("/app/personal-sspaceperso/channels");
+  await expect(generalChannelRow(page)).toBeVisible();
+
+  // Desktop-only landmarks are not mounted on phone viewports.
+  await expect(page.locator(".app-rail")).toHaveCount(0);
+  await expect(page.locator(".app-sidebar")).toHaveCount(0);
+
+  // At rest, the 400%-wide dock track does not hold a permanent compositor layer.
+  await expect.poll(() => page.locator(".app-mobile-dock-track").evaluate((track) => getComputedStyle(track).willChange)).toBe("auto");
+
+  // StatusPulse runs while visible, then pauses when the document is hidden.
+  const pulse = page.locator('nav[aria-label="Primary"] .app-status-pulse');
+  const runningPulseAnimations = () => pulse.evaluate((el) =>
+    el.getAnimations({ subtree: true }).filter((a) => a.playState === "running").length);
+  const setDocumentHidden = (hidden: boolean) => page.evaluate((value) => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => value });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, hidden);
+  await expect.poll(runningPulseAnimations).toBeGreaterThan(0);
+  await setDocumentHidden(true);
+  await expect.poll(runningPulseAnimations).toBe(0);
+  await setDocumentHidden(false);
+  await expect.poll(runningPulseAnimations).toBeGreaterThan(0);
+
+  // Scroll the list, open a conversation, verify covered pager skips paint/compositing, and Back preserves scrollTop.
+  await page.locator(".app-mobile-channel-list-pane .app-material-scroll-viewport").evaluate((vp) => {
+    vp.scrollTop = 240;
+  });
+  await page.locator('[data-mobile-channel-row-id="channel-pad-5"]').tap();
+  await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
+  await expect(page.locator(".app-mobile-dock-pager")).toHaveCSS("content-visibility", "hidden");
+
+  await page.getByRole("button", { name: "Back to channels" }).tap();
+  await expectChannelListVisible(page);
+  await expect.poll(() => page.locator(".app-mobile-channel-list-pane .app-material-scroll-viewport").evaluate((vp) => vp.scrollTop)).toBe(240);
+});

@@ -11,6 +11,11 @@ export function AnimationActivityScope({ active, children }: { active: boolean; 
   return <AnimationActivity value={active && parentActive}>{children}</AnimationActivity>;
 }
 
+/** Whether the enclosing mounted pane is currently active (not inert or covered). */
+export function useAnimationActivity() {
+  return useContext(AnimationActivity);
+}
+
 type DecorationClock = Pick<Animation, "playState" | "play" | "pause" | "cancel">;
 type ClockFactory = (element: HTMLElement) => DecorationClock | undefined;
 type VisibilityTarget = (element: HTMLElement) => { element: HTMLElement; root?: Element | Document | null };
@@ -93,12 +98,12 @@ function useDecorationClock(createClock: ClockFactory, enabled: boolean, visibil
 /** Ordinary Web Animations keep these compositor clocks independent of CSS
  * iteration events. Visibility and pane activity pause without losing phase;
  * reduced motion cancels the effect and restores the static CSS appearance. */
-export function useDecorationSpin(enabled = true) {
+export function useDecorationSpin(enabled = true, visibilityTarget?: VisibilityTarget) {
   const createClock = useCallback((element: HTMLElement) => element.animate(
     [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
     { duration: 1600, iterations: Infinity, easing: "linear" },
   ), []);
-  return useDecorationClock(createClock, enabled);
+  return useDecorationClock(createClock, enabled, visibilityTarget);
 }
 
 /** All effects share one document clock at playbackRate 1. A synchronous

@@ -429,8 +429,32 @@ final class WebContainerTests: XCTestCase {
         }
         settle(controller, MobileTabState(visible: true, activeView: "pages", statusLive: true))
         XCTAssertGreaterThan(pulsing(), 0)
+        // Resigning active removes the mask so Liquid Glass does not animate in the background.
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        XCTAssertEqual(pulsing(), 0)
+        NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+        XCTAssertGreaterThan(pulsing(), 0)
         settle(controller, MobileTabState(visible: true, activeView: "pages", statusLive: false))
         XCTAssertEqual(pulsing(), 0)
+    }
+
+    func testStatusPulseMaskTranslatesRasterizedGradientAtCappedCadence() throws {
+        let mask = NativeMobileTabBarController.statusPulseMask(frame: CGRect(x: 0, y: 0, width: 20, height: 20), scale: 3)
+        let sweepLayer = try XCTUnwrap(mask.sublayers?.first as? CAGradientLayer)
+        XCTAssertTrue(sweepLayer.shouldRasterize)
+        let animation = try XCTUnwrap(sweepLayer.animation(forKey: "sweep") as? CABasicAnimation)
+        XCTAssertEqual(animation.keyPath, "transform.translation.x")
+        XCTAssertLessThanOrEqual(animation.preferredFrameRateRange.maximum, 30)
+    }
+
+    func testWebViewBecomesOpaqueAfterInitialNavigationFinishes() {
+        let (coordinator, container) = makeCoordinator()
+        defer { withExtendedLifetime(container) {} }
+        coordinator.load(AppConfiguration.mobileTabURL(.pages))
+        let webView = page(coordinator)
+        XCTAssertFalse(webView.isOpaque)
+        webView.navigationDelegate?.webView?(webView, didFinish: nil)
+        XCTAssertTrue(webView.isOpaque)
     }
 
     /// A dock in a shown window, so the device corner resolves.

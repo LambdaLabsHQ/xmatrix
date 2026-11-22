@@ -128,6 +128,7 @@ export function useDockTabSlide({ slot, tabRootShowing, tabTapped, rootRef }: {
     const putAway = (slide: Slide) => {
       if (running.current === slide) running.current = null;
       slide.track.cancel();
+      trackRef.current?.style.removeProperty("will-change");
       for (const animation of slide.others) animation.cancel();
       slide.copy?.remove();
       pending.set(null);
@@ -195,6 +196,7 @@ export function useDockTabSlide({ slot, tabRootShowing, tabTapped, rootRef }: {
         slot: target, commit, from, to, speed: 0, track: moveTrack(track, from, to, 0), others, copy,
         createArrives: !fab && create,
       };
+      track.style.willChange = "transform";
       running.current = started;
       pending.set(target);
       landWhenDone(started);
@@ -214,10 +216,17 @@ export function useDockTabSlide({ slot, tabRootShowing, tabTapped, rootRef }: {
     trackSlide.current?.cancel();
     trackSlide.current = null;
     if (track && !reducedMotion()) {
+      track.style.willChange = "transform";
       const duration = springDuration(Math.abs(slot - from) * window.innerWidth, 0);
       const animation = track.animate(springFrames(from * -25, slot * -25, duration, (value) => `translate3d(${value}%, 0, 0)`),
         { duration: duration * 1000, easing: "linear" });
       trackSlide.current = animation;
+      void animation.finished.finally(() => {
+        if (trackSlide.current === animation) {
+          trackSlide.current = null;
+          if (!running.current) track.style.removeProperty("will-change");
+        }
+      });
       startAfterPaint([animation]);
     }
     const tapped = tabTapped.current;

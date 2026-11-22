@@ -687,7 +687,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const phonePageOpen = isMobileViewport && view === "pages" && Boolean(selectedPageId);
   // On a phone, a conversation opened from a page is a screen pushed over it; the page stays where it was.
   const phonePageConversation = phonePageOpen && Boolean(selectedChannel);
-  const pageTree = usePageTree(currentSpaceId, token ?? "");
+  const pageTree = usePageTree(currentSpaceId, token ?? "", { live: view === "pages" });
   const searchPages = useMemo(() => {
     if (!token || !currentSpaceId) return undefined;
     return (query: string) => searchWorkspacePages({ token, spaceId: currentSpaceId, query });
@@ -1579,18 +1579,20 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         )}
         <LiquidGlassFilter />
         <div className="app-ambient pointer-events-none fixed inset-0" />
-        <WorkspaceRail
-          activeView={view}
-          profile={railProfile!}
-          platformAdmin={platformAdmin}
-          onChangeView={changeRailView}
-          onOpenProfile={openOwnProfile}
-          onLogout={logOut}
-          onReportIssue={reportIssue}
-          pendingJoinRequestCount={pendingJoinRequestCount}
-          statusLive={statusLive}
-          updateControl={railUpdateControl}
-        />
+        {!isMobileViewport && (
+          <WorkspaceRail
+            activeView={view}
+            profile={railProfile!}
+            platformAdmin={platformAdmin}
+            onChangeView={changeRailView}
+            onOpenProfile={openOwnProfile}
+            onLogout={logOut}
+            onReportIssue={reportIssue}
+            pendingJoinRequestCount={pendingJoinRequestCount}
+            statusLive={statusLive}
+            updateControl={railUpdateControl}
+          />
+        )}
         {!(view === "messages" && selectedChannel && !composingConversation) && <GlobalSearchBar
           searching={workspaceSearchOpen}
           onOpenSearch={openWorkspaceSearch}
@@ -1613,43 +1615,47 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         style={{ "--app-desktop-sidebar-width": `${desktopSidebarWidth}px` } as CSSProperties}>
       <ListColumnResizeProvider value={listColumnResize}>
         {/* A destination with a list of its own draws it in this column's place. */}
-        <aside
-          className={cn("app-sidebar hidden w-[var(--app-desktop-sidebar-width)] flex-col bg-sidebar text-sidebar-foreground",
-            !SPLIT_TOOL_VIEWS.includes(view) && "md:flex")}
-        >
-          {view === "pages" ? (
-            <PageTreePanel spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
-              onSelectPage={openPage} onOpenSection={openPageAt} creation={pageCreation}
-              create={<ListCreate action={desktopCreate} />} />
-          ) : <ChannelSidebar
-            events={events}
-            spaces={spaces}
-            currentSpaceId={currentSpaceId}
-            selectedChannelId={selectedChannelId}
-            loading={loadingWorkspace}
-            error={channelSidebarError(error)}
-            catalogPaging={currentSpaceCatalog}
-            fallbackChannels={cachedCatalogChannels}
-            view={view}
-            readCounts={channelReadCounts}
-            mentionClearedAt={channelMentionClearedAt}
-            pinState={channelPinState}
-            readCountsBaselineReady={channelReadCountsBaselineReady}
-            currentUserId={user.id}
-            renamingSpaceId={renamingSpaceId}
-            spacesError={spacesError}
-            onRenameSpace={renameSidebarSpace}
-            onManageSpaces={manageSidebarSpaces}
-            onTogglePinned={toggleSidebarPin}
-            onMarkDone={markSidebarDone}
-            onSelectSpace={selectSidebarSpace}
-            onCopyChannelLink={copySidebarChannelLink}
-            onSelect={selectSidebarChannel}
-            create={desktopCreate}
-          />}
-        </aside>
+        {!isMobileViewport && (
+          <>
+            <aside
+              className={cn("app-sidebar hidden w-[var(--app-desktop-sidebar-width)] flex-col bg-sidebar text-sidebar-foreground",
+                !SPLIT_TOOL_VIEWS.includes(view) && "md:flex")}
+            >
+              {view === "pages" ? (
+                <PageTreePanel spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
+                  onSelectPage={openPage} onOpenSection={openPageAt} creation={pageCreation}
+                  create={<ListCreate action={desktopCreate} />} />
+              ) : <ChannelSidebar
+                events={events}
+                spaces={spaces}
+                currentSpaceId={currentSpaceId}
+                selectedChannelId={selectedChannelId}
+                loading={loadingWorkspace}
+                error={channelSidebarError(error)}
+                catalogPaging={currentSpaceCatalog}
+                fallbackChannels={cachedCatalogChannels}
+                view={view}
+                readCounts={channelReadCounts}
+                mentionClearedAt={channelMentionClearedAt}
+                pinState={channelPinState}
+                readCountsBaselineReady={channelReadCountsBaselineReady}
+                currentUserId={user.id}
+                renamingSpaceId={renamingSpaceId}
+                spacesError={spacesError}
+                onRenameSpace={renameSidebarSpace}
+                onManageSpaces={manageSidebarSpaces}
+                onTogglePinned={toggleSidebarPin}
+                onMarkDone={markSidebarDone}
+                onSelectSpace={selectSidebarSpace}
+                onCopyChannelLink={copySidebarChannelLink}
+                onSelect={selectSidebarChannel}
+                create={desktopCreate}
+              />}
+            </aside>
 
-        <ListColumnResizeHandle className={cn(!SPLIT_TOOL_VIEWS.includes(view) && "md:flex")} />
+            <ListColumnResizeHandle className={cn(!SPLIT_TOOL_VIEWS.includes(view) && "md:flex")} />
+          </>
+        )}
 
         <main
           className="app-main relative flex min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-card/80"
@@ -1738,7 +1744,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
                 <div
                   className={cn(
                     "app-mobile-dock-pager relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
-                    mobileDockCovered && "invisible absolute inset-0"
+                    mobileDockCovered && "invisible absolute inset-0 [content-visibility:hidden]"
                   )}
                   inert={mobileDockCovered}
                 >

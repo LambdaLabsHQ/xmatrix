@@ -3551,7 +3551,8 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
     if (item && agentWorkCanReborn(item)) onHandoffAgentInstance(item.agentId, item.instance, item.agentLabel, successor);
   });
   const intentSince = useIntentSince(workItems);
-  const now = useNow();
+  const hasTimedWork = workItems.some((item) => item.displayStatus === "busy" || Boolean(item.waiting));
+  const now = useNow(undefined, hasTimedWork);
   // Handoff successors are the harnesses this Space registered — the same
   // catalog the composer completes `:handoff:@` from.
   const registrationCatalog = useAgentRegistrationCatalog(catalogChannel?.spaceId ?? "", token ?? "",
