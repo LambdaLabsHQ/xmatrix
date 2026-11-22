@@ -42,7 +42,7 @@ function fixture({ targets, stop, dispatch, harness, site = { repository: "acme/
 
 test("the source stops and pushes its checkout, then a successor of the named harness starts from that branch", async () => {
   const f = fixture({ harness: "claude" });
-  const branch = await handoffBranch(f.input.commandId);
+  const branch = await handoffBranch(f.input.sourceRunId);
   assert.match(branch, /^xmatrix\/handoff\/[0-9a-f]{16}$/u);
   const result = await launchHandoffSuccessor({}, f.input, f.dependencies);
   assert.deepEqual(f.calls.map(call => call[0]), ["intervention", "list", "stop", "dispatch"]);
@@ -67,7 +67,22 @@ test("the source stops and pushes its checkout, then a successor of the named ha
   assert.match(dispatch.body, /finish the review/);
   assert.match(dispatch.body, /xmatrix send channel/);
   assert.deepEqual(result, { agentName: "claude" });
-  assert.equal(await handoffBranch(f.input.commandId), branch, "a replay names the same branch");
+  assert.equal(await handoffBranch(f.input.sourceRunId), branch, "a replay names the same branch");
+});
+
+test("a second handoff of the same source repeats its exact stop, so another harness can take over", async () => {
+  const first = fixture({ harness: "claude", dispatch: () => { throw Object.assign(new Error("none"), { code: "registration_not_found" }); } });
+  await assert.rejects(launchHandoffSuccessor({}, first.input, first.dependencies), { code: "registration_not_found" });
+  const second = fixture({ harness: "antigravity" });
+  second.input.commandId = "handoff-elsewhere:n2";
+  second.input.sourceMessageId = "message-2";
+  await launchHandoffSuccessor({}, second.input, second.dependencies);
+  const stops = [first, second].map(f => f.calls.find(call => call[0] === "stop").slice(1));
+  // The machine control rejects a reused command id whose request differs.
+  assert.deepEqual(stops[1], stops[0]);
+  const dispatch = second.calls.find(call => call[0] === "dispatch")[1];
+  assert.equal(dispatch.commandId, "handoff-elsewhere:n2");
+  assert.deepEqual(dispatch.tags, { repo: "acme/app", harness: "antigravity" });
 });
 
 test("@auto leaves the harness to routing and is drawn on the handoff message", async () => {

@@ -11,7 +11,7 @@ const HANDOFF_STOP_WAIT_MS = 15_000;
 /** A handoff: the source stops and a successor starts through ordinary launch
  * routing with the same placement conditions as a summon. */
 export interface HandoffSuccessor {
-  /** Stable per handoff message, so a replay repeats the same steps and branch. */
+  /** Stable per handoff message, so a replay repeats the same successor launch. */
   commandId: string;
   actorUserId: string;
   channelId: string;
@@ -41,9 +41,11 @@ type Dependencies = {
   intervention?: typeof createProductAgentInterventionAuthorityPort;
 };
 
-/** One branch per handoff, named from its command so a replay reuses it. */
-export async function handoffBranch(commandId: string): Promise<string> {
-  return HANDOFF_BRANCH_PREFIX + (await sha256Hex(commandId)).slice(0, 16);
+/** One branch per source Run. Its stop is one idempotent command per Run, so
+ * a later handoff of the same source (after a failed successor launch, or to
+ * another harness) must repeat that exact stop and fetch the same branch. */
+export async function handoffBranch(sourceRunId: string): Promise<string> {
+  return HANDOFF_BRANCH_PREFIX + (await sha256Hex(sourceRunId)).slice(0, 16);
 }
 
 /** The assignment of a handoff successor. */
@@ -92,7 +94,7 @@ export async function launchHandoffSuccessor(env: Env, input: HandoffSuccessor,
   if (input.tags?.repo && input.tags.repo !== repository || input.tags?.pwd && input.tags.pwd !== directory) {
     throw Object.assign(new Error("Handoff work site conflicts with the source"), { code: "handoff_location_conflict" });
   }
-  const branch = repository ? await handoffBranch(input.commandId) : undefined;
+  const branch = repository ? await handoffBranch(input.sourceRunId) : undefined;
   // A confirmed stop may omit the conversation; it never omits the exit fence.
   const { handoffContext } = await stopSource(env, input, branch, dependencies);
   const site = repository && branch ? { repository, branch } : directory ? { directory } : {};
