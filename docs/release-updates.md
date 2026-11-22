@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: competitor alternative landing pages at `/alternatives`
+
+Added `/alternatives` and 19 competitor comparison landing pages (`/alternatives/<slug>` for Raft, Lody, Multica, Paradev/Superset, Conductor, Orca, LobeHub, Cumora, T3 Code, herdr, Seedmux, Claude Code Desktop, Linear Agents, Notion Custom Agents, Slack Code, Nowledge Mem, EverOS, YouMind, and Google Jules), rendered per request on the Web Worker with canonical URLs, OpenGraph/Twitter cards, `FAQPage` + `BreadcrumbList` structured data, sitemap entries, `site-host.mjs` site-origin routing, and a footer link. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Antigravity quota uses native `agy -p "/usage"` instead of direct OAuth token reads
 
 The Antigravity quota reader previously read `~/.gemini/antigravity-cli/antigravity-oauth-token`
