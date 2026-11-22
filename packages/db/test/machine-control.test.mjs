@@ -87,7 +87,7 @@ test("Quota completion cannot substitute a target, configuration or connection o
     results: [{ ...target, status: "unavailable", reason: "provider_unavailable" }],
   } };
   const db = database(query => query.name.startsWith("machine_control_daemon_lock_") ? [daemon]
-    : query.name === "machine_control_complete_replay_lock_v2" ? [{ command_type: "quota_probe",
+    : query.name === "machine_control_lease_lock_v4" ? [{ command_type: "quota_probe",
       status: "completed", payload_json: { type: "machine_quota_probe", requestId: "probe-1", probe },
       result_json: payload }] : []);
   const repository = new PostgresMachineControlRepository(db);
@@ -120,9 +120,7 @@ test("Quota completion records each reading in its registration's pool without a
   const relayLease = { leaseOwner: "owner-1", leaseGeneration: 1, entityVersion: 2, daemonEpoch: 1 };
   const run = success => {
     const db = database(query => query.name.startsWith("machine_control_daemon_lock_") ? [daemon]
-      : query.name === "machine_control_complete_replay_lock_v2" ? [{ command_type: "quota_probe", status: "leased",
-        payload_json: { type: "machine_quota_probe", requestId: "probe-1", probe } }]
-      : query.name === "machine_control_lease_lock_v3" ? [{ command_id: "probe-1", command_type: "quota_probe",
+      : query.name === "machine_control_lease_lock_v4" ? [{ command_id: "probe-1", command_type: "quota_probe",
         status: "leased", lease_owner: "owner-1", lease_generation: 1, version: 2, lease_live: true,
         payload_json: { type: "machine_quota_probe", requestId: "probe-1", probe } }]
       : query.name === "machine_control_complete_v1" ? [{ command_id: "probe-1" }]
@@ -295,7 +293,7 @@ test("Machine renew preserves exact lease entity version across repeated heartbe
   const command = leasedSpawnRow(leaseOwner);
   const db = database((query) => query.name.startsWith("machine_control_daemon_lock_")
     ? [daemon]
-    : query.name === "machine_control_lease_lock_v3"
+    : query.name === "machine_control_lease_lock_v4"
       ? [command]
       : query.name === "machine_control_renew_v2"
         ? [{ version: 2, lease_until: new Date("2099-08-30T00:02:00.000Z") }]
@@ -321,7 +319,7 @@ function harnessRenewFixture(lateMs, renewLeaseUntil) {
   const observed = new Date("2026-11-08T13:29:35.686Z");
   const db = database((query) => {
     if (query.name.startsWith("machine_control_daemon_lock_")) return [daemon];
-    if (query.name === "machine_control_lease_lock_v3") return [leasedSpawnRow(leaseOwner, {
+    if (query.name === "machine_control_lease_lock_v4") return [leasedSpawnRow(leaseOwner, {
       command_id: "harness-1", command_type: "harness_action", lease_live: false,
       lease_until: new Date(observed.getTime() - lateMs), lease_observed_at: observed,
       updated_at: new Date(observed.getTime() - lateMs - 10_000),
@@ -356,7 +354,7 @@ test("Machine lease liveness is decided by PostgreSQL clock evidence", async () 
   const leaseOwner = "machine-daemon:user-1:machine-1:host-1:epoch:1";
   const db = database((query) => query.name.startsWith("machine_control_daemon_lock_")
     ? [daemon]
-    : query.name === "machine_control_lease_lock_v3"
+    : query.name === "machine_control_lease_lock_v4"
       ? [leasedSpawnRow(leaseOwner, { lease_live: false })]
       : []);
 
@@ -364,7 +362,7 @@ test("Machine lease liveness is decided by PostgreSQL clock evidence", async () 
       leaseOwner, leaseGeneration: 1, entityVersion: 2, daemonEpoch: 1,
     } })), (error) => error instanceof MachineControlError && error.code === "machine_command_stale_lease" &&
       error.reason === "renew.expired" && error.commandType === "spawn", "HUB-7F: the refusal names its fence");
-  const lock = db.calls.find((call) => call.name === "machine_control_lease_lock_v3");
+  const lock = db.calls.find((call) => call.name === "machine_control_lease_lock_v4");
   assert.match(lock.text, /lease_until>clock_timestamp\(\) AND \(command_type<>'quota_probe' OR expires_at>clock_timestamp\(\)\) AS lease_live/u);
 });
 
@@ -375,7 +373,7 @@ test("a result lands after its lease lapsed or its connection turned over, fence
     agentName: "claude", identityId: "identity-1", resumeSessionKey: "resume-1" };
   const lapsed = leasedSpawnRow(leaseOwner, { payload_json: issued, lease_until: new Date("2026-09-25T21:30:00.000Z"), lease_live: false });
   const make = (command) => database((query) => query.name.startsWith("machine_control_daemon_lock_") ? [daemon]
-    : query.name === "machine_control_complete_replay_lock_v2" || query.name === "machine_control_lease_lock_v3"
+    : query.name === "machine_control_lease_lock_v4"
       ? [command]
     : query.name === "machine_control_complete_v1" ? [{ command_id: "spawn-1" }]
     : query.name === "machine_control_daemon_update_v3" ? [daemon] : []);
@@ -414,7 +412,7 @@ test("Machine renew rejects immutable spawn authority mismatches before extendin
     } });
   const db = database((query) => query.name.startsWith("machine_control_daemon_lock_")
     ? [daemon]
-    : query.name === "machine_control_lease_lock_v3" ? [command] : []);
+    : query.name === "machine_control_lease_lock_v4" ? [command] : []);
 
   await assert.rejects(new PostgresMachineControlRepository(db).command(relayCommandRequest(leaseOwner, { commandId: "renew-mismatch", action: "renew", controlId: "spawn-1", expected: {
       launchId: "launch-1", spaceId: "space-1", runId: "run-1", instanceId: "instance-1",
@@ -548,15 +546,11 @@ test("Machine spawn completion validates the fields its result protocol can echo
   const command = leasedSpawnRow(leaseOwner, { payload_json: issued });
   const db = database((query) => query.name.startsWith("machine_control_daemon_lock_")
     ? [daemon]
-    : query.name === "machine_control_complete_replay_lock_v2"
+    : query.name === "machine_control_lease_lock_v4"
       ? [command]
-      : query.name === "machine_control_lease_lock_v3"
-        ? [command]
-        : query.name === "machine_control_complete_v1"
-          ? [{ command_id: "spawn-1" }]
-          : query.name === "machine_control_daemon_update_v3"
-            ? [daemon]
-            : []);
+      : query.name === "machine_control_complete_v1"
+        ? [{ command_id: "spawn-1" }]
+        : []);
 
   const input = {
     commandId: "complete-spawn-1", action: "complete", controlId: "spawn-1",
@@ -576,11 +570,11 @@ test("Machine spawn completion validates the fields its result protocol can echo
 
   assert.equal(value.action, "complete");
   assert.equal(db.calls.some((call) => call.name === "machine_control_complete_v1"), true);
+  assert.ok(db.calls.length <= 9, `spawn completion used ${db.calls.length} SQL round trips (budget 9)`);
 
   const mismatchDb = database((query) => query.name.startsWith("machine_control_daemon_lock_")
     ? [daemon]
-    : query.name === "machine_control_complete_replay_lock_v2" ? [command]
-    : query.name === "machine_control_lease_lock_v3" ? [command] : []);
+    : query.name === "machine_control_lease_lock_v4" ? [command] : []);
   await assert.rejects(
     new PostgresMachineControlRepository(mismatchDb).command({
       ...input,
@@ -612,7 +606,7 @@ test("Machine completion replay acknowledges an identical durable result after r
     ? [connected]
     : query.name === "machine_control_replay_read_v1"
       ? [{ request_digest: "old-epoch-digest", result_json: { action: "complete" } }]
-      : query.name === "machine_control_complete_replay_lock_v2"
+      : query.name === "machine_control_lease_lock_v4"
         ? [completed]
         : query.name === "machine_control_daemon_update_v3"
           ? [connected]
@@ -630,7 +624,6 @@ test("Machine completion replay acknowledges an identical durable result after r
 
   assert.equal(value.reused, true);
   assert.equal(value.runLifecycleChannelId, "channel-1");
-  assert.equal(db.calls.some((call) => call.name === "machine_control_lease_lock_v3"), false);
   assert.equal(db.calls.some((call) => call.name === "machine_control_complete_v1"), false);
   assert.equal(db.calls.some((call) => call.name === "machine_control_replay_write_v1"), false);
 });
@@ -665,8 +658,7 @@ test("Machine exact completion replay crosses a newer daemon epoch after its ACK
     if (query.name === "machine_control_replay_read_v1") {
       return storedReplay ? [storedReplay] : [];
     }
-    if (query.name === "machine_control_complete_replay_lock_v2" ||
-        query.name === "machine_control_lease_lock_v3") return [leased];
+    if (query.name === "machine_control_lease_lock_v4") return [leased];
     if (query.name === "machine_control_complete_v1") return [{ command_id: "spawn-lost-ack" }];
     if (query.name === "machine_control_run_route_read_v2") return [{ channel_id: "channel-1" }];
     if (query.name === "machine_control_replay_write_v1") {
@@ -1146,7 +1138,7 @@ test("a sleep result names the issued Run and says whether it slept", async () =
   const payload = { type: "machine_sleep_result", requestId: "sleep-1", runId: "run-1", executionKey: "execution-1",
     instanceId: "instance-1", slept: false, reason: "not_idle" };
   const db = database(query => query.name.startsWith("machine_control_daemon_lock_") ? [daemon]
-    : query.name === "machine_control_complete_replay_lock_v2" ? [{ command_type: "sleep",
+    : query.name === "machine_control_lease_lock_v4" ? [{ command_type: "sleep",
       status: "completed", payload_json: issued, result_json: payload }] : []);
   const repository = new PostgresMachineControlRepository(db);
   const input = { commandId: "complete-sleep", action: "complete", controlId: "sleep-1",

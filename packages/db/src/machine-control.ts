@@ -1480,6 +1480,19 @@ export class PostgresMachineControlRepository {
     ...(unansweredRunChannelIds.size ? { unansweredRunChannelIds: [...unansweredRunChannelIds] } : {}) };
   }
 
+  private async lockCommand(tx: DatabaseTransaction, controlId: string, ownerUserId: string, machineId: string) {
+    // Sample the lease clock after locking the row, including when a writer held it.
+    const [command] = await tx.query<QueryResultRow>({ name: "machine_control_lease_lock_v4", text: `WITH locked AS MATERIALIZED (
+      SELECT * FROM data.machine_daemon_commands WHERE command_id=$1 AND owner_user_id=$2 AND machine_id=$3 FOR UPDATE
+    )
+    SELECT locked.*, clock_timestamp() AS lease_observed_at,
+      lease_until>clock_timestamp() AND (command_type<>'quota_probe' OR expires_at>clock_timestamp()) AS lease_live
+    FROM locked`, values: [controlId, ownerUserId, machineId], maxRows: 1 });
+    if (!command) throw new MachineControlError("machine_command_not_found", 404,
+      "Machine command not found");
+    return command;
+  }
+
   /**
    * The exact lease a daemon holds. Renewal and retry need it live in this
    * connection. A result does not: the process it describes already ran, and
@@ -1490,18 +1503,13 @@ export class PostgresMachineControlRepository {
    */
   private async exactLeased(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,
     machineId: string, connectionEpoch: number, action: "renew" | "complete" | "retry",
-    fence: "live" | "generation" = "live") {
+    fence: "live" | "generation" = "live", lockedCommand?: QueryResultRow) {
     const controlId = text(input.controlId, "controlId", 200);
     const lease = record(input.relayLease, "relayLease");
     const leaseOwner = text(lease.leaseOwner, "relayLease.leaseOwner", 700);
     if (fence === "live" && lease.daemonEpoch !== connectionEpoch) throw new MachineStaleLeaseError(
       "Machine lease belongs to another Daemon epoch", `${action}.epoch`);
-    const rows = await tx.query<QueryResultRow>({ name: "machine_control_lease_lock_v3", text: `SELECT *, clock_timestamp() AS lease_observed_at,
-      lease_until>clock_timestamp() AND (command_type<>'quota_probe' OR expires_at>clock_timestamp()) AS lease_live
-      FROM data.machine_daemon_commands WHERE command_id=$1 AND owner_user_id=$2 AND machine_id=$3 FOR UPDATE`, values: [controlId, ownerUserId, machineId], maxRows: 1 });
-    const command = rows[0];
-    if (!command) throw new MachineControlError("machine_command_not_found", 404,
-      "Machine command not found");
+    const command = lockedCommand ?? await this.lockCommand(tx, controlId, ownerUserId, machineId);
     let stale = command.status !== "leased" ? "status"
       : command.lease_owner !== leaseOwner ? "owner"
         : Number(command.lease_generation) !== integer(lease.leaseGeneration, "leaseGeneration", 1) ? "generation"
@@ -1584,13 +1592,7 @@ export class PostgresMachineControlRepository {
   private async complete(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,
     machineId: string, hostId: string, connectionEpoch: number, payload: Record<string, unknown>, at: string) {
     const controlId = text(input.controlId, "controlId", 200);
-    const priorRows = await tx.query<QueryResultRow>({ name: "machine_control_complete_replay_lock_v2",
-      text: `SELECT * FROM data.machine_daemon_commands WHERE command_id=$1 AND owner_user_id=$2
-        AND machine_id=$3 FOR UPDATE`, values: [controlId, ownerUserId, machineId],
-    maxRows: 1 });
-    const prior = priorRows[0];
-    if (!prior) throw new MachineControlError("machine_command_not_found", 404,
-      "Machine command not found");
+    const prior = await this.lockCommand(tx, controlId, ownerUserId, machineId);
     if (prior.command_type === "quota_probe" &&
         parseRoutingQuotaProbeRequest((prior.payload_json as Record<string, unknown>).probe).connectionEpoch !== connectionEpoch) {
       throw new MachineControlError("machine_command_result_mismatch", 409, "Quota probe connection changed");
@@ -1608,7 +1610,7 @@ export class PostgresMachineControlRepository {
     }
     const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch, "complete",
       // A quota probe answers for one connection; its result expires with it.
-      prior.command_type === "quota_probe" ? "live" : "generation");
+      prior.command_type === "quota_probe" ? "live" : "generation", prior);
     exactResult(String(exact.command.command_type), exact.command.payload_json as Record<string, unknown>,
       text(input.eventType, "eventType", 80), payload, exact.controlId);
     const status = input.success === false ? "failed" : "completed";
