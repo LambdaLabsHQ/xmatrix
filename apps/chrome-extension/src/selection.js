@@ -1,7 +1,7 @@
 // Ask about what you are reading, right on the page. Beside a selection this
 // script frames the extension's question box (app/ask.html, built from apps/web
 // extension-app/ask.tsx): the App's own selection toolbar with one item, Ask,
-// which opens into the App's margin comment box. Enter starts a conversation
+// which opens into the App's conversation composer. Enter starts a conversation
 // with the passage and the question in the Space the side panel shows, where
 // an Agent picks it up, and the side panel opens on it.
 //
@@ -100,6 +100,10 @@
     }
   });
 
+  // A click on the page, away from the open box, closes it, as a click away closes the App's popovers.
+  document.addEventListener("mousedown", (event) => {
+    if (mode === "box" && event.target !== frame) hide();
+  }, true);
   document.addEventListener("mouseup", (event) => {
     if (event.target === frame) return;
     setTimeout(showToolbar, 0);

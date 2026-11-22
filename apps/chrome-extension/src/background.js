@@ -199,20 +199,19 @@ async function askContext(tab) {
 
 /**
  * Starts the conversation the box asked for, without waiting for the app: the
- * panel then shows it. The box wrote the message as the App's composer does
- * (the quoted passage, the question, the Agents picked in it); a message that
- * names nobody lets the Space's routing pick the Agent.
+ * panel then shows it. The box is the App's composer and wrote the message
+ * as it does there (the quoted passage, the question, the Agents picked in
+ * it); a message that names nobody lets the Space's routing pick the Agent.
  */
-async function askSend(tab, { body, question, invocationSelections }) {
+async function askSend(tab, { body, invocationSelections }) {
   const passage = await pendingAsk(tab.id);
-  const text = typeof body === "string" ? body.slice(0, 40_000) : "";
-  const asked = typeof question === "string" ? question.trim() : "";
-  if (!text.trim() || !asked) throw new Error("Write a question first.");
+  const text = typeof body === "string" ? body.slice(0, 64 * 1024) : "";
+  if (!text.trim()) throw new Error("Write a question first.");
   const session = await store.get();
   if (!session) throw new Error("Sign in to xMatrix in the side panel first.");
   const result = await authed(async (scoped, token) => {
     const create = (space) => createConversation(scoped, token, {
-      spaceId: space.id, name: discussionTitle(passage.text || asked), memberName: session.user?.name || "Human" });
+      spaceId: space.id, name: discussionTitle(passage.text || passage.label), memberName: session.user?.name || "Human" });
     let space = await quickAskSpace(token);
     if (!space) throw new Error("You are not in any Space yet.");
     let channel;

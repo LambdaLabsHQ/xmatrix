@@ -37,17 +37,13 @@ export interface PageCommentText { body: string; selections: AgentInvocationSele
  * it to one in a new discussion. Leaving it, by a click anywhere else, closes it as Escape does; what was typed
  * comes back if the same passage is commented on again.
  */
-export function PageCommentBox({ text, taker, context, placeholder = "Comment, or ask for a change", action = "Comment", onText, onSend, onClose }: {
+export function PageCommentBox({ text, taker, context, onText, onSend, onClose }: {
   /** What is typed so far; it stays with the passage's draft, not with the box. */
   text: string;
   /** The Agent at work on the page that takes the comment, when there is one. */
   taker?: MarginAgent;
   /** The Space the page is in; without it the box completes nothing. */
   context?: PageCommentComposerContext;
-  /** What the empty box says; the extension's box on a web page asks rather than comments. */
-  placeholder?: string;
-  /** What sending does, as the field and its button name it. */
-  action?: string;
   onText: (text: string) => void;
   onSend: (comment: PageCommentText) => void;
   /** `away`: the reader left it for somewhere else, which keeps the focus it went to. */
@@ -83,7 +79,7 @@ export function PageCommentBox({ text, taker, context, placeholder = "Comment, o
         onConfigureAppConnector={() => { if (space) context?.onOpenAppsForSpace?.(space.id); }}
         onEditHarnessProfile={context?.onEditHarnessProfile}
         enabled autoFocus fieldRef={field} canSend={Boolean(text.trim())}
-        placeholder={placeholder} ariaLabel={action} sendTitle={action}
+        placeholder="Comment, or ask for a change" ariaLabel="Comment" sendTitle="Comment"
         onSend={() => {
           const typed = text.trim();
           if (!typed) return onClose();
