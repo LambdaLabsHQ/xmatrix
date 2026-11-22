@@ -74,8 +74,9 @@ pub enum Account {
     /// Supported by [`Provider::Codex`] and [`Provider::Grok`].
     Home(PathBuf),
     /// The provider CLI's default login, ignoring token/config overrides in
-    /// the environment. Supported by [`Provider::Claude`] (keychain, then
-    /// `~/.claude/.credentials.json`) and [`Provider::Cursor`].
+    /// the environment. Supported by [`Provider::Antigravity`],
+    /// [`Provider::Claude`] (keychain, then `~/.claude/.credentials.json`), and
+    /// [`Provider::Cursor`].
     DefaultLogin,
 }
 

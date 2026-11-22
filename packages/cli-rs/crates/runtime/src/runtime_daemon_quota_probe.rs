@@ -250,7 +250,8 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
         "opencode" => QuotaAccount::OpenCodeDefault,
         "deepseek" => QuotaAccount::DeepSeekDefault,
         "antigravity" => {
-            if spawn.any_effective(quota::antigravity::ANTIGRAVITY_LOGIN_OVERRIDE_KEYS)
+            if quota::antigravity::is_quota_probe_disabled_in(|key| spawn.effective(key))
+                || spawn.any_effective(quota::antigravity::ANTIGRAVITY_LOGIN_OVERRIDE_KEYS)
                 || host.home.is_none()
             {
                 return Resolution::ConfigurationUnavailable;
@@ -972,6 +973,9 @@ mod tests {
             ("ANTIGRAVITY_APP_DATA_DIR", "/fixture/antigravity"),
             ("GEMINI_API_KEY", "fixture-key"),
             ("GOOGLE_API_KEY", "fixture-key"),
+            ("AGY_ADC_AUTH", "1"),
+            ("XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE", "1"),
+            ("XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE", "true"),
         ] {
             assert_eq!(
                 resolve_fixture("registration:antigravity", &[inherited]),
@@ -979,6 +983,13 @@ mod tests {
                 "{inherited:?}"
             );
         }
+        assert_eq!(
+            account_of(resolve_fixture(
+                "registration:antigravity",
+                &[("XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE", "0")]
+            )),
+            QuotaAccount::AntigravityDefault
+        );
     }
 
     #[test]
