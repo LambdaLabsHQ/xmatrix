@@ -105,7 +105,7 @@ test("reply carries the command's files in the original thread", async () => {
   const { staged, mailSnapshot } = staging();
   const ctx = { credentials: token, caller: { userId: "user-1" }, mailAttachments: attachments, mailSnapshot };
   const original = gmail({ id: "18f2a9c0d1e2b3a4", threadId: "18f2a9c0d1e2b300", payload: { headers: [
-    { name: "From", value: "Acme <help@acme.test>" }, { name: "Subject", value: "Your ticket" }, { name: "Message-ID", value: "<m1@acme.test>" }] } });
+    { name: "From", value: "Acme <help@acme.test>" }, { name: "To", value: "me@example.com" }, { name: "Subject", value: "Your ticket" }, { name: "Message-ID", value: "<m1@acme.test>" }] } });
   const replied = await fetched([original, gmail({ id: "19a0b1c2d3e4f5a7" })],
     () => ACTIONS.reply.execute(ctx, { id: "18f2a9c0d1e2b3a4", body: "Logs attached" }));
   assert.equal(replied.calls[1].body.endpoint, "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send");
