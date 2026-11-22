@@ -113,7 +113,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Comparando alternativas a Lody? Pasa de worktrees por sesión y cortes del daemon a Canales compartidos de xMatrix, Páginas vivas, secretos del Space y rutinas por webhook.",
     eyebrow: "Alternativa a Lody · Lody vs xMatrix",
-    headline: "Un Canal, una Página viva: compartidos por todo tu equipo y cada agente",
+    headline: "Alternativa a Lody: un Canal, una Página viva compartidos por todo tu equipo y cada agente",
     lead: "Lody organiza el trabajo en hilos aislados de una sesión por worktree sincronizados mediante un relay en la nube de código cerrado. xMatrix reúne a tus compañeros y a 35 agentes de código en un Canal compartido, mantiene las Páginas vivas al día a medida que aterriza el trabajo y añade secretos del Space junto con programas Norn dirigidos por eventos.",
     productCaption:
       "Dentro de xMatrix: en lugar de pasarse sesiones de programación aisladas una a una, compañeros y 35 agentes de código trabajan en un Canal compartido y consolidan los resultados en Páginas vivas.",
@@ -217,7 +217,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Evaluando alternativas a Multica? Supera los tickets headless, bypassPermissions silencioso (#9559) y variables en texto plano con Canales en vivo, Páginas vivas y Secretos en xMatrix.",
     eyebrow: "Alternativa a Multica · Multica vs xMatrix",
-    headline: "No conviertas cada petición en un ticket: dilo una vez, los agentes entregan y las Páginas se mantienen al día",
+    headline: "Alternativa a Multica: no conviertas cada petición en un ticket — dilo una vez y las Páginas se mantienen al día",
     lead: "Multica obliga a convertir cada tarea de agente en una incidencia Kanban headless con bypassPermissions por defecto y sin capa de documentación viva. xMatrix permite que personas y 35 agentes de código colaboren en vivo en Canales (o acoplen una sesión interactiva con xmatrix claude), mantiene las Páginas vivas al día y gobierna 35 aplicaciones conectadas con secretos del Space.",
     productCaption:
       "Dentro de xMatrix: dirige a Claude Code, Codex y otros 33 agentes de código en vivo junto a tu equipo en Canales compartidos, con aprobaciones explícitas por app y Páginas vivas en lugar de ejecuciones ciegas en un tablero.",
@@ -635,7 +635,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Buscas alternativas a LobeHub o LobeChat? Evita sobrecostos por reventa de créditos, la migración 2.0 a PostgreSQL/S3 y ruido RAG con agentes locales y Páginas vivas en xMatrix.",
     eyebrow: "Alternativa a LobeHub (LobeChat) · LobeHub vs xMatrix",
-    headline: "Para equipos de código que ya pagan Claude Code o Codex: deja de comprar créditos dos veces",
+    headline: "Alternativa a LobeHub: para equipos que ya pagan Claude Code o Codex — deja de comprar créditos dos veces",
     lead: "LobeHub (renombrado desde LobeChat) es un espacio de IA multipropósito monetizado mediante la reventa de créditos de modelos, con una pila autoalojada 2.0 pesada y sin canales compartidos multi-humano y multi-agente. xMatrix ejecuta 35 agentes de código directamente en tus repositorios reales con tus suscripciones actuales, con Goals para verificar entregas y 35 conectores gobernados.",
     productCaption:
       "Dentro de xMatrix: coordina tus propias suscripciones de Claude Code, Codex y Cursor en Canales de equipo en tiempo real con Páginas vivas, sin reventa de tokens ni mantenimiento de pilas Docker.",
@@ -1155,7 +1155,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Quieres Canales multijugador, Páginas vivas y otros 34 agentes de código junto a Claude Code? Conserva Claude Code en xMatrix, con traspaso automático cuando llega el límite de 5 horas.",
     eyebrow: "Alternativa a Claude Code · Claude Code vs xMatrix",
-    headline: "Conserva Claude Code y rodéalo de tu equipo, otros 34 agentes y Páginas vivas",
+    headline: "¿Alternativa a Claude Code? Conserva Claude Code y rodéalo de tu equipo, otros 34 agentes y Páginas vivas",
     lead: "Claude Code Desktop y Cowork son excelentes para trabajar a solas con una sesión de Claude, pero dejan a tus compañeros fuera de la sala, atrapan el contexto en sesiones individuales y se detienen en seco cuando llegan los topes más estrictos de 5 horas o semanales de noviembre de 2026. xMatrix rodea a Claude Code con Canales compartidos, Páginas vivas, otros 34 agentes de código y secretos del Space.",
     productCaption:
       "Dentro de xMatrix: sigue ejecutando tu CLI local de Claude Code mientras tus compañeros y otros 34 agentes de código colaboran en el mismo Canal y mantienen las Páginas vivas al día.",
@@ -1259,7 +1259,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Comparando alternativas a Linear Agents? Evita créditos prepagados que caducan, sandboxes solo en la nube y auditoría restringida a Enterprise con Canales locales y Páginas vivas en xMatrix.",
     eyebrow: "Alternativa a Linear Agents · Linear vs xMatrix",
-    headline: "Ejecuta agentes en tus propias máquinas y suscripciones: sin créditos que caducan, junto a Linear",
+    headline: "Alternativa a Linear Agents: ejecuta agentes en tus propias máquinas sin créditos que caducan, junto a Linear",
     lead: "Linear es un gestor de incidencias extraordinario, y Linear Agents convierte tickets bien acotados en PRs desde sandboxes en la nube por $0.25 cada 20 minutos más consumo de tokens desde un saldo prepagado aparte que caduca a los 12 meses. Conserva Linear para tus incidencias y conéctalo a xMatrix para ejecutar 35 agentes de código en tus propias máquinas dentro de Canales en vivo y Páginas vivas.",
     productCaption:
       "Dentro de xMatrix: mantén Linear conectado mientras ejecutas tus harnesses locales de Claude Code y Codex en Canales en vivo sin medidores de sandbox ni saldos prepagados que vencen.",
@@ -1364,7 +1364,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Buscas alternativas a Notion Custom Agents? Evita la barrera Business de $20–$24, las tres billeteras de créditos, pausas por saldo del creador y límites móviles con Páginas vivas de xMatrix.",
     eyebrow: "Alternativa a Notion Custom Agents · Notion vs xMatrix",
-    headline: "Páginas vivas que se actualizan mientras los agentes entregan código, sin tres billeteras de créditos",
+    headline: "Alternativa a Notion Custom Agents: Páginas vivas que se actualizan al entregar código, sin tres billeteras de créditos",
     lead: "Notion Custom Agents queda detrás de un muro Business de $20–$24/asiento y un enredado sistema de tres billeteras de créditos donde los agentes compartidos consumen los créditos personales Select de su creador y se pausan a mitad de ejecución. xMatrix actualiza las Páginas vivas automáticamente mientras 35 agentes de código entregan en tus repositorios reales, sin billeteras de créditos.",
     productCaption:
       "Dentro de xMatrix: los agentes trabajan en tus repositorios reales, conversan con tu equipo en Canales y mantienen Páginas vivas, con una única bolsa compartida del Space y acceso móvil completo.",
@@ -1468,7 +1468,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Buscas alternativas a Slack Code? Escapa del límite de Slack de 1 req/min y 15 mensajes de historial en apps propias, el recorte de 90 días en Free y la falta de runtime con xMatrix.",
     eyebrow: "Alternativa a Slack Code · Slack Code vs xMatrix",
-    headline: "Agentes en tus máquinas, decisiones en Páginas vivas: funciona junto a Slack",
+    headline: "Alternativa a Slack Code: agentes en tus máquinas, decisiones en Páginas vivas, junto a Slack",
     lead: "Slack Code API añade canales de tareas y vistas previas de diffs dentro de Slack, pero Slack sigue siendo solo una interfaz de chat sin runtime de agentes, sin documentación viva y con un recorte severo en la API (1 petición/min y máximo 15 mensajes en endpoints de historial para apps fuera del Marketplace). Mantén Slack conectado mediante el conector de Slack de xMatrix mientras ejecutas 35 agentes de código en tus propias máquinas y conservas las decisiones en Páginas vivas.",
     productCaption:
       "Dentro de xMatrix: Canales nativos multi-humano y multi-agente respaldados por tus propias máquinas y Páginas vivas, con acceso completo al contexto y cero muros de 15 mensajes.",
@@ -1571,7 +1571,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Comparando alternativas a Nowledge Mem? No te quedes en extraer fragmentos de memoria de chats: ejecuta agentes entre máquinas y mantén Páginas vivas autoritativas en xMatrix.",
     eyebrow: "Alternativa a Nowledge Mem · Nowledge Mem vs xMatrix",
-    headline: "Memoria de proyecto en equipo escrita por los agentes que hacen el trabajo",
+    headline: "Alternativa a Nowledge Mem: memoria de proyecto en equipo escrita por los agentes que hacen el trabajo",
     lead: "Nowledge Mem construye una ingeniosa capa local de memoria en grafo y vectores entre herramientas de IA, pero es un almacén pasivo: infiere datos de chats antiguos, no puede ejecutar agentes de código ni gobernar herramientas externas, y su espacio Team sigue en beta privada. En xMatrix, las ejecuciones activas redactan Páginas vivas autoritativas que todo tu equipo comparte hoy.",
     productCaption:
       "Dentro de xMatrix: en lugar de adivinar recuerdos de chats antiguos de forma pasiva, los mismos agentes de programación que entregan tu trabajo mantienen precisas las Páginas vivas del proyecto.",
@@ -1675,7 +1675,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Buscas alternativas a EverOS o EverMemOS? Supera los bloqueos SQLite de máquina única, gastos ocultos en LLM de extracción y la falta de sincronización de equipo con Canales y Páginas vivas en xMatrix.",
     eyebrow: "Alternativa a EverOS (EverMemOS) · EverOS vs xMatrix",
-    headline: "Memoria de proyecto multimáquina escrita por los agentes que hacen el trabajo",
+    headline: "Alternativa a EverOS: memoria de proyecto multimáquina escrita por los agentes que hacen el trabajo",
     lead: "EverOS (EverMemOS) combina archivos Markdown con índices locales en SQLite y LanceDB, pero su v1 open-source rechaza explícitamente un segundo servicio sobre el mismo directorio, deja fuera multitenencia y sincronización, y quema tokens LLM de forma continua en extracción en segundo plano. xMatrix brinda a los equipos ejecución multimáquina en tiempo real con 35 agentes de código y Páginas vivas autoritativas.",
     productCaption:
       "Dentro de xMatrix: Páginas Markdown sincronizadas en tiempo real entre máquinas y actualizadas por tus agentes activos, sin bloqueos de directorio único ni drenaje de tokens por extracción.",

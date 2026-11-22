@@ -11,7 +11,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Comparing Linear Agents alternatives? Skip expiring prepaid sandbox credits, cloud-only ticket runs, and Enterprise-gated audit logs with xMatrix's local Channels and living Pages.",
     eyebrow: "Linear Agents Alternative · Linear vs xMatrix",
-    headline: "Run Agents on Your Own Machines & Subscriptions — No Expiring Credits, Works Alongside Linear",
+    headline: "Linear Agents Alternative: Run Agents on Your Own Machines & Subscriptions — Works Alongside Linear",
     lead: "Linear is an extraordinary issue tracker, and Linear Agents turns well-scoped issues into cloud sandbox PRs—at $0.25 per 20 minutes plus token spend from a separate prepaid wallet that expires in 12 months. Keep Linear for issue tracking and connect it to xMatrix to run 35 coding harnesses on your own machines in live Channels and living Pages.",
     productCaption: "Inside xMatrix: keep Linear connected while running local Claude Code and Codex harnesses in live Channels with zero sandbox meters or expiring prepaid balances.",
     painPoints: [
@@ -115,7 +115,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Looking for Notion Custom Agents alternatives? Escape the $20–$24 Business gate, three credit wallets, creator-drained pauses, and mobile limits with xMatrix living Pages.",
     eyebrow: "Notion Custom Agents Alternative · Notion vs xMatrix",
-    headline: "Living Pages Updated as Agents Ship Code — Without Three Credit Wallets",
+    headline: "Notion Custom Agents Alternative: Living Pages Updated as Agents Ship Code — Without Three Credit Wallets",
     lead: "Notion Custom Agents sit behind a $20–$24/seat Business paywall and a convoluted three-wallet credit system where shared agents drain their creator's personal Select credits and pause mid-run. xMatrix updates living Pages automatically as 35 coding harnesses ship in your real repos—no credit wallets required.",
     productCaption: "Inside xMatrix: agents run in your real repos, talk with your team in Channels, and maintain living Pages—with one pooled Space allowance and full mobile access.",
     painPoints: [
@@ -218,7 +218,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Searching for Slack Code alternatives? Escape Slack's 1 req/min, 15-message history clampdown on custom apps, 90-day Free caps, and missing agent runtimes with xMatrix.",
     eyebrow: "Slack Code Alternative · Slack Code vs xMatrix",
-    headline: "Agents on Your Machines, Decisions on Living Pages — Works Alongside Slack",
+    headline: "Slack Code Alternative: Agents on Your Machines, Decisions on Living Pages — Works Alongside Slack",
     lead: "Slack Code API adds task channels and diff previews inside Slack, but Slack is still just a chat shell with no agent runtime, no living documentation, and severe API throttling (1 req/min, 15 messages max on history endpoints for non-Marketplace apps). Keep Slack connected via xMatrix's Slack connector while running 35 coding harnesses on your own machines and keeping decisions in living Pages.",
     productCaption: "Inside xMatrix: native multi-human and multi-agent Channels backed by your own machines and living Pages—with full context access and zero 15-message API walls.",
     painPoints: [
@@ -320,7 +320,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Comparing Nowledge Mem alternatives? Don't just extract memory fragments from chats—run coding agents across machines and keep authoritative living Pages current in xMatrix.",
     eyebrow: "Nowledge Mem Alternative · Nowledge Mem vs xMatrix",
-    headline: "Team Project Memory Written by the Agents Doing the Work",
+    headline: "Nowledge Mem Alternative: Team Project Memory Written by the Agents Doing the Work",
     lead: "Nowledge Mem builds a clever local graph/vector memory layer across AI tools, but it is a passive memory store—it guesses facts from old chats, cannot run coding agents or govern external tools, and its Team workspace remains in private beta. In xMatrix, the working runs write authoritative living Pages your whole team shares today.",
     productCaption: "Inside xMatrix: instead of passively guessing memories from old chats, the exact coding agents shipping your work keep living project Pages accurate across your team.",
     painPoints: [
@@ -423,7 +423,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Searching for EverOS or EverMemOS alternatives? Move beyond single-machine SQLite locks, hidden extraction LLM bills, and no team sync to xMatrix Channels and living Pages.",
     eyebrow: "EverOS (EverMemOS) Alternative · EverOS vs xMatrix",
-    headline: "Multi-Machine Project Memory Written by the Agents Doing the Work",
+    headline: "EverOS Alternative: Multi-Machine Project Memory Written by the Agents Doing the Work",
     lead: "EverOS (EverMemOS) pairs Markdown files with local SQLite and LanceDB indexes, but its open-source v1 explicitly refuses a second service on the same directory, excludes multi-tenancy and sync, and burns continuous background LLM tokens on extraction. xMatrix gives teams real-time multi-machine execution across 35 harnesses and authoritative living Pages.",
     productCaption: "Inside xMatrix: real-time multi-machine Markdown Pages updated by your working coding agents—with zero single-directory locks or background extraction token drain.",
     painPoints: [

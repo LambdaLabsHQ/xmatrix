@@ -319,7 +319,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Want multiplayer Channels, living Pages, and 34 other coding agents around Claude Code? Keep Claude Code inside xMatrix, with automatic quota handoff when 5-hour caps hit.",
     eyebrow: "Claude Code Alternative · Claude Code vs xMatrix",
-    headline: "Keep Claude Code — Wrap It With Teammates, 34 Other Agents, and Living Pages",
+    headline: "Claude Code Alternative? Keep Claude Code — Wrap It With Teammates, 34 Other Agents, and Living Pages",
     lead: "Claude Code Desktop and Cowork are great for solo pairing with one Claude session, but they leave teammates outside the room, keep context trapped in solo sessions, and stop cold when November 2026's tighter 5-hour or weekly caps hit. xMatrix wraps Claude Code with shared Channels, living Pages, 34 other harnesses, and Space secrets.",
     productCaption: "Inside xMatrix: keep running your local Claude Code CLI while teammates and 34 other coding harnesses collaborate in the same Channel and maintain living Pages.",
     painPoints: [

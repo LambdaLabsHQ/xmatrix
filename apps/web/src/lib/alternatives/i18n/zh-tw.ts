@@ -112,7 +112,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在比較 Lody 替代方案？告別單一工作階段 worktree 與背景服務斷線問題，改用 xMatrix 的多人共享頻道、即時頁面、Space 機密與 Webhook 自動化。",
     eyebrow: "Lody 替代方案 · Lody vs xMatrix",
-    headline: "一個頻道、一份即時頁面——整個團隊與所有代理即時共享",
+    headline: "Lody 替代：一個頻道、一份即時頁面，全隊與所有代理即時共享",
     lead: "Lody 以「一個 worktree 對應一個獨立工作階段」為核心，並透過閉源雲端中繼同步。xMatrix 讓隊友與 35 種程式設計代理齊聚同一個共享頻道、隨工作落地持續更新即時頁面，並加上 Space 機密與事件驅動的 Norn 程式。",
     productCaption:
       "xMatrix 實景：不再逐一轉交孤立的開發工作階段，而是讓隊友與 35 種程式設計代理在同一個頻道即時協作，並將成果沉澱到即時頁面中。",
@@ -215,7 +215,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "評估 Multica 替代方案？擺脫無頭工單執行、#9559 靜默丟失 bypassPermissions 限制與明文環境變數，改用 xMatrix 的即時頻道、即時頁面與 Space 機密。",
     eyebrow: "Multica 替代方案 · Multica vs xMatrix",
-    headline: "別把每個需求都開成工單——說一次，代理交付、頁面同步最新",
+    headline: "Multica 替代：別把每個需求都開成工單，說一次，代理交付、即時頁面同步最新",
     lead: "Multica 強制把每項 Agent 任務都塞進預設 bypassPermissions 的無頭看板工單，且缺乏動態文件層。xMatrix 讓團隊與 35 種程式設計代理在頻道即時協作（或透過 xmatrix claude 掛接互動式工作階段）、自動保持即時頁面最新，並以 Space 機密治理 35 個整合工具。",
     productCaption:
       "xMatrix 實景：在共享頻道與隊友一同即時引導 Claude Code、Codex 與其餘 33 種程式設計代理，搭配明確的應用核准與即時頁面，取代盲跑的無頭看板工單。",
@@ -624,7 +624,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在找 LobeHub 或 LobeChat 替代方案？告別點數轉售加價、2.0 PostgreSQL／S3 自架門檻與 RAG 片段汙染，改用 xMatrix 本機開發 Agent 與即時頁面。",
     eyebrow: "LobeHub (LobeChat) 替代方案 · LobeHub vs xMatrix",
-    headline: "給已訂閱 Claude Code 或 Codex 的開發團隊——別再為點數付兩次錢",
+    headline: "LobeHub 替代：給已訂閱 Claude Code 或 Codex 的開發團隊，別再為點數付兩次錢",
     lead: "LobeHub（由 LobeChat 更名）是主打轉售模型點數的通用型 AI 工作區，2.0 自架架構沉重，且缺乏多人多 Agent 共享頻道。xMatrix 直接沿用你的現有訂閱，在真實儲存庫中執行 35 種程式設計代理，並內建 Goals 交付驗證與 35 個受控管整合工具。",
     productCaption:
       "xMatrix 實景：在即時團隊頻道與即時頁面中協調你既有的 Claude Code、Codex 與 Cursor 訂閱，零 Token 轉售加價、零 Docker 維運負擔。",
@@ -1126,7 +1126,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "想為 Claude Code 加上多人頻道、即時頁面與其他 34 種程式設計代理？在 xMatrix 中保留 Claude Code，並在觸及 5 小時上限時支援自動配額交接。",
     eyebrow: "Claude Code 替代方案 · Claude Code vs xMatrix",
-    headline: "保留 Claude Code——為它加上隊友、34 種程式設計代理與即時頁面",
+    headline: "Claude Code 替代？保留 Claude Code，為它加上隊友、34 種程式設計代理與即時頁面",
     lead: "Claude Code Desktop 與 Cowork 非常適合單人與一個 Claude 工作階段結對開發，但會把隊友擋在門外、讓脈絡困在個人對話裡，且在 2026 年 11 月更緊縮的 5 小時或每週配額觸頂時直接停擺。xMatrix 在 Claude Code 之外包上一層共享頻道、即時頁面、其餘 34 種程式設計代理與 Space 機密。",
     productCaption:
       "xMatrix 實景：繼續執行你本機的 Claude Code CLI，讓隊友與其他 34 種程式設計代理在同一頻道協作並持續維護即時頁面。",
@@ -1226,7 +1226,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "比較 Linear Agents 替代方案？擺脫會過期的預付沙盒點數、僅限雲端工單執行與 Enterprise 才有的稽核日誌，改用 xMatrix 本機頻道與即時頁面。",
     eyebrow: "Linear Agents 替代方案 · Linear vs xMatrix",
-    headline: "在自有主機與既有訂閱上執行代理——無過期點數，與 Linear 並肩運作",
+    headline: "Linear Agents 替代：在自有主機與既有訂閱上執行代理，無過期點數，與 Linear 並肩運作",
     lead: "Linear 是極為出色的議題追蹤工具，Linear Agents 也能將界定清楚的 Issue 轉成雲端沙盒 PR——但每 20 分鐘要價 US$0.25 另計 Token 費用，且必須從 12 個月過期的獨立預付錢包扣款。你可以繼續用 Linear 追蹤議題，並將它連接至 xMatrix，在自有主機的即時頻道與即時頁面中執行 35 種程式設計代理。",
     productCaption:
       "xMatrix 實景：保留 Linear 連線的同時，在本機以 Claude Code 與 Codex 於即時頻道協作，免付沙盒計時費、沒有過期預付餘額。",
@@ -1328,7 +1328,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在尋找 Notion Custom Agents 替代方案？擺脫 US$20–$24 Business 門檻、三種點數錢包、建立者點數耗盡導致暫停與行動端限制，改用 xMatrix 即時頁面。",
     eyebrow: "Notion Custom Agents 替代方案 · Notion vs xMatrix",
-    headline: "隨代理交付程式碼自動更新的即時頁面——擺脫三套點數錢包",
+    headline: "Notion Custom Agents 替代：隨代理交付程式碼自動更新的即時頁面，擺脫三套點數錢包",
     lead: "Notion Custom Agents 被鎖在 US$20–$24／席位的 Business 方案與複雜的三錢包點數制度後，團隊共用 Agent 預設會扣光建立者的個人 Select 點數並在途中停擺。xMatrix 會在 35 種程式設計代理於你的真實儲存庫交付程式碼時自動更新即時頁面——無須任何點數錢包。",
     productCaption:
       "xMatrix 實景：Agent 在真實儲存庫執行、在頻道與團隊對話並持續維護即時頁面——單一 Space 共享額度池，完整支援行動端。",
@@ -1427,7 +1427,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "尋找 Slack Code 替代方案？擺脫 Slack 對自訂應用設下的每分鐘 1 次、最多 15 則歷史訊息限流、90 天免費上限與缺少 Agent 執行環境的限制，改用 xMatrix。",
     eyebrow: "Slack Code 替代方案 · Slack Code vs xMatrix",
-    headline: "代理跑在自有主機、決策留在即時頁面——與 Slack 並肩協作",
+    headline: "Slack Code 替代：代理跑在自有主機、決策留在即時頁面，與 Slack 並肩協作",
     lead: "Slack Code API 在 Slack 內加入了任務頻道與 diff 預覽，但 Slack 本質仍是聊天外殼——沒有 Agent 執行環境、沒有動態文件，還對非 Marketplace 應用程式的歷史紀錄端點施加嚴苛限流（每分鐘 1 次、單次最多 15 則）。透過 xMatrix 原生 Slack 連接器維持與 Slack 的連動，同時在自有主機執行 35 種程式設計代理並把決策留在即時頁面中。",
     productCaption:
       "xMatrix 實景：由自有主機與即時頁面支撐的原生多人多 Agent 頻道，享有完整脈絡讀取權限，零 15 則 API 阻擋。",
@@ -1525,7 +1525,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "比較 Nowledge Mem 替代方案？別只從舊聊天抽取出推測的記憶碎片——在 xMatrix 跨主機執行開發 Agent，並直接維護權威的動態專案頁面。",
     eyebrow: "Nowledge Mem 替代方案 · Nowledge Mem vs xMatrix",
-    headline: "由實際動手的代理直接寫下的團隊專案記憶",
+    headline: "Nowledge Mem 替代：由實際動手的代理直接寫下的團隊專案記憶",
     lead: "Nowledge Mem 在各 AI 工具間建立了巧妙的本機圖譜／向量記憶層，但它只是被動的記憶庫——從舊對話推測事實、無法執行開發 Agent 或控管外部工具，且 Team 工作區仍在封測階段。在 xMatrix 中，實際執行的任務會直接寫下整個團隊今天就能共享的權威即時頁面。",
     productCaption:
       "xMatrix 實景：不再事後從舊對話裡被動推測記憶，而是讓實際交付程式碼的 Agent 直接維持整個團隊的動態專案頁面準確無誤。",
@@ -1625,7 +1625,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在尋找 EverOS 或 EverMemOS 替代方案？告別單機 SQLite 鎖定、隱藏的背景抽取 LLM 帳單與無團隊同步，改用 xMatrix 頻道與即時頁面。",
     eyebrow: "EverOS (EverMemOS) 替代方案 · EverOS vs xMatrix",
-    headline: "由實際動手的代理直接寫下的跨主機專案記憶",
+    headline: "EverOS 替代：由實際動手的代理直接寫下的跨主機專案記憶",
     lead: "EverOS（EverMemOS）以 Markdown 檔案搭配本機 SQLite 與 LanceDB 索引，但其開源 v1 明確禁止在同一目錄啟動第二個服務、將多租戶與同步排除在範疇外，且持續在背景消耗 LLM Token 進行抽取。xMatrix 為團隊帶來涵蓋 35 種程式設計代理的即時跨主機執行與權威即時頁面。",
     productCaption:
       "xMatrix 實景：由實際動手的開發 Agent 即時更新跨主機 Markdown 頁面，零單一目錄鎖定衝突，零背景抽取 Token 消耗。",

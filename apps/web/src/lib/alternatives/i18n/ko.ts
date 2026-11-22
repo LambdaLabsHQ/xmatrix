@@ -112,7 +112,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Lody 대안을 비교 중이신가요? 단일 세션 워크트리와 데몬 동기화 끊김 대신 xMatrix의 다중 사용자 공유 채널, 살아 있는 페이지, 스페이스 시크릿, 웹훅 루틴으로 전환하세요.",
     eyebrow: "Lody 대안 · Lody vs xMatrix",
-    headline: "팀 전체와 모든 에이전트가 함께 쓰는 하나의 채널, 하나의 살아 있는 페이지",
+    headline: "Lody 대안: 팀 전체와 모든 에이전트가 함께 쓰는 하나의 채널, 하나의 살아 있는 페이지",
     lead: "Lody는 비공개 소스 클라우드 릴레이로 동기화되는 1세션-1워크트리 스레드 중심으로 동작합니다. xMatrix는 팀원과 35종 코딩 에이전트를 하나의 공유 채널로 모으고, 작업이 완료될 때마다 살아 있는 페이지를 최신화하며, 스페이스 시크릿과 이벤트 기반 Norn 프로그램을 함께 제공합니다.",
     productCaption:
       "xMatrix 화면: 고립된 코딩 세션을 한 명씩 주고받는 대신, 팀원들과 35종 코딩 에이전트가 하나의 공유 채널에서 협업하고 결과를 살아 있는 페이지에 반영합니다.",
@@ -216,7 +216,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Multica 대안을 검토 중이신가요? 헤드리스 티켓 실행, 조용한 bypassPermissions 해제(#9559), 평문 환경 변수 대신 xMatrix의 실시간 채널, 살아 있는 페이지, 스페이스 시크릿을 써 보세요.",
     eyebrow: "Multica 대안 · Multica vs xMatrix",
-    headline: "모든 요청을 티켓으로 만들지 마세요 — 한 번 말하면 에이전트가 배포하고 페이지가 최신화됩니다",
+    headline: "Multica 대안: 모든 요청을 티켓으로 만들지 마세요 — 한 번 말하면 에이전트가 배포하고 페이지가 최신화됩니다",
     lead: "Multica는 모든 에이전트 작업을 bypassPermissions 기본값의 헤드리스 칸반 이슈로 강제하며 살아 있는 문서 계층이 없습니다. xMatrix는 사람과 35종 코딩 에이전트가 공유 채널에서 실시간으로 협업(또는 xmatrix claude로 대화형 세션 연결)하고, 살아 있는 페이지를 최신으로 유지하며, 스페이스 시크릿으로 35개 연동 앱을 통제합니다.",
     productCaption:
       "xMatrix 화면: 보이지 않는 헤드리스 보드 실행 대신, 공유 채널에서 팀원들과 함께 Claude Code, Codex 및 33종 기타 코딩 에이전트를 실시간으로 조율하고 명시적 앱 승인과 살아 있는 페이지를 유지합니다.",
@@ -634,7 +634,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "LobeHub 또는 LobeChat 대안을 찾고 계신가요? 크레딧 재판매 마진, 2.0 PostgreSQL/S3 마이그레이션 부담, RAG 청크 오염 대신 xMatrix의 로컬 코딩 에이전트와 살아 있는 페이지를 써 보세요.",
     eyebrow: "LobeHub (LobeChat) 대안 · LobeHub vs xMatrix",
-    headline: "이미 Claude Code나 Codex를 구독 중인 코딩 팀을 위해 — 크레딧 이중 결제를 멈추세요",
+    headline: "LobeHub 대안: 이미 Claude Code나 Codex를 구독 중인 코딩 팀을 위해 — 크레딧 이중 결제를 멈추세요",
     lead: "LobeHub(구 LobeChat)는 모델 크레딧 재판매로 수익화하는 범용 AI 워크스페이스로, 무거운 2.0 자체 호스팅 스택을 요구하며 다중 사용자+다중 에이전트 공유 채널이 없습니다. xMatrix는 기존 구독 그대로 실제 저장소에서 35종 코딩 에이전트를 실행하며, 완료 조건을 검증하는 Goals와 35개 연동 앱 거버넌스를 제공합니다.",
     productCaption:
       "xMatrix 화면: 토큰 재판매나 Docker 스택 관리 없이 본인의 Claude Code, Codex, Cursor 구독을 실시간 팀 채널과 살아 있는 페이지로 조율하세요.",
@@ -1153,7 +1153,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Claude Code에 멀티플레이어 채널, 살아 있는 페이지, 34종 기타 코딩 에이전트를 더하고 싶으신가요? xMatrix 안에서 Claude Code를 그대로 쓰면서 5시간 한도 도달 시 자동 할당량 핸드오프까지 활용하세요.",
     eyebrow: "Claude Code 대안 · Claude Code vs xMatrix",
-    headline: "Claude Code는 그대로 — 팀원, 34종 코딩 에이전트, 살아 있는 페이지를 더하세요",
+    headline: "Claude Code 대안? Claude Code는 그대로 두고 팀원, 34종 코딩 에이전트, 살아 있는 페이지를 더하세요",
     lead: "Claude Code Desktop과 Cowork는 단일 Claude 세션과의 1인 페어링에 훌륭하지만, 팀원들이 함께 참여할 수 없고 맥락이 개인 세션에 갇히며 2026년 11월 더 빡빡해진 5시간·주간 한도에 걸리면 작업이 그대로 멈춥니다. xMatrix는 Claude Code 위에 공유 채널, 살아 있는 페이지, 34종 기타 코딩 에이전트, 스페이스 시크릿을 더해 줍니다.",
     productCaption:
       "xMatrix 화면: 로컬 Claude Code CLI는 그대로 실행하면서 팀원들과 34종 기타 코딩 에이전트가 같은 채널에서 협업하고 살아 있는 페이지를 최신으로 유지합니다.",
@@ -1257,7 +1257,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Linear Agents 대안을 비교 중이신가요? 12개월 만료 선불 샌드박스 크레딧, 클라우드 전용 티켓 실행, Enterprise 전용 감사 로그 대신 xMatrix의 로컬 채널과 살아 있는 페이지를 써 보세요.",
     eyebrow: "Linear Agents 대안 · Linear vs xMatrix",
-    headline: "내 머신과 구독으로 에이전트 실행 — 만료되는 크레딧 없이 Linear와 함께 사용",
+    headline: "Linear Agents 대안: 내 머신과 구독으로 에이전트 실행 — 만료 크레딧 없이 Linear와 함께 사용",
     lead: "Linear는 탁월한 이슈 트래커이며 Linear Agents는 범위가 명확한 이슈를 클라우드 샌드박스 PR로 바꿔 줍니다—단, 12개월 뒤 만료되는 별도 선불 지갑에서 20분당 $0.25와 토큰 비용을 차감합니다. 이슈 추적은 Linear에 그대로 두고 xMatrix와 연결해 본인 머신의 실시간 채널과 살아 있는 페이지에서 35종 코딩 에이전트를 실행하세요.",
     productCaption:
       "xMatrix 화면: Linear 연결은 그대로 유지하면서 샌드박스 시간 과금이나 만료되는 선불 잔액 없이 실시간 채널에서 로컬 Claude Code와 Codex 하네스를 실행하세요.",
@@ -1362,7 +1362,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Notion Custom Agents 대안을 찾고 계신가요? $20~$24 Business 페이월, 3중 크레딧 지갑, 생성자 크레딧 고갈로 인한 중단, 모바일 제한 대신 xMatrix의 살아 있는 페이지를 써 보세요.",
     eyebrow: "Notion Custom Agents 대안 · Notion vs xMatrix",
-    headline: "에이전트가 코드를 배포할 때마다 최신화되는 살아 있는 페이지 — 3중 크레딧 지갑 없이",
+    headline: "Notion Custom Agents 대안: 에이전트가 코드를 배포할 때마다 최신화되는 살아 있는 페이지 — 3중 크레딧 지갑 없이",
     lead: "Notion Custom Agents는 시트당 $20~$24 Business 요금제와 복잡한 3중 크레딧 지갑 뒤에 잠겨 있어, 공유 에이전트가 생성자의 개인 Select 크레딧을 갉아먹다 작업 도중 멈춰 버립니다. xMatrix는 35종 코딩 에이전트가 실제 저장소에서 배포할 때마다 살아 있는 페이지를 자동으로 최신화합니다—복잡한 크레딧 지갑 없이요.",
     productCaption:
       "xMatrix 화면: 하나의 스페이스 통합 크레딧과 완전한 모바일 접근 권한으로, 에이전트가 실제 저장소에서 일하고 채널에서 팀과 소통하며 살아 있는 페이지를 유지합니다.",
@@ -1466,7 +1466,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Slack Code 대안을 찾고 계신가요? 비마켓플레이스 앱의 분당 1회·15개 메시지 기록 제한, Free 90일 한도, 런타임 부재 대신 xMatrix를 사용해 보세요.",
     eyebrow: "Slack Code 대안 · Slack Code vs xMatrix",
-    headline: "내 머신에서 도는 에이전트, 살아 있는 페이지에 남는 결정 — Slack과 함께 사용",
+    headline: "Slack Code 대안: 내 머신에서 도는 에이전트, 살아 있는 페이지에 남는 결정 — Slack과 함께 사용",
     lead: "Slack Code API는 Slack 안에 태스크 채널과 diff 미리보기를 더했지만, Slack은 여전히 에이전트 런타임도 살아 있는 문서도 없는 채팅 껍데기이며 비마켓플레이스 앱의 기록 조회 API를 분당 1회·최대 15개 메시지로 강하게 제한합니다. xMatrix의 Slack 커넥터로 Slack을 계속 연결해 두면서 본인 머신에서 35종 코딩 에이전트를 실행하고 결정 사항은 살아 있는 페이지에 남기세요.",
     productCaption:
       "xMatrix 화면: 전체 맥락 접근과 15개 메시지 API 장벽 없는 네이티브 다중 사용자·다중 에이전트 채널, 본인 머신 실행, 살아 있는 페이지.",
@@ -1569,7 +1569,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Nowledge Mem 대안을 비교 중이신가요? 채팅에서 메모리 조각을 사후 추출하는 데 그치지 말고 xMatrix에서 여러 머신의 코딩 에이전트를 실행하며 신뢰할 수 있는 살아 있는 페이지를 최신화하세요.",
     eyebrow: "Nowledge Mem 대안 · Nowledge Mem vs xMatrix",
-    headline: "직접 일하는 에이전트가 기록하는 팀 프로젝트 메모리",
+    headline: "Nowledge Mem 대안: 직접 일하는 에이전트가 기록하는 팀 프로젝트 메모리",
     lead: "Nowledge Mem은 여러 AI 도구에 걸친 영리한 로컬 그래프·벡터 메모리 계층이지만, 수동적인 메모리 저장소일 뿐 오래된 채팅에서 사실을 추측하고 코딩 에이전트 실행이나 외부 도구 거버넌스를 제공하지 못하며 Team 워크스페이스는 여전히 비공개 베타입니다. xMatrix에서는 실제 작업을 수행하는 실행(Run)이 팀 전체가 오늘 바로 공유하는 공식 살아 있는 페이지를 작성합니다.",
     productCaption:
       "xMatrix 화면: 예전 채팅에서 기억을 수동으로 추측해 뽑는 대신, 실제로 코드를 배포하는 코딩 에이전트가 팀의 살아 있는 프로젝트 페이지를 정확하게 유지합니다.",
@@ -1673,7 +1673,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "EverOS 또는 EverMemOS 대안을 찾고 계신가요? 단일 머신 SQLite 락, 숨겨진 추출 LLM 비용, 팀 동기화 부재 대신 xMatrix의 채널과 살아 있는 페이지를 사용해 보세요.",
     eyebrow: "EverOS (EverMemOS) 대안 · EverOS vs xMatrix",
-    headline: "직접 일하는 에이전트가 기록하는 멀티 머신 프로젝트 메모리",
+    headline: "EverOS 대안: 직접 일하는 에이전트가 기록하는 멀티 머신 프로젝트 메모리",
     lead: "EverOS(EverMemOS)는 Markdown 파일에 로컬 SQLite와 LanceDB 인덱스를 결합했지만, 오픈소스 v1은 같은 디렉터리에서 두 번째 서비스 실행을 명시적으로 거부하고 멀티테넌시와 동기화를 범위에서 제외했으며 백그라운드 추출에 지속적으로 LLM 토큰을 소모합니다. xMatrix는 팀을 위한 35종 코딩 에이전트의 실시간 멀티 머신 실행과 공식 살아 있는 페이지를 제공합니다.",
     productCaption:
       "xMatrix 화면: 단일 디렉터리 락이나 백그라운드 추출 토큰 소모 없이, 작업 중인 코딩 에이전트가 실시간으로 멀티 머신 Markdown 페이지를 최신화합니다.",

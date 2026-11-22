@@ -38,6 +38,10 @@ test("every competitor alternative page works across all 6 site locales and reso
       assert.ok(localized.metaTitle.length > 10 && localized.metaTitle.length <= 65, `${locale}/${page.slug} metaTitle length (${localized.metaTitle.length})`);
       assert.ok(localized.metaDescription.length >= 40, `${locale}/${page.slug} needs metaDescription`);
       assert.ok(localized.headline.length >= 10, `${locale}/${page.slug} needs headline`);
+      assert.ok(
+        localized.headline.toLowerCase().includes(page.name.toLowerCase()),
+        `${locale}/${page.slug} headline must include competitor display name "${page.name}": "${localized.headline}"`,
+      );
       assert.ok(localized.productCaption.length >= 15, `${locale}/${page.slug} needs productCaption`);
       assert.ok(localized.painPoints.length >= 3, `${locale}/${page.slug} needs concrete pain points`);
       for (const point of localized.painPoints) {

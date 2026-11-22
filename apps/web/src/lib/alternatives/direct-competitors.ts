@@ -114,7 +114,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Comparing Lody alternatives? Switch from Lody's single-session worktrees and daemon sync drops to xMatrix's shared multi-human Channels, living Pages, Space secrets, and webhook routines.",
     eyebrow: "Lody Alternative · Lody vs xMatrix",
-    headline: "One Channel, One Living Page — Shared by Your Whole Team and Every Agent",
+    headline: "Lody Alternative: One Channel, One Living Page — Shared by Your Whole Team and Every Agent",
     lead: "Lody organizes work around isolated one-session-per-worktree threads synced through a closed-source cloud relay. xMatrix brings teammates and 35 coding harnesses into one shared Channel, keeps living Pages current as work lands, and adds Space secrets plus event-driven Norn programs.",
     productCaption: "Inside xMatrix: instead of passing isolated coding sessions one by one, teammates and 35 coding harnesses work in one shared Channel and roll finished work into living Pages.",
     painPoints: [
@@ -217,7 +217,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Evaluating Multica alternatives? Move beyond headless ticket runs, silent bypassPermissions drops (#9559), and plaintext env vars to xMatrix's live Channels, living Pages, and Space secrets.",
     eyebrow: "Multica Alternative · Multica vs xMatrix",
-    headline: "Don't Turn Every Request Into a Ticket — Say It Once, Agents Ship, Pages Stay Current",
+    headline: "Multica Alternative: Don't Turn Every Request Into a Ticket — Say It Once, Agents Ship, Pages Stay Current",
     lead: "Multica forces every agent task into a headless Kanban issue with bypassPermissions defaults and no living documentation layer. xMatrix lets humans and 35 coding harnesses collaborate live in Channels (or attach an interactive session with xmatrix claude), keeps living Pages current, and governs 35 external apps with Space secrets.",
     productCaption: "Inside xMatrix: steer Claude Code, Codex, and 33 other harnesses live alongside teammates in shared Channels—with explicit app approvals and living Pages instead of blind headless board runs.",
     painPoints: [
@@ -631,7 +631,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Searching for LobeHub or LobeChat alternatives? Skip credit resale markups, 2.0 PostgreSQL/S3 migration friction, and RAG chunk pollution with xMatrix's local coding agents and living Pages.",
     eyebrow: "LobeHub (LobeChat) Alternative · LobeHub vs xMatrix",
-    headline: "For Coding Teams Already Paying for Claude Code or Codex — Stop Buying Credits Twice",
+    headline: "LobeHub Alternative: For Coding Teams Already Paying for Claude Code or Codex — Stop Buying Credits Twice",
     lead: "LobeHub (rebranded from LobeChat) is a general-purpose AI workspace monetized by reselling model credits, with a heavy 2.0 self-hosting stack and no shared multi-human + multi-agent channels. xMatrix runs 35 coding harnesses directly in your real repos on your existing subscriptions, with Goals for delivery checks and 35 governed app connectors.",
     productCaption: "Inside xMatrix: coordinate your own Claude Code, Codex, and Cursor subscriptions in real-time team Channels with living Pages—zero token resale or Docker stack maintenance.",
     painPoints: [
