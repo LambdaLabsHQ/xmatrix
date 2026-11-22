@@ -256,11 +256,11 @@ Composer completion:
 
 Work controls: the Instance toolbar in the Channel's agent work dock shows
 **Handoff** beside Reborn / Stop for the same Instances Reborn is offered on.
-It opens a picker of `Auto` plus the Space's registered harnesses (the
-registration catalog the composer completes from), with optional parameter
-chips for machine, model, effort, and advertised harness parameters, and posts
-`@<name>:<n>:handoff:@<successor>` (with any chosen launch conditions) as the
-person; it adds no new authority.
+Pressing it inserts `@<name>:<n>:handoff:@` into the Channel composer (preserving
+any existing draft text), focuses the composer, and opens its completion menu
+with `Auto`, the Space's registered harnesses, and launch parameters (`machine:`,
+`model:`, `effort:`, and advertised harness parameters) so the author can refine
+parameters and add instructions before sending; it adds no new authority.
 
 Rejected alternatives:
 

@@ -194,7 +194,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     hasOlderMessages,
     stoppingAgentInstanceIds,
     reborningAgentInstanceIds,
-    handingOffAgentInstanceIds,
     renamingChannelId,
     updatingChannelVisibilityId,
     error,
@@ -954,7 +953,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const rebornDockInstance = useStableCallback((...args: Parameters<typeof rebornAgentInstance>) =>
     void rebornAgentInstance(...args));
   const handoffDockInstance = useStableCallback((...args: Parameters<typeof handoffAgentInstance>) =>
-    void handoffAgentInstance(...args));
+    handoffAgentInstance(...args));
   const cancelComposerReply = useStableCallback(() => {
     replyTargetRef.current = null;
     replyTargetHistoryRevisionRef.current = -1;
@@ -1327,7 +1326,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         events={events}
         stoppingAgentInstanceIds={stoppingAgentInstanceIds}
         reborningAgentInstanceIds={reborningAgentInstanceIds}
-        handingOffAgentInstanceIds={handingOffAgentInstanceIds}
         onStopAgentInstance={stopDockInstance}
         onRebornAgentInstance={rebornDockInstance}
         onHandoffAgentInstance={handoffDockInstance}

@@ -152,7 +152,6 @@ import {
   type SinceDigest,
 } from "./conversation-activity-rows";
 import { AgentWorkIntent, AgentWorkIntentCard, agentWaitingPhrase, useIntentSince, useNow } from "./agent-work-intent";
-import { AgentWorkHandoffPicker } from "./agent-work-handoff-picker";
 import { AgentRuntimeNotice, agentRuntimeIssuePhrase, agentRuntimeNoticePhrase } from "./agent-runtime-notice";
 
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
@@ -227,7 +226,7 @@ import { PageEditCards, useMessagePageEdits } from "@/components/dashboard/page-
 
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow, PageMessageEdit,
   InteractionLaunchOption } from "@xmatrix/protocol";
-import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation, parseConnectorReceipt, connectorReceiptFixesOf, settingsCardOf } from "@xmatrix/protocol";
+import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation, parseConnectorReceipt, connectorReceiptFixesOf, settingsCardOf } from "@xmatrix/protocol";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
 import { launchChoiceOffered } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
@@ -3475,7 +3474,6 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   events,
   stoppingAgentInstanceIds,
   reborningAgentInstanceIds,
-  handingOffAgentInstanceIds,
   onStopAgentInstance,
   onRebornAgentInstance,
   onHandoffAgentInstance,
@@ -3495,7 +3493,6 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   events: ObservabilityEvent[];
   stoppingAgentInstanceIds: ReadonlySet<string>;
   reborningAgentInstanceIds: ReadonlySet<string>;
-  handingOffAgentInstanceIds: ReadonlySet<string>;
   onStopAgentInstance: (
     agentId: string,
     instance: SerializedAgentInstance,
@@ -3509,9 +3506,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   onHandoffAgentInstance: (
     agentId: string,
     instance: SerializedAgentInstance,
-    agentLabel: string,
-    successor: string,
-    tags?: import("@xmatrix/protocol").AutoLaunchTags
+    agentLabel: string
   ) => void;
   /** The anchor is the dock item the trace panel grows up out of. */
   onOpenAgentTrace: (target: AgentTraceTarget, anchor?: Element) => void;
@@ -3547,26 +3542,13 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
     const item = readLatest(key);
     if (item && agentWorkCanReborn(item)) onRebornAgentInstance(item.agentId, item.instance, item.agentLabel);
   });
-  const handoffInstance = useStableCallback((key: string, successor: string, tags?: import("@xmatrix/protocol").AutoLaunchTags) => {
+  const handoffInstance = useStableCallback((key: string) => {
     const item = readLatest(key);
-    if (item && agentWorkCanReborn(item)) onHandoffAgentInstance(item.agentId, item.instance, item.agentLabel, successor, tags);
+    if (item && agentWorkCanReborn(item)) onHandoffAgentInstance(item.agentId, item.instance, item.agentLabel);
   });
   const intentSince = useIntentSince(workItems);
   const hasTimedWork = workItems.some((item) => item.displayStatus === "busy" || Boolean(item.waiting));
   const now = useNow(undefined, hasTimedWork);
-  // Handoff successors are the harnesses this Space registered — the same
-  // catalog the composer completes `:handoff:@` from.
-  const registrationCatalog = useAgentRegistrationCatalog(catalogChannel?.spaceId ?? "", token ?? "",
-    Boolean(token && catalogChannel?.spaceId && workItems.some(item => item.canReborn)));
-  const handoffHarnesses = useMemo(
-    () => registrationCatalog.data?.capabilities.map((capability) => capability.harness) ?? [],
-    [registrationCatalog.data],
-  );
-  const handoffRegistrations = useMemo(
-    () => registrationCatalog.data?.registrations ?? [],
-    [registrationCatalog.data],
-  );
-  const handoffSuccessors = useMemo(() => agentWorkHandoffSuccessors(handoffHarnesses), [handoffHarnesses]);
   const dockRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLElement | null>(null);
@@ -3656,8 +3638,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
 
   // An Instance's controls wait only on its own request; the others stay usable.
   const controlsBusy = (instanceId: string) =>
-    stoppingAgentInstanceIds.has(instanceId) || reborningAgentInstanceIds.has(instanceId) ||
-    handingOffAgentInstanceIds.has(instanceId);
+    stoppingAgentInstanceIds.has(instanceId) || reborningAgentInstanceIds.has(instanceId);
 
   return (
     <div
@@ -3679,10 +3660,6 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
             stopDisabled={controlsBusy(item.instanceId)}
             reborning={reborningAgentInstanceIds.has(item.instanceId)}
             rebornDisabled={controlsBusy(item.instanceId)}
-            handingOff={handingOffAgentInstanceIds.has(item.instanceId)}
-            handoffSuccessors={handoffSuccessors}
-            handoffRegistrations={handoffRegistrations}
-            handoffHarnesses={handoffHarnesses}
             onStop={stopInstance}
             onReborn={rebornInstance}
             onHandoff={handoffInstance}
@@ -3705,10 +3682,6 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   stopDisabled,
   reborning,
   rebornDisabled,
-  handingOff = false,
-  handoffSuccessors = [],
-  handoffRegistrations = [],
-  handoffHarnesses = [],
   onStop,
   onReborn,
   onHandoff,
@@ -3724,14 +3697,9 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   stopDisabled: boolean;
   reborning: boolean;
   rebornDisabled: boolean;
-  handingOff?: boolean;
-  /** Successor names offered by the Handoff picker, `auto` first. */
-  handoffSuccessors?: readonly string[];
-  handoffRegistrations?: readonly import("@xmatrix/protocol").AgentRegistrationSummary[];
-  handoffHarnesses?: readonly string[];
   onStop: (key: string) => void;
   onReborn: (key: string) => void;
-  onHandoff?: (key: string, successor: string, tags?: import("@xmatrix/protocol").AutoLaunchTags) => void;
+  onHandoff?: (key: string) => void;
   /** Opens the trace panel growing up out of this item. */
   onOpenAgentTrace: (key: string, anchor: Element) => void;
 }) {
@@ -3756,12 +3724,9 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   const [hoverPart, setHoverPart] = useState<"instance" | "intent">("instance");
   const [actionToolbarPosition, setActionToolbarPosition] = useState<CSSProperties>({ left: 0, top: 0 });
   const [stackAboveCapsule, setStackAboveCapsule] = useState(false);
-  const [handoffPickerOpen, setHandoffPickerOpen] = useState(false);
-  const handoffPickerToggledRef = useRef(false);
-  // Reborn, Handoff and Stop ask in place: the first press arms the button,
-  // the second sends. A handoff arms the successor row that was pressed.
+  // Reborn and Stop ask in place: the first press arms the button, the second sends.
   const [armedAction, setArmedAction] = useState<string | null>(null);
-  const controlsPinned = handoffPickerOpen || armedAction !== null;
+  const controlsPinned = armedAction !== null;
   const wasTraceOpenRef = useRef(false);
   const stopArmed = armedAction === "stop";
   const stopArmedByGestureRef = useRef(false);
@@ -3770,9 +3735,9 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   // detail row uses. Deriving it here again is what let the two disagree.
   const usageLimit = item.usageLimit;
   const canReborn = item.canReborn;
-  // Handoff shares Reborn's address (`@<name>:<n>`); the picker only opens
-  // when there is a successor to offer.
-  const canHandoff = canReborn && Boolean(onHandoff) && handoffSuccessors.length > 0;
+  // Handoff fills `@<name>:<n>:handoff:@` into the composer so the person can
+  // pick a target, parameters, and optional instructions before sending.
+  const canHandoff = canReborn && Boolean(onHandoff);
   const titleParts = [
     item.agentLabel,
     item.label,
@@ -3807,7 +3772,6 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     suppressNextClickRef.current = true;
     // The gesture opens the controls with Stop armed; pressing it there stops.
     stopArmedByGestureRef.current = true;
-    setHandoffPickerOpen(false);
     setArmedAction("stop");
   }
 
@@ -3917,7 +3881,6 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
 
   useEffect(() => {
     if (wasTraceOpenRef.current && !traceOpen) {
-      setHandoffPickerOpen(false);
       setArmedAction(null);
     }
     wasTraceOpenRef.current = traceOpen;
@@ -3928,10 +3891,8 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     return listenForOverlayDismissal((event) => {
       const target = event.target as Node | null;
       if (target && itemElement.contains(target)) return;
-      setHandoffPickerOpen(false);
       setArmedAction(null);
     }, () => {
-      setHandoffPickerOpen(false);
       setArmedAction(null);
     });
   }, [controlsPinned, itemElement]);
@@ -3958,13 +3919,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
 
   useLayoutEffect(() => {
     positionActionToolbar();
-    // The toolbar changes size under the pointer when the picker opens or
-    // closes; keeping focus inside it keeps it shown (and keyboard-usable).
-    if (!handoffPickerToggledRef.current) return;
-    handoffPickerToggledRef.current = false;
-    actionToolbarRef.current?.querySelector<HTMLButtonElement>(handoffPickerOpen
-      ? '[data-action="handoff-successor"]' : '[data-action="handoff"]')?.focus();
-  }, [handoffPickerOpen, armedAction, stackAboveCapsule, positionActionToolbar]);
+  }, [armedAction, stackAboveCapsule, positionActionToolbar]);
 
   useLayoutEffect(() => {
     if (!stopArmed || !stopArmedByGestureRef.current) return;
@@ -4076,7 +4031,6 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       }}
       onPointerLeave={(event) => {
         if (event.pointerType !== "mouse") return;
-        setHandoffPickerOpen(false);
         setArmedAction(null);
       }}
       onBlur={(event) => {
@@ -4087,7 +4041,6 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
         // `listenForOverlayDismissal`, so only reset on blur when focus moved
         // to another element outside this item or left the window.
         if (next ? event.currentTarget.contains(next) : document.hasFocus()) return;
-        setHandoffPickerOpen(false);
         setArmedAction(null);
       }}
     >
@@ -4132,7 +4085,6 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       <div
         ref={actionToolbarRef}
         className="app-agent-work-action-menu"
-        data-mode={handoffPickerOpen && canHandoff ? "handoff" : undefined}
         data-usage={usageLimit ? usageLimit.severity : undefined}
         role="toolbar"
         aria-label={`Controls for ${item.instanceLabel}`}
@@ -4147,28 +4099,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
             {usageLimit.title}
           </p>
         )}
-        {handoffPickerOpen && canHandoff ? (
-          <AgentWorkHandoffPicker
-            label={item.label}
-            instanceLabel={item.instanceLabel}
-            disabled={rebornDisabled}
-            armedAction={armedAction}
-            onClearArmed={() => setArmedAction(null)}
-            onPressArmed={pressArmed}
-            registrations={handoffRegistrations}
-            capabilityHarnesses={handoffHarnesses}
-            onBack={() => {
-              handoffPickerToggledRef.current = true;
-              setArmedAction(null);
-              setHandoffPickerOpen(false);
-            }}
-            onSelect={(successor, tags) => {
-              setHandoffPickerOpen(false);
-              onHandoff?.(item.key, successor, tags);
-            }}
-            onLayoutChange={positionActionToolbar}
-          />
-        ) : <div className="app-agent-work-action-row">
+        <div className="app-agent-work-action-row">
         <span className="app-agent-work-instance-name">{item.label}</span>
         {canReborn ? (
           <button
@@ -4200,18 +4131,14 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
-              handoffPickerToggledRef.current = true;
               setArmedAction(null);
-              setHandoffPickerOpen(true);
+              event.currentTarget.blur();
+              onHandoff?.(item.key);
             }}
             className="app-agent-work-action"
             data-action="handoff"
           >
-            {handingOff ? (
-              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" aria-hidden="true" />
-            ) : (
-              <ArrowRightLeft className="size-3.5" aria-hidden="true" />
-            )}
+            <ArrowRightLeft className="size-3.5" aria-hidden="true" />
             <span>Handoff</span>
           </button>
         ) : null}
@@ -4235,7 +4162,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
           )}
           <span>{stopArmed ? "Confirm" : "Stop"}</span>
         </button>
-        </div>}
+        </div>
       </div>
     );
   }
@@ -4244,15 +4171,6 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
 
 
 export { agentWorkDisplayStatus, agentWorkCanReborn } from "./agent-work-view";
-
-
-
-/** `auto` first, then each registered harness once, in catalog order. */
-export function agentWorkHandoffSuccessors(harnesses: readonly string[]): string[] {
-  const names = harnesses.map((harness) => harness.trim().replace(/^[@＠]/, ""))
-    .filter((harness) => harness && isHandoffSuccessorName(harness) && !isAutoHandoffSuccessor(harness));
-  return names.length > 0 ? ["auto", ...new Set(names)] : [];
-}
 
 
 

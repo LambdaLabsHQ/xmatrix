@@ -42,6 +42,7 @@ import {
 import {
   insertMentionIntoDraft,
 } from "./workspace-shell-helpers-extra";
+import { insertHandoffIntoDraft } from "./auto-launch-completion";
 
 import {
   ATTACHMENT_UPLOAD_CONCURRENCY,
@@ -196,6 +197,8 @@ export type { ComposerChannelAttachment } from "./workspace-shell-message-model"
 
 export type ComposerMentionInsertRequest =
   | { id: number; kind: "mention"; mention: string }
+  /** Opens handoff completion in the composer for this channel instance (`<name>:<n>`). */
+  | { id: number; kind: "handoff"; source: string }
   /** A passage quoted into the draft as a block on the line after the caret (composer-blocks.ts). */
   | { id: number; kind: "quote"; quote: string; source: DiscussionSource };
 
@@ -457,6 +460,9 @@ export const Composer = memo(function Composer({
   const dismissCompletion = useCallback(() => {
     completionApiRef.current?.dismissCompletion();
   }, []);
+  const reopenCompletion = useCallback(() => {
+    completionApiRef.current?.reopenCompletion();
+  }, []);
   const cursor = completionApiRef.current?.cursor ?? 0;
   // What each picture of the draft shows, and which files the draft holds as pictures rather than in the strip.
   const inlinedPictures = useMemo(() => new Set(draftPictures(localDraft).map((picture) => resolvePicture(picture.ref))),
@@ -602,17 +608,23 @@ export const Composer = memo(function Composer({
     const next = mentionInsertRequest.kind === "quote"
       // The field's own text: what was typed a moment ago may not have reached the draft state yet.
       ? insertQuoteIntoDraft(target?.value ?? localDraft, nextCursor, mentionInsertRequest.quote, mentionInsertRequest.source)
-      : insertMentionIntoDraft(localDraft, nextCursor, mentionInsertRequest.mention);
+      : mentionInsertRequest.kind === "handoff"
+        ? insertHandoffIntoDraft(target?.value ?? localDraft, mentionInsertRequest.source)
+        : insertMentionIntoDraft(localDraft, nextCursor, mentionInsertRequest.mention);
     setDraftText(next.value);
     setCursor(next.cursor);
-    dismissCompletion();
+    if (mentionInsertRequest.kind === "handoff") {
+      reopenCompletion();
+    } else {
+      dismissCompletion();
+    }
     onWorkspaceSelect(null);
     scheduleTextareaSelection(
       () => fieldRef.current,
       next.value,
       { start: next.cursor, end: next.cursor }
     );
-  }, [dismissCompletion, cursor, writable, localDraft, mentionInsertRequest, onWorkspaceSelect, setCursor, setDraftText]);
+  }, [dismissCompletion, reopenCompletion, cursor, writable, localDraft, mentionInsertRequest, onWorkspaceSelect, setCursor, setDraftText]);
 
   function syncCursor(target: ComposerField) {
     setCursor(composerDraftCursor(target.value, target.selectionStart));
