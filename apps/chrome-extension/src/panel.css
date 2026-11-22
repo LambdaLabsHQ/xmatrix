@@ -84,11 +84,11 @@ button { font: inherit; color: inherit; }
 /* After sign-in: the button beside a selection, shown as it looks on a page, and one choice. */
 .fine { margin: 4px 0 0; color: var(--ink-muted); font-size: 12px; line-height: 1.5; text-wrap: pretty; }
 .fine b, .lede b { color: var(--ink); font-weight: 650; }
-.demo { position: relative; margin: 0 0 14px; padding: 18px 16px 34px; border-radius: 18px; background: #fff; text-align: left;
-  box-shadow: 0 1px 2px oklch(0.2 0.03 55 / 0.06), 0 0 0 1px var(--field-border); }
-.demo-text { margin: 0; color: var(--ink-muted); font-size: 13px; line-height: 1.6; }
-.demo-text mark { background: oklch(0.83 0.07 76 / 0.45); color: var(--ink); border-radius: 2px; }
-.demo-pill { position: absolute; left: 34%; bottom: 10px; display: inline-flex; align-items: center; gap: 7px; height: 30px; min-width: 150px; padding: 0 14px 0 10px;
-  border-radius: 999px; background: #fff; color: var(--ink-muted); font-size: 12.5px; font-weight: 500;
-  box-shadow: 0 8px 20px -8px oklch(0.18 0.04 55 / 0.5), 0 0 0 1px oklch(0.46 0.05 60 / 20%); }
-.demo-pill svg { width: 14px; height: 14px; fill: var(--brass); }
+.demo { position: relative; margin: 8px 0 22px; padding: 0 4px 30px; text-align: left; }
+.demo-text { margin: 0; color: var(--ink-muted); font-size: 14px; line-height: 1.65; }
+.demo-text mark { background: oklch(0.83 0.07 76 / 0.42); color: var(--ink); }
+/* The App's PaperPopover, as the button beside a selection shows on a page (src/selection.js). */
+.demo-slip { position: absolute; right: 18%; bottom: -6px; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px;
+  border-radius: 8px; background: color-mix(in oklch, var(--wood-base) 35%, var(--paper)); font-size: 14px; font-weight: 500;
+  box-shadow: 0 1px 2px oklch(0.2 0.03 55 / 0.10), 0 6px 18px -8px oklch(0.2 0.03 55 / 0.22); }
+.demo-slip svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
