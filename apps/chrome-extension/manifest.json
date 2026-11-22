@@ -28,7 +28,7 @@
   "host_permissions": ["https://xmatrix-hub.xmatrix.sh/*"],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "web_accessible_resources": [
-    { "resources": ["assets/fonts/inter-latin.woff2"], "matches": ["https://*/*", "http://*/*"] }
+    { "resources": ["app/ask.html"], "matches": ["https://*/*", "http://*/*"] }
   ],
   "commands": {
     "_execute_action": {

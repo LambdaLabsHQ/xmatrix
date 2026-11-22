@@ -18,7 +18,7 @@ import {
   tokenExpiresAt,
   withSession,
 } from "./hub-client.js";
-import { discussionHead, discussionTitle, pagePassage, sourceLink } from "./passage.js";
+import { discussionTitle, pagePassage } from "./passage.js";
 
 const BADGE_ALARM = "needs-you";
 const SIGN_IN_ALARM = "sign-in";
@@ -168,16 +168,46 @@ async function quickAskSpace(token, { fresh = false } = {}) {
 }
 
 /**
- * Starts a conversation holding the passage and the question, without waiting
- * for the app: the panel then shows it. Mentioning an Agent hands it the work
- * at once.
+ * What the question box on a tab was opened on: the passage picked there (or
+ * the page itself) and the tab's window, kept until the box sends or another
+ * passage is picked. Only this extension's content script in that tab, or its
+ * context menu, sets it; the box reads it by the tab it is framed in.
  */
-async function quickAsk(tab, { text, question }) {
+async function setPendingAsk(tab, text) {
   const passage = pagePassage({ text, title: tab.title, url: tab.url, target: "new" });
-  const asked = String(question ?? "").trim().slice(0, 8000);
-  if (!passage) throw new Error("xMatrix can only ask about web pages.");
-  if (!asked) throw new Error("Write a question first.");
-  const source = { label: passage.label || new URL(passage.href).host, href: passage.href };
+  if (!passage || tab.id === undefined) return;
+  await chrome.storage.session.set({ [`ask:${tab.id}`]: {
+    text: passage.text, label: passage.label || new URL(passage.href).host, href: passage.href, windowId: tab.windowId ?? null } });
+}
+
+async function pendingAsk(tabId) {
+  const key = `ask:${tabId}`;
+  const { [key]: pending } = await chrome.storage.session.get(key);
+  if (!pending) throw new Error("Select some text on the page first.");
+  return pending;
+}
+
+/** The box's session and target, as the side panel's app gets its own: a current access token, never the refresh token. */
+async function askContext(tab) {
+  const passage = await pendingAsk(tab.id);
+  const session = await panelHandlers.session({});
+  if (!session?.user) throw new Error("Sign in to xMatrix in the side panel first.");
+  const { lastSpace } = await chrome.storage.local.get("lastSpace");
+  return { token: session.token, user: session.user, spaceId: lastSpace?.id ?? null,
+    passage: { text: passage.text, label: passage.label, href: passage.href }, windowId: passage.windowId };
+}
+
+/**
+ * Starts the conversation the box asked for, without waiting for the app: the
+ * panel then shows it. The box wrote the message as the App's composer does
+ * (the quoted passage, the question, the Agents picked in it); a message that
+ * names nobody lets the Space's routing pick the Agent.
+ */
+async function askSend(tab, { body, question, invocationSelections }) {
+  const passage = await pendingAsk(tab.id);
+  const text = typeof body === "string" ? body.slice(0, 40_000) : "";
+  const asked = typeof question === "string" ? question.trim() : "";
+  if (!text.trim() || !asked) throw new Error("Write a question first.");
   const session = await store.get();
   if (!session) throw new Error("Sign in to xMatrix in the side panel first.");
   const result = await authed(async (scoped, token) => {
@@ -195,12 +225,13 @@ async function quickAsk(tab, { text, question }) {
       if (!space) throw new Error("You are not in any Space yet.");
       channel = await create(space);
     }
-    await sendMessage(scoped, token, { channelId: channel.id,
-      // Not mentioning anyone lets the Space's routing pick the Agent, as a message in the app does.
-      body: (passage.text ? discussionHead(passage.text, source) : sourceLink(source)) + asked,
-      clientMessageId: crypto.randomUUID() });
+    // Picks were made against the remembered Space; in another one they do not apply.
+    const picks = space.id === (await chrome.storage.local.get("lastSpace")).lastSpace?.id ? invocationSelections : undefined;
+    await sendMessage(scoped, token, { channelId: channel.id, body: text, clientMessageId: crypto.randomUUID(),
+      ...(picks && typeof picks === "object" ? { invocationSelections: picks } : {}) });
     return { space, channel };
   });
+  await chrome.storage.session.remove(`ask:${tab.id}`);
   await chrome.storage.local.set({ lastSpace: { id: result.space.id, name: result.space.name } });
   // The panel shows it: at once if its app is loaded, or opening straight onto it.
   await chrome.storage.session.set({ openPath: {
@@ -289,19 +320,19 @@ function isExtensionPage(sender) {
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== chrome.runtime.id) return false;
-  // The selection button runs in web pages: it may only hand over a passage of its own tab.
-  if (message?.type === "quick-ask" && sender.tab) {
-    openPanel(sender.tab);
-    quickAsk(sender.tab, message)
-      .then((value) => reply({ ok: true, value }))
+  const answer = (work) => {
+    work.then((value) => reply({ ok: true, value }))
       .catch((error) => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
+  };
+  // The selection script runs in web pages: it may only hand over a passage of its own tab.
+  if (message?.type === "askPrepare" && sender.tab && !isExtensionPage(sender)) {
+    return answer(setPendingAsk(sender.tab, String(message.text ?? "")));
   }
-  if (message?.type === "quick-ask-target" && sender.tab) {
-    quickAskTarget()
-      .then((value) => reply({ ok: true, value }))
-      .catch(() => reply({ ok: false }));
-    return true;
+  // The question box is this extension's page, framed in that tab: it reads and sends that tab's ask only.
+  if (isExtensionPage(sender) && sender.tab?.id !== undefined) {
+    if (message?.type === "askContext") return answer(askContext(sender.tab));
+    if (message?.type === "askSend") return answer(askSend(sender.tab, message.args ?? {}));
   }
   const handler = isExtensionPage(sender) ? panelHandlers[message?.type] : undefined;
   if (!handler) return false;
@@ -321,19 +352,13 @@ function installMenus() {
   });
 }
 
-/** Where the box says a question goes, before it is asked. */
-async function quickAskTarget() {
-  if (!(await store.get())) return { signedIn: false };
-  const { lastSpace } = await chrome.storage.local.get("lastSpace");
-  return { signedIn: true, spaceName: lastSpace?.name || null };
-}
-
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if ((info.menuItemId !== MENU_ASK && info.menuItemId !== MENU_PAGE) || tab?.id === undefined) return;
   // The menu's click lets this extension into this one tab (activeTab) to open the box there.
   try {
+    await setPendingAsk({ ...tab, url: info.pageUrl ?? tab.url }, info.menuItemId === MENU_ASK ? info.selectionText ?? "" : "");
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["src/selection.js"] });
-    await chrome.tabs.sendMessage(tab.id, { type: "open-ask", text: info.selectionText ?? "" });
+    await chrome.tabs.sendMessage(tab.id, { type: "open-ask", page: info.menuItemId === MENU_PAGE });
   } catch {
     // A page no extension may enter (the Web Store, a PDF): the panel starts the conversation instead.
     openPanel(tab);

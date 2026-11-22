@@ -217,11 +217,29 @@ export function openEmbedAddress(path: string): boolean {
 }
 
 /**
+ * The extension's question box on a web page (extension-app/ask.tsx) is a
+ * packaged page of the extension too, framed by the page it asks about, not
+ * by the side panel. It names itself as the same client.
+ */
+let askSurface = false;
+let askToken: string | null = null;
+/** Marks this page as the question box, holding the access token the extension handed it for calls that carry none. */
+export function markExtensionAskSurface(token: string) {
+  askSurface = true;
+  askToken = token;
+}
+
+/** The question box's access token, when this page is the question box. */
+export function extensionAskToken(): string | null {
+  return askSurface ? askToken : null;
+}
+
+/**
  * The side panel's client identity, sent on its calls to the Hub
  * (extension-app/hub-proxy.ts). The Hub judges it on every call.
  */
 export function embedClientCompatibilityHeaders(): Record<string, string> {
-  if (!extensionEmbedParent()) return {};
+  if (!extensionEmbedParent() && !askSurface) return {};
   return clientCompatibilityHeaders({
     component: "app",
     version: canonicalVersion.version,

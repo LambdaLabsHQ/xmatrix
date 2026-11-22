@@ -45,3 +45,15 @@ test("the package is an extension Chrome loads, with the app built into it", asy
   const styles = fs.readFileSync(path.join(out, "app/app.css"), "utf8");
   for (const [, file] of styles.matchAll(/url\(["']?\/([^"')]+)["']?\)/gu)) assert.ok(shipped.includes(file), `the styles load /${file}`);
 });
+
+// The question box a page frames is only as wide as the box: its stylesheet is the App's as a desktop window applies it.
+test("the question box's stylesheet settles width queries and viewport units at a desktop window", async () => {
+  const { desktopStylesheet, widthCondition } = await import("../scripts/build-app.mjs");
+  assert.equal(widthCondition("(width>=48rem)"), true);
+  assert.equal(widthCondition("(max-width:767px)"), false);
+  assert.equal(widthCondition("(hover:hover)"), null);
+  assert.equal(desktopStylesheet("@media(width>=48rem){.a{x:1}}@media(max-width:767px){.b{x:2}}"
+    + "@media(hover:hover)and (min-width:640px){.c{x:3}}@media(prefers-reduced-motion:reduce){.d{x:4}}"),
+  ".a{x:1}@media(hover:hover){.c{x:3}}@media(prefers-reduced-motion:reduce){.d{x:4}}");
+  assert.equal(desktopStylesheet(".f{max-height:min(9rem,34dvh)}"), ".f{max-height:min(9rem,272px)}");
+});

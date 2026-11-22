@@ -414,6 +414,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 /** The signed-in reader's bearer token, or null where no one is signed in or nothing provides the session. */
+/**
+ * A session another part of xMatrix already holds, handed to a surface that
+ * cannot sign in by itself: the extension's question box on a web page, which
+ * reads its token from the extension. Read-only: nothing here signs in or out.
+ */
+export function GrantedAuthProvider({ token, user, children }: { token: string; user: AuthUser; children: ReactNode }) {
+  const value = useMemo<AuthContextValue>(() => {
+    const refuse = () => Promise.reject(new Error("Sign in from the xMatrix side panel."));
+    return {
+      session: { access_token: token, token_type: "bearer", user: { id: user.id, email: user.email } },
+      user, loading: false,
+      signInWithOtp: refuse, verifyOtp: refuse, signInWithPassword: refuse, verifySecondFactor: refuse,
+      signInWithSocial: refuse, signInWithPasskey: refuse, signInWithApple: refuse,
+      setSessionFromAuthResponse: refuse, logout: refuse,
+    };
+  }, [token, user]);
+  return (
+    <AuthContext.Provider value={value}>
+      <XMatrixQueryProvider userId={user.id}>{children}</XMatrixQueryProvider>
+    </AuthContext.Provider>
+  );
+}
+
 export function useAuthToken(): string | null {
   return useContext(AuthContext)?.session?.access_token ?? null;
 }

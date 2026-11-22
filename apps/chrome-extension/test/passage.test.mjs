@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pagePassage, pageTitle, sourceLink } from "../src/passage.js";
+import { pagePassage, pageTitle } from "../src/passage.js";
 import { chromeVersion, extensionPagesPolicy, shippedManifest } from "../scripts/package.mjs";
 
 test("a passage is bounded text from a web page with a known target", () => {
@@ -46,11 +46,8 @@ test("the extension's pages run only packaged scripts and ask only the Hub, and 
   assert.deepEqual(directives("http://localhost:8787").get("connect-src"), ["'self'", "http://localhost:8787", "ws://localhost:8787"]);
 });
 
-test("a quick question opens with the same quoted head the web app writes", async () => {
-  const { discussionHead, discussionTitle } = await import("../src/passage.js");
-  assert.equal(discussionHead("line one\n\nline two", { label: "Issue [12]", href: "https://a.example/x" }),
-    "> line one\n>\n> line two\n\n— [Issue \\[12\\]](https://a.example/x)\n\n");
-  assert.equal(discussionHead("q", { label: "", href: "https://a.example/a b" }), "> q\n\n— [source](<https://a.example/a b>)\n\n");
+test("a question is named by its passage until its first message names it", async () => {
+  const { discussionTitle } = await import("../src/passage.js");
   assert.equal(discussionTitle(`  ${"w".repeat(80)} `), `“${"w".repeat(59)}…”`);
 });
 
@@ -63,6 +60,3 @@ test("a source label drops the unread counts sites put before their title", () =
   assert.equal(pagePassage({ text: "", title: "(5) Home / X", url: "https://x.com/home", target: "new" }).label, "Home / X");
 });
 
-test("a question about a whole page opens with a link to it", () => {
-  assert.equal(sourceLink({ label: "Pool [docs]", href: "https://example.test/a b" }), "[Pool \\[docs\\]](<https://example.test/a b>)\n\n");
-});
