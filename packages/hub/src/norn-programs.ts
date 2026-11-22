@@ -6,6 +6,7 @@ import { recordCommandResult } from "./command-result";
 import { agentHolder, checkNornProgram, instanceHolder, nornAnswerBody, nornAsking, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody,
   nornProgramIn, nornQuestionSource, nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion,
   type NornRequestCard } from "./norn-host";
+import { nornEventDeliveryAllowed, parseNornEventDeliveryPayload } from "./norn-events";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
@@ -121,10 +122,35 @@ export async function startNornProgram(input: ProductMessagePostCommitInput): Pr
 export async function reconcileNornPrograms(env: Env, channelId: string, postCommit: PostCommit): Promise<void> {
   const requestId = `norn-reconcile:${channelId}`;
   const programs = await repository(env, channelId, requestId);
-  for (const programId of (await programs.channelWork({ requestId, channelId })).passes) {
+  const initialWork = await programs.channelWork({ requestId, channelId });
+  let moreEventDeliveries = initialWork.eventDeliveries.length >= 50;
+  for (const owed of initialWork.eventDeliveries) {
+    const scope = { requestId: `norn-event:${owed.eventId}:${owed.programId}`, channelId, programId: owed.programId, eventId: owed.eventId };
+    const payload = parseNornEventDeliveryPayload(owed.payload);
+    if (!owed.running || !owed.authorityAllowed || !payload ||
+        !(await nornEventDeliveryAllowed(env, { spaceId: owed.spaceId, authorityUserId: owed.authorityUserId, grant: payload.grant }))) {
+      await programs.settleEventDelivery(scope);
+      continue;
+    }
+    try {
+      await programs.deliverEvent(scope, nornStep(undefined, {
+        id: owed.eventId, streams: payload.streams, what: payload.what,
+        ...(payload.cloudEvent ? { cloudEvent: payload.cloudEvent } : {}),
+      }));
+    } catch (error) {
+      const delayMs = Math.min(60_000, 1_000 * (2 ** Math.min(owed.attempts, 6)));
+      await programs.rescheduleEventDelivery({ ...scope, delayMs }).catch(() => undefined);
+      console.warn("Norn owed outside-event delivery failed; rescheduled", {
+        channelId, programId: owed.programId, attempts: owed.attempts + 1,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  for (const programId of initialWork.passes) {
     await programs.advance({ requestId, channelId, programId }, nornStep());
   }
   const work = await programs.channelWork({ requestId, channelId });
+  if (work.eventDeliveries.length > 0) moreEventDeliveries = true;
   let undeliverable = false;
   for (const delivery of work.deliveries) {
     if (personHolder(delivery.holder)) {
@@ -163,8 +189,8 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
     await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch,
       ...(there ? { instanceId: there.instanceId } : {}) });
   }
-  // A request nobody could be found for ended in this pass: what its program does next is due now.
-  if (undeliverable) await wakeAgentLaunchCoordinator(env, channelId, ["norn"]);
+  // A request nobody could be found for ended in this pass, or more owed outside events remain: run the next page.
+  if (undeliverable || moreEventDeliveries) await wakeAgentLaunchCoordinator(env, channelId, ["norn"]);
   // A person's request that ended says how under its card, and no longer waits on them.
   for (const closing of work.closings) {
     if (closing.reply) await recordCommandResult(env, { channelId, messageId: closing.deliveryMessageId, key: "norn-request",

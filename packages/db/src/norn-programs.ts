@@ -194,7 +194,8 @@ export const NORN_CHANNEL_DUE_SQL = `LEAST(
     (SELECT MIN(r.settled_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL}),
     (SELECT MIN(r.created_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_DELEGATED_AWAY_SQL}),
     (SELECT MIN(r.settled_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNCLOSED_SQL}),
-    (SELECT MIN(n.created_at) FROM data.norn_notices n WHERE n.channel_id=$1 AND n.posted_at IS NULL))`;
+    (SELECT MIN(n.created_at) FROM data.norn_notices n WHERE n.channel_id=$1 AND n.posted_at IS NULL),
+    (SELECT MIN(d.next_attempt_at) FROM data.norn_event_deliveries d WHERE d.channel_id=$1 AND d.delivered_at IS NULL))`;
 /** The Channels with any program still running or unreported: `p` is the program. */
 export const NORN_PROGRAM_OPEN_SQL = "(p.state='running' OR p.reported_at IS NULL)";
 
@@ -376,6 +377,44 @@ export class PostgresNornProgramRepository {
   }
 
   /**
+   * Deliver one durable outside-event obligation to its program and mark the
+   * obligation settled in the same transaction. If the program is no longer
+   * running, the obligation is settled without advancing. Because ledger
+   * occurrence recording is idempotent by event id, a lost commit response is
+   * safe to retry.
+   */
+  async deliverEvent<T>(input: Scope & { eventId: string }, step: NornStep<T>): Promise<T | undefined> {
+    return this.transaction(input.requestId, "deliver-event", async tx => {
+      const program = await this.running(tx, input);
+      const result = program ? await this.pass(tx, program, step) : undefined;
+      await tx.query({ name: "norn_event_delivery_settled_v1", text: `UPDATE data.norn_event_deliveries
+        SET delivered_at=clock_timestamp()
+        WHERE space_id=$1 AND program_id=$2 AND event_id=$3 AND delivered_at IS NULL`,
+        values: [this.placement.spaceId, input.programId, input.eventId], maxRows: 0 });
+      return result;
+    });
+  }
+
+  /** Settle an outside-event delivery obligation without advancing (e.g., revoked access or stopped program). */
+  async settleEventDelivery(input: Scope & { eventId: string }): Promise<void> {
+    await this.transaction(input.requestId, "settle-event-delivery", tx => tx.query({
+      name: "norn_event_delivery_settled_v1", text: `UPDATE data.norn_event_deliveries
+        SET delivered_at=clock_timestamp()
+        WHERE space_id=$1 AND program_id=$2 AND event_id=$3 AND delivered_at IS NULL`,
+      values: [this.placement.spaceId, input.programId, input.eventId], maxRows: 0 }));
+  }
+
+  /** Defer one failed outside-event delivery with bounded backoff so later programs are not starved. */
+  async rescheduleEventDelivery(input: Scope & { eventId: string; delayMs: number }): Promise<void> {
+    const delayMs = Math.max(100, Math.min(300_000, Math.trunc(input.delayMs)));
+    await this.transaction(input.requestId, "reschedule-event-delivery", tx => tx.query({
+      name: "norn_event_delivery_reschedule_v1", text: `UPDATE data.norn_event_deliveries
+        SET attempts=attempts+1,next_attempt_at=clock_timestamp()+make_interval(secs=>$4::integer/1000.0)
+        WHERE space_id=$1 AND program_id=$2 AND event_id=$3 AND delivered_at IS NULL`,
+      values: [this.placement.spaceId, input.programId, input.eventId, delayMs], maxRows: 0 }));
+  }
+
+  /**
    * A step in which the holder of a request delegates it (Norn spec §7). When
    * the step took the delegation, the same transaction records the person who
    * delegated it, or whose Agent did, so that they alone can take it back and
@@ -491,7 +530,20 @@ export class PostgresNornProgramRepository {
           n.recipient,n.body,p.authority_user_id,p.page_id
         FROM data.norn_notices n JOIN data.norn_programs p ON p.space_id=n.space_id AND p.program_id=n.program_id
         WHERE n.channel_id=$1 AND n.posted_at IS NULL ORDER BY n.created_at,n.notice_id LIMIT 200`, values, maxRows: 200 });
+      const eventDeliveries = await tx.query<QueryResultRow>({ name: "norn_channel_event_deliveries_v1", text: `SELECT d.space_id,
+          d.program_id,d.event_id,d.payload_json,d.attempts,p.state,p.authority_user_id,
+          (member.user_id IS NOT NULL) AS authority_allowed
+        FROM data.norn_event_deliveries d
+          JOIN data.norn_programs p ON p.space_id=d.space_id AND p.program_id=d.program_id
+          LEFT JOIN data.space_members member ON member.space_id=p.space_id AND member.user_id=p.authority_user_id
+            AND member.role NOT IN ('viewer','participant')
+        WHERE d.channel_id=$1 AND d.delivered_at IS NULL AND d.next_attempt_at<=clock_timestamp()
+        ORDER BY d.next_attempt_at,d.created_at,d.program_id,d.event_id LIMIT 50`, values, maxRows: 50 });
       return {
+        eventDeliveries: eventDeliveries.map(row => ({ spaceId: String(row.space_id), programId: String(row.program_id),
+          eventId: String(row.event_id), payload: row.payload_json as unknown, attempts: Number(row.attempts),
+          running: row.state === "running", authorityUserId: String(row.authority_user_id),
+          authorityAllowed: row.authority_allowed === true })),
         closings: closings.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
           holder: String(row.holder), holderUserId: String(row.holder_user_id), deliveryMessageId: String(row.delivery_message_id),
           source: String(row.source), reply: row.reply_json as unknown })),
@@ -758,17 +810,48 @@ export async function readPageNornPrograms(database: AuthorityDatabase, input: {
  * The running programs on this shard that wait on an outside stream, with
  * what each waits on, for an event to be matched against. Only a program
  * whose authority may use its Space's connected apps now is told of an event:
- * owner, admin or member, as for a Page's schedule.
+ * owner, admin or member, as for a Page's schedule. Supports keyset paging via
+ * `afterProgramId` so ingress never truncates past a single page.
  */
-export async function readWaitingNornPrograms(database: AuthorityDatabase, input: { requestId: string; spaceId?: string }) {
+export async function readWaitingNornPrograms(database: AuthorityDatabase, input: {
+  requestId: string; spaceId?: string; afterProgramId?: string; limit?: number;
+}) {
+  const limit = Math.max(1, Math.min(1000, Math.trunc(input.limit ?? 200)));
   return database.transaction({ requestId: input.requestId, operation: "norn.waiting-programs",
     statement: "single_read" }, async tx =>
-    (await tx.query<QueryResultRow>({ name: "norn_waiting_programs_v1", text: `SELECT p.space_id,p.channel_id,p.program_id,
+    (await tx.query<QueryResultRow>({ name: "norn_waiting_programs_v2", text: `SELECT p.space_id,p.channel_id,p.program_id,
         p.authority_user_id,p.waits_json
       FROM data.norn_programs p JOIN data.space_members member ON member.space_id=p.space_id
         AND member.user_id=p.authority_user_id AND member.role NOT IN ('viewer','participant')
       WHERE p.state='running' AND p.waits_json IS NOT NULL AND ($1::text IS NULL OR p.space_id=$1)
-      ORDER BY p.program_id LIMIT 1000`, values: [input.spaceId ?? null], maxRows: 1000 }))
+        AND ($2::text IS NULL OR p.program_id>$2)
+      ORDER BY p.program_id LIMIT $3`, values: [input.spaceId ?? null, input.afterProgramId ?? null, limit], maxRows: limit }))
       .map(row => ({ spaceId: String(row.space_id), channelId: String(row.channel_id), programId: String(row.program_id),
         authorityUserId: String(row.authority_user_id), waits: Array.isArray(row.waits_json) ? row.waits_json as unknown[] : [] })));
+}
+
+/**
+ * Record durable per-program outside-event delivery obligations at ingress.
+ * Duplicate `(space_id, program_id, event_id)` rows are ignored so webhook
+ * retries remain idempotent.
+ */
+export async function enqueueNornEventDeliveries(database: AuthorityDatabase, input: {
+  requestId: string;
+  deliveries: ReadonlyArray<{ spaceId: string; channelId: string; programId: string; eventId: string; payload: unknown }>;
+}): Promise<number> {
+  if (!input.deliveries.length) return 0;
+  const rows = await database.transaction({ requestId: input.requestId.slice(0, 200),
+    operation: "norn.enqueue-event-deliveries" }, tx => tx.query<QueryResultRow>({
+    name: "norn_event_deliveries_enqueue_v1", text: `INSERT INTO data.norn_event_deliveries
+        (space_id,channel_id,program_id,event_id,payload_json)
+      SELECT entry.space_id,entry.channel_id,entry.program_id,entry.event_id,entry.payload_json
+      FROM jsonb_to_recordset($1::jsonb) AS entry(space_id text,channel_id text,program_id text,event_id text,payload_json jsonb)
+        JOIN data.norn_programs p ON p.space_id=entry.space_id AND p.program_id=entry.program_id AND p.state='running'
+      ON CONFLICT (space_id,program_id,event_id) DO NOTHING
+      RETURNING program_id`,
+    values: [JSON.stringify(input.deliveries.slice(0, 200).map(entry => ({
+      space_id: entry.spaceId, channel_id: entry.channelId, program_id: entry.programId,
+      event_id: entry.eventId, payload_json: entry.payload,
+    })))], maxRows: 200 }));
+  return rows.length;
 }

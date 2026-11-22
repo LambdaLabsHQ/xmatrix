@@ -77,7 +77,8 @@ async function process(env: Env, job: AppleCommerceJob) {
       phase = "current";
       if (!await repository.current(job)) return;
       phase = "automation";
-      await connectorEventArrived(env,{ spaceId: job.spaceId,provider:"appstoreconnect",event:notice,authorizedUserId:job.userId });
+      await connectorEventArrived(env,{ spaceId: job.spaceId,provider:"appstoreconnect",event:notice,authorizedUserId:job.userId })
+        .catch(() => console.error("Connector event did not reach its programs", "appstoreconnect"));
       phase = "delivered";
       await repository.delivered(job,change.sequence);
     }

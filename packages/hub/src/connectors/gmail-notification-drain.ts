@@ -65,7 +65,7 @@ async function deliver(env: Env, job: GmailRoutingJob, id: string, read: { crede
     provider: "gmail",
     event: { ...event, data: extractGmailEventData(id, job.selection.address, privateRead) },
     authorizedUserId: job.userId,
-  });
+  }).catch(() => console.error("Connector event did not reach its programs", "gmail"));
   await repository.delivered(job,id);
 }
 async function process(env: Env, job: GmailRoutingJob) {
