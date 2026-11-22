@@ -1,9 +1,9 @@
 import type { SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import {
   owedRegistrationQuotaWaitOwners, PostgresChannelSpaceDirectory, PostgresQuotaRetryRepository,
-  PostgresSpacePlacementDirectory, readyRegistrationQuotaWaits, RegistrationAccessError, registrationQuotaProbeTargets,
-  settleRegistrationQuotaWaits, waitedRegistrationsOnMachine, waitForRegistrationQuota,
-  type AuthorityDatabase, type ReadyRegistrationQuotaWait,
+  PostgresSpacePlacementDirectory, readyRegistrationQuotaWaits, reconcileOwedRegistrationQuotaPools,
+  RegistrationAccessError, registrationQuotaProbeTargets, settleRegistrationQuotaWaits,
+  waitedRegistrationsOnMachine, waitForRegistrationQuota, type AuthorityDatabase, type ReadyRegistrationQuotaWait,
 } from "@xmatrix/db";
 import { runtimePlacement } from "./runtime";
 import { issueRegistrationQuotaProbes, type QuotaProbeIssueDependencies } from "./agent-routing-quota-refresh";
@@ -35,6 +35,8 @@ const QUOTA_WAIT_LIFETIME_MS = 35 * 24 * 60 * 60_000;
  * own delivery and is delivered again. */
 const QUOTA_WAIT_REDELIVERY_MS = 30_000;
 const QUOTA_WAIT_DELIVERY_CONCURRENCY = 4;
+const QUOTA_WAIT_DELIVERY_MAX_BATCHES = 8;
+const QUOTA_WAIT_READY_BATCH_SIZE = 32;
 
 /** The quota retries of the Space a Channel is placed in. */
 export async function quotaRetryRepository(env: Env, channelId: string, database?: AuthorityDatabase) {
@@ -90,6 +92,7 @@ export type QuotaWaitDependencies = QuotaProbeIssueDependencies & {
     ready(ownerUserId: string): Promise<ReadyRegistrationQuotaWait[]>;
     settle(waits: readonly ReadyRegistrationQuotaWait[]): Promise<void>;
     owedOwners(): Promise<string[]>;
+    reconcile?(ownerUserId: string): Promise<{ readied: number; more: boolean }>;
   };
 };
 
@@ -102,6 +105,8 @@ function quotaWaitStore(env: Env, dependencies: QuotaWaitDependencies) {
       settleRegistrationQuotaWaits(directory, { waits, requestId: crypto.randomUUID() }),
     owedOwners: () => owedRegistrationQuotaWaitOwners(directory, { olderThanMs: QUOTA_WAIT_REDELIVERY_MS,
       limit: 50, requestId: crypto.randomUUID() }),
+    reconcile: (ownerUserId: string) => reconcileOwedRegistrationQuotaPools(directory, {
+      ownerUserId, requestId: crypto.randomUUID() }),
   };
 }
 
@@ -129,30 +134,41 @@ export async function verifyRegistrationQuota(env: Env, input: {
 export async function deliverQuotaWakes(env: Env, ownerUserId: string,
   dependencies: QuotaWaitDependencies = {}): Promise<{ delivered: number }> {
   const store = quotaWaitStore(env, dependencies);
-  const waits = await store.ready(ownerUserId);
-  const byChannel = new Map<string, ReadyRegistrationQuotaWait[]>();
-  for (const wait of waits) byChannel.set(wait.channelId, [...byChannel.get(wait.channelId) ?? [], wait]);
-  const channels = [...byChannel.entries()];
-  let next = 0, delivered = 0;
   const wake = dependencies.wakeCoordinator ?? (channelId => wakeAgentLaunchCoordinator(env, channelId, ["quotaRetry"]));
   const retries = dependencies.retries ?? (async (channelId: string) => (await quotaRetryRepository(env, channelId)).repository);
-  async function worker() {
-    while (next < channels.length) {
-      const [channelId, channelWaits] = channels[next++]!;
-      try {
-        if (await (await retries(channelId)).wake(channelId)) await wake(channelId);
-      } catch (error) {
-        if (!(error instanceof RegistrationAccessError && error.code === "channel_not_found")) {
-          console.warn("Quota wait delivery failed; it is delivered again", {
-            error: error instanceof Error ? error.message : String(error) });
-          continue;
-        }
-      }
-      await store.settle(channelWaits);
-      delivered += channelWaits.length;
+  let delivered = 0;
+
+  for (let batch = 0; batch < QUOTA_WAIT_DELIVERY_MAX_BATCHES; batch++) {
+    const reconciled = store.reconcile ? await store.reconcile(ownerUserId) : { readied: 0, more: false };
+    const waits = await store.ready(ownerUserId);
+    if (!waits.length) {
+      if (!reconciled.more) break;
+      continue;
     }
+    const byChannel = new Map<string, ReadyRegistrationQuotaWait[]>();
+    for (const wait of waits) byChannel.set(wait.channelId, [...byChannel.get(wait.channelId) ?? [], wait]);
+    const channels = [...byChannel.entries()];
+    let next = 0, batchDelivered = 0;
+    async function worker() {
+      while (next < channels.length) {
+        const [channelId, channelWaits] = channels[next++]!;
+        try {
+          if (await (await retries(channelId)).wake(channelId)) await wake(channelId);
+        } catch (error) {
+          if (!(error instanceof RegistrationAccessError && error.code === "channel_not_found")) {
+            console.warn("Quota wait delivery failed; it is delivered again", {
+              error: error instanceof Error ? error.message : String(error) });
+            continue;
+          }
+        }
+        await store.settle(channelWaits);
+        batchDelivered += channelWaits.length;
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(QUOTA_WAIT_DELIVERY_CONCURRENCY, channels.length) }, worker));
+    delivered += batchDelivered;
+    if (batchDelivered === 0 || (waits.length < QUOTA_WAIT_READY_BATCH_SIZE && !reconciled.more)) break;
   }
-  await Promise.all(Array.from({ length: Math.min(QUOTA_WAIT_DELIVERY_CONCURRENCY, channels.length) }, worker));
   return { delivered };
 }
 
