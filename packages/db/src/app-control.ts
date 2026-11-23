@@ -1004,10 +1004,16 @@ export class PostgresAppRepository {
       "version_conflict", 409, "App connection changed during provider check", true);
     const ok = input.ok === true;
     const message = text(input.message, "message", 240);
-    await tx.query({ name: "app_connection_check_v1", text: `UPDATE data.app_connector_connections SET
-      status=$1,error=$2,last_checked_at=$3,updated_at=$3,version=version+1
+    // A passed check names the account it reached, or none; a failed one keeps the last name it had.
+    const account = ok && typeof input.account === "string" && input.account.trim()
+      ? text(input.account.trim(), "account", 200) : null;
+    await tx.query({ name: "app_connection_check_v2", text: `UPDATE data.app_connector_connections SET
+      status=$1,error=$2,last_checked_at=$3,updated_at=$3,version=version+1,
+      metadata_json=CASE WHEN NOT $6::boolean THEN metadata_json
+        WHEN $7::text IS NOT NULL THEN COALESCE(metadata_json,'{}'::jsonb)||jsonb_build_object('connectedAccount',$7::text)
+        WHEN metadata_json IS NULL THEN NULL ELSE metadata_json-'connectedAccount' END
       WHERE connection_id=$4 AND version=$5`, values: [ok ? "configured" : "error", ok ? null : message,
-      at, connectionId, expected], maxRows: 0 });
+      at, connectionId, expected, ok, account], maxRows: 0 });
     const updated = await tx.query<QueryResultRow>({ name: "app_connection_checked_v1",
       text: "SELECT * FROM data.app_connector_connections WHERE connection_id=$1 LIMIT 1",
       values: [connectionId], maxRows: 1 });

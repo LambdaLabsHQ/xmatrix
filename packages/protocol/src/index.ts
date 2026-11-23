@@ -48,6 +48,7 @@ export {
 export type {
   AppConnectorProviderManifest, GitHubRepositoryFeature,
 } from "./app-connector-manifests.js";
+export { GOOGLE_IDENTITY_SCOPES } from "./app-connector-event-manifests.js";
 export {
   CLIENT_COMPATIBILITY_HEADERS, CLIENT_COMPATIBILITY_PATH, CLIENT_COMPATIBILITY_POLICY,
   CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, clientCompatibilityHeaders, compareClientVersions,

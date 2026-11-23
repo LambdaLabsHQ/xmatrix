@@ -79,6 +79,9 @@ function actionConnector(input: ConnectorBase & { actions: Action[] }): AppConne
 const SLUG = "^[a-z0-9][a-z0-9_.-]{0,99}$";
 
 /* The values one-click OAuth keeps for a provider whose token expires. */
+/* Google sign-ins also name the account they reached (its address), shown on the connection's page. */
+export const GOOGLE_IDENTITY_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"] as const;
+
 const OAUTH_TOKEN_CREDENTIALS: Credential[] = [
   { id: "oauthToken", label: "OAuth access token", managed: true, description: "Set by Connect with OAuth; never typed by hand." },
   { id: "oauthRefreshToken", label: "OAuth refresh token", managed: true, description: "Set by Connect with OAuth." },
@@ -111,7 +114,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       id: "google", name: "Google Docs, Drive & Sheets", kind: "docs",
       description: "Read app-authorized Google Docs and Sheets, create files, and write work results. Access is limited to files created by or explicitly opened with xMatrix.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["https://www.googleapis.com/auth/drive.file"], tokenField: "oauthToken",
+        scopes: [...GOOGLE_IDENTITY_SCOPES, "https://www.googleapis.com/auth/drive.file"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
@@ -137,7 +140,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       id: "googlesearchconsole", name: "Google Search Console", kind: "observability",
       description: "Manage Search Console properties and sitemaps, verify site ownership, and read search performance and URL inspection results.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["https://www.googleapis.com/auth/webmasters", "https://www.googleapis.com/auth/siteverification"], tokenField: "oauthToken",
+        scopes: [...GOOGLE_IDENTITY_SCOPES, "https://www.googleapis.com/auth/webmasters", "https://www.googleapis.com/auth/siteverification"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS, { id: "oauthScopes", label: "Granted scopes", managed: true, description: "Confirmed by Google at consent; reconnect an older grant to enable verification." }],
       actions: [
@@ -191,7 +194,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       id: "googleadsense", name: "Google AdSense", kind: "observability",
       description: "Read AdSense accounts, sites, ad units, earnings reports, payments, alerts and policy issues for the accounts the connected Google account can see. Read-only.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["https://www.googleapis.com/auth/adsense.readonly"], tokenField: "oauthToken",
+        scopes: [...GOOGLE_IDENTITY_SCOPES, "https://www.googleapis.com/auth/adsense.readonly"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
@@ -213,7 +216,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       id: "googlecalendar", name: "Google Calendar", kind: "docs",
       description: "Read calendars, events and availability; create, edit and delete events under the app permission.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events.freebusy"], tokenField: "oauthToken",
+        scopes: [...GOOGLE_IDENTITY_SCOPES, "https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events.freebusy"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
@@ -233,7 +236,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       id: "googleanalytics", name: "Google Analytics", kind: "observability",
       description: "Read Google Analytics 4 properties and traffic reports for the properties the connected Google account can see. Read-only.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["https://www.googleapis.com/auth/analytics.readonly"], tokenField: "oauthToken",
+        scopes: [...GOOGLE_IDENTITY_SCOPES, "https://www.googleapis.com/auth/analytics.readonly"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
@@ -250,7 +253,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       defaultPermission: "ask",
       description: "Create and manage advertising campaigns, budgets, targeting and creatives; enable or pause campaigns and read spend and conversions for the selected advertiser account.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["https://www.googleapis.com/auth/adwords"], tokenField: "oauthToken",
+        scopes: [...GOOGLE_IDENTITY_SCOPES, "https://www.googleapis.com/auth/adwords"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS,
         { id: "customerId", label: "Selected advertiser customer ID", required: true,
@@ -274,7 +277,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       id: "googlebusinessprofile", name: "Google Business Profile", kind: "observability",
       description: "Read Business Profile accounts, locations, search and Maps performance and reviews, and reply to reviews under the app permission.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["https://www.googleapis.com/auth/business.manage"], tokenField: "oauthToken",
+        scopes: [...GOOGLE_IDENTITY_SCOPES, "https://www.googleapis.com/auth/business.manage"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
@@ -293,7 +296,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       id: "googleplay", name: "Google Play Console", kind: "deploy",
       description: "Release Android apps from a channel: read tracks, upload app bundles, roll versions out to internal, closed or production testing, and manage testers, store listings, subscriptions and reviews through Google's official Play Developer API.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["https://www.googleapis.com/auth/androidpublisher", "https://www.googleapis.com/auth/playdeveloperreporting"], tokenField: "oauthToken",
+        scopes: [...GOOGLE_IDENTITY_SCOPES, "https://www.googleapis.com/auth/androidpublisher", "https://www.googleapis.com/auth/playdeveloperreporting"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
@@ -372,7 +375,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       id: "gcp", name: "Google Cloud", kind: "observability",
       description: "Analyze project costs and billing exports, and investigate Google Cloud resources, Cloud Run status, logs, metrics and alert policies; route Monitoring incidents to channels and Automations.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
-        scopes: ["https://www.googleapis.com/auth/cloud-platform"], tokenField: "oauthToken",
+        scopes: [...GOOGLE_IDENTITY_SCOPES, "https://www.googleapis.com/auth/cloud-platform"], tokenField: "oauthToken",
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS,
         { id: "webhookSecret", label: "Monitoring webhook token", generated: true,

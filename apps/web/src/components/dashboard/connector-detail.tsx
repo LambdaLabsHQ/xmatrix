@@ -284,6 +284,8 @@ function ConnectorHero({ connector, Icon, connection, oauth, native, checking, o
   const label = configured ? "Connected" : needsAttention ? "Needs attention" : connection ? "Disconnected"
     : connector.status === "available" ? "Not connected" : "Coming soon";
   const via = configured && connection ? connectorAuthorizationLabel(connector, connection, oauth, native) : null;
+  // The account the last passed Check reached, so Switch account says what it switches from.
+  const account = typeof connection?.metadata?.connectedAccount === "string" ? connection.metadata.connectedAccount : null;
   return (
     <header className="app-connector-hero">
       <div className="flex items-center gap-3 md:gap-4">
@@ -297,6 +299,7 @@ function ConnectorHero({ connector, Icon, connection, oauth, native, checking, o
         <p className="mt-3 text-[13px] leading-7 text-muted-foreground" data-testid="connector-status">
           <ToolStateDot state={needsAttention ? "attention" : configured ? "running" : "offline"} />
           <span className={cn("ml-1.5 font-semibold text-foreground", needsAttention && "text-destructive")}>{label}</span>
+          {account ? <> · <span className="font-medium text-foreground" data-testid="connector-account">{account}</span></> : null}
           {via ? <> · via {via}</> : null}
           {configured && connection?.lastCheckedAt ? <> · checked {relativeTime(connection.lastCheckedAt)}</> : null}
           {configured ? (

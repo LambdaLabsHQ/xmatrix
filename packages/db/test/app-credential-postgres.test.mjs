@@ -1709,3 +1709,24 @@ integration("Stripe account bindings can be shared and a replay cannot retire a 
     });
   });
 });
+
+integration("a passed check keeps the name of the account it reached; a failed one keeps the last name", async () => {
+  await withDatabase(async ({ database, space }) => {
+    const credentials = new PostgresAppCredentialRepository(database, material);
+    const apps = new PostgresAppRepository(database);
+    await credentials.put({ requestId: "put-account", spaceId: space, providerId: "webhook",
+      actorUserId: "owner", fields: { ingressKey: "key-1" }, policy, at });
+    const connectionId = `${space}:webhook`;
+    const read = async () => (await apps.getConnection({ requestId: crypto.randomUUID(), connectionId, actorUserId: "member" })).connection;
+    const check = async (input) => apps.command({ commandId: crypto.randomUUID(), connectionId,
+      expectedVersion: (await read()).version, principal: { kind: "user", id: "owner" }, message: "checked", ...input }, "check");
+    await check({ ok: true, account: "owner@example.com" });
+    assert.equal((await read()).metadata.connectedAccount, "owner@example.com");
+    await check({ ok: false, message: "refused", account: "other@example.com" });
+    assert.equal((await read()).metadata.connectedAccount, "owner@example.com", "a failed check names nobody new");
+    await check({ ok: true, account: "next@example.com" });
+    assert.equal((await read()).metadata.connectedAccount, "next@example.com", "switching accounts replaces the name");
+    await check({ ok: true });
+    assert.equal((await read()).metadata?.connectedAccount, undefined, "a passed check that names nobody drops the old name");
+  });
+});

@@ -28,7 +28,7 @@ export async function assertReadOnlyGoogleGrant(providerId, scope, actions, { br
     await fetched([{ body: { ...accepted, scope: wrong } }], () => assert.rejects(exchangeOAuthGrant(client, "code", "https://hub.test/cb"), refused));
   }
   const manifest = getAppConnectorProvider(providerId);
-  assert.deepEqual(manifest.oauth.scopes, [scope]);
+  assert.deepEqual(manifest.oauth.scopes, ["openid", "https://www.googleapis.com/auth/userinfo.email", scope]);
   const effects = new Map(manifest.actions.map(action => [action.id, action.effect]));
   for (const [id, action] of Object.entries(actions)) assert.deepEqual([action.effect, effects.get(id)], ["read", "read"], id);
 }
