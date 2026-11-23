@@ -22,6 +22,10 @@ const emptyConfiguration: SpaceAgentConfiguration = { workspaceReferences: [] };
 /** Running Instances listed per registration; a machine runs far fewer at once. */
 const RUNNING_INSTANCE_LIMIT = 32;
 
+function catalogModelLimits(models: unknown) {
+  return parseRegistrationResourceLimits({ models, workspaces: [], capabilities: [] });
+}
+
 function isoTime(value: unknown): string | undefined {
   if (value === null || value === undefined || value === "") return undefined;
   const time = new Date(value as string | Date).getTime();
@@ -348,49 +352,64 @@ export class PostgresAgentRegistrationRepository {
       // registration in this Space, in Channels the reader may read.
       // A catalog observed in the last 24 hours was written to its Instance
       // row then, and that write stamps updated_at: the 48-hour bound on it
-      // (a day of reporter clock skew to spare) keeps the two catalog reads
-      // from opening every Instance this registration ever ran, each with
-      // kilobytes of presentation to detoast (0.4-0.8 s on 2026-11-16).
+      // (a day of reporter clock skew to spare) bounds the candidates. Both
+      // catalogs select independently from the same recent Instance rows.
       // Membership and visibility share the read's snapshot. The outer row
       // distinguishes a member's empty page from a nonmember without a lock.
-      const result = await tx.query({ name: "registration_catalog_page_v8", text: `SELECT
+      // The catalog lists model choices, not the workspace and capability
+      // grants or the instructions used to launch a Run.
+      const result = await tx.query({ name: "registration_catalog_page_v9", text: `SELECT
         reader.role AS reader_role,page.* FROM
         (SELECT role FROM data.space_members WHERE space_id=$1 AND user_id=$2) reader
         LEFT JOIN LATERAL (SELECT
-        r.owner_user_id,r.machine_id,r.harness,r.display_name,r.configuration_json,r.version,
+        r.owner_user_id,r.machine_id,r.harness,r.display_name,r.version,
+        (r.configuration_json - ARRAY['instructions','reasoningEffort','workingMode','workspaceReferences',
+          'role','secretReferences']) || '{"workspaceReferences":[]}'::jsonb AS configuration_json,
         profile.description AS profile_description,profile.revision AS profile_revision,
         EXISTS (SELECT 1 FROM data.space_agent_registrations own WHERE own.space_id=r.space_id
           AND own.harness=r.harness AND own.owner_user_id=$2) AS owns_harness,
-        m.user_id AS current_owner,m.display_name AS owner_name,a.grant_state,a.policy_state,a.grant_limits,a.policy_limits, catalog.models AS catalog_models,catalog.observed_at AS catalog_observed_at,
-        parameter_catalog.parameters AS catalog_parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,
+        m.user_id AS current_owner,m.display_name AS owner_name,a.grant_state,a.policy_state,
+        CASE WHEN a.grant_limits IS NOT NULL AND a.policy_limits IS NOT NULL
+          THEN jsonb_build_array(a.grant_limits->'models',a.policy_limits->'models') END AS model_limits,
+        catalog.models AS catalog_models,catalog.observed_at AS catalog_observed_at,
+        catalog.parameters AS catalog_parameters,catalog.parameter_model,catalog.parameters_observed_at,
         running.instances AS running
         FROM data.space_agent_registrations r
         LEFT JOIN data.space_members m ON m.space_id=r.space_id AND m.user_id=r.owner_user_id
         LEFT JOIN data.space_agent_registration_access a ON a.space_id=r.space_id AND a.owner_user_id=r.owner_user_id
           AND a.machine_id=r.machine_id AND a.harness=r.harness
         LEFT JOIN data.space_harness_profiles profile ON profile.space_id=r.space_id AND profile.harness=r.harness
-        LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
-          i.presentation_json->>'modelsObservedAt' AS observed_at
-          FROM data.run_agent_registrations binding JOIN data.instances i ON i.run_id=binding.run_id
-          WHERE binding.space_id=r.space_id AND binding.owner_user_id=r.owner_user_id
-            AND binding.machine_id=r.machine_id AND binding.harness=r.harness
-            AND i.updated_at>=statement_timestamp()-interval '48 hours'
-            AND jsonb_typeof(i.presentation_json->'models')='array'
-            AND CASE WHEN pg_input_is_valid(i.presentation_json->>'modelsObservedAt','timestamp with time zone')
-              THEN (i.presentation_json->>'modelsObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
-              ELSE FALSE END
-          ORDER BY (i.presentation_json->>'modelsObservedAt')::timestamptz DESC,i.instance_id LIMIT 1) catalog ON TRUE
-        LEFT JOIN LATERAL (SELECT i.presentation_json->'parameters' AS parameters,
-          i.presentation_json->>'model' AS parameter_model,i.presentation_json->>'parametersObservedAt' AS parameters_observed_at
-          FROM data.run_agent_registrations binding JOIN data.instances i ON i.run_id=binding.run_id
-          WHERE binding.space_id=r.space_id AND binding.owner_user_id=r.owner_user_id
-            AND binding.machine_id=r.machine_id AND binding.harness=r.harness
-            AND i.updated_at>=statement_timestamp()-interval '48 hours'
-            AND jsonb_typeof(i.presentation_json->'parameters')='array'
-            AND CASE WHEN pg_input_is_valid(i.presentation_json->>'parametersObservedAt','timestamp with time zone')
-              THEN (i.presentation_json->>'parametersObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
-              ELSE FALSE END
-          ORDER BY (i.presentation_json->>'parametersObservedAt')::timestamptz DESC,i.instance_id LIMIT 1) parameter_catalog ON TRUE
+        LEFT JOIN LATERAL (
+          WITH recent AS MATERIALIZED (
+            SELECT i.instance_id,i.presentation_json
+            FROM data.run_agent_registrations binding JOIN data.instances i ON i.run_id=binding.run_id
+            WHERE binding.space_id=r.space_id AND binding.owner_user_id=r.owner_user_id
+              AND binding.machine_id=r.machine_id AND binding.harness=r.harness
+              AND i.updated_at>=statement_timestamp()-interval '48 hours'
+          )
+          SELECT model_catalog.models,model_catalog.observed_at,
+            parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at
+          FROM (SELECT 1) registration
+          LEFT JOIN LATERAL (
+            SELECT i.presentation_json->'models' AS models,i.presentation_json->>'modelsObservedAt' AS observed_at
+            FROM recent i
+            WHERE jsonb_typeof(i.presentation_json->'models')='array'
+              AND CASE WHEN pg_input_is_valid(i.presentation_json->>'modelsObservedAt','timestamp with time zone')
+                THEN (i.presentation_json->>'modelsObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
+                ELSE FALSE END
+            ORDER BY (i.presentation_json->>'modelsObservedAt')::timestamptz DESC,i.instance_id LIMIT 1
+          ) model_catalog ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT i.presentation_json->'parameters' AS parameters,i.presentation_json->>'model' AS parameter_model,
+              i.presentation_json->>'parametersObservedAt' AS parameters_observed_at
+            FROM recent i
+            WHERE jsonb_typeof(i.presentation_json->'parameters')='array'
+              AND CASE WHEN pg_input_is_valid(i.presentation_json->>'parametersObservedAt','timestamp with time zone')
+                THEN (i.presentation_json->>'parametersObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
+                ELSE FALSE END
+            ORDER BY (i.presentation_json->>'parametersObservedAt')::timestamptz DESC,i.instance_id LIMIT 1
+          ) parameter_catalog ON TRUE
+        ) catalog ON TRUE
         LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('instanceId',live.instance_id,'channelId',live.channel_id,
             'channelInstanceId',live.channel_instance_id::text,'since',live.created_at)
             ORDER BY live.created_at,live.instance_id) AS instances
@@ -419,8 +438,8 @@ export class PostgresAgentRegistrationRepository {
         const key = parseSpaceAgentRegistrationKey({ spaceId: input.spaceId, ownerUserId: row.owner_user_id,
           machineId: row.machine_id, harness: row.harness });
         const configuration = parseSpaceAgentConfiguration(row.configuration_json);
-        const allowed = row.grant_limits && row.policy_limits ? intersectRegistrationLimits(
-          parseRegistrationResourceLimits(row.grant_limits), parseRegistrationResourceLimits(row.policy_limits)) : null;
+        const allowed = row.model_limits ? intersectRegistrationLimits(
+          catalogModelLimits(row.model_limits[0]), catalogModelLimits(row.model_limits[1])) : null;
         const models = [...new Set([...(configuration.model ? [configuration.model] : []), ...(configuration.routing?.models ?? [])])]
           .filter(model => allowed?.models.includes(model)).sort();
         // An empty model list allows the runtime default; the environment pass

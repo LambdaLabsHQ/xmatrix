@@ -63,7 +63,7 @@ integration("composite registration commands preserve identity, configuration an
     const other = new PostgresAgentRegistrationRepository(database, { ...placement, spaceId: "b" });
     await other.offer({ ...offer, key: { ...key, spaceId: "b" }, commandId: "offer-b" });
     assert.equal((await client.query(`SELECT count(*)::int n FROM ${schema}.agent_registrations`)).rows[0].n, 1);
-    const configuration = { model: "model-a", workspaceReferences: ["repo-a"] };
+    const configuration = { model: "model-a", workspaceReferences: ["repo-a"], instructions: "x".repeat(6_000) };
     const configure = { key, actorUserId: "admin", commandId: "config-a", expectedVersion: 1, displayName: "renamed", configuration };
     await rejects(() => repo.configure(configure), "registration_not_granted");
     await access.change({ key, actorUserId: "owner", commandId: "grant-a", expectedRevision: 1,
@@ -87,7 +87,13 @@ integration("composite registration commands preserve identity, configuration an
     assert.deepEqual(await repo.list({ ...listing, spaceId: "a", actorUserId: "member",
       cursor: JSON.stringify(["zzzz", "machine", "codex"]) }), { registrations: [], nextCursor: null },
     "an authorized empty page is distinct from missing membership");
-    let catalog = await repo.list(listing);
+    let resultBytes = 0;
+    const countResultBytes = (row) => { resultBytes += row.length + 1; };
+    client.connection.on("dataRow", countResultBytes);
+    const catalogRead = repo.list(listing);
+    let catalog = await catalogRead.finally(() => client.connection.off("dataRow", countResultBytes));
+    assert.ok(resultBytes > 0 && resultBytes < 4_096,
+      `registration list transferred ${resultBytes} bytes for a registration with 6 KB of launch instructions`);
     assert.equal(catalog.registrations.length, 1);
     // The daemon's hostname is an observation and never names the Machine.
     assert.equal(catalog.registrations[0].machineName, "Registered machine");
