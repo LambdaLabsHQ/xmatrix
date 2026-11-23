@@ -243,6 +243,46 @@ test("a completion panel covers the timeline instead of pushing it up", async ({
   const composer = page.locator(".app-composer");
   const before = await composer.boundingBox();
 
+  // Sample every animation frame across open and close: whenever the morphing
+  // composer box vertically overlaps the work dock, the dock must already be
+  // invisible (`opacity: 0` + `visibility: hidden`, excluding focus/VoiceOver).
+  type OverlapViolation = { phase: string; opacity: string; visibility: string; boxTop: number; dockBottom: number };
+  type OverlapWindow = Window & { __dockOverlapViolations?: OverlapViolation[]; __dockOverlapSampling?: boolean };
+  const dockVisibility = () => page.evaluate(() => {
+    const dock = document.querySelector<HTMLElement>(".app-agent-work-dock");
+    if (!dock) return null;
+    const style = getComputedStyle(dock);
+    return { opacity: style.opacity, visibility: style.visibility };
+  });
+
+  await page.evaluate(() => {
+    const win = window as OverlapWindow;
+    win.__dockOverlapViolations = [];
+    win.__dockOverlapSampling = true;
+    const sample = () => {
+      const box = document.querySelector<HTMLElement>(".app-composer-box:not(.app-agent-work-card)");
+      const dock = document.querySelector<HTMLElement>(".app-agent-work-dock");
+      if (box && dock) {
+        const boxRect = box.getBoundingClientRect();
+        const dockRect = dock.getBoundingClientRect();
+        if (boxRect.top < dockRect.bottom - 1) {
+          const style = getComputedStyle(dock);
+          if (style.opacity !== "0" || style.visibility !== "hidden") {
+            win.__dockOverlapViolations!.push({
+              phase: box.classList.contains("app-composer-box-mentions-open") ? "open" : "close",
+              opacity: style.opacity,
+              visibility: style.visibility,
+              boxTop: boxRect.top,
+              dockBottom: dockRect.bottom,
+            });
+          }
+        }
+      }
+      if (win.__dockOverlapSampling) window.requestAnimationFrame(sample);
+    };
+    window.requestAnimationFrame(sample);
+  });
+
   await page.locator(".composer-textarea").fill("ship in #rel");
   await expect(page.getByTestId("composer-reference-suggestions")
     .getByRole("option", { name: /release-train/u })).toBeVisible();
@@ -254,10 +294,7 @@ test("a completion panel covers the timeline instead of pushing it up", async ({
   const open = await tailGeometry(page);
   expect(open.lastRowBottom).toBeCloseTo(beforeGeometry.lastRowBottom, 0);
   expect(open.dockTop).toBeCloseTo(beforeGeometry.dockTop!, 0);
-  await expect.poll(() => page.evaluate(() => {
-    const dock = document.querySelector<HTMLElement>(".app-agent-work-dock");
-    return dock ? getComputedStyle(dock).opacity : null;
-  })).toBe("0");
+  await expect.poll(dockVisibility).toEqual({ opacity: "0", visibility: "hidden" });
 
   // Closing the panel re-measures the resting composer, which never changed,
   // and restores the work dock once the glass has shrunk clear of it.
@@ -267,10 +304,14 @@ test("a completion panel covers the timeline instead of pushing it up", async ({
   await expect
     .poll(async () => (await tailGeometry(page)).lastRowBottom)
     .toBeCloseTo(beforeGeometry.lastRowBottom, 0);
-  await expect.poll(() => page.evaluate(() => {
-    const dock = document.querySelector<HTMLElement>(".app-agent-work-dock");
-    return dock ? getComputedStyle(dock).opacity : null;
-  })).toBe("1");
+  await expect.poll(dockVisibility).toEqual({ opacity: "1", visibility: "visible" });
+
+  const overlapViolations = await page.evaluate(() => {
+    const win = window as OverlapWindow;
+    win.__dockOverlapSampling = false;
+    return win.__dockOverlapViolations ?? [];
+  });
+  expect(overlapViolations).toEqual([]);
 });
 
 /* The work dock scroller reserves transparent vertical space above the agent
