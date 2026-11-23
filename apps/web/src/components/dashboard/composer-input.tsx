@@ -314,7 +314,7 @@ function ComposerInputSurface({
         {!panelOpen && closingPanel && (
           <div
             aria-hidden="true"
-            className="app-composer-panel-closing"
+            className="app-composer-panel-closing pointer-events-none absolute inset-x-0 z-[2] [animation:app-composer-attach-out_200ms_cubic-bezier(0.4,0,0.2,1)_forwards] motion-reduce:animate-none [&_.app-composer-attach-menu]:animate-none"
             style={{ bottom: `${closingPanel.bottomOffset}px` }}
           >
             {closingPanel.node}

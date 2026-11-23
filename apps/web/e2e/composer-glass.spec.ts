@@ -341,14 +341,19 @@ test.describe("mock-auth app fixture", () => {
       expect(interruptCheck.sawClosingPanel).toBe(true);
       await expectSettledAtRestingHeight();
 
-      // Picking Choose Files synchronously arms the one-shot source and clicks
-      // the composer's file input so WKUIDelegate.runOpenPanelWith receives it.
+      // Picking Choose Files synchronously arms the one-shot source, holds Send
+      // while the native picker is in flight, and clicks the composer's file input
+      // so WKUIDelegate.runOpenPanelWith receives it.
+      await composerBox.locator(".composer-textarea").fill("pending send");
+      const sendButton = composerBox.locator(".app-composer-send");
+      await expect(sendButton).toBeEnabled();
       await attachButton.click();
       await expect(menu).toBeVisible();
       const [fileChooser] = await Promise.all([
         page.waitForEvent("filechooser"),
         menu.getByRole("menuitem", { name: "Choose Files" }).click(),
       ]);
+      await expect(sendButton).toBeDisabled();
       const armedSource = await page.evaluate(() =>
         (window as unknown as { __xmatrixPendingAttachmentSource?: { source: string } | null })
           .__xmatrixPendingAttachmentSource?.source ?? null
@@ -361,6 +366,7 @@ test.describe("mock-auth app fixture", () => {
       });
       await expect(menu).toHaveCount(0);
       await expect(composerBox.getByText("notes.txt")).toBeVisible();
+      await expect(sendButton).toBeEnabled();
     });
   });
 

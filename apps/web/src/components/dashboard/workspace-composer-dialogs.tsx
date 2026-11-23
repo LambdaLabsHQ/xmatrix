@@ -443,7 +443,9 @@ export const Composer = memo(function Composer({
   const [emptyPasteAnchorActive, setEmptyPasteAnchorActive] = useState(false);
   const uploadRegistryRef = useRef(createAttachmentUploadRegistry());
   const mountedRef = useRef(true);
+  const draftRevisionRef = useRef(0);
   const pendingFileInputPickRef = useRef<DraftPickOrigin | null>(null);
+  const [nativePickerPending, setNativePickerPending] = useState(false);
   const handledMentionInsertRequestIdRef = useRef<number | null>(null);
   const handledAutoFocusRequestRef = useRef(0);
   // Set while files are inbound but have no row yet (the desktop clipboard
@@ -467,6 +469,7 @@ export const Composer = memo(function Composer({
     writable &&
     (localDraft.trim().length > 0 || attachments.length > 0 || uploadingAttachments.length > 0) &&
     !intakeBusy &&
+    !nativePickerPending &&
     !preparingSend &&
     !sending;
   const paneActive = useAnimationActivity();
@@ -610,8 +613,16 @@ export const Composer = memo(function Composer({
     mountedRef.current = true;
     const uploadRegistry = uploadRegistryRef.current;
     const previewUrls = pendingPreviewUrlsRef.current;
+    const input = fileInputRef.current;
+    const handleFileInputCancel = () => {
+      pendingFileInputPickRef.current = null;
+      clearPendingAttachmentSource();
+      if (mountedRef.current) setNativePickerPending(false);
+    };
+    input?.addEventListener("cancel", handleFileInputCancel);
     return () => {
       mountedRef.current = false;
+      input?.removeEventListener("cancel", handleFileInputCancel);
       pendingFileInputPickRef.current = null;
       clearPendingAttachmentSource();
       uploadRegistry.cancelAll();
@@ -635,6 +646,10 @@ export const Composer = memo(function Composer({
     setPendingAttachments([]);
     setAttachmentError(null);
     setAttachmentMenuActive(null);
+    setNativePickerPending(false);
+    pendingFileInputPickRef.current = null;
+    clearPendingAttachmentSource();
+    draftRevisionRef.current += 1;
   }, [composerIdentity]);
 
   useEffect(() => {
@@ -761,6 +776,7 @@ export const Composer = memo(function Composer({
   ): Promise<number> {
     const origin: DraftPickOrigin = {
       generation: uploadRegistryRef.current.generation(),
+      draftRevision: draftRevisionRef.current,
       scope: channelIdRef.current,
     };
     intakeDepthRef.current += 1;
@@ -778,11 +794,12 @@ export const Composer = memo(function Composer({
     };
     try {
       const candidates = await load();
-      // If the reader switched conversations (including A→B→A) or closed this
-      // composer while waiting for files, drop the stale pick cleanly.
+      // If the reader switched conversations (including A→B→A), sent the draft,
+      // or closed this composer while waiting for files, drop the stale pick cleanly.
       if (!isDraftPickCurrent(origin, {
         mounted: mountedRef.current,
         generation: uploadRegistryRef.current.generation(),
+        draftRevision: draftRevisionRef.current,
         scope: channelIdRef.current,
       })) {
         loaded();
@@ -800,6 +817,7 @@ export const Composer = memo(function Composer({
       if (isDraftPickCurrent(origin, {
         mounted: mountedRef.current,
         generation: uploadRegistryRef.current.generation(),
+        draftRevision: draftRevisionRef.current,
         scope: channelIdRef.current,
       })) {
         setAttachmentError(userErrorMessage(error, "Couldn't attach the file"));
@@ -1033,6 +1051,7 @@ export const Composer = memo(function Composer({
         attachments: sentAttachments,
         ...(uploads.length ? { uploads } : {}),
       });
+      draftRevisionRef.current += 1;
       handedOver = true;
       rememberInput({ userId, spaceId: historySpaceId }, sentDraft, sentText);
     } catch (error) {
@@ -1451,10 +1470,17 @@ export const Composer = memo(function Composer({
   function openComposerFileInput(source?: NativeAttachmentPickerSource) {
     pendingFileInputPickRef.current = {
       generation: uploadRegistryRef.current.generation(),
+      draftRevision: draftRevisionRef.current,
       scope: channelIdRef.current,
     };
-    if (source) armNativeAttachmentSource(source);
-    else clearPendingAttachmentSource();
+    if (source) {
+      // Hold Send until the native open panel returns `change` or `cancel` so
+      // an iCloud media fetch finishing after a send cannot land in a new draft.
+      setNativePickerPending(true);
+      armNativeAttachmentSource(source);
+    } else {
+      clearPendingAttachmentSource();
+    }
     fileInputRef.current?.click();
   }
 
@@ -1536,6 +1562,7 @@ export const Composer = memo(function Composer({
           const pickOrigin = pendingFileInputPickRef.current;
           pendingFileInputPickRef.current = null;
           clearPendingAttachmentSource();
+          setNativePickerPending(false);
           const picked = event.target.files ? fileCandidates(event.target.files) : [];
           event.target.value = "";
           if (
@@ -1543,6 +1570,7 @@ export const Composer = memo(function Composer({
             isDraftPickCurrent(pickOrigin, {
               mounted: mountedRef.current,
               generation: uploadRegistryRef.current.generation(),
+              draftRevision: draftRevisionRef.current,
               scope: channelIdRef.current,
             })
           ) {
@@ -1767,7 +1795,7 @@ export function ComposerIcon({
       onClick={onClick}
       className={cn(
         "composer-icon app-composer-inline-icon flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
-        active && "app-composer-inline-icon-active text-foreground"
+        active && "!bg-[color-mix(in_oklch,var(--foreground)_7%,transparent)] hover:!bg-[color-mix(in_oklch,var(--foreground)_7%,transparent)] !shadow-none ![backdrop-filter:none] ![-webkit-backdrop-filter:none] text-foreground"
       )}
     >
       <Icon className="size-[18px] stroke-[1.75]" />

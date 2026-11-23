@@ -600,6 +600,42 @@ final class WebContainerTests: XCTestCase {
         clock = clock.addingTimeInterval(AttachmentStagingStore.entryTTL + 1)
         XCTAssertEqual(store.count, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: expiring.fileURL.path))
+
+        // An active batch larger than maxEntries never self-evicts its own URLs,
+        // while an earlier batch is evicted once a newer batch pushes past capacity.
+        let boundedStore = AttachmentStagingStore(rootDirectory: root, now: { clock }, maxEntries: 2, purgeExistingOnInit: false)
+        let firstBatch = UUID()
+        let oldEntry = try boundedStore.stage(data: Data("old".utf8), name: "old.txt", batchID: firstBatch)
+        clock = clock.addingTimeInterval(1)
+        let activeBatch = UUID()
+        let activeURLs = try (0..<4).map { index in
+            try boundedStore.stage(data: Data("item-\(index)".utf8), name: "item-\(index).txt", batchID: activeBatch).fileURL
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldEntry.fileURL.path))
+        for url in activeURLs {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), url.lastPathComponent)
+        }
+    }
+
+    func testArmedAttachmentSourceScriptConsumesOnceAndIgnoresExpiredRecords() async throws {
+        let webView = WKWebView(frame: .zero)
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+        _ = try await webView.evaluateJavaScript(
+            "window.__xmatrixPendingAttachmentSource = { source: 'photos', expiresAt: \(nowMs + 5000) }; true;"
+        )
+        let first = try await webView.evaluateJavaScript(NativeAttachmentPicker.readArmedSourceScript)
+        XCTAssertEqual(NativeAttachmentPicker.parseArmedSource(first), .photos)
+        // Second call (e.g. profile avatar picker) sees nil.
+        let second = try await webView.evaluateJavaScript(NativeAttachmentPicker.readArmedSourceScript)
+        XCTAssertNil(NativeAttachmentPicker.parseArmedSource(second))
+
+        // Expired record is cleared and ignored.
+        _ = try await webView.evaluateJavaScript(
+            "window.__xmatrixPendingAttachmentSource = { source: 'camera', expiresAt: \(nowMs - 1000) }; true;"
+        )
+        let expired = try await webView.evaluateJavaScript(NativeAttachmentPicker.readArmedSourceScript)
+        XCTAssertNil(NativeAttachmentPicker.parseArmedSource(expired))
     }
 
     func testAttachmentPickerParsesSourcesPrefersMoviesAndSanitizesNames() {

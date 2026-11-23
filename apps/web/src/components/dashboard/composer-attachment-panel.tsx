@@ -5,13 +5,13 @@ import { stopTouchPropagation } from "./completion-option-button";
 import type { NativeAttachmentPickerSource } from "@/lib/desktop/bridge";
 import { cn } from "@/lib/utils";
 
-export type ComposerAttachmentChoice = {
+type ComposerAttachmentChoice = {
   source: NativeAttachmentPickerSource;
   label: string;
   icon: typeof ImageIcon;
 };
 
-export const COMPOSER_ATTACHMENT_CHOICES: readonly ComposerAttachmentChoice[] = [
+const COMPOSER_ATTACHMENT_CHOICES: readonly ComposerAttachmentChoice[] = [
   { source: "photos", label: "Photo Library", icon: ImageIcon },
   { source: "camera", label: "Take Photo or Video", icon: Camera },
   { source: "files", label: "Choose Files", icon: Folder },
@@ -38,7 +38,7 @@ export function ComposerAttachmentPanel({
       role="menu"
       aria-label="Attach"
       data-testid="composer-attachment-panel"
-      className="app-composer-attach-menu border-b border-border/45"
+      className="app-composer-attach-menu flex flex-col gap-0.5 border-b border-border/45 px-[var(--app-composer-pad,0.375rem)] pt-1.5 pb-1 [animation:app-composer-attach-in_220ms_cubic-bezier(0.16,1,0.3,1)] motion-reduce:animate-none"
       onTouchStart={stopTouchPropagation}
       onTouchMove={stopTouchPropagation}
     >
@@ -59,12 +59,12 @@ export function ComposerAttachmentPanel({
               onSelect(choice.source);
             }}
             className={cn(
-              "app-composer-attach-option flex w-full items-center text-left text-[15px] font-medium text-foreground transition-colors",
+              "app-composer-attach-option [--app-composer-option-r:var(--app-composer-row-r,0.875rem)] flex min-h-[var(--app-composer-row-h,2.75rem)] w-full items-center gap-1.5 !bg-transparent pr-3 pl-0 text-left text-[length:var(--app-composer-row-fs,0.9375rem)] font-medium text-foreground transition-colors hover:!bg-[color-mix(in_oklch,var(--foreground)_6%,transparent)] active:!bg-[color-mix(in_oklch,var(--foreground)_6%,transparent)] data-[active=true]:!bg-[color-mix(in_oklch,var(--foreground)_6%,transparent)]",
               disabled && "pointer-events-none opacity-45"
             )}
           >
-            <span className="app-composer-attach-option-icon flex shrink-0 items-center justify-center text-muted-foreground">
-              <Icon className="size-[18px] stroke-[1.75]" />
+            <span className="app-composer-attach-option-icon flex size-[var(--app-composer-icon-w,2.25rem)] shrink-0 items-center justify-center text-muted-foreground">
+              <Icon className="size-[var(--app-composer-icon-glyph,1.125rem)] stroke-[1.75]" />
             </span>
             <span className="min-w-0 flex-1 truncate">{choice.label}</span>
           </button>

@@ -6841,6 +6841,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-send-ready {
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app-shell .app-composer-box:not(.app-agent-work-card) {
+    --app-composer-pad: 0.25rem;
+    --app-composer-icon-w: 2rem;
+    --app-composer-row-r: 1.125rem;
     min-height: 3rem !important;
     border-radius: var(--app-composer-radius) !important;
   }
@@ -6903,6 +6906,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-send-ready {
   }
 
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app-native-dock.xmatrix-app-shell .app-composer-box:not(.app-agent-work-card) {
+    --app-composer-pad: 0.375rem;
+    --app-composer-icon-w: 2.5rem;
+    --app-composer-icon-glyph: 1.25rem;
+    --app-composer-row-h: 3rem;
+    --app-composer-row-r: 1.375rem;
+    --app-composer-row-fs: 1.0625rem;
     min-height: 3.5rem !important;
   }
 
@@ -6934,26 +6943,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-composer-send-ready {
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app-native-dock.xmatrix-app-shell .app-composer-send {
     width: 2.75rem !important;
     height: 2.75rem !important;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app-native-dock.xmatrix-app-shell .app-composer-attach-menu {
-    padding: 0.375rem 0.375rem 0.25rem;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app-native-dock.xmatrix-app-shell .app-composer-attach-menu button.app-composer-attach-option {
-    min-height: 3rem;
-    border-radius: 1.375rem !important;
-    font-size: 1.0625rem;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app-native-dock.xmatrix-app-shell .app-composer-attach-option-icon {
-    width: 2.5rem;
-    height: 2.5rem;
-  }
-
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app-native-dock.xmatrix-app-shell .app-composer-attach-option-icon svg {
-    width: 1.25rem;
-    height: 1.25rem;
   }
 }
 
@@ -7567,7 +7556,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .xmatrix-app .app-composer-attach-menu button.app-composer-attach-option {
   width: 100% !important;
   margin: 0 !important;
-  border-radius: 0 !important;
+  border-radius: var(--app-composer-option-r, 0) !important;
   border-color: transparent !important;
   box-shadow: none !important;
   -webkit-backdrop-filter: none !important;
@@ -7665,57 +7654,6 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   .xmatrix-app .app-mention-suggestions .app-mention-capability .app-mention-profile-edit { margin: -10px -6px; padding: 10px 6px; }
 }
 
-/* Native attachment source menu morphed inside the composer's single glass surface:
-   each row's icon column matches the paperclip icon's width and row padding so the
-   choices align vertically with the trigger directly below them. */
-.xmatrix-app .app-composer-attach-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 6px 4px;
-  animation: app-composer-attach-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.xmatrix-app .app-composer-attach-menu button.app-composer-attach-option {
-  min-height: 44px;
-  gap: 6px;
-  padding: 0 12px 0 0;
-  border-radius: 14px !important;
-  background: transparent !important;
-}
-
-.xmatrix-app .app-composer-attach-menu button.app-composer-attach-option:is(:hover, :active, [data-active="true"]) {
-  background: color-mix(in oklch, var(--foreground) 6%, transparent) !important;
-}
-
-.xmatrix-app .app-composer-attach-option-icon {
-  width: 2.25rem;
-  height: 2.25rem;
-}
-
-.xmatrix-app .composer-inline-actions .app-composer-inline-icon-active,
-.xmatrix-app .composer-inline-actions .app-composer-inline-icon-active:hover {
-  background: color-mix(in oklch, var(--foreground) 7%, transparent) !important;
-  box-shadow: none !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-}
-
-@media (max-width: 767px) {
-  .xmatrix-app .app-composer-attach-menu {
-    padding: 6px 4px 4px;
-  }
-
-  .xmatrix-app .app-composer-attach-menu button.app-composer-attach-option {
-    border-radius: 18px !important;
-  }
-
-  .xmatrix-app .app-composer-attach-option-icon {
-    width: 2rem;
-    height: 2rem;
-  }
-}
-
 @keyframes app-composer-attach-in {
   from {
     opacity: 0;
@@ -7735,25 +7673,6 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   to {
     opacity: 0;
     transform: translateY(6px);
-  }
-}
-
-.xmatrix-app .app-composer-panel-closing {
-  position: absolute;
-  inset-inline: 0;
-  z-index: 2;
-  pointer-events: none;
-  animation: app-composer-attach-out 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-.xmatrix-app .app-composer-panel-closing .app-composer-attach-menu {
-  animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .xmatrix-app .app-composer-attach-menu,
-  .xmatrix-app .app-composer-panel-closing {
-    animation: none;
   }
 }
 

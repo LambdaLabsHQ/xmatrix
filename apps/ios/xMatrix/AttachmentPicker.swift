@@ -11,6 +11,7 @@ enum AttachmentPickerSource: String {
 
 struct StagedAttachment {
     let token: String
+    let batchID: UUID
     let fileURL: URL
     let directoryURL: URL
     let name: String
@@ -19,24 +20,29 @@ struct StagedAttachment {
 
 /// Keeps temporary copies of picked media and documents on disk long enough for
 /// WebKit's disk-backed `File` objects to finish preview, compression, upload,
-/// and retries, while bounding count and lifetime on disk.
+/// and retries, while bounding count and lifetime on disk. Entries belonging to
+/// the currently staging batch are never evicted before their URLs reach WebKit.
 final class AttachmentStagingStore: @unchecked Sendable {
-    static let maxEntries = 64
+    static let maxEntries = 256
+    static let maxBatchSelection = 64
     static let entryTTL: TimeInterval = 7200
 
     private let lock = NSLock()
     private let rootDirectory: URL
     private let now: () -> Date
+    private let maxEntries: Int
     private var entries: [String: StagedAttachment] = [:]
 
     init(
         rootDirectory: URL = FileManager.default.temporaryDirectory
             .appendingPathComponent("xmatrix-picked-attachments", isDirectory: true),
         now: @escaping () -> Date = Date.init,
+        maxEntries: Int = AttachmentStagingStore.maxEntries,
         purgeExistingOnInit: Bool = true
     ) {
         self.rootDirectory = rootDirectory
         self.now = now
+        self.maxEntries = max(1, maxEntries)
         if purgeExistingOnInit {
             try? FileManager.default.removeItem(at: rootDirectory)
         }
@@ -46,15 +52,24 @@ final class AttachmentStagingStore: @unchecked Sendable {
         releaseAll()
     }
 
-    func stage(copying sourceURL: URL, suggestedName: String? = nil) throws -> StagedAttachment {
+    func stage(
+        copying sourceURL: URL,
+        suggestedName: String? = nil,
+        batchID: UUID = UUID()
+    ) throws -> StagedAttachment {
         let rawName = suggestedName?.isEmpty == false ? suggestedName! : sourceURL.lastPathComponent
-        return try stageFile(rawName: rawName, fallbackExtension: sourceURL.pathExtension) { destination in
+        return try stageFile(rawName: rawName, fallbackExtension: sourceURL.pathExtension, batchID: batchID) { destination in
             try FileManager.default.copyItem(at: sourceURL, to: destination)
         }
     }
 
-    func stage(data: Data, name: String, fallbackExtension: String? = nil) throws -> StagedAttachment {
-        try stageFile(rawName: name, fallbackExtension: fallbackExtension) { destination in
+    func stage(
+        data: Data,
+        name: String,
+        fallbackExtension: String? = nil,
+        batchID: UUID = UUID()
+    ) throws -> StagedAttachment {
+        try stageFile(rawName: name, fallbackExtension: fallbackExtension, batchID: batchID) { destination in
             try data.write(to: destination, options: .atomic)
         }
     }
@@ -62,6 +77,7 @@ final class AttachmentStagingStore: @unchecked Sendable {
     private func stageFile(
         rawName: String,
         fallbackExtension: String?,
+        batchID: UUID,
         write: (URL) throws -> Void
     ) throws -> StagedAttachment {
         let token = UUID().uuidString.lowercased()
@@ -77,7 +93,13 @@ final class AttachmentStagingStore: @unchecked Sendable {
             throw error
         }
 
-        return registerStagedFile(token: token, directory: directory, fileURL: destination, name: fileName)
+        return registerStagedFile(
+            token: token,
+            batchID: batchID,
+            directory: directory,
+            fileURL: destination,
+            name: fileName
+        )
     }
 
     func release(token: String) {
@@ -112,22 +134,28 @@ final class AttachmentStagingStore: @unchecked Sendable {
 
     private func registerStagedFile(
         token: String,
+        batchID: UUID,
         directory: URL,
         fileURL: URL,
         name: String
     ) -> StagedAttachment {
         let staged = StagedAttachment(
             token: token,
+            batchID: batchID,
             fileURL: fileURL,
             directoryURL: directory,
             name: name,
             createdAt: now()
         )
         let evicted: [StagedAttachment] = lock.withLock {
-            var dropped = pruneExpiredLocked()
+            var dropped = pruneExpiredLocked(protectedBatchID: batchID)
             entries[token] = staged
-            while entries.count > Self.maxEntries {
-                guard let oldest = entries.values.min(by: { $0.createdAt < $1.createdAt }) else { break }
+            while entries.count > maxEntries {
+                guard let oldest = entries.values
+                    .filter({ $0.batchID != batchID })
+                    .min(by: { $0.createdAt < $1.createdAt }) else {
+                    break
+                }
                 if let removed = entries.removeValue(forKey: oldest.token) {
                     dropped.append(removed)
                 }
@@ -141,9 +169,11 @@ final class AttachmentStagingStore: @unchecked Sendable {
     }
 
     @discardableResult
-    private func pruneExpiredLocked() -> [StagedAttachment] {
+    private func pruneExpiredLocked(protectedBatchID: UUID? = nil) -> [StagedAttachment] {
         let cutoff = now().addingTimeInterval(-Self.entryTTL)
-        let expiredTokens = entries.values.filter { $0.createdAt < cutoff }.map(\.token)
+        let expiredTokens = entries.values
+            .filter { $0.batchID != protectedBatchID && $0.createdAt < cutoff }
+            .map(\.token)
         var dropped: [StagedAttachment] = []
         for token in expiredTokens {
             if let removed = entries.removeValue(forKey: token) {
@@ -319,7 +349,7 @@ final class NativeAttachmentPicker: NSObject {
         switch source {
         case .photos:
             var configuration = PHPickerConfiguration()
-            configuration.selectionLimit = allowsMultipleSelection ? 0 : 1
+            configuration.selectionLimit = allowsMultipleSelection ? AttachmentStagingStore.maxBatchSelection : 1
             configuration.filter = allowsMultipleSelection ? .any(of: [.images, .videos]) : .images
             configuration.preferredAssetRepresentationMode = .compatible
             let picker = PHPickerViewController(configuration: configuration)
@@ -401,6 +431,7 @@ extension NativeAttachmentPicker: PHPickerViewControllerDelegate {
                 return
             }
             let stagingStore = self.store
+            let batchID = UUID()
             let group = DispatchGroup()
             let batch = StagedURLBatch()
 
@@ -419,7 +450,7 @@ extension NativeAttachmentPicker: PHPickerViewControllerDelegate {
                         : url.pathExtension
                     let rawName = suggestedName?.isEmpty == false ? suggestedName! : url.lastPathComponent
                     let name = AttachmentStagingStore.sanitizedFilename(rawName, fallbackExtension: ext)
-                    if let staged = try? stagingStore.stage(copying: url, suggestedName: name) {
+                    if let staged = try? stagingStore.stage(copying: url, suggestedName: name, batchID: batchID) {
                         batch.record(index: index, url: staged.fileURL)
                     }
                 }
@@ -482,10 +513,11 @@ extension NativeAttachmentPicker: UIDocumentPickerDelegate {
             return
         }
         var stagedURLs: [URL] = []
+        let batchID = UUID()
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            if let staged = try? store.stage(copying: url) {
+            if let staged = try? store.stage(copying: url, batchID: batchID) {
                 stagedURLs.append(staged.fileURL)
             }
         }

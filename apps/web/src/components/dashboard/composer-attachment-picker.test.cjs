@@ -7,7 +7,6 @@ const {
   armNativeAttachmentSource,
   attachmentPanelKey,
   clearPendingAttachmentSource,
-  consumePendingAttachmentSource,
   isDraftPickCurrent,
 } = require("./composer-attachment-picker.ts");
 
@@ -28,33 +27,28 @@ test("attachment panel keyboard navigation wraps across sources and picks on Ent
   assert.equal(attachmentPanelKey({ open: true, active: 0, key: "a" }), null);
 });
 
-test("armed attachment source is one-shot, expires cleanly, and does not leak to other file inputs", () => {
+test("armNativeAttachmentSource writes bounded TTL record and clearPendingAttachmentSource resets it", () => {
   globalThis.window = {};
-  armNativeAttachmentSource("photos", 1000);
-  assert.equal(consumePendingAttachmentSource(1000 + 50), "photos");
-  // Second consume (e.g. avatar file input) sees null.
-  assert.equal(consumePendingAttachmentSource(1000 + 60), null);
+  const armed = armNativeAttachmentSource("photos", 1000);
+  assert.deepEqual(armed, { source: "photos", expiresAt: 1000 + PENDING_ATTACHMENT_SOURCE_TTL_MS });
+  assert.deepEqual(globalThis.window.__xmatrixPendingAttachmentSource, armed);
 
-  // Expired source is ignored.
-  armNativeAttachmentSource("camera", 2000);
-  assert.equal(consumePendingAttachmentSource(2000 + PENDING_ATTACHMENT_SOURCE_TTL_MS + 1), null);
-
-  // Explicit clear drops armed state.
-  armNativeAttachmentSource("files", 3000);
   clearPendingAttachmentSource();
-  assert.equal(consumePendingAttachmentSource(3000 + 10), null);
+  assert.equal(globalThis.window.__xmatrixPendingAttachmentSource, null);
 });
 
-test("draft pick ownership rejects A->B, A->B->A generation bumps, and unmounted drafts", () => {
-  const origin = { generation: 3, scope: "channel-a" };
-  assert.equal(isDraftPickCurrent(origin, { mounted: true, generation: 3, scope: "channel-a" }), true);
+test("draft pick ownership rejects A->B, A->B->A, same-channel sends, and unmounted drafts", () => {
+  const origin = { generation: 3, draftRevision: 1, scope: "channel-a" };
+  assert.equal(isDraftPickCurrent(origin, { mounted: true, generation: 3, draftRevision: 1, scope: "channel-a" }), true);
   // Switched to channel B (scope changed + generation bumped).
-  assert.equal(isDraftPickCurrent(origin, { mounted: true, generation: 4, scope: "channel-b" }), false);
+  assert.equal(isDraftPickCurrent(origin, { mounted: true, generation: 4, draftRevision: 1, scope: "channel-b" }), false);
   // Switched A -> B -> A (same scope, generation bumped).
-  assert.equal(isDraftPickCurrent(origin, { mounted: true, generation: 5, scope: "channel-a" }), false);
+  assert.equal(isDraftPickCurrent(origin, { mounted: true, generation: 5, draftRevision: 1, scope: "channel-a" }), false);
+  // Draft sent in the same channel while iCloud media was still downloading.
+  assert.equal(isDraftPickCurrent(origin, { mounted: true, generation: 3, draftRevision: 2, scope: "channel-a" }), false);
   // Composer/thread closed.
-  assert.equal(isDraftPickCurrent(origin, { mounted: false, generation: 3, scope: "channel-a" }), false);
+  assert.equal(isDraftPickCurrent(origin, { mounted: false, generation: 3, draftRevision: 1, scope: "channel-a" }), false);
   // Direct drop/setInputFiles with no pending click origin stays allowed while mounted.
-  assert.equal(isDraftPickCurrent(null, { mounted: true, generation: 3, scope: "channel-a" }), true);
-  assert.equal(isDraftPickCurrent(null, { mounted: false, generation: 3, scope: "channel-a" }), false);
+  assert.equal(isDraftPickCurrent(null, { mounted: true, generation: 3, draftRevision: 1, scope: "channel-a" }), true);
+  assert.equal(isDraftPickCurrent(null, { mounted: false, generation: 3, draftRevision: 1, scope: "channel-a" }), false);
 });

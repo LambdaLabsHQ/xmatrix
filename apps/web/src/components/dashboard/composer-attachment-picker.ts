@@ -68,18 +68,6 @@ export function armNativeAttachmentSource(
   return record;
 }
 
-/**
- * Consumes and clears the armed source if it is still fresh; returns null for
- * unrelated `<input type="file">` clicks (such as the profile avatar picker).
- */
-export function consumePendingAttachmentSource(now = Date.now()): NativeAttachmentPickerSource | null {
-  if (typeof window === "undefined") return null;
-  const record = window.__xmatrixPendingAttachmentSource;
-  window.__xmatrixPendingAttachmentSource = null;
-  if (!record || record.expiresAt < now) return null;
-  return COMPOSER_ATTACHMENT_SOURCES.includes(record.source) ? record.source : null;
-}
-
 export function clearPendingAttachmentSource(): void {
   if (typeof window !== "undefined") {
     window.__xmatrixPendingAttachmentSource = null;
@@ -88,18 +76,24 @@ export function clearPendingAttachmentSource(): void {
 
 export type DraftPickOrigin = {
   generation: number;
+  draftRevision: number;
   scope: string | null;
 };
 
 /**
  * Returns true only when an async picker or file-input selection still belongs
- * to the draft that opened it (guards A→B, A→B→A, and closed thread/composer).
+ * to the draft that opened it (guards A→B, A→B→A, sending the draft meanwhile,
+ * and closing the thread/composer).
  */
 export function isDraftPickCurrent(
   origin: DraftPickOrigin | null,
-  current: { mounted: boolean; generation: number; scope: string | null },
+  current: { mounted: boolean; generation: number; draftRevision: number; scope: string | null },
 ): boolean {
   if (!current.mounted) return false;
   if (!origin) return true;
-  return origin.generation === current.generation && origin.scope === current.scope;
+  return (
+    origin.generation === current.generation &&
+    origin.draftRevision === current.draftRevision &&
+    origin.scope === current.scope
+  );
 }
