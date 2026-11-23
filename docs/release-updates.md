@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: workspace search conditions move into a dedicated filter bar
+
+Workspace search previously placed active `in:` and `from:` filter chips inline inside the single-line search input row, where long conversation titles squeezed the query input, `Backspace` could not remove a filter while query text was present, and the portaled search overlay sitting over the desktop top band did not explicitly mark itself `no-drag`. Search filters now live in a dedicated filter bar directly below the search field with `In` and `From` triggers, truncating active filter chips with a dedicated remove button (`×`) that preserves the typed query, an inline filter picker for switching or clearing filters without losing the query (`Escape` closes only the picker first), start-of-input `Backspace` removal, and `no-drag` on the search overlay and panel. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Google Play Console creates a one-time product in one command
 
 `@googleplay:one_time_product` creates a one-time in-app product with its
