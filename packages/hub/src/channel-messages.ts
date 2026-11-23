@@ -226,7 +226,7 @@ export async function readSpaceAttentionProjection(
   if (!match) throw new Error("Space attention principal is invalid");
   const principal = { kind: match[1] === "user" ? "user" as const : "agent" as const, id: match[2]! };
   const summaries = await channelCatalogAttention(env, { spaceId, principal });
-  return summaries.map((summary) => ({ channelId: summary.channelId, subjectId, summary }));
+  return summaries.map((summary) => ({ channelId: String(summary.channelId), subjectId, summary }));
 }
 
 async function sealAttachments(

@@ -78,6 +78,12 @@ export interface ChannelCatalogAttentionSummary {
   updatedAt: string;
 }
 
+/** A waiting Channel as its catalog row carries it: the summary and the stored message that waits. */
+export interface ChannelCatalogAttention {
+  attention: ChannelCatalogAttentionSummary;
+  waitingMessage?: ChannelHeadMessage;
+}
+
 export interface ChannelCatalogResolveInput {
   requestId: string;
   spaceId: string;
@@ -94,17 +100,12 @@ export interface ChannelCatalogResolveInput {
   knownInstanceIds?: readonly string[];
 }
 
-interface CatalogRow extends ChannelPresentationRow {
+interface CatalogRow extends ChannelPresentationRow, CatalogAttentionRow {
   activity_at: string | Date;
   created_by_fallback: string;
   history_head_sequence: string | number;
   content_revision: string | number;
   read_sequence: string | number;
-  attention_count: string | number;
-  last_attention_at: string | Date | null;
-  last_attention_message_id: string | null;
-  last_attention_sequence: string | number | null;
-  last_attention_kind: string | null;
   visible_human_ids: string[] | null;
   head_message_id: string | null;
   head_sent_at: string | Date | null;
@@ -114,14 +115,6 @@ interface CatalogRow extends ChannelPresentationRow {
   head_preview_json: unknown;
   head_payload_bundle_base64: string | null;
   head_legacy_body: string | null;
-  waiting_message_id: string | null;
-  waiting_sent_at: string | Date | null;
-  waiting_author_kind: string | null;
-  waiting_author_id: string | null;
-  waiting_recalled_at: string | Date | null;
-  waiting_preview_json: unknown;
-  waiting_payload_bundle_base64: string | null;
-  waiting_legacy_body: string | null;
   sort_group: string | number;
   pin_rank: string | number;
 }
@@ -145,6 +138,7 @@ interface CatalogResolveRow extends CatalogRow {
   requested_route_token: string | null;
 }
 
+/** What waits on the principal in one Channel: the aggregate of its attention rows and the newest of their messages. */
 interface CatalogAttentionRow {
   channel_id: string;
   attention_count: string | number | null;
@@ -152,6 +146,14 @@ interface CatalogAttentionRow {
   last_attention_message_id: string | null;
   last_attention_sequence: string | number | null;
   last_attention_kind: string | null;
+  waiting_message_id: string | null;
+  waiting_sent_at: string | Date | null;
+  waiting_author_kind: string | null;
+  waiting_author_id: string | null;
+  waiting_recalled_at: string | Date | null;
+  waiting_preview_json: unknown;
+  waiting_payload_bundle_base64: string | null;
+  waiting_legacy_body: string | null;
 }
 
 interface CatalogAttentionEnvelope extends QueryResultRow {
@@ -235,6 +237,22 @@ function safeCount(value: string | number | null | undefined): number {
     throw new DatabaseContractError("catalog count is invalid");
   }
   return result;
+}
+
+/** The stored message that holds the principal's attention, when the row read one. */
+function waitingMessage(row: CatalogAttentionRow): { waitingMessage?: ChannelHeadMessage } {
+  if (!row.waiting_message_id || !row.waiting_sent_at || row.last_attention_sequence === null) return {};
+  return { waitingMessage: {
+    messageId: row.waiting_message_id,
+    sequence: safeCount(row.last_attention_sequence),
+    authorKind: row.waiting_author_kind ?? "user",
+    authorId: row.waiting_author_id ?? "",
+    sentAt: iso(row.waiting_sent_at),
+    recalledAt: row.waiting_recalled_at ? iso(row.waiting_recalled_at) : null,
+    preview: readMessagePreview(row.waiting_preview_json),
+    payloadBundleBase64: row.waiting_payload_bundle_base64,
+    legacyBody: row.waiting_legacy_body,
+  } };
 }
 
 /** What waits on the principal in one Channel, from its aggregated attention rows. */
@@ -327,18 +345,7 @@ function serialize(
       legacyBody: row.head_legacy_body,
     } satisfies ChannelHeadMessage } : {}),
     // The newest message that waits on the reader, so a list can say who waits and on what.
-    ...(attentionCount > 0 && row.waiting_message_id && row.waiting_sent_at &&
-        row.last_attention_sequence !== null ? { waitingMessage: {
-      messageId: row.waiting_message_id,
-      sequence: safeCount(row.last_attention_sequence),
-      authorKind: row.waiting_author_kind ?? "user",
-      authorId: row.waiting_author_id ?? "",
-      sentAt: iso(row.waiting_sent_at),
-      recalledAt: row.waiting_recalled_at ? iso(row.waiting_recalled_at) : null,
-      preview: readMessagePreview(row.waiting_preview_json),
-      payloadBundleBase64: row.waiting_payload_bundle_base64,
-      legacyBody: row.waiting_legacy_body,
-    } satisfies ChannelHeadMessage } : {}),
+    ...(attentionCount > 0 ? waitingMessage(row) : {}),
   };
 }
 
@@ -751,12 +758,12 @@ export class PostgresChannelCatalogRepository {
   }
 
   /**
-   * What holds the principal's attention across the Space: one summary for
-   * each readable Channel that has any, read from the principal's own
-   * attention rows. A catalog reader needs only these, so it never resolves
+   * What holds the principal's attention across the Space: one summary, with
+   * the message that waits, for each readable Channel that has any, read from
+   * the principal's own attention rows. A catalog reader needs only these, so it never resolves
    * every Channel's whole row to learn which few are waiting.
    */
-  async attention(input: ChannelCatalogAttentionInput): Promise<ChannelCatalogAttentionSummary[]> {
+  async attention(input: ChannelCatalogAttentionInput): Promise<ChannelCatalogAttention[]> {
     if (!this.ownsRequestSession) {
       return this.withRequestSession((repository) => repository.attention(input));
     }
@@ -788,14 +795,18 @@ export class PostgresChannelCatalogRepository {
             WHERE (${declaredWaitStandsSql("item")}
                 OR item.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
             GROUP BY item.channel_id
-          ), waiting AS (
-            SELECT attended.* FROM attended
-            WHERE EXISTS (SELECT 1 FROM authorized_channels channel
-              WHERE channel.channel_id=attended.channel_id)
+          ), waiting_channels AS (
+            SELECT attention.channel_id,attention.attention_count,attention.last_attention_at,
+              attention.last_attention_message_id,attention.last_attention_sequence,
+              attention.last_attention_kind,${WAITING_MESSAGE_FIELDS}
+              channel.space_id
+            FROM attended attention
+            JOIN authorized_channels channel ON channel.channel_id=attention.channel_id
+            ${WAITING_MESSAGE_JOIN}
           )
           SELECT context.authorized AS principal_authorized,
-            COALESCE((SELECT jsonb_agg(to_jsonb(waiting) ORDER BY waiting.channel_id)
-              FROM waiting),'[]') AS attention_rows
+            COALESCE((SELECT jsonb_agg(to_jsonb(waiting_channels) ORDER BY waiting_channels.channel_id)
+              FROM waiting_channels),'[]') AS attention_rows
           FROM principal_context context`,
         values: [spaceId, principalId, input.principal.kind], maxRows: 1,
       });
@@ -804,7 +815,8 @@ export class PostgresChannelCatalogRepository {
       if (!envelope.principal_authorized) {
         throw new ControlError("space_not_found", 404, "Space not found");
       }
-      return (envelope.attention_rows ?? []).map((row) => attentionSummary(row));
+      return (envelope.attention_rows ?? []).map((row) =>
+        ({ attention: attentionSummary(row), ...waitingMessage(row) }));
     });
   }
 

@@ -954,18 +954,22 @@ integration("the attention read answers what every resolved Channel row carries,
     const read = () => repository.attention({ requestId: crypto.randomUUID(), spaceId: "space-catalog", principal });
     const resolved = async () => (await repository.resolve({ requestId: crypto.randomUUID(),
       spaceId: "space-catalog", principal, channelIds: ["child", "root-00", "grandchild", "closed-hidden"],
-      includeParticipants: false })).channels.flatMap((channel) => channel.attention ? [channel.attention] : []);
+      includeParticipants: false })).channels.flatMap((channel) => channel.attention
+      ? [{ attention: channel.attention, waitingMessage: channel.waitingMessage }] : []);
     const waiting = await read();
-    assert.deepEqual(waiting.map((summary) => summary.channelId), ["child"]);
-    assert.equal(waiting[0].unreadAttentionCount, 3);
-    assert.equal(waiting[0].lastMessageId, "newer-mention");
+    assert.deepEqual(waiting.map((row) => row.attention.channelId), ["child"]);
+    assert.equal(waiting[0].attention.unreadAttentionCount, 3);
+    assert.equal(waiting[0].attention.lastMessageId, "newer-mention");
+    // The message that waits rides along, as it does on the Channel's own row.
+    assert.equal(waiting[0].waitingMessage.messageId, "newer-mention");
     assert.deepEqual(waiting, await resolved());
     // Reading to the head leaves only the wait its asker still holds.
     await client.query(`INSERT INTO data.delivery_cursors
       (space_id,subject_id,channel_id,acknowledged_sequence,version,updated_at)
       VALUES ('space-catalog','user:user-1','child',3,1,$1)`, [now]);
-    assert.deepEqual((await read()).map((summary) => [summary.channelId, summary.unreadAttentionCount, summary.lastMessageId]),
-      [["child", 1, "older-wait"]]);
+    assert.deepEqual((await read()).map(({ attention, waitingMessage }) =>
+      [attention.channelId, attention.unreadAttentionCount, attention.lastMessageId, waitingMessage.messageId]),
+      [["child", 1, "older-wait", "older-wait"]]);
     assert.deepEqual(await read(), await resolved());
     await client.query(`UPDATE data.instances SET rest_state='stopped' WHERE instance_id='root-00:1'`);
     assert.deepEqual(await read(), []);
