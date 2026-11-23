@@ -14,7 +14,7 @@ pub struct ChannelReadContext {
 /// The catalog read narrowed to one Channel and its direct children. An older
 /// Hub ignores the parameter and answers with the complete catalog, which
 /// `render_context` filters to the same result.
-fn channel_family_route(channel_id: &str) -> String {
+pub(crate) fn channel_family_route(channel_id: &str) -> String {
     format!(
         "{}?familyOfChannelId={}",
         HubRoutes::CHANNELS,
@@ -141,6 +141,20 @@ mod tests {
         assert!(crate::channel_holds_words(&found, "THREAD ci"));
         assert!(!crate::channel_holds_words(&found, "颜色 billing"), "every word must appear");
         assert!(crate::channel_holds_words(&found, "  "), "no words keep the whole list");
+    }
+
+    #[test]
+    fn the_channel_list_names_its_space_and_the_words_to_find() {
+        assert_eq!(crate::channels_route(None, None), HubRoutes::CHANNELS);
+        assert_eq!(crate::channels_route(None, Some("   ")), HubRoutes::CHANNELS);
+        assert_eq!(
+            crate::channels_route(Some("space 1"), None),
+            format!("{}?spaceId=space%201", HubRoutes::CHANNELS)
+        );
+        assert_eq!(
+            crate::channels_route(Some("s"), Some(" CI  颜色 ")),
+            format!("{}?spaceId=s&find=CI%20%E9%A2%9C%E8%89%B2", HubRoutes::CHANNELS)
+        );
     }
 
     #[test]

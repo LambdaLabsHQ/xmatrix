@@ -101,7 +101,10 @@ export function createChannelCatalogReader({
     spaceId?: string,
     metrics?: ChannelCatalogReadMetrics,
     deadline?: ChannelCatalogDeadline,
+    /** Keep only Channels whose name, topic or summary holds every word. */
+    find?: readonly string[],
   ): Promise<ChannelCatalogRead> {
+    const selection = find?.length ? { find } : undefined;
     if (principal.kind === "agent") {
       // An Agent catalog is one Space, its registration's own. The Space claim
       // is minted from the registration; a token without it fails closed here
@@ -109,12 +112,12 @@ export function createChannelCatalogReader({
       const agentSpaceId = spaceId || principal.spaceId;
       if (!agentSpaceId) return agentSpaceUnavailable();
       return readCompleteAuthorityChannelCatalog(
-        env, { kind: "agent", id: principal.id }, agentSpaceId, metrics, deadline,
+        env, { kind: "agent", id: principal.id }, agentSpaceId, metrics, deadline, selection,
       );
     }
     if (spaceId) {
       return readCompleteAuthorityChannelCatalog(
-        env, principal, spaceId, metrics, deadline,
+        env, principal, spaceId, metrics, deadline, selection,
       );
     }
     return readSpaceFanoutChannelCatalog({
@@ -125,7 +128,7 @@ export function createChannelCatalogReader({
       },
       listSpaceIds: () => listChannelCatalogSpaceIds(env, principal, metrics, deadline),
       readSpaceCatalog: (routedSpaceId) => readCompleteAuthorityChannelCatalog(
-        env, principal, routedSpaceId, metrics, deadline,
+        env, principal, routedSpaceId, metrics, deadline, selection,
       ),
     });
   }
@@ -161,7 +164,7 @@ export function createChannelCatalogReader({
     if (principal.kind === "agent" && !routedSpaceId) return agentSpaceUnavailable();
     const read = await readCompleteAuthorityChannelCatalog(
       env, { kind: principal.kind, id: principal.id }, routedSpaceId, metrics, deadline,
-      familyOfChannelId,
+      { familyOfChannelId },
     );
     if (!read.ok) return read;
     if (!read.channels.some((channel) => (channel as { id?: unknown }).id === familyOfChannelId)) {
@@ -184,8 +187,8 @@ export function createChannelCatalogReader({
     spaceId?: string,
     metrics?: ChannelCatalogReadMetrics,
     deadline?: ChannelCatalogDeadline,
-    /** Narrow the read to this Channel and its direct children. */
-    familyOfChannelId?: string,
+    /** Narrow the read: one Channel and its direct children, or the Channels that hold every word. */
+    selection: { familyOfChannelId?: string; find?: readonly string[] } = {},
   ): Promise<ChannelCatalogRead> {
     const channels: unknown[] = [];
     const openChannelHumanMemberIdsBySpace: Record<string, readonly string[]> =
@@ -242,7 +245,8 @@ export function createChannelCatalogReader({
       let cursor: string | undefined;
       do {
         const listed = listChannels(env, { principal, limit: 200, ...(spaceId ? { spaceId } : {}),
-          ...(familyOfChannelId ? { familyOfChannelId } : {}), ...(cursor ? { cursor } : {}) });
+          ...(selection.familyOfChannelId ? { familyOfChannelId: selection.familyOfChannelId } : {}),
+          ...(selection.find?.length ? { find: selection.find } : {}), ...(cursor ? { cursor } : {}) });
         const page = deadline ? await deadline.wait("authority_page", listed) : await listed;
         onPage(page as unknown as Record<string, unknown>, page.channels);
         channels.push(...page.channels);
