@@ -242,6 +242,16 @@ const ASK_PAGE = `<!doctype html>
   <title>Ask xMatrix</title>
   <link rel="stylesheet" href="ask.css">
   <script src="document.js"></script>
+  <style>
+    /* Only the capsule and its shadow sit on the page: the App's paper behind the composer would show as a pale
+       box over the page's text around it. In a frame the glass cannot blur the page behind it, so the capsule
+       carries the paper itself (Daniel 2026-11-23: the box is the input alone). */
+    html[data-app-theme] .xmatrix-app { background: transparent !important; }
+    .xmatrix-app .app-composer-box {
+      --app-liquid-surface-bg: var(--background) !important;
+      --app-liquid-shared-surface-bg: var(--background) !important;
+    }
+  </style>
 </head>
 <body class="site-canvas antialiased" style="margin: 0; background: transparent; overflow: hidden">
   <script type="module" src="ask.js"></script>
