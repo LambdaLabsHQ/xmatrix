@@ -150,9 +150,17 @@ author's `launch-choice` with `shown: true`, sent when the reading appears,
 moves it on. Nothing extends it past `FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS` after
 sending, and Jev re-reads the deadline until it has passed. Whether the choice
 is still open is the Hub's own `open` in each record, never a comparison with
-the reader's clock. The web shows the Space's routable harnesses and "Don't
-start" under the message, marks Jev's pick as soon as Jev has one, and drains a
-brass rule over the window. `data.first_message_launch_choices` holds the
+the reader's clock. The web shows one line of text under the message, not a
+card and not a list of Agents: "Choosing an Agent…", then Jev's pick and the
+seconds left, with the author's two ways out as words at its end ("Change" or
+"Pick one", and "Don't start"). Opening the menu claims "start nothing"
+first, so choosing is never a race against the window; the Agent picked there
+is the author's own `@<harness>` message, an ordinary summon, and the menu's
+last row puts that summon in the composer, where model, effort, machine and
+repository are written with the composer's completion. A line that says no
+Agent started keeps "Ask an Agent", the same menu. Once anything follows the
+message the line is gone: the summon shows the launch and whose it was.
+`data.first_message_launch_choices` holds the
 message's one decision; its `choice` is written once. The author's pick
 (`POST /api/channels/:channelId/messages/:messageId/launch-choice`, author only,
 body hash checked) writes it at once and posts the `@<harness>` reply. Jev's
@@ -160,9 +168,9 @@ reading waits until the window closes and then claims the same row; if the
 author already chose, Jev posts nothing, so a message never summons two Agents.
 The reply's id derives from the first message, so a retry appends and launches
 nothing new. The invocation query returns the row as `launchChoices`, so the
-message shows one line saying which harness was picked and whose pick it was;
-when Jev could not read the message and nobody chose, that line gives the
-refusal's cause instead. Only a fresh first message, within the hold limit,
+line can say which harness is starting until its summon lands; when Jev could
+not read the message and nobody chose, the line gives the refusal's cause
+instead. Only a fresh first message, within the hold limit,
 opens its author's window: reopening an older conversation shows how its choice
 ended and never counts down or reports `shown` again. An Agent-authored first
 message has no window: Jev's reading decides at once and posts the same reply.

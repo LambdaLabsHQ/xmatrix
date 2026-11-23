@@ -9,8 +9,10 @@
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { isImeKeyDown } from "@/lib/ime-keydown";
+import { cn } from "@/lib/utils";
 import type { RealtimeCollection } from "./realtime-collection";
-import { ArrowRight, AtSign, Clock, FileText, Hash, MessageSquare, X } from "lucide-react";
+import { ArrowRight, AtSign, ChevronDown, Clock, FileText, Hash, MessageSquare, X } from "lucide-react";
 import type {
   MessageSearchHit,
   ObservabilityEvent,
@@ -163,44 +165,152 @@ function hitChannelLabel(hit: MessageSearchHit, channelById: Map<string, Channel
   return channel ? `#${channelTitle(channel)}` : "a conversation";
 }
 
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+type FilterKind = "in" | "from";
+
+function FilterTrigger({
+  icon: Icon,
+  label,
+  open,
+  onToggle,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <span className="app-search-chip inline-flex shrink-0 items-center gap-0.5 text-[13px] font-semibold">
-      {label}
-      <button type="button" aria-label={`Remove ${label}`} onClick={onRemove}
-        className="flex size-4 items-center justify-center text-muted-foreground hover:text-foreground">
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={onToggle}
+      className={cn(
+        "inline-flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-[color-mix(in_oklab,var(--foreground)_12%,transparent)] pl-2.5 pr-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-[color-mix(in_oklab,var(--foreground)_7%,transparent)] hover:text-foreground sm:h-7 sm:text-[12px]",
+        open && "border-[color-mix(in_oklab,var(--foreground)_24%,transparent)] bg-[color-mix(in_oklab,var(--foreground)_9%,transparent)] text-foreground",
+      )}
+    >
+      <Icon className="size-3.5 shrink-0" />
+      <span>{label}</span>
+      <ChevronDown className={cn("size-3 shrink-0 transition-transform", open && "rotate-180")} />
+    </button>
+  );
+}
+
+function ActiveFilterChip({
+  prefix,
+  value,
+  open,
+  onSelect,
+  onRemove,
+}: {
+  prefix: string;
+  value: string;
+  open: boolean;
+  onSelect: () => void;
+  onRemove: () => void;
+}) {
+  const fullLabel = `${prefix} ${value}`;
+  return (
+    <span
+      className={cn(
+        "app-search-chip inline-flex h-8 min-w-0 max-w-full items-center text-[13px] font-semibold sm:h-7 sm:text-[12px]",
+        open && "border-[color-mix(in_oklab,var(--foreground)_24%,transparent)] bg-[color-mix(in_oklab,var(--foreground)_11%,transparent)]",
+      )}
+    >
+      <button
+        type="button"
+        title={fullLabel}
+        aria-expanded={open}
+        onClick={onSelect}
+        className="inline-flex h-full min-w-0 items-center gap-1 pl-2.5 pr-2 text-foreground transition-colors hover:bg-[color-mix(in_oklab,var(--foreground)_6%,transparent)]"
+      >
+        <span className="shrink-0 font-medium text-muted-foreground">{prefix}</span>
+        <span className="truncate">{value}</span>
+      </button>
+      <button
+        type="button"
+        aria-label={`Remove ${fullLabel}`}
+        title={`Remove ${fullLabel}`}
+        onClick={onRemove}
+        className="inline-flex h-full w-7.5 shrink-0 items-center justify-center text-muted-foreground shadow-[inset_1px_0_0_color-mix(in_oklab,var(--foreground)_10%,transparent)] transition-colors hover:bg-[color-mix(in_oklab,var(--foreground)_10%,transparent)] hover:text-foreground sm:w-6.5"
+      >
         <X className="size-3" />
       </button>
     </span>
   );
 }
 
-function filterChips(filters: SearchFilters, onChange: (filters: SearchFilters) => void) {
-  if (!searchHasFilters(filters)) return null;
+function SearchFilterBar({
+  filters,
+  activeKind,
+  onToggle,
+  onRemove,
+  onClearAll,
+}: {
+  filters: SearchFilters;
+  activeKind: FilterKind | null;
+  onToggle: (kind: FilterKind) => void;
+  onRemove: (kind: FilterKind) => void;
+  onClearAll: () => void;
+}) {
   return (
     <>
-      {filters.channel && (
-        <FilterChip label={`in #${filters.channel.label}`}
-          onRemove={() => onChange({ ...filters, channel: undefined })} />
+      {filters.channel ? (
+        <ActiveFilterChip
+          prefix="in"
+          value={`#${filters.channel.label}`}
+          open={activeKind === "in"}
+          onSelect={() => onToggle("in")}
+          onRemove={() => onRemove("in")}
+        />
+      ) : (
+        <FilterTrigger
+          icon={Hash}
+          label="In"
+          open={activeKind === "in"}
+          onToggle={() => onToggle("in")}
+        />
       )}
-      {filters.from && (
-        <FilterChip label={`from ${filters.from.label}`}
-          onRemove={() => onChange({ ...filters, from: undefined })} />
+      {filters.from ? (
+        <ActiveFilterChip
+          prefix="from"
+          value={filters.from.label}
+          open={activeKind === "from"}
+          onSelect={() => onToggle("from")}
+          onRemove={() => onRemove("from")}
+        />
+      ) : (
+        <FilterTrigger
+          icon={AtSign}
+          label="From"
+          open={activeKind === "from"}
+          onToggle={() => onToggle("from")}
+        />
+      )}
+      {filters.channel && filters.from && (
+        <button
+          type="button"
+          onClick={onClearAll}
+          className="inline-flex h-8 shrink-0 items-center rounded-full px-1.5 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-[oklch(0.42_0.012_238/0.07)] hover:text-foreground sm:h-7 sm:text-[12px]"
+        >
+          Clear
+        </button>
       )}
     </>
   );
 }
 
 /** A trailing `in:` or `from:` being typed, to complete into a filter. */
-function pendingFilter(text: string): { kind: "in" | "from"; needle: string; start: number } | null {
+function pendingFilter(text: string): { kind: FilterKind; needle: string; start: number } | null {
   const match = /(^|\s)(in|from):(\S*)$/u.exec(text);
   if (!match) return null;
-  return { kind: match[2] as "in" | "from", needle: match[3].replace(/^[#@]/u, "").toLowerCase(),
+  return { kind: match[2] as FilterKind, needle: match[3].replace(/^[#@]/u, "").toLowerCase(),
     start: match.index + match[1].length };
 }
 
 type DialogRow =
   | { key: string; kind: "recent"; request: SearchRequest }
+  | { key: string; kind: "filter-in-clear" }
+  | { key: string; kind: "filter-from-clear" }
   | { key: string; kind: "filter-in"; channel: ChannelSnapshot }
   | { key: string; kind: "filter-from"; author: SearchAuthor; detail: string }
   | { key: string; kind: "destination"; view: AppView; label: string }
@@ -311,8 +421,11 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
     open && realtimeAgents ? realtimeAgents.getSnapshot : () => catalogAgents, () => catalogAgents);
   const [text, setText] = useState("");
   const [filters, setFilters] = useState<SearchFilters>(initialFilters);
+  const [picker, setPicker] = useState<FilterKind | null>(null);
+  const [pickerQuery, setPickerQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const pickerInputRef = useRef<HTMLInputElement | null>(null);
   const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const initialKey = searchRequestKey({ text: "", ...initialFilters });
 
@@ -321,12 +434,18 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
     setText("");
     const scope = searchRequestFromParams(new URLSearchParams(initialKey));
     setFilters({ channel: scope.channel, from: scope.from });
+    setPicker(null);
+    setPickerQuery("");
     setActiveIndex(0);
     window.requestAnimationFrame(() => inputRef.current?.focus());
   }, [initialKey, open]);
-  useEffect(() => { setActiveIndex(0); }, [text, filters]);
+  useEffect(() => { setActiveIndex(0); }, [text, filters, picker, pickerQuery]);
 
   const pending = pendingFilter(text);
+  const activeFilterKind = picker ?? pending?.kind ?? null;
+  const activeFilterNeedle = picker
+    ? pickerQuery.trim().replace(/^[#@]/u, "").toLowerCase()
+    : pending?.needle ?? "";
   const searchText = pending ? text.slice(0, pending.start).trim() : text.trim();
   const request: SearchRequest = { text: searchText, ...filters };
   const scoped = searchHasFilters(filters);
@@ -335,6 +454,40 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
   useCatalogSearch(open && !scoped, searchText, catalogPaging);
   const space = spaces.find((item) => item.id === spaceId);
   const channelById = useMemo(() => new Map(channels.map((channel) => [channel.id, channel])), [channels]);
+
+  const closePicker = useCallback((refocus = true) => {
+    setPicker(null);
+    setPickerQuery("");
+    if (refocus) window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  const togglePicker = useCallback((kind: FilterKind) => {
+    if (picker === kind) {
+      closePicker(true);
+      return;
+    }
+    setPicker(kind);
+    setPickerQuery("");
+    window.requestAnimationFrame(() => pickerInputRef.current?.focus());
+  }, [closePicker, picker]);
+
+  const removeFilter = useCallback((kind: FilterKind) => {
+    setFilters((current) => kind === "in"
+      ? { ...current, channel: undefined }
+      : { ...current, from: undefined });
+    if (picker === kind) {
+      setPicker(null);
+      setPickerQuery("");
+    }
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, [picker]);
+
+  const clearAllFilters = useCallback(() => {
+    setFilters({});
+    setPicker(null);
+    setPickerQuery("");
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
 
   const directory = useMemo(() => open && !scoped && searchText
     ? buildWorkspaceSearchResults({
@@ -371,19 +524,29 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
   const rerankReading = useSearchRerank(searchRerank, searchText, rerankCandidates, open && !pending && !scoped);
 
   const sections = useMemo<DialogSection[]>(() => {
-    if (pending) {
-      if (pending.kind === "in") {
-        return [{ title: "Search in", rows: channels
+    if (activeFilterKind) {
+      if (activeFilterKind === "in") {
+        const filterRows: DialogRow[] = [];
+        if (picker && filters.channel && !activeFilterNeedle) {
+          filterRows.push({ key: "in:clear", kind: "filter-in-clear" });
+        }
+        filterRows.push(...channels
           .filter((channel) => (!spaceId || channel.spaceId === spaceId)
-            && channelTitle(channel).toLowerCase().includes(pending.needle))
-          .slice(0, 8)
-          .map((channel) => ({ key: `in:${channel.id}`, kind: "filter-in" as const, channel })) }];
+            && channelTitle(channel).toLowerCase().includes(activeFilterNeedle))
+          .slice(0, 12)
+          .map((channel) => ({ key: `in:${channel.id}`, kind: "filter-in" as const, channel })));
+        return filterRows.length ? [{ title: "Search in", rows: filterRows }] : [];
       }
-      return [{ title: "From", rows: searchAuthors(space, agents)
-        .filter((item) => item.searchable.includes(pending.needle))
-        .slice(0, 8)
+      const filterRows: DialogRow[] = [];
+      if (picker && filters.from && !activeFilterNeedle) {
+        filterRows.push({ key: "from:clear", kind: "filter-from-clear" });
+      }
+      filterRows.push(...searchAuthors(space, agents)
+        .filter((item) => item.searchable.includes(activeFilterNeedle))
+        .slice(0, 12)
         .map((item) => ({ key: `from:${searchAuthorParam(item.author)}`, kind: "filter-from" as const,
-          author: item.author, detail: item.detail })) }];
+          author: item.author, detail: item.detail })));
+      return filterRows.length ? [{ title: "From", rows: filterRows }] : [];
     }
     if (!searchIsRunnable(request)) {
       const recent = readRecentSearches({ userId, spaceId });
@@ -396,7 +559,7 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
     return rows.length ? [{ rows }] : [];
     // `request` is rebuilt every render; its parts are the dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, channels, filters, messages.more, pending, rankedRows, rerankReading, searchText, space, spaceId, userId]);
+  }, [activeFilterKind, activeFilterNeedle, agents, channels, filters, messages.more, picker, rankedRows, rerankReading, searchText, space, spaceId, userId]);
 
   const rows = sections.flatMap((section) => section.rows);
   useLayoutEffect(() => {
@@ -408,15 +571,27 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
     if (row.kind === "recent") {
       setFilters({ channel: row.request.channel, from: row.request.from });
       setText(row.request.text);
-      inputRef.current?.focus();
+      closePicker(true);
+      return;
+    }
+    if (row.kind === "filter-in-clear") {
+      removeFilter("in");
+      return;
+    }
+    if (row.kind === "filter-from-clear") {
+      removeFilter("from");
       return;
     }
     if (row.kind === "filter-in" || row.kind === "filter-from") {
       setFilters((current) => row.kind === "filter-in"
         ? { ...current, channel: { id: row.channel.id, label: channelTitle(row.channel) } }
         : { ...current, from: row.author });
-      setText(pending ? text.slice(0, pending.start) : text);
-      inputRef.current?.focus();
+      if (picker) {
+        closePicker(true);
+      } else {
+        setText(pending ? text.slice(0, pending.start) : text);
+        inputRef.current?.focus();
+      }
       return;
     }
     rememberRecentSearch({ userId, spaceId }, request);
@@ -431,12 +606,64 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
     if (item.channelId) onSelectChannel(item.channelId);
   };
 
-  const runnable = !pending && searchIsRunnable(request);
+  const runnable = !activeFilterKind && searchIsRunnable(request);
   const status = runnable
     ? messages.status === "loading" ? "Searching messages…"
       : messages.status === "unavailable" ? "Message search is unavailable right now."
         : undefined
     : undefined;
+
+  const pickerHeader = picker ? (
+    <div
+      className="mb-0.5 flex h-9 items-center gap-3 shadow-[inset_0_-1px_0_oklch(0.42_0.012_238/0.08)]"
+      style={{ paddingInline: "calc(var(--app-search-panel-column) - 0.5rem - var(--app-search-panel-gutter))" }}
+    >
+      {picker === "in"
+        ? <Hash className="size-4 shrink-0 text-muted-foreground" />
+        : <AtSign className="size-4 shrink-0 text-muted-foreground" />}
+      <input
+        ref={pickerInputRef}
+        type="text"
+        value={pickerQuery}
+        onChange={(event) => setPickerQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (isImeKeyDown(event.nativeEvent)) return;
+          if (event.key === "ArrowDown" && rows.length > 0) {
+            event.preventDefault();
+            setActiveIndex((activeIndex + 1) % rows.length);
+          } else if (event.key === "ArrowUp" && rows.length > 0) {
+            event.preventDefault();
+            setActiveIndex(activeIndex === 0 ? rows.length - 1 : activeIndex - 1);
+          } else if (event.key === "Enter") {
+            event.preventDefault();
+            const row = rows[activeIndex] ?? rows[0];
+            if (row) choose(row);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            closePicker(true);
+          }
+        }}
+        data-workspace-search-filter-input=""
+        placeholder={picker === "in" ? "Filter conversations…" : "Filter people and agents…"}
+        aria-label={picker === "in" ? "Filter conversations" : "Filter people and agents"}
+        className="app-search-panel-input min-w-0 flex-1 text-[16px]! sm:text-[13px]!"
+      />
+      {pickerQuery && (
+        <button
+          type="button"
+          aria-label="Clear filter search"
+          onClick={() => {
+            setPickerQuery("");
+            pickerInputRef.current?.focus();
+          }}
+          className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-3" />
+        </button>
+      )}
+    </div>
+  ) : undefined;
 
   let index = -1;
   return (
@@ -446,17 +673,33 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
       query={text}
       inputRef={inputRef}
       placeholder={scoped ? "Search here" : `Search ${space?.name ?? "this Space"}`}
-      emptyLabel={pending
-        ? pending.kind === "in" ? "No conversation by that name" : "Nobody by that name"
+      emptyLabel={activeFilterKind
+        ? activeFilterKind === "in" ? "No conversation by that name" : "Nobody by that name"
         : runnable ? status ?? "No results"
-          : "Search messages, pages, conversations and people. Type in: or from: to narrow it."}
+          : "Search messages, pages, conversations and people."}
       activeIndex={activeIndex}
       resultCount={rows.length}
-      chips={filterChips(filters, setFilters)}
-      onRemoveLastChip={scoped ? () => setFilters((current) => current.from
+      filters={
+        <SearchFilterBar
+          filters={filters}
+          activeKind={activeFilterKind}
+          onToggle={togglePicker}
+          onRemove={removeFilter}
+          onClearAll={clearAllFilters}
+        />
+      }
+      resultsHeader={pickerHeader}
+      onRemoveLastFilter={scoped ? () => setFilters((current) => current.from
         ? { ...current, from: undefined } : { ...current, channel: undefined }) : undefined}
-      onQueryChange={setText}
+      onInputFocus={() => {
+        if (picker) closePicker(false);
+      }}
+      onQueryChange={(next) => {
+        if (picker) closePicker(false);
+        setText(next);
+      }}
       onActiveIndexChange={setActiveIndex}
+      onEscape={picker ? () => closePicker(true) : onCancel}
       onCancel={onCancel}
       onSubmit={() => {
         const row = rows[activeIndex] ?? rows[0];
@@ -488,12 +731,22 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
               return <SearchResultRow key={row.key} {...common} icon={Clock}
                 title={searchRequestLabel(row.request)} subtitle="Recent search" />;
             }
+            if (row.kind === "filter-in-clear") {
+              return <SearchResultRow key={row.key} {...common} icon={X}
+                title="All conversations" subtitle="Remove channel filter" />;
+            }
+            if (row.kind === "filter-from-clear") {
+              return <SearchResultRow key={row.key} {...common} icon={X}
+                title="Anyone" subtitle="Remove sender filter" />;
+            }
             if (row.kind === "filter-in") {
               return <SearchResultRow key={row.key} {...common} icon={Hash}
+                selected={filters.channel?.id === row.channel.id}
                 title={`#${channelTitle(row.channel)}`} subtitle="Search only this conversation" />;
             }
             if (row.kind === "filter-from") {
               return <SearchResultRow key={row.key} {...common} icon={AtSign}
+                selected={Boolean(filters.from && searchAuthorParam(filters.from) === searchAuthorParam(row.author))}
                 title={row.author.label} subtitle={row.detail || "Only their messages"} />;
             }
             if (row.kind === "destination") {

@@ -97,7 +97,7 @@ GitHub 連携は `repo:` 起動条件の基盤でもあります。連携する�
 | Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event`（書き込みはデフォルトで承認制。[ガイド](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-calendar.md)） |
 | Google Analytics | `googleanalytics` | | `list_properties`, `report` |
 | Google Ads | `googleads` | | `list_accounts`, `read_account`, `query`, `validate_mutations`; `mutate`, `set_campaign_status`（デフォルトで承認制） |
-| Google Play Console | `googleplay` | | `list_apps`, `tracks`, `release`, `base_plans`, `base_plan`, `api_operations`, `api_schema`, `api_read`, `api_plan`, `api_write`, `api_upload` |
+| Google Play Console | `googleplay` | | `list_apps`, `tracks`, `release`, `base_plans`, `base_plan`, `one_time_product`, `api_operations`, `api_schema`, `api_read`, `api_plan`, `api_write`, `api_upload` |
 | Google Business Profile | `googlebusinessprofile` | | `list_accounts`, `list_locations`, `performance`, `reviews`, `reply_review` |
 | Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `list_adunits`, `report`, `list_payments`, `list_alerts`, `list_policy_issues` |
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |

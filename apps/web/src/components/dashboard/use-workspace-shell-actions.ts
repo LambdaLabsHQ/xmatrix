@@ -364,6 +364,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     insertMentionIntoComposer(message.senderMention || message.author);
   });
 
+  const handleTimelineComposeMention = useStableCallback((mention: string) => {
+    insertMentionIntoComposer(mention);
+  });
+
   const handleTimelineRebornSender = useStableCallback((message: TimelineItem) => {
     void rebornMessageSender(message);
   });
@@ -2978,6 +2982,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     handleTimelineQuotePassage,
     desktopFrameClass,
     handleTimelineMentionSender,
+    handleTimelineComposeMention,
     handleTimelineRebornSender,
     handleTimelineQuestionnaireAnswer,
     handleTimelineOpenInternalAppLink,

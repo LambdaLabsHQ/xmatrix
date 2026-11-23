@@ -278,6 +278,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     handleTimelineDiscussPassage,
     handleTimelineQuotePassage,
     handleTimelineMentionSender,
+    handleTimelineComposeMention,
     handleTimelineRebornSender,
     handleTimelineQuestionnaireAnswer,
     handleTimelineOpenInternalAppLink,
@@ -1300,6 +1301,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       <MessageTimeline
         channel={selectedChannel}
         onRunChannelCommand={canUseSelectedChannel ? sendSelectedChannelCommand : undefined}
+        onComposeMention={canUseSelectedChannel ? handleTimelineComposeMention : undefined}
         space={currentSpace}
         token={token ?? null}
         localContext={localMentionContext}

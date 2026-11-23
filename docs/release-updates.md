@@ -1,5 +1,23 @@
 # Release Updates
 
+## Unreleased: a first message's launch choice is one line of text, and choosing is no longer a race
+
+Under a new conversation's first message the web drew a brass card listing every Agent of the Space as a pill, with "Don't start" and a draining rule. It is now one sentence on the paper: "Choosing an Agent…", then the Agent xMatrix picked and the seconds left, with "Change" (or "Pick one") and "Don't start" as words at its end. No Agent is listed until the author asks. "Change" opens the app's paper menu and records "start nothing" first, so the three-second window can no longer start an Agent while the author is choosing; the Agent picked there is the author's own `@<harness>` message, and the menu's last row puts that summon in the composer, where model, effort, machine and repository are written with the composer's completion. A line that says no Agent started keeps "Ask an Agent". Once anything follows the message the line is gone, because the summon already shows the launch and whose it was. The "No Agent was asked" line of a named conversation uses the same sentence and menu. The Hub is unchanged.
+
+## Unreleased: workspace search conditions move into a dedicated filter bar
+
+Workspace search previously placed active `in:` and `from:` filter chips inline inside the single-line search input row, where long conversation titles squeezed the query input, `Backspace` could not remove a filter while query text was present, and the portaled search overlay sitting over the desktop top band did not explicitly mark itself `no-drag`. Search filters now live in a dedicated filter bar directly below the search field with `In` and `From` triggers, truncating active filter chips with a dedicated remove button (`×`) that preserves the typed query, an inline filter picker for switching or clearing filters without losing the query (`Escape` closes only the picker first), start-of-input `Backspace` removal, and `no-drag` on the search overlay and panel. Web only. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: Google Play Console creates a one-time product in one command
+
+`@googleplay:one_time_product` creates a one-time in-app product with its
+title, description and price: the named region keeps exactly the stated
+price, Google converts it for every other region, and the purchase option can
+be activated in the same step. Setting up a "remove ads" purchase for a new
+Android app needed the Play Console website, because the catalog write of
+every regional price does not fit a command. Hub and protocol; no schema
+change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: public site pages are prerendered, with valid structured data and direct app links
 
 An Ahrefs audit of xmatrix.sh and xmatrix.page found 37 slow pages. Each one was a localized page, a `/docs` page or a `/<slug>-alternatives` page: the Worker rendered them on every request and a cold isolate took 1–2 s. All of them are now prerendered at build: 6 locales × (home, download, support, 10 guide pages, 19 competitor pages). The build fails if a representative page of each kind stops prerendering. The 114 competitor pages and 6 homes no longer carry a `SoftwareApplication` node without ratings, which Google reported as 120 rich-result errors. Site pages on xmatrix.page link to `/app`, `/login`, `/console`, `/billing` and `/account/delete` on the app origin directly instead of through a 302. The footer's Perplexity link goes straight to `/search/new`. Search descriptions and titles that results cut off are rewritten to fit: 47 descriptions over 160 characters and 9 Spanish guide titles. The `/support` titles now say what the page helps with. Web only. Recovery is a CI-validated beta reverting #1994.
