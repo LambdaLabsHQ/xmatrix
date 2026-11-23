@@ -3,6 +3,7 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { canonicalMentionToken, NORN_ASK_MESSAGE_PREFIX, NORN_DELEGATED_NOTE } from "@xmatrix/protocol";
 import { markCardAnswered } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
+import { installProgramActionOutcome, type ProgramActionOutcome } from "./connectors/connector-commands";
 import { deliverNornAppRequest, withdrawNornAppRequests } from "./norn-actions";
 import { agentHolder, appRequest, checkNornProgram, instanceHolder, nornActionAnswer, nornAnswerBody, nornAsking, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody,
   nornPreparedReply, nornProgramIn, nornQuestionSource, nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion,
@@ -262,7 +263,7 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
  * already takes nothing, so a repeat is safe.
  */
 export async function settleNornAppRequest(env: Env, input: { channelId: string; requestRef: string;
-  outcome: { admitted: true } | { declined: string } | { done: { summary: string; url?: string } } | { blocked: string } | { failed: string } }): Promise<void> {
+  outcome: { admitted: true } | { declined: string } | ProgramActionOutcome }): Promise<void> {
   const requestId = `norn-app:${input.requestRef}:${crypto.randomUUID()}`;
   const programs = await repository(env, input.channelId, requestId);
   const held = await programs.appRequest({ requestId, requestRef: input.requestRef });
@@ -278,6 +279,10 @@ export async function settleNornAppRequest(env: Env, input: { channelId: string;
   // What the answer opened, or the program's end, is the coordinator's to deliver.
   await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
 }
+
+// The durable executor tells a program how the action it performed ended. The connector's files do not import the
+// Norn host, which imports them, so the host installs its part here, once both are loaded.
+installProgramActionOutcome(settleNornAppRequest);
 
 /** Stops the Run of an Instance a request started, if still live, or retires the Instance if it rests. */
 async function letGo(env: Env, channelId: string, release: { programId: string; requestId: string; authorityUserId: string;
