@@ -58,6 +58,23 @@ async function openFresh(page: Page) {
   return push;
 }
 
+/** Jev picked codex, the author's window is running, and the author presses Change. */
+async function changeFromJevsPick(page: Page) {
+  const push = await openFresh(page);
+  const line = page.locator(".launch-line");
+  await launches(page, [open({ recommendation: { start: true, harness: "codex" } })]);
+  await push();
+  await page.clock.runFor(700);
+  await expect(line.getByRole("button", { name: "Change" })).toBeEnabled();
+  await expect.poll(async () => (await fixtureRequestBodies(page, "first-choice")).length).toBe(1);
+  // Opening the menu records "start nothing": choosing is not a race against the window.
+  await launches(page, [open({ open: false, recommendation: { start: true, harness: "codex" },
+    choice: { start: false, by: "author", at: E2E_NOW } })]);
+  await line.getByRole("button", { name: "Change" }).click();
+  await expect.poll(async () => fixtureRequestBodies(page, "first-choice")).toEqual([{ body, shown: true }, { body }]);
+  return line;
+}
+
 test("the line is one sentence: reading, then Jev's pick counting down, then the pick starting", async ({ page }) => {
   // Opening the conversation took 2.5s and Jev has not read the message yet.
   const push = await openFresh(page);
@@ -102,19 +119,7 @@ test("the line is one sentence: reading, then Jev's pick counting down, then the
 });
 
 test("Change takes the decision first, then the Agent picked is the author's own summon", async ({ page }) => {
-  const push = await openFresh(page);
-  const line = page.locator(".launch-line");
-  await launches(page, [open({ recommendation: { start: true, harness: "codex" } })]);
-  await push();
-  await page.clock.runFor(700);
-  await expect(line.getByRole("button", { name: "Change" })).toBeEnabled();
-  await expect.poll(async () => (await fixtureRequestBodies(page, "first-choice")).length).toBe(1);
-
-  // Opening the menu records "start nothing": choosing is not a race against the window.
-  await launches(page, [open({ open: false, recommendation: { start: true, harness: "codex" },
-    choice: { start: false, by: "author", at: E2E_NOW } })]);
-  await line.getByRole("button", { name: "Change" }).click();
-  await expect.poll(async () => fixtureRequestBodies(page, "first-choice")).toEqual([{ body, shown: true }, { body }]);
+  const line = await changeFromJevsPick(page);
   const menu = page.getByRole("menu", { name: "Choose the Agent that starts" });
   await expect(menu.getByRole("menuitem")).toHaveText([/^claude$/u, /^codex\s*xMatrix's pick$/u, /^gemini$/u, "Model, effort, machine…"]);
   await expect(line).toContainText("Choose who starts");
@@ -130,14 +135,7 @@ test("Change takes the decision first, then the Agent picked is the author's own
 });
 
 test("the menu's last row hands the summon to the composer for its other parameters", async ({ page }) => {
-  const push = await openFresh(page);
-  const line = page.locator(".launch-line");
-  await launches(page, [open({ recommendation: { start: true, harness: "codex" } })]);
-  await push();
-  await page.clock.runFor(700);
-  await launches(page, [open({ open: false, recommendation: { start: true, harness: "codex" },
-    choice: { start: false, by: "author", at: E2E_NOW } })]);
-  await line.getByRole("button", { name: "Change" }).click();
+  const line = await changeFromJevsPick(page);
   await page.getByRole("menuitem", { name: "Model, effort, machine…" }).click();
   await expect(page.getByRole("menu", { name: "Choose the Agent that starts" })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Message composer" })).toContainText("@codex");

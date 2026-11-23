@@ -7,7 +7,7 @@ import type { InteractionLaunchOption } from "@xmatrix/protocol";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 import { useFace } from "./face";
 import { avatarImageSrc } from "./identity-avatar";
-import { listenForOverlayDismissal } from "./use-overlay-dismiss";
+import { useAnchoredMenuDismiss } from "./use-overlay-dismiss";
 
 /** The face of the harness the option starts (protocol faces.ts); blank for one with no mark. */
 export function OptionMark({ option }: { option: InteractionLaunchOption }) {
@@ -40,21 +40,11 @@ export function LaunchAgentMenu({ anchor, label, options, recommended, onPick, o
   onClose: () => void;
 }) {
   const popup = useRef<HTMLDivElement>(null);
+  // The timeline scrolling away from the line takes its menu with it.
+  useAnchoredMenuDismiss(anchor, popup, onClose);
   useEffect(() => {
-    // The timeline scrolling away from the line takes its menu with it.
-    const scrolled = (event: Event) => {
-      if (event.target instanceof Node && popup.current?.contains(event.target)) return;
-      onClose();
-    };
-    window.addEventListener("scroll", scrolled, { capture: true, passive: true });
-    const stop = listenForOverlayDismissal((event) => {
-      const target = event.target instanceof Node ? event.target : null;
-      if (target && (anchor.contains(target) || popup.current?.contains(target))) return;
-      onClose();
-    }, onClose);
     popup.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus({ preventScroll: true });
-    return () => { window.removeEventListener("scroll", scrolled, { capture: true }); stop(); };
-  }, [anchor, onClose]);
+  }, []);
   const place = anchor.getBoundingClientRect();
   const viewport = window.visualViewport?.height ?? window.innerHeight;
   const height = (options.length + (onCompose ? 1 : 0)) * rowHeight() + (onCompose ? 1 : 0);
