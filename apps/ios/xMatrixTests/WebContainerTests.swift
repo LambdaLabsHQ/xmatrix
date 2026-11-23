@@ -569,4 +569,104 @@ final class WebContainerTests: XCTestCase {
             XCTAssertFalse(AppSignIn.isHubSignInStart(URL(string: page)!), page)
         }
     }
+
+    func testAttachmentStagingStoreStagesDiskBackedFilesWithBoundedTTLAndEviction() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xmatrix-staging-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // A stale file from an earlier launch is cleared when the store initializes.
+        let staleDir = root.appendingPathComponent("stale-session", isDirectory: true)
+        try FileManager.default.createDirectory(at: staleDir, withIntermediateDirectories: true)
+        let staleFile = staleDir.appendingPathComponent("old.mp4")
+        try Data("old".utf8).write(to: staleFile)
+
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let store = AttachmentStagingStore(rootDirectory: root, now: { clock })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleFile.path))
+
+        let payload = Data("disk-backed-native-video".utf8)
+        let staged = try store.stage(data: payload, name: "../clip.mp4", fallbackExtension: "mp4")
+        XCTAssertEqual(staged.name, "clip.mp4")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.fileURL.path))
+        XCTAssertEqual(try Data(contentsOf: staged.fileURL), payload)
+
+        // Release deletes the staged file from disk.
+        store.release(token: staged.token)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.fileURL.path))
+
+        // Expired entries are pruned once TTL passes.
+        let expiring = try store.stage(data: Data("temp".utf8), name: "note.txt")
+        clock = clock.addingTimeInterval(AttachmentStagingStore.entryTTL + 1)
+        XCTAssertEqual(store.count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: expiring.fileURL.path))
+
+        // Capacity fails closed rather than deleting live files from earlier
+        // batches; slots reopen once entries are released or expire past TTL.
+        let boundedStore = AttachmentStagingStore(rootDirectory: root, now: { clock }, maxEntries: 2, purgeExistingOnInit: false)
+        let first = try boundedStore.stage(data: Data("first".utf8), name: "first.txt")
+        let second = try boundedStore.stage(data: Data("second".utf8), name: "second.txt")
+        XCTAssertThrowsError(try boundedStore.stage(data: Data("third".utf8), name: "third.txt")) { error in
+            XCTAssertEqual(error as? AttachmentStagingError, .capacityReached)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.fileURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.fileURL.path))
+        XCTAssertEqual(boundedStore.count, 2)
+
+        boundedStore.release(token: first.token)
+        let third = try boundedStore.stage(data: Data("third".utf8), name: "third.txt")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.fileURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: third.fileURL.path))
+        XCTAssertEqual(boundedStore.count, 2)
+    }
+
+    func testArmedAttachmentSourceScriptConsumesOnceAndIgnoresExpiredRecords() async throws {
+        let webView = WKWebView(frame: .zero)
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+        _ = try await webView.evaluateJavaScript(
+            "window.__xmatrixPendingAttachmentSource = { source: 'photos', expiresAt: \(nowMs + 5000) }; true;"
+        )
+        let first = try await webView.evaluateJavaScript(NativeAttachmentPicker.readArmedSourceScript)
+        XCTAssertEqual(NativeAttachmentPicker.parseArmedSource(first), .photos)
+        // Second call (e.g. profile avatar picker) sees nil.
+        let second = try await webView.evaluateJavaScript(NativeAttachmentPicker.readArmedSourceScript)
+        XCTAssertNil(NativeAttachmentPicker.parseArmedSource(second))
+
+        // Expired record is cleared and ignored.
+        _ = try await webView.evaluateJavaScript(
+            "window.__xmatrixPendingAttachmentSource = { source: 'camera', expiresAt: \(nowMs - 1000) }; true;"
+        )
+        let expired = try await webView.evaluateJavaScript(NativeAttachmentPicker.readArmedSourceScript)
+        XCTAssertNil(NativeAttachmentPicker.parseArmedSource(expired))
+    }
+
+    func testAttachmentPickerParsesSourcesPrefersMoviesAndSanitizesNames() {
+        XCTAssertEqual(NativeAttachmentPicker.parseArmedSource("photos"), .photos)
+        XCTAssertEqual(NativeAttachmentPicker.parseArmedSource("camera"), .camera)
+        XCTAssertEqual(NativeAttachmentPicker.parseArmedSource("files"), .files)
+        XCTAssertNil(NativeAttachmentPicker.parseArmedSource("unknown"))
+        XCTAssertNil(NativeAttachmentPicker.parseArmedSource(nil))
+
+        XCTAssertEqual(
+            NativeAttachmentPicker.preferredTypeIdentifier(for: ["public.jpeg", "public.mpeg-4"]),
+            "public.mpeg-4"
+        )
+        XCTAssertEqual(
+            NativeAttachmentPicker.preferredTypeIdentifier(for: ["public.plain-text", "public.png"]),
+            "public.png"
+        )
+        XCTAssertEqual(AttachmentStagingStore.sanitizedFilename("  ../photo  ", fallbackExtension: "jpg"), "photo.jpg")
+        XCTAssertEqual(AttachmentStagingStore.sanitizedFilename("..", fallbackExtension: "png"), "attachment.png")
+
+        let (coordinator, container) = makeCoordinator()
+        defer { withExtendedLifetime(container) {} }
+        coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        let uiDelegate = coordinator.webView?.uiDelegate as AnyObject?
+        XCTAssertTrue(
+            uiDelegate?.responds(
+                to: NSSelectorFromString("webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:")
+            ) == true
+        )
+    }
 }

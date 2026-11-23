@@ -3,11 +3,17 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { humanAvatarMimeType } from "@xmatrix/protocol";
 import { Camera, Loader2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 
+import {
+  getActiveNativeAttachmentPanel,
+  openNativeAttachmentPanel,
+  subscribeNativeAttachmentPanel,
+} from "@/components/dashboard/composer-attachment-picker";
 import { HumanAvatarCropDialog } from "@/components/dashboard/human-avatar-crop-dialog";
 import { Face, useFace, type FaceOf } from "@/components/dashboard/face";
 import { IdentityAvatar } from "@/components/dashboard/identity-avatar";
+import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { HUMAN_AVATAR_ACCEPT, type PreparedAvatar } from "@/lib/human-avatar-image";
 import { cn } from "@/lib/utils";
 
@@ -35,10 +41,25 @@ export function HumanAvatarPicker({
   onError: (message: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const mountedRef = useRef(true);
+  const ownerId = useId();
+  const activeNativePanel = useSyncExternalStore(
+    subscribeNativeAttachmentPanel,
+    getActiveNativeAttachmentPanel,
+    () => null
+  );
+  const nativePanelBusy = activeNativePanel !== null;
   const [preview, setPreview] = useState<string | null>(null);
   const [cropFile, setCropFile] = useState<File | null>(null);
   const of: FaceOf = { kind: "user", id: userId, name: displayName };
   const face = useFace(of);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   /* The preview is an object URL for the encoded blob, so it must outlive the
      upload but not the component. Revoking on replacement as well as unmount
@@ -103,11 +124,24 @@ export function HumanAvatarPicker({
       <button
         type="button"
         aria-label="Change your photo"
-        disabled={busy}
-        onClick={() => inputRef.current?.click()}
+        disabled={busy || nativePanelBusy}
+        onClick={() => {
+          if (getDesktopBridge()?.nativeAttachmentOpenPanel) {
+            openNativeAttachmentPanel({
+              multiple: false,
+              accept: HUMAN_AVATAR_ACCEPT,
+              origin: { ownerId, generation: 0, draftRevision: 0, scope: userId },
+              deliver: (files) => {
+                if (mountedRef.current) pick(files?.[0]);
+              },
+            });
+            return;
+          }
+          inputRef.current?.click();
+        }}
         className={cn(
           "group relative block size-14 rounded-full focus-visible:outline-2 focus-visible:outline-offset-2",
-          busy && "cursor-progress",
+          (busy || nativePanelBusy) && "cursor-progress",
         )}
       >
         {/* The picture just cropped shows at once, before it is the face everyone sees. */}

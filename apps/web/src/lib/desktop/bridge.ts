@@ -68,6 +68,8 @@ export type ApplePurchaseTransaction = {
   environment: "Production" | "Sandbox";
 };
 
+export type NativeAttachmentPickerSource = "photos" | "camera" | "files";
+
 export type DesktopBridge = {
   googlePlayProducts?: (input: { subscriptionId: string }) => Promise<{ basePlanId: string; displayPrice: string }[]>;
   googlePlayPurchase?: (input: { subscriptionId: string; basePlanId: string; accountToken: string }) => Promise<{
@@ -106,6 +108,13 @@ export type DesktopBridge = {
   getClipboardImages?: () => Promise<DesktopClipboardImage[]>;
   /** Write an image onto the OS clipboard via Electron nativeImage. */
   writeClipboardImage?: (image: DesktopClipboardImage) => Promise<void>;
+  /**
+   * True when the iOS native shell implements `WKUIDelegate.runOpenPanelWith`
+   * and reads the one-shot source armed by the composer's single-surface
+   * attachment menu so `<input type="file">` receives disk-backed Files directly.
+   * Absent on web and older shells.
+   */
+  nativeAttachmentOpenPanel?: boolean;
   checkCliInstalled: () => Promise<{ installed: boolean; version?: string }>;
   saveCliSession?: (payload: DesktopCliSessionPayload) => Promise<{
     ok: boolean;

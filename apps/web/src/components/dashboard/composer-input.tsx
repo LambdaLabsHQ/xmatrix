@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { ArrowUp, Loader2, PlugZap, } from "lucide-react";
@@ -52,8 +53,10 @@ export type ComposerInputAuthorityProps = ComposerContextFields & {
   inputTrailing?: ReactNode;
   /** Controls after the send button (thread cancel). */
   afterSend?: ReactNode;
-  /** A list the composer shows in place of completion (input history); it takes the box's open panel shape. */
+  /** A list the composer shows in place of completion (input history, attachment sources); it takes the box's open panel shape. */
   panel?: ReactNode;
+  /** Stable key naming the active `panel` so switching between panels also triggers a smooth height morph. */
+  panelKey?: string;
   /** Key handling before completion and Enter-to-send, for the `panel`'s own keys; true when it took the key. */
   onKeyDownFirst?: (event: ComposerKeyEvent) => boolean;
   /** Extra key handling after shared completion/enter (e.g. attachment backspace). */
@@ -122,6 +125,7 @@ function ComposerInputSurface({
   inputTrailing,
   afterSend,
   panel,
+  panelKey,
   onKeyDownFirst,
   onKeyDownExtra,
   boxClassName,
@@ -147,6 +151,7 @@ function ComposerInputSurface({
   const internalFieldRef = useRef<ComposerField | null>(null);
   const fieldRef = fieldRefProp ?? internalFieldRef;
   const boxRef = useRef<HTMLElement | null>(null);
+  const inputRowRef = useRef<HTMLDivElement | null>(null);
   const { user } = useAuth();
   // Plain text has no addresses to paint. Do not rebuild the interaction
   // registry on every activity report until a draft actually contains one.
@@ -177,12 +182,19 @@ function ComposerInputSurface({
     completionApiRef.current = completion;
   }
 
-  // The completion panel morphs out of the capsule: the glass box itself
-  // grows from the height it had to the panel's (or back), with its content
-  // pinned to the bottom edge and revealed as it grows, as the work dock's
-  // island grows into its panel. The box's last settled height is kept so
-  // the change can start from it.
+  // Any composer panel (completion, input history, attachment sources) morphs
+  // out of the capsule: the glass box itself grows from the height it had to
+  // the panel's (or back), with its content pinned to the bottom edge and
+  // revealed as it grows, as the work dock's island grows into its panel.
+  // Interrupting an in-flight morph reads the box's current animated height so
+  // rapid toggles never snap.
   const settledBoxHeightRef = useRef<number | null>(null);
+  const activeMorphAnimationRef = useRef<Animation | null>(null);
+  const latestPanelRef = useRef<{ key: string; node: ReactNode } | null>(null);
+  const [closingPanel, setClosingPanel] = useState<{ node: ReactNode; bottomOffset: number } | null>(null);
+  if (!completion.isCompletionOpen && panel) {
+    latestPanelRef.current = { key: panelKey ?? "panel", node: panel };
+  }
   useEffect(() => {
     const box = boxRef.current;
     if (!box) return;
@@ -192,23 +204,54 @@ function ComposerInputSurface({
     observer.observe(box);
     return () => observer.disconnect();
   }, []);
-  const completionOpen = completion.isCompletionOpen;
+  const morphStateKey = completion.isCompletionOpen ? "completion" : panel ? (panelKey ?? "panel") : "closed";
+  const panelOpen = morphStateKey !== "closed";
+  const prevMorphStateKeyRef = useRef(morphStateKey);
   useLayoutEffect(() => {
     const box = boxRef.current;
-    const from = settledBoxHeightRef.current;
-    if (!box || from === null) return;
+    if (!box) return;
+    const previousKey = prevMorphStateKeyRef.current;
+    if (previousKey === morphStateKey) {
+      if (settledBoxHeightRef.current === null && !box.getAnimations().length) {
+        settledBoxHeightRef.current = box.getBoundingClientRect().height;
+      }
+      return;
+    }
+    prevMorphStateKeyRef.current = morphStateKey;
+    const running = box.getAnimations();
+    const from = running.length > 0 ? box.getBoundingClientRect().height : settledBoxHeightRef.current;
+    for (const animation of running) animation.cancel();
+    activeMorphAnimationRef.current = null;
     const to = box.getBoundingClientRect().height;
     settledBoxHeightRef.current = to;
-    if (Math.abs(to - from) < 1 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    for (const running of box.getAnimations()) running.cancel();
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (from === null || Math.abs(to - from) < 1 || reducedMotion) {
+      box.classList.remove("app-composer-box-morphing");
+      setClosingPanel(null);
+      return;
+    }
+    if (panelOpen) {
+      setClosingPanel(null);
+    } else if (previousKey !== "completion" && latestPanelRef.current) {
+      const bottomOffset = inputRowRef.current?.getBoundingClientRect().height ?? 0;
+      setClosingPanel({ node: latestPanelRef.current.node, bottomOffset });
+    } else {
+      setClosingPanel(null);
+    }
     box.classList.add("app-composer-box-morphing");
-    const animation = box.animate([{ height: `${from}px` }, { height: `${to}px` }], completionOpen
+    const animation = box.animate([{ height: `${from}px` }, { height: `${to}px` }], panelOpen
       ? { duration: 360, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }
       : { duration: 240, easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
-    const settle = () => box.classList.remove("app-composer-box-morphing");
+    activeMorphAnimationRef.current = animation;
+    const settle = () => {
+      if (activeMorphAnimationRef.current !== animation) return;
+      activeMorphAnimationRef.current = null;
+      box.classList.remove("app-composer-box-morphing");
+      setClosingPanel(null);
+    };
     animation.onfinish = settle;
     animation.oncancel = settle;
-  }, [completionOpen]);
+  }, [morphStateKey, panelOpen]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -267,12 +310,20 @@ function ComposerInputSurface({
             ))}
           </div>
         )}
-        {completion.renderOverlays()}
-        {panel}
+        {completion.isCompletionOpen ? completion.renderOverlays() : panel}
+        {!panelOpen && closingPanel && (
+          <div
+            aria-hidden="true"
+            className="app-composer-panel-closing pointer-events-none absolute inset-x-0 z-[2] [animation:app-composer-attach-out_200ms_cubic-bezier(0.4,0,0.2,1)_forwards] motion-reduce:animate-none [&_.app-composer-attach-menu]:animate-none"
+            style={{ bottom: `${closingPanel.bottomOffset}px` }}
+          >
+            {closingPanel.node}
+          </div>
+        )}
         {/* One capsule: attach, text, actions and send share the glass. When
             the text wraps or a header shows, the same surface grows into a
             panel and the controls stay on its bottom edge. */}
-        <div className="composer-input-row flex min-w-0 items-end gap-2">
+        <div ref={inputRowRef} className="composer-input-row flex min-w-0 items-end gap-2">
           {inputLeading}
           <ComposerEditor
             fieldRef={fieldRef}

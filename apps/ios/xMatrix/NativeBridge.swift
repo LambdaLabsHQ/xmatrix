@@ -82,6 +82,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         authorizeInBrowser: (request) => invoke("authorizeInBrowser", request),
         signInWithApple: (request) => invoke("signInWithApple", request),
         getClipboardImages: () => invoke("getClipboardImages"),
+        nativeAttachmentOpenPanel: true,
         checkCliInstalled: () => invoke("checkCliInstalled"),
         openCliInstall: () => invoke("openCliInstall"),
         setMobileTabState: (state) => invoke("setMobileTabState", state),
