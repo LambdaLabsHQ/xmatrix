@@ -3,12 +3,13 @@
 import { Check } from "lucide-react";
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
+import { appHref } from "@/lib/site-url";
 
 export function Pricing({ locale = "en" }: { locale?: Locale }) {
   const copy = landingCopy[locale].pricing;
   const plans = [
-    { name: "Free", price: "$0", period: "", ...copy.free, href: "/login", highlighted: false },
-    { name: "Pro", price: "$10", ...copy.pro, href: "/login?next=%2Fbilling", highlighted: true },
+    { name: "Free", price: "$0", period: "", ...copy.free, href: appHref("/login"), highlighted: false },
+    { name: "Pro", price: "$10", ...copy.pro, href: appHref("/login?next=%2Fbilling"), highlighted: true },
   ];
   return (
     <section id="pricing" className="x-section">
@@ -64,7 +65,7 @@ export function Pricing({ locale = "en" }: { locale?: Locale }) {
                     </LiquidGlassPill>
                     <LiquidGlassPill
                       as="a"
-                      href="/login?next=%2Fbilling"
+                      href={appHref("/login?next=%2Fbilling")}
                       className="inline-flex h-11 items-center justify-center px-4 text-sm font-semibold"
                     >
                       {copy.pro.yearly}
