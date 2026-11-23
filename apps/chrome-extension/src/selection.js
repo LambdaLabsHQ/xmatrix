@@ -1,8 +1,9 @@
 // Ask about what you are reading, right on the page. As soon as the person
 // selects text, this script frames the extension's question box under it
 // (app/ask.html, built from apps/web extension-app/ask.tsx): the App's own
-// conversation composer, holding the passage quoted. It does not take the
-// focus, so the selection can still be copied; a click goes into it. Enter
+// conversation composer, for the question (the selection is the quote, sent
+// with it). It does not take the focus, so the selection can still be
+// copied; a click goes into it. Enter
 // starts a conversation in the Space the side panel shows, where an Agent
 // picks it up, and the side panel opens on it.
 //
