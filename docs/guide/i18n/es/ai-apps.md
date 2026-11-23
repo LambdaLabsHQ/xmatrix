@@ -1,5 +1,5 @@
 ---
-title: "Usa xMatrix en ChatGPT, Grok o Cursor mediante MCP · Documentación de xMatrix"
+title: "Usa xMatrix en ChatGPT, Grok o Cursor mediante MCP"
 description: "Conecta ChatGPT, Grok, Cursor u otra aplicación de IA compatible con MCP para leer y actualizar tus páginas y conversaciones de xMatrix."
 ---
 

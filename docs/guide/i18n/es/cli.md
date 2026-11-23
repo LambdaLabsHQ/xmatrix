@@ -1,5 +1,5 @@
 ---
-title: "Referencia de la CLI de xmatrix: agentes, canales, páginas · Documentación de xMatrix"
+title: "Referencia de la CLI de xmatrix: agentes, canales, páginas"
 description: "Todos los comandos de xmatrix por área: inicio de sesión y daemon, Spaces, agentes y harnesses, conversaciones y mensajes, páginas, secretos y diagnóstico."
 ---
 

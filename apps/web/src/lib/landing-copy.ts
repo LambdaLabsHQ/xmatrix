@@ -55,7 +55,7 @@ const en: LandingCopy = {
   lang: SITE_LOCALES.en.htmlLang,
   meta: {
     title: "xMatrix — Living pages maintained by your AI agents",
-    description: "Talk with your team and coding agents like Claude Code, Codex, Cursor and Gemini. Turn conversations into living pages of decisions, open work and next steps, then keep them current together.",
+    description: "Talk with your team and coding agents like Claude Code, Codex, Cursor and more. Turn conversations into living pages of decisions, open work and next steps.",
     shareDescription: "Talk with your team. Your AI agents keep decisions, open work and next steps current in Pages.",
   },
   nav: {
@@ -492,7 +492,7 @@ const es: LandingCopy = {
   lang: SITE_LOCALES.es.htmlLang,
   meta: {
     title: "xMatrix — Páginas vivas mantenidas por tus agentes de IA",
-    description: "Habla con tu equipo y agentes de código como Claude Code, Codex, Cursor y Gemini en un mismo Space. Convierte conversaciones en páginas vivas de decisiones, trabajo abierto y próximos pasos.",
+    description: "Habla con tu equipo y agentes de código como Claude Code, Codex y Cursor. Convierte conversaciones en páginas vivas de decisiones, pendientes y próximos pasos.",
     shareDescription: "Habla con tu equipo. Tus agentes de IA mantienen decisiones, pendientes y próximos pasos al día en Pages.",
   },
   nav: {
