@@ -6,7 +6,7 @@ import type {
   HumanTraceAccessServerMessage,
   HumanWorkspaceResourceChangedMessage,
 } from "@xmatrix/protocol/connections/human";
-import { HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST } from "@xmatrix/protocol/connections/human";
+import { HUMAN_CLIENT_BROWSER_READ, HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST } from "@xmatrix/protocol/connections/human";
 import {
   CLIENT_UPGRADE_REQUIRED_CLOSE_CODE,
   HUMAN_AUTH_INVALID_FAILURE_CODE,
@@ -80,6 +80,8 @@ export interface HumanRuntimeSession {
   presenceCoverage?: true;
   /** Self-contained Instance facts and separate transient work frames. */
   instanceRecords?: true;
+  /** The Chrome extension's side panel: it reads pages for the person's Agents (browser-read.ts). */
+  browserRead?: true;
 }
 
 /**
@@ -349,6 +351,7 @@ export class HumanRuntimeTransport {
       const presenceCoverage = Array.isArray(device.capabilities) &&
         device.capabilities.includes(HUMAN_CLIENT_PRESENCE_COVERAGE);
       const instanceRecords = Array.isArray(device.capabilities) && device.capabilities.includes(HUMAN_CLIENT_INSTANCE_RECORDS);
+      const browserRead = Array.isArray(device.capabilities) && device.capabilities.includes(HUMAN_CLIENT_BROWSER_READ);
       const session: HumanRuntimeSession = {
         user: authentication.user,
         connectedAt: now,
@@ -362,6 +365,7 @@ export class HumanRuntimeTransport {
         ...(presenceDigest ? { presenceDigest: true as const } : {}),
         ...(presenceCoverage ? { presenceCoverage: true as const } : {}),
         ...(instanceRecords ? { instanceRecords: true as const } : {}),
+        ...(browserRead ? { browserRead: true as const } : {}),
       };
       this.sockets.establish(ws, session, authentication.connected);
       // Pure-Authority does not host live agent_list inventory (that is REST/profile
@@ -589,5 +593,7 @@ function refusedClient(device: unknown): Record<string, string> {
 
 /** Capability negotiation affects representation only, never audience grants. */
 function humanSessionAcceptsFrame(session: HumanRuntimeSession, message: HumanServerMessage): boolean {
+  // A page read goes only to a client that reads pages: the desktop app or a Web tab would leave the Agent waiting.
+  if (message.type === "browser_read_requested") return session.browserRead === true;
   return message.type !== "instance_records" && message.type !== "instance_activity" || session.instanceRecords === true;
 }

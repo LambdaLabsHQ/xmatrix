@@ -185,6 +185,7 @@ import {
   SmilePlus,
   Trash2,
   X,
+  Globe,
 } from "lucide-react";
 
 import { Textarea } from "@/components/ui/textarea";
@@ -308,7 +309,7 @@ import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
 } from "@/components/dashboard/secret-request-card";
 
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, browserPageOf } from "@xmatrix/protocol";
 import { StartupFailureProblem } from "./startup-failure-problem";
 
 
@@ -2712,6 +2713,8 @@ export const MessageRow = memo(function MessageRow({
       </div>
     </MentionReadMessageScopeProvider>
   );
+  // Written in the Chrome extension's side panel: the page the person was looking at (browser-page.ts).
+  const browserPage = browserPageOf(message.metadata);
   const underWords = (message.attachments ?? []).filter((_attachment, index) =>
     !richMessage.picturedPlaces.has(index + 1));
   function drawPicture(place: number) {
@@ -3045,6 +3048,13 @@ export const MessageRow = memo(function MessageRow({
           <div ref={attachmentGridRef} className="mt-2 grid w-full max-w-[min(42rem,100%)] min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
             {underWords.map(renderAttachment)}
           </div>
+        )}
+        {!recalled && browserPage && (
+          <a href={browserPage.href} target="_blank" rel="noreferrer" title={browserPage.href}
+            className="message-browser-page mt-1 flex w-fit max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+            <Globe aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate">{browserPage.title || new URL(browserPage.href).host}</span>
+          </a>
         )}
         {/* After the words and the pictures. A choice between them reads as a second message. */}
         {!recalled && !editing && !contextOnly && !askOffered && message.messageId && onLaunchChoice && (launchWindow || launchChoiceOffered) && (

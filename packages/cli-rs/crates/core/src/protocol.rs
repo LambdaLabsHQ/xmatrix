@@ -605,6 +605,24 @@ pub struct CrossChannelReplySource {
     pub replier_instance_id: Option<String>,
 }
 
+/// The page a person was looking at in Chrome when they wrote the message in
+/// the xMatrix extension's side panel (`browserPage` metadata, protocol
+/// browser-page.ts): its title, possibly empty, and its web address.
+pub fn browser_page(metadata: Option<&serde_json::Value>) -> Option<(String, String)> {
+    let page = metadata?.get("browserPage")?;
+    let href = page.get("href")?.as_str()?.trim();
+    let lower = href.to_ascii_lowercase();
+    if href.len() > 2_000 || !(lower.starts_with("https://") || lower.starts_with("http://")) {
+        return None;
+    }
+    let title = page
+        .get("title")
+        .and_then(|value| value.as_str())
+        .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "))
+        .unwrap_or_default();
+    Some((title.chars().take(300).collect(), href.to_string()))
+}
+
 pub fn cross_channel_reply_source(
     metadata: Option<&serde_json::Value>,
 ) -> Option<CrossChannelReplySource> {

@@ -374,6 +374,7 @@ async function appendChannelMessageWithAttachments(input: {
   replyToMessageId?: string;
   appMentions: ReturnType<typeof parseAppMentions>;
   invocationSelections?: AgentInvocationSelections;
+  metadata?: Record<string, unknown>;
   deadlineMs?: number;
 }): Promise<{
   message?: unknown;
@@ -396,6 +397,7 @@ async function appendChannelMessageWithAttachments(input: {
     replyToMessageId: input.replyToMessageId,
     appMentions: input.appMentions.length > 0 ? input.appMentions : undefined,
     invocationSelections: input.invocationSelections,
+    metadata: input.metadata,
     // A person sends from here: the Agents the message summons start.
     launch: true,
     attachments: committedAttachments.length > 0 ? committedAttachments : undefined,

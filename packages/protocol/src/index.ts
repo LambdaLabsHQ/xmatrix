@@ -34,6 +34,7 @@ export {
 export type { TextTaskRequest, TextTaskResult, TextTaskStatus } from "./text-task.js";
 export { PAGE_AGENT_INK_MS, PAGE_CO_WRITE_RATE, PAGE_MESSAGE_CO_WRITE, PAGE_COWRITE_INPUT_CAPABILITY, PageCoWriteParser, parsePageCoWriteReply } from "./page-co-writing.js";
 export { discussionHead, discussionHeadsIn, splitDiscussionHead, withoutDiscussionHeads, type PlacedDiscussionHead } from "./discussion-head.js";
+export { BROWSER_PAGE_METADATA_KEY, browserPageMetadata, browserPageOf, type BrowserPage } from "./browser-page.js";
 export { automaticConversationName } from "./conversation-name.js";
 export type { DiscussionHead, DiscussionSource } from "./discussion-head.js";
 export type {
@@ -355,6 +356,7 @@ export type {
 export {
   HUMAN_CLIENT_PRESENCE_COVERAGE,
   HUMAN_CLIENT_INSTANCE_RECORDS,
+  HUMAN_CLIENT_BROWSER_READ,
   HUMAN_CLIENT_PRESENCE_DIGEST,
   HUMAN_HEARTBEAT_PING,
   HUMAN_HEARTBEAT_PONG,

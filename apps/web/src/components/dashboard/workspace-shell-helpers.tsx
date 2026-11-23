@@ -154,6 +154,8 @@ export type OutgoingMessage = {
   replyToMessageId?: string;
   replyTo?: TimelineItem["replyTo"];
   appMentions: ReturnType<typeof parseAppMentions>;
+  /** Caller metadata: the page beside the extension's side panel when it was written there (browser-page.ts). */
+  metadata?: Record<string, unknown>;
   sentAt: string;
   /**
    * `unconfirmed` means the send passed its deadline with the result unknown —

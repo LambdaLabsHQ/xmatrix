@@ -159,3 +159,20 @@ test("outside the side panel an Agent's page read goes nowhere", (t) => {
   embed.forwardEmbedBrowserRead({ requestId: "req-12345678", channelId: "c1", target: "conversation", agentName: "claude" });
   assert.equal(win.parent.posted.length, 0);
 });
+
+// Each message written in the side panel carries the page beside it (browser-page.ts).
+test("the side panel knows the page beside it, and messages carry only a web page", (t) => {
+  const { win, embed } = load(t, EXTENSION);
+  const stop = embed.subscribeEmbedPage(() => undefined);
+  win.dispatch({ source: win.parent, origin: EXTENSION, data: { protocol: "xmatrix-embed/1", type: "page",
+    title: "Incident 2481", href: "https://status.example.com/i/2481", text: "p99 rose" } });
+  stop();
+  assert.deepEqual(embed.embedBrowserPage(), { title: "Incident 2481", href: "https://status.example.com/i/2481" });
+  const { browserPageMetadata, browserPageOf } = require("@xmatrix/protocol");
+  const metadata = browserPageMetadata(embed.embedBrowserPage());
+  assert.deepEqual(browserPageOf(metadata), { title: "Incident 2481", href: "https://status.example.com/i/2481" });
+  assert.equal(browserPageOf({ browserPage: { title: "x", href: "javascript:alert(1)" } }), null);
+  assert.equal(browserPageOf({ other: true }), null);
+  globalThis.window = require("./extension-embed-test-frame.cjs").frameWindow("https://evil.example");
+  assert.equal(embed.embedBrowserPage(), null);
+});

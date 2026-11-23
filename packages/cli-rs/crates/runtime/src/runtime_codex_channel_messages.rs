@@ -183,6 +183,17 @@ fn format_incoming_channel_message_delivered_at(
         }
     }
 
+    // Written in the Chrome side panel: the page the person was looking at, which the Agent can read.
+    if let Some((title, href)) = protocol::browser_page(metadata) {
+        if !rendered_body.is_empty() {
+            rendered_body.push_str("\n\n");
+        }
+        let title = if title.is_empty() { href.clone() } else { title };
+        rendered_body.push_str(&format!(
+            "Viewing in Chrome: {title} <{href}> (`xmatrix browse` reads this page from their browser)"
+        ));
+    }
+
     let message_context = match (message_id, reply_to_message_id) {
         (Some(message_id), Some(reply_to_message_id)) => {
             format!(" messageId={message_id} replyToMessageId={reply_to_message_id}")

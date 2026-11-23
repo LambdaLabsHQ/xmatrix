@@ -33,7 +33,7 @@ function refusalMessage(refusal: string, ownerName: string): string {
     case "offline": return `${ownerName}'s browser is not connected: the xMatrix side panel is not open in Chrome. Ask them to open it, then try again.`;
     case "denied": return `${ownerName} did not allow reading that tab.`;
     case "not-open": return "That page is not open in the browser. The extension reads only pages the person has open; ask them to open it.";
-    case "no-page": return "This conversation was not started from a page in the browser; pass --tab <address> for a tab the person has open.";
+    case "no-page": return "There is no web page there: the side panel is beside a browser page, or this conversation was not started from a page. Pass --tab <address> for a tab the person has open.";
     case "no-access": return `${ownerName} has not given the xMatrix extension access to web pages, so it can read only the page a conversation was started from. They can turn it on in the side panel.`;
     case "unreadable": return "The browser could not read that page (it may be a browser page, or the extension has no access to it).";
     default: return refusal;
@@ -50,10 +50,13 @@ export function registerBrowserReadRoutes(app: Hono<{ Bindings: Env }>): void {
       await requireAgentRunChannelDelegation(c.env, run, []);
       const body = await c.req.json().catch(() => null) as { requestId?: unknown; target?: unknown } | null;
       const requestId = typeof body?.requestId === "string" && REQUEST_ID.test(body.requestId) ? body.requestId : null;
-      const target = body?.target === undefined || body.target === "conversation" ? "conversation"
+      // "current": the page beside the side panel, which the person shows by chatting there (Daniel 2026-11-23:
+      // no prompt for it). "conversation": the page the conversation was started from. Any other open tab: an address.
+      const target = body?.target === undefined || body.target === "current" ? "current"
+        : body.target === "conversation" ? "conversation"
         : typeof body.target === "string" && /^https?:\/\//u.test(body.target) && body.target.length <= 2_000 ? body.target : null;
       if (!requestId || !target) {
-        return c.json({ error: "Provide a requestId, and a target that is \"conversation\" or a page address" }, 400, NO_STORE);
+        return c.json({ error: "Provide a requestId, and a target that is \"current\", \"conversation\" or a page address" }, 400, NO_STORE);
       }
       const waited = await cellCall(c.env, run.ownerUserId, RELAY_RUNTIME_BROWSER_READ_WAIT_PATH, {
         ownerUserId: run.ownerUserId, requestId, channelId: run.channelId, target, agentName: run.agentName,

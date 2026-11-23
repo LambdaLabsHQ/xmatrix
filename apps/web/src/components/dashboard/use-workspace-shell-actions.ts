@@ -1,14 +1,14 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { appViewSelectionQuery, decodeChannelSnapshot, discussionHead, isAppSelectionView, presenceInstanceId, type SerializedChannel } from "@xmatrix/protocol";
+import { appViewSelectionQuery, browserPageMetadata, decodeChannelSnapshot, discussionHead, isAppSelectionView, presenceInstanceId, type SerializedChannel } from "@xmatrix/protocol";
 
 import { pageShellActions } from "./page-shell-actions";
 import { invocationSelectionsEnvelope } from "./composer-invocation-bindings";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
-import { announceEmbedSpace, subscribeEmbedOpen, subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
+import { announceEmbedSpace, embedBrowserPage, subscribeEmbedOpen, subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
 import { appAddressHref, appAddressOrigin } from "@/lib/app-address";
 import { pageApi } from "@/lib/pages/page-client";
 import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
@@ -2618,6 +2618,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         ? crypto.randomUUID()
         : `out-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     const sentAt = new Date().toISOString();
+    const browserPage = embedBrowserPage();
     setHistoryError(null);
     queueChannelTimelineScroll(channelId);
 
@@ -2631,6 +2632,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       replyToMessageId,
       replyTo,
       appMentions,
+      // Written in the extension's side panel: the page the person is looking at goes with it.
+      ...(browserPage ? { metadata: browserPageMetadata(browserPage) } : {}),
       sentAt,
       status: "pending",
     };
@@ -2647,7 +2650,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
    * Answers the stored message's id, or null when the row stayed unsent or unconfirmed.
    */
   async function attemptOutgoingSend(token: string, channel: ChannelSnapshot, outgoing: OutgoingMessage): Promise<string | null> {
-    const { clientMessageId, body, invocationSelections, replyToMessageId, appMentions, sentAt, uploads } = outgoing;
+    const { clientMessageId, body, invocationSelections, replyToMessageId, appMentions, sentAt, uploads, metadata } = outgoing;
     let { attachments } = outgoing;
     const channelId = channel.id;
     try {
@@ -2673,6 +2676,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         attachments,
         replyToMessageId,
         appMentions,
+        metadata,
       });
       if (isValidChannelMessage(payload.message)) {
         // Stamp clientMessageId before dropping the pending row so the confirmed
