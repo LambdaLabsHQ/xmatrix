@@ -6,7 +6,6 @@
 import {
   HubError,
   accountFrom,
-  countNeedsYou,
   createConversation,
   listSpaces,
   sendMessage,
@@ -20,7 +19,6 @@ import {
 } from "./hub-client.js";
 import { discussionTitle, pagePassage } from "./passage.js";
 
-const BADGE_ALARM = "needs-you";
 const SIGN_IN_ALARM = "sign-in";
 const MENU_ASK = "ask";
 const MENU_PAGE = "ask-page";
@@ -51,22 +49,11 @@ function serial(call) {
   inFlight = run.catch(() => undefined);
   return run;
 }
-// Calls with a valid token run at once: the badge's catalog read must not hold up the panel or a question.
+// Calls with a valid token run at once; only a renewal takes the queue.
 const authed = (call) => withSession(deps, store, call);
 
-async function setBadge(count) {
-  await chrome.action.setBadgeBackgroundColor({ color: "#b5832f" });
-  await chrome.action.setBadgeText({ text: count > 0 ? (count > 99 ? "99+" : String(count)) : "" });
-}
-
-async function refreshBadge() {
-  if (!(await store.get())) return setBadge(0);
-  try {
-    await setBadge(await authed((scoped, token) => countNeedsYou(scoped, token)));
-  } catch (error) {
-    if (error instanceof HubError && error.code === "signed_out") await setBadge(0);
-  }
-}
+// The toolbar shows no badge (Daniel 2026-11-23: a standing count of everything waiting was noise); the panel's
+// "Needs you" lists what waits. A badge an earlier version set is cleared at start.
 
 // ---- Sign-in: the person approves in a tab, so the panel may lose focus meanwhile.
 
@@ -92,7 +79,6 @@ async function pollSignIn() {
           await store.set(answer.session);
           await chrome.storage.session.remove("signIn");
           await chrome.alarms.clear(SIGN_IN_ALARM);
-          await refreshBadge();
           return;
         }
         wait = answer.intervalMs;
@@ -130,7 +116,6 @@ async function beginSignIn() {
 async function endSession() {
   const session = await store.get();
   await store.set(null);
-  await setBadge(0);
   if (session) await signOut(deps, session).catch(() => undefined);
 }
 
@@ -422,7 +407,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === BADGE_ALARM) refreshBadge();
   if (alarm.name === SIGN_IN_ALARM) pollSignIn();
 });
 
@@ -438,9 +422,9 @@ chrome.permissions.onRemoved.addListener(() => syncSelectionScript());
 
 function start() {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
-  chrome.alarms.create(BADGE_ALARM, { periodInMinutes: 1 });
+  chrome.alarms.clear("needs-you").catch(() => undefined);
+  chrome.action.setBadgeText({ text: "" }).catch(() => undefined);
   syncSelectionScript().catch(() => undefined);
-  refreshBadge();
 }
 
 /**

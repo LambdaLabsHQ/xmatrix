@@ -20,7 +20,7 @@ Your xMatrix Space beside every page. xMatrix is where your team and coding agen
 • Select text and ask about it right there: the question box opens under the selection. Your question starts a conversation in the side panel, with the passage and a link back to the page, and an Agent in your Space picks it up.
 • Or ask about the whole page, from the right-click menu or the side panel.
 • Mention an Agent, for example @claude, to hand the work to that one: a bug report, an incident page, a doc to update.
-• Your conversations, Agents, approvals and Pages stay live in the panel while you browse. The badge shows how many conversations are waiting on you.
+• Your conversations, Agents, approvals and Pages stay live in the panel while you browse.
 
 How it works
 • Sign in once on xmatrix.page. The extension shows a code to compare, and no password is typed into it.
@@ -47,8 +47,8 @@ Open the user's xMatrix workspace in the side panel, beside the page they are re
 | `scripting` | After the user acted, opens the question box in that tab or reads the text they selected; and registers the optional box beside selected text once the user grants web-page access. |
 | `contextMenus` | Adds "Ask about “selection”" and "Ask about this page" to the right-click menu. |
 | `storage` | Keeps the user's xMatrix sign-in on this device, and text they picked until the panel takes it. |
-| `alarms` | Refreshes the badge count once a minute, and keeps checking for the sign-in approval while the user approves it in a tab. |
-| Host `https://xmatrix-hub.xmatrix.sh/*` | The xMatrix server. The extension signs in to it and reads the badge count from it, and the workspace in the side panel reads and sends the user's conversations through it. |
+| `alarms` | Keeps checking for the sign-in approval while the user approves it in a tab. |
+| Host `https://xmatrix-hub.xmatrix.sh/*` | The xMatrix server. The extension signs in to it, starts the conversations the user asks on a page, and the workspace in the side panel reads and sends the user's conversations through it. |
 | Optional hosts `https://*/*`, `http://*/*` | Requested only when the user turns it on, right after signing in: shows the question box under text they select on a page, holding that text. It reads only the selected text, and sends it only with a question the user sends. |
 
 **Remote code:** No. All code ships in the package, the workspace shown in the side panel included: it is built into the package, not loaded from a website. The package's content security policy allows scripts from the package only.

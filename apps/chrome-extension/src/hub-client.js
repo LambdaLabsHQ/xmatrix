@@ -165,22 +165,6 @@ export async function withSession(deps, store, call) {
   return call(scoped, renewed.token);
 }
 
-/**
- * How many conversations wait on the signed-in person, across every Space:
- * the same count the web's "Needs you" section shows. The Hub answers with
- * only the conversations that wait, so the badge never reads the whole list.
- */
-export async function countNeedsYou(deps, token) {
-  const json = await request(deps, "/api/channels/attention", { token });
-  const waiting = new Set();
-  for (const space of json.attentionSnapshot?.spaces ?? []) {
-    for (const summary of space?.summaries ?? []) {
-      if (Number(summary?.unreadAttentionCount) > 0 && typeof summary.channelId === "string") waiting.add(summary.channelId);
-    }
-  }
-  return waiting.size;
-}
-
 /** When an access token (a JWT) expires, in ms since the epoch; 0 when it cannot be read. */
 export function tokenExpiresAt(token) {
   try {
