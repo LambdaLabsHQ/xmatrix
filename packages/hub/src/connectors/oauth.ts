@@ -1,4 +1,4 @@
-import { APP_CONNECTOR_PROVIDER_MANIFESTS, trimEnd, type AppConnectorProviderManifest } from "@xmatrix/protocol";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, GOOGLE_IDENTITY_SCOPES, trimEnd, type AppConnectorProviderManifest } from "@xmatrix/protocol";
 import { oauthStateProviderId, signOAuthState, verifyOAuthStateClaims } from "./oauth-state";
 import type { Env } from "../types";
 import { metered, type UpstreamMeter } from "../usage-cost-metering";
@@ -60,8 +60,11 @@ function validateGoogleGrant(providerId: string, payload: Record<string, unknown
   const scopes = typeof payload.scope === "string" ? payload.scope.split(/\s+/u).filter(Boolean) : [];
   const expected = APP_CONNECTOR_PROVIDER_MANIFESTS.find(candidate => candidate.id === providerId)!.oauth!.scopes;
   // Old Search Console grants remain refreshable; only a new consent can add verification.
+  // The identity scopes only name the account; a grant without them (older ones) is still whole.
+  const required = expected.filter(value => !(GOOGLE_IDENTITY_SCOPES as readonly string[]).includes(value));
   const validScopes = scopes.includes(scope) && new Set(scopes).size === scopes.length &&
-    scopes.every(value => expected.includes(value)) && ((!initial && providerId === "googlesearchconsole") || scopes.length === expected.length);
+    scopes.every(value => expected.includes(value)) && ((!initial && providerId === "googlesearchconsole") ||
+      required.every(value => scopes.includes(value)));
   if (!Number.isFinite(expires) || expires <= 0 || expires > 86_400 ||
       typeof payload.token_type !== "string" || payload.token_type.toLowerCase() !== "bearer" ||
       ((initial || payload.scope !== undefined) && !validScopes) ||

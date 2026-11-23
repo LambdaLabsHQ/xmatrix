@@ -123,3 +123,9 @@ test("a saved credential is replaced from one of the Space's secrets without typ
   await rows.getByRole("button", { name: "Use it" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "fill")).toEqual([{ fromSecrets: { apiKey: "bing-webmaster-yiming" } }]);
 });
+
+test("a connected app names the account it reached beside its status", async ({ page }) => {
+  await openApps(page, { providers: ["linear"], connections: [{ ...connection("linear", "Linear", "configured", "oauth"),
+    metadata: { connectedAccount: "Lambda Labs" } }], app: "Linear" });
+  await expect(page.getByTestId("connector-status")).toContainText("Connected · Lambda Labs · via Linear sign-in");
+});

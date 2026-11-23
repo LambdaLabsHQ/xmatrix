@@ -22,7 +22,7 @@ test("Google authorization requests only offline drive.file with signed Space/ad
   const client = oauthClient(env, "google");
   const url = new URL(await oauthAuthorizeUrl(client, { spaceId: "space-1", userId: "admin-1", redirectUri: "https://hub.test/cb" }));
   assert.equal(url.origin, "https://accounts.google.com");
-  assert.equal(url.searchParams.get("scope"), scope);
+  assert.equal(url.searchParams.get("scope"), "openid https://www.googleapis.com/auth/userinfo.email " + scope);
   assert.equal(url.searchParams.get("access_type"), "offline");
   assert.equal(url.searchParams.get("prompt"), "select_account consent");
   assert.equal(url.searchParams.has("include_granted_scopes"), false);

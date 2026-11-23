@@ -27,7 +27,7 @@ test("Search Console signs in with the company Google client but its own provide
   assert.equal(client.clientId, env.CONNECTOR_GOOGLE_CLIENT_ID);
   assert.ok(oauthProviderIds(env).includes("googlesearchconsole"));
   const url = new URL(await oauthAuthorizeUrl(client, { spaceId: "space-1", userId: "admin-1", redirectUri: "https://hub.test/cb" }));
-  assert.equal(url.searchParams.get("scope"), scope);
+  assert.equal(url.searchParams.get("scope"), "openid https://www.googleapis.com/auth/userinfo.email " + scope);
   assert.equal(url.searchParams.get("access_type"), "offline");
   assert.equal(url.searchParams.get("include_granted_scopes"), "false");
   const verified = await verifyOAuthState(env, url.searchParams.get("state"));
@@ -101,7 +101,7 @@ test("page actions refuse pages outside the named property before any provider c
 test("manifest and executors agree on action effects", () => {
   const manifest = getAppConnectorProvider("googlesearchconsole");
   assert.equal(manifest.status, "available");
-  assert.deepEqual(manifest.oauth.scopes, [legacyScope, verificationScope]);
+  assert.deepEqual(manifest.oauth.scopes, [...["openid", "https://www.googleapis.com/auth/userinfo.email"], legacyScope, verificationScope]);
   const effects = Object.fromEntries(manifest.actions.map(action => [action.id, [action.effect]]));
   assert.deepEqual(effects.submit_sitemap, ["write"]);
   for (const id of ["list_sites", "query", "list_sitemaps", "inspect_url"]) assert.equal(effects[id][0], "read");

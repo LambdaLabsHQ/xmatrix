@@ -24,7 +24,7 @@ test("Calendar has a separate exact three-scope offline grant and refuses missin
   const client = oauthClient(company, "googlecalendar");
   assert.equal(client.clientId, company.CONNECTOR_GOOGLE_CLIENT_ID);
   const url = new URL(await oauthAuthorizeUrl(client, { spaceId: "space", userId: "admin", redirectUri: "https://hub.test/cb" }));
-  assert.equal(url.searchParams.get("scope"), scopes.join(" "));
+  assert.equal(url.searchParams.get("scope"), "openid https://www.googleapis.com/auth/userinfo.email " + scopes.join(" "));
   assert.equal(url.searchParams.get("include_granted_scopes"), "false");
   assert.equal(url.searchParams.get("access_type"), "offline");
   const grant = { access_token: "a", refresh_token: "r", token_type: "Bearer", expires_in: 3600, scope: scopes.join(" ") };

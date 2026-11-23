@@ -8,6 +8,7 @@ import { upstreamMeter } from "../usage-cost-metering";
 import { connectionCredentials } from "./connection-credentials";
 import { ProviderRequestError } from "./http";
 import { providerEgress } from "./provider-egress";
+import { connectedAccount, hasConnectedAccount } from "./connected-account";
 import { connectorProvider } from "./registry";
 import { verifyDiscordNativeConnection } from "./discord-native";
 import { verifyFeishuNativeConnection } from "./feishu-native";
@@ -49,4 +50,10 @@ export async function verifyConnectorConnection(env: Env, spaceId: string, provi
     throw new Error(error instanceof DOMException && error.name === "TimeoutError"
       ? `${manifest.name} did not answer in time` : `${manifest.name} could not be reached`);
   }
+}
+
+/** After a passed check, the name of the account the connection reached, when its provider names one. */
+export async function checkedConnectedAccount(env: Env, spaceId: string, providerId: string): Promise<string | undefined> {
+  if (!hasConnectedAccount(providerId)) return undefined;
+  return connectedAccount(providerId, await connectionCredentials(env, spaceId, providerId), providerEgress(env, providerId));
 }

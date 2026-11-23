@@ -184,3 +184,11 @@ export async function verifyBingWebmaster(credentials: Readonly<Record<string, s
   if (!credentials.apiKey && !credentials.oauthToken) return;
   rows(await bing(credentials, egress, "GetUserSites"), "a site list for this account");
 }
+
+/** What the connection reaches, said on its page: Bing names no account, so its verified sites stand in. */
+export async function bingConnectedAccount(credentials: Readonly<Record<string, string>>, egress?: ProviderEgress): Promise<string | undefined> {
+  if (!credentials.apiKey && !credentials.oauthToken) return undefined;
+  const sites = rows(await bing(credentials, egress, "GetUserSites"), "a site list for this account");
+  const verified = sites.filter((site) => site.IsVerified === true).length;
+  return `${verified} verified site${verified === 1 ? "" : "s"}`;
+}
