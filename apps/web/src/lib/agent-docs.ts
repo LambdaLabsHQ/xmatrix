@@ -20,7 +20,7 @@ const askPrompt =
 const askBases = [
   { label: "ChatGPT", base: "https://chatgpt.com/?q=" },
   { label: "Claude", base: "https://claude.ai/new?q=" },
-  { label: "Perplexity", base: "https://www.perplexity.ai/search?q=" },
+  { label: "Perplexity", base: "https://www.perplexity.ai/search/new?q=" },
   { label: "Gemini", base: "https://www.google.com/search?udm=50&q=" },
   { label: "Grok", base: "https://grok.com/?q=" },
 ];

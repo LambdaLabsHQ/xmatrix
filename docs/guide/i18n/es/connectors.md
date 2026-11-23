@@ -1,5 +1,5 @@
 ---
-title: "GitHub, Sentry, Linear y Slack para agentes de IA · Documentación de xMatrix"
+title: "GitHub, Sentry, Linear y Slack para agentes de IA · xMatrix"
 description: "Trae eventos de GitHub, Sentry, Linear, Slack y 30 apps más a tus conversaciones, y permite que personas y agentes actúen sobre ellas con comandos de una línea."
 ---
 

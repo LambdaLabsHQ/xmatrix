@@ -135,8 +135,11 @@ import { inputHistoryKey, readInputHistory, rememberInput, type ComposerInputHis
 import { ComposerInputHistoryPanel } from "./composer-input-history-panel";
 import { ComposerAttachmentPanel } from "./composer-attachment-panel";
 import {
+  armNativeAttachmentSource,
   attachmentPanelKey,
-  loadNativePickedAttachments,
+  clearPendingAttachmentSource,
+  isDraftPickCurrent,
+  type DraftPickOrigin,
 } from "./composer-attachment-picker";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { isImeKeyDown } from "@/lib/ime-keydown";
@@ -439,6 +442,8 @@ export const Composer = memo(function Composer({
   const preparingSendRef = useRef(false);
   const [emptyPasteAnchorActive, setEmptyPasteAnchorActive] = useState(false);
   const uploadRegistryRef = useRef(createAttachmentUploadRegistry());
+  const mountedRef = useRef(true);
+  const pendingFileInputPickRef = useRef<DraftPickOrigin | null>(null);
   const handledMentionInsertRequestIdRef = useRef<number | null>(null);
   const handledAutoFocusRequestRef = useRef(0);
   // Set while files are inbound but have no row yet (the desktop clipboard
@@ -602,9 +607,13 @@ export const Composer = memo(function Composer({
   }, [compact]);
 
   useEffect(() => {
+    mountedRef.current = true;
     const uploadRegistry = uploadRegistryRef.current;
     const previewUrls = pendingPreviewUrlsRef.current;
     return () => {
+      mountedRef.current = false;
+      pendingFileInputPickRef.current = null;
+      clearPendingAttachmentSource();
       uploadRegistry.cancelAll();
       for (const url of previewUrls.values()) URL.revokeObjectURL(url);
       previewUrls.clear();
@@ -750,6 +759,10 @@ export const Composer = memo(function Composer({
   async function beginAttachmentIntake(
     load: () => AttachmentDropCandidate[] | Promise<AttachmentDropCandidate[]>
   ): Promise<number> {
+    const origin: DraftPickOrigin = {
+      generation: uploadRegistryRef.current.generation(),
+      scope: channelIdRef.current,
+    };
     intakeDepthRef.current += 1;
     setIntakeBusy(true);
     setAttachmentError(null);
@@ -760,11 +773,21 @@ export const Composer = memo(function Composer({
       intakeDepthRef.current -= 1;
       if (intakeDepthRef.current <= 0) {
         intakeDepthRef.current = 0;
-        setIntakeBusy(false);
+        if (mountedRef.current) setIntakeBusy(false);
       }
     };
     try {
       const candidates = await load();
+      // If the reader switched conversations (including A→B→A) or closed this
+      // composer while waiting for files, drop the stale pick cleanly.
+      if (!isDraftPickCurrent(origin, {
+        mounted: mountedRef.current,
+        generation: uploadRegistryRef.current.generation(),
+        scope: channelIdRef.current,
+      })) {
+        loaded();
+        return 0;
+      }
       // The rows are committed before the first await below, in the same
       // render as the busy flag clears: there is no moment without either.
       const intake = intakeAttachmentCandidates(candidates);
@@ -774,7 +797,13 @@ export const Composer = memo(function Composer({
       // Drop and the file picker call this fire-and-forget, so a rejection here
       // would surface as an unhandled rejection and nothing else. Whatever rows
       // exist have already been failed by the stage that threw.
-      setAttachmentError(userErrorMessage(error, "Couldn't attach the file"));
+      if (isDraftPickCurrent(origin, {
+        mounted: mountedRef.current,
+        generation: uploadRegistryRef.current.generation(),
+        scope: channelIdRef.current,
+      })) {
+        setAttachmentError(userErrorMessage(error, "Couldn't attach the file"));
+      }
       return 0;
     } finally {
       loaded();
@@ -1419,35 +1448,31 @@ export const Composer = memo(function Composer({
     },
   });
 
+  function openComposerFileInput(source?: NativeAttachmentPickerSource) {
+    pendingFileInputPickRef.current = {
+      generation: uploadRegistryRef.current.generation(),
+      scope: channelIdRef.current,
+    };
+    if (source) armNativeAttachmentSource(source);
+    else clearPendingAttachmentSource();
+    fileInputRef.current?.click();
+  }
+
   function pickNativeAttachments(source: NativeAttachmentPickerSource) {
     setAttachmentMenuActive(null);
-    const bridge = getDesktopBridge();
-    if (!bridge?.pickAttachments || !bridge?.readPickedAttachmentChunk) {
-      fileInputRef.current?.click();
-      return;
-    }
-    void beginAttachmentIntake(async () =>
-      fileCandidates(
-        await loadNativePickedAttachments(
-          bridge,
-          source,
-          MAX_ATTACHMENT_BYTES,
-          formatFileSize(MAX_ATTACHMENT_BYTES)
-        )
-      )
-    );
+    openComposerFileInput(source);
   }
 
   function handleAttachButtonClick() {
     if (!attachmentsEnabled || !writable) return;
     const bridge = getDesktopBridge();
-    if (bridge?.pickAttachments && bridge?.readPickedAttachmentChunk) {
+    if (bridge?.nativeAttachmentOpenPanel) {
       setInputHistory(null);
       dismissCompletion();
       setAttachmentMenuActive((current) => (current === null ? -1 : null));
       return;
     }
-    fileInputRef.current?.click();
+    openComposerFileInput();
   }
 
   function composerPanelKeyDown(event: ComposerKeyEvent): boolean {
@@ -1508,9 +1533,21 @@ export const Composer = memo(function Composer({
         multiple
         className="hidden"
         onChange={(event) => {
+          const pickOrigin = pendingFileInputPickRef.current;
+          pendingFileInputPickRef.current = null;
+          clearPendingAttachmentSource();
           const picked = event.target.files ? fileCandidates(event.target.files) : [];
-          if (picked.length > 0) void beginAttachmentIntake(() => picked);
           event.target.value = "";
+          if (
+            picked.length > 0 &&
+            isDraftPickCurrent(pickOrigin, {
+              mounted: mountedRef.current,
+              generation: uploadRegistryRef.current.generation(),
+              scope: channelIdRef.current,
+            })
+          ) {
+            void beginAttachmentIntake(() => picked);
+          }
         }}
       />
               <ComposerInputAuthority

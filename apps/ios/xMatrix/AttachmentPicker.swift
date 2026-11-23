@@ -14,26 +14,15 @@ struct StagedAttachment {
     let fileURL: URL
     let directoryURL: URL
     let name: String
-    let mimeType: String
-    let size: Int64
     let createdAt: Date
-
-    var metadataPayload: [String: Any] {
-        [
-            "token": token,
-            "name": name,
-            "mimeType": mimeType,
-            "size": size,
-        ]
-    }
 }
 
-/// Owns temporary copies of files chosen from native iOS pickers and serves them
-/// to WebKit in bounded chunks so large videos never cross IPC as one string.
+/// Keeps temporary copies of picked media and documents on disk long enough for
+/// WebKit's disk-backed `File` objects to finish preview, compression, upload,
+/// and retries, while bounding count and lifetime on disk.
 final class AttachmentStagingStore: @unchecked Sendable {
     static let maxEntries = 64
-    static let entryTTL: TimeInterval = 600
-    static let maxChunkBytes = 2 * 1024 * 1024
+    static let entryTTL: TimeInterval = 7200
 
     private let lock = NSLock()
     private let rootDirectory: URL
@@ -43,99 +32,52 @@ final class AttachmentStagingStore: @unchecked Sendable {
     init(
         rootDirectory: URL = FileManager.default.temporaryDirectory
             .appendingPathComponent("xmatrix-picked-attachments", isDirectory: true),
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        purgeExistingOnInit: Bool = true
     ) {
         self.rootDirectory = rootDirectory
         self.now = now
+        if purgeExistingOnInit {
+            try? FileManager.default.removeItem(at: rootDirectory)
+        }
     }
 
     deinit {
         releaseAll()
     }
 
-    func stage(copying sourceURL: URL, suggestedName: String? = nil, mimeType: String? = nil) throws -> StagedAttachment {
-        let token = UUID().uuidString.lowercased()
-        let directory = rootDirectory.appendingPathComponent(token, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
+    func stage(copying sourceURL: URL, suggestedName: String? = nil) throws -> StagedAttachment {
         let rawName = suggestedName?.isEmpty == false ? suggestedName! : sourceURL.lastPathComponent
-        let fileName = Self.sanitizedFilename(rawName, fallbackExtension: sourceURL.pathExtension)
-        let destination = directory.appendingPathComponent(fileName)
-
-        do {
+        return try stageFile(rawName: rawName, fallbackExtension: sourceURL.pathExtension) { destination in
             try FileManager.default.copyItem(at: sourceURL, to: destination)
-        } catch {
-            try? FileManager.default.removeItem(at: directory)
-            throw error
         }
-
-        return try registerStagedFile(
-            token: token,
-            directory: directory,
-            fileURL: destination,
-            name: fileName,
-            explicitMimeType: mimeType
-        )
     }
 
-    func stage(data: Data, name: String, mimeType: String) throws -> StagedAttachment {
+    func stage(data: Data, name: String, fallbackExtension: String? = nil) throws -> StagedAttachment {
+        try stageFile(rawName: name, fallbackExtension: fallbackExtension) { destination in
+            try data.write(to: destination, options: .atomic)
+        }
+    }
+
+    private func stageFile(
+        rawName: String,
+        fallbackExtension: String?,
+        write: (URL) throws -> Void
+    ) throws -> StagedAttachment {
         let token = UUID().uuidString.lowercased()
         let directory = rootDirectory.appendingPathComponent(token, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let fileName = Self.sanitizedFilename(name, fallbackExtension: UTType(mimeType: mimeType)?.preferredFilenameExtension)
+        let fileName = Self.sanitizedFilename(rawName, fallbackExtension: fallbackExtension)
         let destination = directory.appendingPathComponent(fileName)
         do {
-            try data.write(to: destination, options: .atomic)
+            try write(destination)
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw error
         }
 
-        return try registerStagedFile(
-            token: token,
-            directory: directory,
-            fileURL: destination,
-            name: fileName,
-            explicitMimeType: mimeType
-        )
-    }
-
-    func readChunk(token: String, offset: Int64, length: Int) throws -> [String: Any] {
-        let entry: StagedAttachment? = lock.withLock {
-            pruneExpiredLocked()
-            return entries[token]
-        }
-        guard let entry else {
-            throw NSError(
-                domain: "sh.xmatrix.app",
-                code: 404,
-                userInfo: [NSLocalizedDescriptionKey: "Selected file is no longer available."]
-            )
-        }
-        guard offset >= 0, length > 0 else {
-            throw NSError(
-                domain: "sh.xmatrix.app",
-                code: 400,
-                userInfo: [NSLocalizedDescriptionKey: "Invalid attachment chunk range."]
-            )
-        }
-
-        if offset >= entry.size {
-            return ["dataBase64": "", "bytesRead": 0, "eof": true]
-        }
-
-        let boundedLength = min(length, Self.maxChunkBytes)
-        let handle = try FileHandle(forReadingFrom: entry.fileURL)
-        defer { try? handle.close() }
-        try handle.seek(toOffset: UInt64(offset))
-        let data = try handle.read(upToCount: boundedLength) ?? Data()
-        let eof = offset + Int64(data.count) >= entry.size || data.isEmpty
-        return [
-            "dataBase64": data.base64EncodedString(),
-            "bytesRead": data.count,
-            "eof": eof,
-        ]
+        return registerStagedFile(token: token, directory: directory, fileURL: destination, name: fileName)
     }
 
     func release(token: String) {
@@ -159,29 +101,26 @@ final class AttachmentStagingStore: @unchecked Sendable {
     }
 
     var count: Int {
-        lock.withLock {
+        let dropped: [StagedAttachment] = lock.withLock {
             pruneExpiredLocked()
-            return entries.count
         }
+        for item in dropped {
+            try? FileManager.default.removeItem(at: item.directoryURL)
+        }
+        return lock.withLock { entries.count }
     }
 
     private func registerStagedFile(
         token: String,
         directory: URL,
         fileURL: URL,
-        name: String,
-        explicitMimeType: String?
-    ) throws -> StagedAttachment {
-        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-        let mimeType = Self.resolvedMimeType(explicit: explicitMimeType, filename: name)
+        name: String
+    ) -> StagedAttachment {
         let staged = StagedAttachment(
             token: token,
             fileURL: fileURL,
             directoryURL: directory,
             name: name,
-            mimeType: mimeType,
-            size: size,
             createdAt: now()
         )
         let evicted: [StagedAttachment] = lock.withLock {
@@ -228,91 +167,76 @@ final class AttachmentStagingStore: @unchecked Sendable {
         }
         return component
     }
+}
 
-    static func resolvedMimeType(explicit: String?, filename: String) -> String {
-        if let explicit = explicit?.trimmingCharacters(in: .whitespacesAndNewlines), !explicit.isEmpty {
-            return explicit
+private final class StagedURLBatch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var urlsByIndex: [Int: URL] = [:]
+
+    func record(index: Int, url: URL) {
+        lock.withLock { urlsByIndex[index] = url }
+    }
+
+    func orderedURLs(count: Int) -> [URL] {
+        lock.withLock {
+            (0..<count).compactMap { urlsByIndex[$0] }
         }
-        let ext = (filename as NSString).pathExtension
-        if !ext.isEmpty, let type = UTType(filenameExtension: ext), let mime = type.preferredMIMEType {
-            return mime
-        }
-        return "application/octet-stream"
     }
 }
 
-/// Presents native iOS Photos, Camera, or Files pickers directly so the composer
-/// can own its own single-surface morph menu instead of WebKit's detached popover.
+private final class OpenPanelCompletionBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: (([URL]?) -> Void)?
+
+    init(_ handler: @escaping ([URL]?) -> Void) {
+        self.handler = handler
+    }
+
+    func complete(_ urls: [URL]?) {
+        let pending: (([URL]?) -> Void)? = lock.withLock {
+            let current = handler
+            handler = nil
+            return current
+        }
+        guard let pending else { return }
+        if let urls, !urls.isEmpty {
+            pending(urls)
+        } else {
+            pending(nil)
+        }
+    }
+
+    deinit {
+        complete(nil)
+    }
+}
+
+/// Fulfills `WKUIDelegate.webView(_:runOpenPanelWith:initiatedByFrame:completionHandler:)`
+/// with native iOS pickers and hands disk-backed file URLs straight back to WebKit.
 @MainActor
 final class NativeAttachmentPicker: NSObject {
+    static let readArmedSourceScript = """
+    (() => {
+      const record = window.__xmatrixPendingAttachmentSource;
+      window.__xmatrixPendingAttachmentSource = null;
+      if (!record || typeof record !== "object") return null;
+      if (typeof record.expiresAt === "number" && record.expiresAt < Date.now()) return null;
+      return typeof record.source === "string" ? record.source : null;
+    })();
+    """
+
     weak var anchorView: UIView?
     let store: AttachmentStagingStore
-    private var activeContinuation: CheckedContinuation<[[String: Any]], Error>?
+    private var activeCompletion: OpenPanelCompletionBox?
 
     init(store: AttachmentStagingStore = AttachmentStagingStore()) {
         self.store = store
         super.init()
     }
 
-    func pick(source: AttachmentPickerSource) async throws -> [[String: Any]] {
-        guard let presenter = Self.topPresenter(from: anchorView) else {
-            throw NSError(
-                domain: "sh.xmatrix.app",
-                code: 500,
-                userInfo: [NSLocalizedDescriptionKey: "Could not open the attachment picker."]
-            )
-        }
-
-        if let previous = activeContinuation {
-            activeContinuation = nil
-            previous.resume(returning: [])
-        }
-
-        switch source {
-        case .photos:
-            return try await withCheckedThrowingContinuation { continuation in
-                activeContinuation = continuation
-                var configuration = PHPickerConfiguration()
-                configuration.selectionLimit = 0
-                configuration.filter = .any(of: [.images, .videos])
-                configuration.preferredAssetRepresentationMode = .compatible
-                let picker = PHPickerViewController(configuration: configuration)
-                picker.delegate = self
-                picker.presentationController?.delegate = self
-                presenter.present(picker, animated: true)
-            }
-
-        case .camera:
-            guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-                throw NSError(
-                    domain: "sh.xmatrix.app",
-                    code: 400,
-                    userInfo: [NSLocalizedDescriptionKey: "Camera is not available on this device."]
-                )
-            }
-            return try await withCheckedThrowingContinuation { continuation in
-                activeContinuation = continuation
-                let picker = UIImagePickerController()
-                picker.sourceType = .camera
-                let available = UIImagePickerController.availableMediaTypes(for: .camera) ?? []
-                let wanted = [UTType.image.identifier, UTType.movie.identifier].filter { available.contains($0) }
-                picker.mediaTypes = wanted.isEmpty ? [UTType.image.identifier] : wanted
-                picker.videoQuality = .typeHigh
-                picker.delegate = self
-                picker.presentationController?.delegate = self
-                presenter.present(picker, animated: true)
-            }
-
-        case .files:
-            return try await withCheckedThrowingContinuation { continuation in
-                activeContinuation = continuation
-                let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
-                picker.allowsMultipleSelection = true
-                picker.delegate = self
-                picker.presentationController?.delegate = self
-                presenter.present(picker, animated: true)
-            }
-        }
+    nonisolated static func parseArmedSource(_ raw: Any?) -> AttachmentPickerSource? {
+        guard let value = raw as? String else { return nil }
+        return AttachmentPickerSource(rawValue: value)
     }
 
     nonisolated static func preferredTypeIdentifier(for registeredIdentifiers: [String]) -> String? {
@@ -329,15 +253,117 @@ final class NativeAttachmentPicker: NSObject {
         return registeredIdentifiers.first
     }
 
-    private func finish(_ result: Result<[[String: Any]], Error>) {
-        guard let continuation = activeContinuation else { return }
-        activeContinuation = nil
-        switch result {
-        case .success(let items):
-            continuation.resume(returning: items)
-        case .failure(let error):
-            continuation.resume(throwing: error)
+    func presentOpenPanel(
+        source: AttachmentPickerSource?,
+        allowsMultipleSelection: Bool,
+        completionHandler: @escaping ([URL]?) -> Void
+    ) {
+        // Cancel any superseded open panel so WebKit never leaks an uncalled completion.
+        finish(nil)
+
+        guard let presenter = Self.topPresenter(from: anchorView) else {
+            completionHandler(nil)
+            return
         }
+
+        activeCompletion = OpenPanelCompletionBox(completionHandler)
+        if let source {
+            present(source: source, allowsMultipleSelection: allowsMultipleSelection, from: presenter)
+        } else {
+            presentSourceChooser(allowsMultipleSelection: allowsMultipleSelection, from: presenter)
+        }
+    }
+
+    private func presentSourceChooser(allowsMultipleSelection: Bool, from presenter: UIViewController) {
+        let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "Photo Library", style: .default) { [weak self] _ in
+            guard let self, let current = Self.topPresenter(from: self.anchorView) else {
+                self?.finish(nil)
+                return
+            }
+            self.present(source: .photos, allowsMultipleSelection: allowsMultipleSelection, from: current)
+        })
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            let cameraTitle = allowsMultipleSelection ? "Take Photo or Video" : "Take Photo"
+            sheet.addAction(UIAlertAction(title: cameraTitle, style: .default) { [weak self] _ in
+                guard let self, let current = Self.topPresenter(from: self.anchorView) else {
+                    self?.finish(nil)
+                    return
+                }
+                self.present(source: .camera, allowsMultipleSelection: allowsMultipleSelection, from: current)
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "Choose Files", style: .default) { [weak self] _ in
+            guard let self, let current = Self.topPresenter(from: self.anchorView) else {
+                self?.finish(nil)
+                return
+            }
+            self.present(source: .files, allowsMultipleSelection: allowsMultipleSelection, from: current)
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+            self?.finish(nil)
+        })
+        if let popover = sheet.popoverPresentationController, let anchor = anchorView ?? presenter.view {
+            popover.sourceView = anchor
+            popover.sourceRect = CGRect(x: anchor.bounds.midX, y: anchor.bounds.maxY - 24, width: 1, height: 1)
+        }
+        sheet.presentationController?.delegate = self
+        presenter.present(sheet, animated: true)
+    }
+
+    private func present(
+        source: AttachmentPickerSource,
+        allowsMultipleSelection: Bool,
+        from presenter: UIViewController
+    ) {
+        switch source {
+        case .photos:
+            var configuration = PHPickerConfiguration()
+            configuration.selectionLimit = allowsMultipleSelection ? 0 : 1
+            configuration.filter = allowsMultipleSelection ? .any(of: [.images, .videos]) : .images
+            configuration.preferredAssetRepresentationMode = .compatible
+            let picker = PHPickerViewController(configuration: configuration)
+            picker.delegate = self
+            picker.presentationController?.delegate = self
+            presenter.present(picker, animated: true)
+
+        case .camera:
+            guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+                finish(nil)
+                let alert = UIAlertController(
+                    title: "Camera unavailable",
+                    message: "Camera is not available on this device.",
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                presenter.present(alert, animated: true)
+                return
+            }
+            let picker = UIImagePickerController()
+            picker.sourceType = .camera
+            let available = UIImagePickerController.availableMediaTypes(for: .camera) ?? []
+            let wanted = allowsMultipleSelection
+                ? [UTType.image.identifier, UTType.movie.identifier].filter { available.contains($0) }
+                : [UTType.image.identifier].filter { available.contains($0) }
+            picker.mediaTypes = wanted.isEmpty ? [UTType.image.identifier] : wanted
+            picker.videoQuality = .typeHigh
+            picker.delegate = self
+            picker.presentationController?.delegate = self
+            presenter.present(picker, animated: true)
+
+        case .files:
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+            picker.allowsMultipleSelection = allowsMultipleSelection
+            picker.delegate = self
+            picker.presentationController?.delegate = self
+            presenter.present(picker, animated: true)
+        }
+    }
+
+    private func finish(_ urls: [URL]?) {
+        let completion = activeCompletion
+        activeCompletion = nil
+        completion?.complete(urls)
     }
 
     private static func topPresenter(from view: UIView?) -> UIViewController? {
@@ -365,67 +391,36 @@ final class NativeAttachmentPicker: NSObject {
     }
 }
 
-private final class StagedAttachmentBatch: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stagedByIndex: [Int: StagedAttachment] = [:]
-    private var firstError: Error?
-
-    func record(index: Int, attachment: StagedAttachment) {
-        lock.withLock { stagedByIndex[index] = attachment }
-    }
-
-    func record(error: Error) {
-        lock.withLock {
-            if firstError == nil { firstError = error }
-        }
-    }
-
-    func result(count: Int) -> (payloads: [[String: Any]], error: Error?) {
-        lock.withLock {
-            let ordered = (0..<count).compactMap { stagedByIndex[$0]?.metadataPayload }
-            return (ordered, firstError)
-        }
-    }
-}
-
 extension NativeAttachmentPicker: PHPickerViewControllerDelegate {
     nonisolated func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         Task { @MainActor [weak self] in
             picker.dismiss(animated: true)
             guard let self else { return }
             guard !results.isEmpty else {
-                self.finish(.success([]))
+                self.finish(nil)
                 return
             }
             let stagingStore = self.store
             let group = DispatchGroup()
-            let batch = StagedAttachmentBatch()
+            let batch = StagedURLBatch()
 
             for (index, item) in results.enumerated() {
                 let provider = item.itemProvider
                 guard let typeIdentifier = Self.preferredTypeIdentifier(for: provider.registeredTypeIdentifiers) else {
                     continue
                 }
-                let mimeType = UTType(typeIdentifier)?.preferredMIMEType
                 let suggestedName = provider.suggestedName
                 group.enter()
-                provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+                provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _ in
                     defer { group.leave() }
-                    if let error {
-                        batch.record(error: error)
-                        return
-                    }
                     guard let url else { return }
-                    do {
-                        let ext = url.pathExtension.isEmpty
-                            ? UTType(typeIdentifier)?.preferredFilenameExtension
-                            : url.pathExtension
-                        let rawName = suggestedName?.isEmpty == false ? suggestedName! : url.lastPathComponent
-                        let name = AttachmentStagingStore.sanitizedFilename(rawName, fallbackExtension: ext)
-                        let staged = try stagingStore.stage(copying: url, suggestedName: name, mimeType: mimeType)
-                        batch.record(index: index, attachment: staged)
-                    } catch {
-                        batch.record(error: error)
+                    let ext = url.pathExtension.isEmpty
+                        ? UTType(typeIdentifier)?.preferredFilenameExtension
+                        : url.pathExtension
+                    let rawName = suggestedName?.isEmpty == false ? suggestedName! : url.lastPathComponent
+                    let name = AttachmentStagingStore.sanitizedFilename(rawName, fallbackExtension: ext)
+                    if let staged = try? stagingStore.stage(copying: url, suggestedName: name) {
+                        batch.record(index: index, url: staged.fileURL)
                     }
                 }
             }
@@ -433,15 +428,7 @@ extension NativeAttachmentPicker: PHPickerViewControllerDelegate {
             let totalCount = results.count
             group.notify(queue: .main) {
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    let outcome = batch.result(count: totalCount)
-                    if !outcome.payloads.isEmpty {
-                        self.finish(.success(outcome.payloads))
-                    } else if let firstError = outcome.error {
-                        self.finish(.failure(firstError))
-                    } else {
-                        self.finish(.success([]))
-                    }
+                    self?.finish(batch.orderedURLs(count: totalCount))
                 }
             }
         }
@@ -451,7 +438,7 @@ extension NativeAttachmentPicker: PHPickerViewControllerDelegate {
 extension NativeAttachmentPicker: UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
         picker.dismiss(animated: true)
-        finish(.success([]))
+        finish(nil)
     }
 
     func imagePickerController(
@@ -459,72 +446,55 @@ extension NativeAttachmentPicker: UIImagePickerControllerDelegate, UINavigationC
         didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
     ) {
         picker.dismiss(animated: true)
-        do {
-            if let mediaURL = info[.mediaURL] as? URL {
-                let ext = mediaURL.pathExtension.isEmpty ? "mov" : mediaURL.pathExtension
-                let staged = try store.stage(
-                    copying: mediaURL,
-                    suggestedName: "video-\(Self.timestampStem()).\(ext)"
-                )
-                finish(.success([staged.metadataPayload]))
-                return
-            }
-            if let imageURL = info[.imageURL] as? URL {
-                let staged = try store.stage(copying: imageURL)
-                finish(.success([staged.metadataPayload]))
-                return
-            }
-            if let image = info[.originalImage] as? UIImage,
-               let data = Self.normalizedImageData(image) {
-                let staged = try store.stage(
-                    data: data,
-                    name: "photo-\(Self.timestampStem()).jpg",
-                    mimeType: "image/jpeg"
-                )
-                finish(.success([staged.metadataPayload]))
-                return
-            }
-            finish(.success([]))
-        } catch {
-            finish(.failure(error))
+        if let mediaURL = info[.mediaURL] as? URL {
+            let ext = mediaURL.pathExtension.isEmpty ? "mov" : mediaURL.pathExtension
+            let staged = try? store.stage(copying: mediaURL, suggestedName: "video-\(Self.timestampStem()).\(ext)")
+            finish(staged.map { [$0.fileURL] })
+            return
         }
+        if let imageURL = info[.imageURL] as? URL {
+            let staged = try? store.stage(copying: imageURL)
+            finish(staged.map { [$0.fileURL] })
+            return
+        }
+        if let image = info[.originalImage] as? UIImage,
+           let data = Self.normalizedImageData(image) {
+            let staged = try? store.stage(
+                data: data,
+                name: "photo-\(Self.timestampStem()).jpg",
+                fallbackExtension: "jpg"
+            )
+            finish(staged.map { [$0.fileURL] })
+            return
+        }
+        finish(nil)
     }
 }
 
 extension NativeAttachmentPicker: UIDocumentPickerDelegate {
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-        finish(.success([]))
+        finish(nil)
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard !urls.isEmpty else {
-            finish(.success([]))
+            finish(nil)
             return
         }
-        var payloads: [[String: Any]] = []
-        var firstError: Error?
+        var stagedURLs: [URL] = []
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            do {
-                let staged = try store.stage(copying: url)
-                payloads.append(staged.metadataPayload)
-            } catch {
-                if firstError == nil { firstError = error }
+            if let staged = try? store.stage(copying: url) {
+                stagedURLs.append(staged.fileURL)
             }
         }
-        if !payloads.isEmpty {
-            finish(.success(payloads))
-        } else if let firstError {
-            finish(.failure(firstError))
-        } else {
-            finish(.success([]))
-        }
+        finish(stagedURLs)
     }
 }
 
 extension NativeAttachmentPicker: UIAdaptivePresentationControllerDelegate {
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        finish(.success([]))
+        finish(nil)
     }
 }

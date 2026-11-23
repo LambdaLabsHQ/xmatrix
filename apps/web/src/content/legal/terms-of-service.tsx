@@ -6,6 +6,7 @@ import {
   LegalList,
   LegalSection,
 } from "@/components/legal/legal-document";
+import { appHref } from "@/lib/site-url";
 
 export function TermsOfServiceContent() {
   return (
@@ -256,7 +257,7 @@ export function TermsOfServiceContent() {
         </p>
         <p>
           <strong className="text-foreground">Cancellation and changes.</strong> Customer may cancel a
-          self-service subscription at any time from the <Link className="font-medium text-foreground underline underline-offset-4" href="/billing">billing page</Link> through the Stripe billing portal.
+          self-service subscription at any time from the <Link className="font-medium text-foreground underline underline-offset-4" href={appHref("/billing")}>billing page</Link> through the Stripe billing portal.
           Cancellation takes effect at the end of the current paid period: the Space keeps its paid
           features until then, no further renewal is charged, and the unused remainder of a monthly
           or annual period is not refunded except as stated under refunds below. Seat and plan changes are made

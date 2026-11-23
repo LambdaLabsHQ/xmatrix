@@ -532,6 +532,7 @@ struct WebContainerView: UIViewRepresentable {
         weak var owner: Coordinator?
         /// Where each in-flight download is being written, keyed by download.
         private var downloadFiles: [ObjectIdentifier: URL] = [:]
+        @MainActor private lazy var attachmentPicker = NativeAttachmentPicker()
 
         init(owner: Coordinator) {
             self.owner = owner
@@ -725,6 +726,42 @@ struct WebContainerView: UIViewRepresentable {
             let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default))
             return alert
+        }
+
+        // Native file upload handoff (iOS 18.4+ / iOS 26): replaces WebKit's
+        // detached WKFileUploadPanel popover. When the composer's morphed glass
+        // menu armed a one-shot source, open Photos, Camera, or Files directly
+        // and hand disk-backed file URLs straight back to `<input type="file">`.
+        func webView(
+            _ webView: WKWebView,
+            runOpenPanelWith parameters: WKOpenPanelParameters,
+            initiatedByFrame frame: WKFrameInfo,
+            completionHandler: @escaping ([URL]?) -> Void
+        ) {
+            let allowsMultiple = parameters.allowsMultipleSelection
+            let presentWithSource: (AttachmentPickerSource?) -> Void = { [weak self, weak webView] source in
+                Task { @MainActor in
+                    guard let self, let webView else {
+                        completionHandler(nil)
+                        return
+                    }
+                    self.attachmentPicker.anchorView = webView
+                    self.attachmentPicker.presentOpenPanel(
+                        source: source,
+                        allowsMultipleSelection: allowsMultiple,
+                        completionHandler: completionHandler
+                    )
+                }
+            }
+            guard frame.isMainFrame,
+                  AppConfiguration.isTrustedAppPage(frame.request.url),
+                  AppConfiguration.isTrustedAppPage(webView.url) else {
+                presentWithSource(nil)
+                return
+            }
+            webView.evaluateJavaScript(NativeAttachmentPicker.readArmedSourceScript) { result, _ in
+                presentWithSource(NativeAttachmentPicker.parseArmedSource(result))
+            }
         }
 
         // The page's window.alert, confirm and prompt. Without these a web view

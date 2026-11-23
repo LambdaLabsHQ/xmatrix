@@ -1013,6 +1013,14 @@
   }
 
   .xmatrix-app .message-video-attachment {
+    --message-video-aspect: 1.777778;
+    --message-video-max-height: 28rem;
+    aspect-ratio: var(--message-video-aspect);
+    width: min(100%, calc(var(--message-video-max-height) * var(--message-video-aspect)));
+    max-width: 100%;
+    max-height: var(--message-video-max-height);
+    min-width: min(100%, 10rem);
+    min-height: 6rem;
     border-radius: 0.75rem !important;
     background: #000 !important;
     box-shadow: none;
@@ -7719,8 +7727,32 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   }
 }
 
+@keyframes app-composer-attach-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.xmatrix-app .app-composer-panel-closing {
+  position: absolute;
+  inset-inline: 0;
+  z-index: 2;
+  pointer-events: none;
+  animation: app-composer-attach-out 200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.xmatrix-app .app-composer-panel-closing .app-composer-attach-menu {
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .xmatrix-app .app-composer-attach-menu {
+  .xmatrix-app .app-composer-attach-menu,
+  .xmatrix-app .app-composer-panel-closing {
     animation: none;
   }
 }

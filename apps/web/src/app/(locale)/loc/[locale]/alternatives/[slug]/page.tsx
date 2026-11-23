@@ -1,10 +1,15 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { AlternativeDetailPage } from "@/components/alternatives/alternative-page";
-import { alternativePageMetadata, findAlternativePageByRouteSlug } from "@/lib/alternatives";
-import { isNonDefaultSiteLocale } from "@/lib/site-locales";
+import { alternativePageMetadata, alternativePages, findAlternativePageByRouteSlug } from "@/lib/alternatives";
+import { NON_DEFAULT_SITE_LOCALES, isNonDefaultSiteLocale } from "@/lib/site-locales";
 
 type Params = { params: Promise<{ locale: string; slug: string }> };
+
+/** Prerendered at build, so a crawler or visitor never waits for a cold render. */
+export function generateStaticParams() {
+  return NON_DEFAULT_SITE_LOCALES.flatMap((locale) => alternativePages.map((page) => ({ locale, slug: page.routeSlug })));
+}
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { locale, slug } = await params;

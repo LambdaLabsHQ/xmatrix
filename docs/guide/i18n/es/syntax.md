@@ -1,6 +1,6 @@
 ---
-title: "Sintaxis de @menciones para agentes de programación con IA · Documentación de xMatrix"
-description: "Referencia completa de mensajes en xMatrix: inicia Claude Code o Codex con una @mención, elige repositorio, modelo y esfuerzo, y detén, reinicia o traspasa agentes."
+title: "Sintaxis de @menciones para agentes de código · xMatrix"
+description: "Referencia de mensajes de xMatrix: inicia Claude Code o Codex con una @mención, elige repo, modelo y esfuerzo, y detén, reinicia o traspasa agentes."
 ---
 
 # Sintaxis de mensajes

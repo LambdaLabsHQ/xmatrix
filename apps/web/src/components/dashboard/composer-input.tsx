@@ -6,6 +6,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { ArrowUp, Loader2, PlugZap, } from "lucide-react";
@@ -150,6 +151,7 @@ function ComposerInputSurface({
   const internalFieldRef = useRef<ComposerField | null>(null);
   const fieldRef = fieldRefProp ?? internalFieldRef;
   const boxRef = useRef<HTMLElement | null>(null);
+  const inputRowRef = useRef<HTMLDivElement | null>(null);
   const { user } = useAuth();
   // Plain text has no addresses to paint. Do not rebuild the interaction
   // registry on every activity report until a draft actually contains one.
@@ -188,6 +190,11 @@ function ComposerInputSurface({
   // rapid toggles never snap.
   const settledBoxHeightRef = useRef<number | null>(null);
   const activeMorphAnimationRef = useRef<Animation | null>(null);
+  const latestPanelRef = useRef<{ key: string; node: ReactNode } | null>(null);
+  const [closingPanel, setClosingPanel] = useState<{ node: ReactNode; bottomOffset: number } | null>(null);
+  if (!completion.isCompletionOpen && panel) {
+    latestPanelRef.current = { key: panelKey ?? "panel", node: panel };
+  }
   useEffect(() => {
     const box = boxRef.current;
     if (!box) return;
@@ -203,7 +210,8 @@ function ComposerInputSurface({
   useLayoutEffect(() => {
     const box = boxRef.current;
     if (!box) return;
-    if (prevMorphStateKeyRef.current === morphStateKey) {
+    const previousKey = prevMorphStateKeyRef.current;
+    if (previousKey === morphStateKey) {
       if (settledBoxHeightRef.current === null && !box.getAnimations().length) {
         settledBoxHeightRef.current = box.getBoundingClientRect().height;
       }
@@ -216,9 +224,19 @@ function ComposerInputSurface({
     activeMorphAnimationRef.current = null;
     const to = box.getBoundingClientRect().height;
     settledBoxHeightRef.current = to;
-    if (from === null || Math.abs(to - from) < 1 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (from === null || Math.abs(to - from) < 1 || reducedMotion) {
       box.classList.remove("app-composer-box-morphing");
+      setClosingPanel(null);
       return;
+    }
+    if (panelOpen) {
+      setClosingPanel(null);
+    } else if (previousKey !== "completion" && latestPanelRef.current) {
+      const bottomOffset = inputRowRef.current?.getBoundingClientRect().height ?? 0;
+      setClosingPanel({ node: latestPanelRef.current.node, bottomOffset });
+    } else {
+      setClosingPanel(null);
     }
     box.classList.add("app-composer-box-morphing");
     const animation = box.animate([{ height: `${from}px` }, { height: `${to}px` }], panelOpen
@@ -229,6 +247,7 @@ function ComposerInputSurface({
       if (activeMorphAnimationRef.current !== animation) return;
       activeMorphAnimationRef.current = null;
       box.classList.remove("app-composer-box-morphing");
+      setClosingPanel(null);
     };
     animation.onfinish = settle;
     animation.oncancel = settle;
@@ -292,10 +311,19 @@ function ComposerInputSurface({
           </div>
         )}
         {completion.isCompletionOpen ? completion.renderOverlays() : panel}
+        {!panelOpen && closingPanel && (
+          <div
+            aria-hidden="true"
+            className="app-composer-panel-closing"
+            style={{ bottom: `${closingPanel.bottomOffset}px` }}
+          >
+            {closingPanel.node}
+          </div>
+        )}
         {/* One capsule: attach, text, actions and send share the glass. When
             the text wraps or a header shows, the same surface grows into a
             panel and the controls stay on its bottom edge. */}
-        <div className="composer-input-row flex min-w-0 items-end gap-2">
+        <div ref={inputRowRef} className="composer-input-row flex min-w-0 items-end gap-2">
           {inputLeading}
           <ComposerEditor
             fieldRef={fieldRef}

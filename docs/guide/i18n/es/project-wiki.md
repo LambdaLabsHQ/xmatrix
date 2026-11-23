@@ -1,6 +1,6 @@
 ---
-title: "Crear una wiki de proyecto con Claude Code o Codex · Documentación de xMatrix"
-description: "Convierte notas de proyecto en una wiki viva mantenida al día por tu propio agente Claude Code o Codex: crea una página de estado, revísala y actualízala desde el chat."
+title: "Crear una wiki de proyecto con Claude Code o Codex · xMatrix"
+description: "Convierte notas de proyecto en una wiki viva que tu agente Claude Code o Codex mantiene al día: crea una página de estado y actualízala desde el chat."
 ---
 
 # Crear una wiki de proyecto con Claude Code o Codex

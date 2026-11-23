@@ -8,7 +8,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "T3 Code Alternatives (2026): T3 Code vs xMatrix",
     metaDescription:
-      "Searching for T3 Code alternatives? Give your team real user identities, shared Channels (#27974), living project Pages (#15858), Space secrets, and cross-provider handoff (#15846).",
+      "Looking for T3 Code alternatives? Give your team real user identities, shared Channels, living project Pages, Space secrets and cross-provider handoff.",
     eyebrow: "T3 Code Alternative · T3 Code vs xMatrix",
     headline: "T3 Code for Teams: Real Identities, One Channel, and One Living Page",
     lead: "T3 Code is an impressive free single-player coding workbench, but it binds each environment to one account, has no shared living project pages, and stalls at 'Limited' when a provider quota runs out. xMatrix gives your team shared Channels, living Pages, Space secrets, and 35 coding harnesses across your machines.",
@@ -111,7 +111,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "herdr Alternatives (2026): herdr vs xMatrix",
     metaDescription:
-      "Evaluating herdr (herdr-core) alternatives? Get built-in auth, team permissions, live cross-device relay today (no waitlist), per-app approvals, and living Pages in xMatrix.",
+      "Evaluating herdr alternatives? xMatrix ships built-in auth, team permissions, live cross-device relay with no waitlist, per-app approvals and living Pages.",
     eyebrow: "herdr Alternative · herdr vs xMatrix",
     headline: "herdr Alternative With Team Auth, Approvals, and Living Pages — Live Across Devices Today",
     lead: "herdr evolved from a beloved Rust TUI multiplexer into herdr-core plus native apps, bringing breaking protocol changes and Reddit pushback over GUI lock-in—while still lacking multi-user auth, approvals, secrets, and a live cloud relay. xMatrix gives you a complete, governed collaboration layer today.",
@@ -214,7 +214,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Seedmux Alternatives (2026): Seedmux vs xMatrix",
     metaDescription:
-      "Looking for Seedmux alternatives? Escape macOS + iPhone lock-in, closed-source binaries, and YOLO phone defaults with xMatrix across macOS, Windows, Linux, Android, and iOS.",
+      "Looking for Seedmux alternatives? Escape macOS + iPhone lock-in, closed binaries and YOLO phone defaults with xMatrix on macOS, Windows, Linux and Android.",
     eyebrow: "Seedmux Alternative · Seedmux vs xMatrix",
     headline: "The Seedmux Alternative for Cross-OS Teams, Android, and Governed Mobile Control",
     lead: "Seedmux pairs a slick Ghostty + tmux macOS terminal with an iPhone companion app, but it is closed-source, Mac-only, single-player, and launches phone-initiated sessions in YOLO mode by default. xMatrix brings cross-OS multi-machine coordination, real team Spaces, and living Pages to macOS, Windows, Linux, Android, and iOS.",
@@ -317,7 +317,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Claude Code Alternatives (2026): Add Teams & Pages",
     metaDescription:
-      "Want multiplayer Channels, living Pages, and 34 other coding agents around Claude Code? Keep Claude Code inside xMatrix, with automatic quota handoff when 5-hour caps hit.",
+      "Keep Claude Code and add multiplayer Channels, living Pages and 34 more coding agents in xMatrix, with automatic handoff when 5-hour quota caps hit.",
     eyebrow: "Claude Code Alternative · Claude Code vs xMatrix",
     headline: "Claude Code Alternative? Keep Claude Code — Wrap It With Teammates, 34 Other Agents, and Living Pages",
     lead: "Claude Code Desktop and Cowork are great for solo pairing with one Claude session, but they leave teammates outside the room, keep context trapped in solo sessions, and stop cold when November 2026's tighter 5-hour or weekly caps hit. xMatrix wraps Claude Code with shared Channels, living Pages, 34 other harnesses, and Space secrets.",

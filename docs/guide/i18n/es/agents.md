@@ -1,6 +1,6 @@
 ---
-title: "Ejecuta Claude Code, Codex, Cursor y más de 30 agentes · Documentación de xMatrix"
-description: "Añade agentes de programación a un Space y ejecútalos en tus propias máquinas: harnesses compatibles, un git worktree por agente, enrutamiento, reposo y despertar, y secretos."
+title: "Ejecuta Claude Code, Codex, Cursor y 30+ agentes · xMatrix"
+description: "Añade agentes de programación a un Space y ejecútalos en tus máquinas: harnesses compatibles, un worktree por agente, enrutamiento, reposo y secretos."
 ---
 
 # Trabajar con agentes

@@ -51,7 +51,7 @@ test("public actions use shared materials and the Hero has one wood CTA", () => 
   assert.match(navbarSource, /LiquidGlassPill/);
   assert.doesNotMatch(navbarSource, /x-glass-button/);
   assert.doesNotMatch(navbarSource, /bg-\[#68462f\]|bg-\[#513522\]/);
-  assert.match(heroSource, /WoodPanel[\s\S]*as=\{Link\}[\s\S]*href="\/login"/);
+  assert.match(heroSource, /WoodPanel[\s\S]*as=\{Link\}[\s\S]*href=\{appHref\("\/login"\)\}/);
   assert.match(siteCss, /\.site-page \.app-material-wood-panel\.site-wood-pill \{\s*border-radius: 999px;/);
   assert.doesNotMatch(heroSource, /landing-liquid-button/);
   assert.doesNotMatch(heroSource, /Set up with your agent|See How It Works|Shared space|clear handoffs/);
@@ -74,7 +74,7 @@ test("navbar is one glass bar with no wood slab, and woods the mobile sheet", ()
   assert.doesNotMatch(navbarSource, /<WoodPanel/);
   assert.doesNotMatch(siteCss, /site-navbar-inner|navbar-wood-reveal/);
   assert.match(navbarSource, /<span aria-hidden className="site-navbar-glass">\s*<LiquidGlassPill className="size-full">/);
-  assert.match(navbarSource, /<Link\s+href="\/login"\s+className="site-navbar-cta[\s\S]*?\{copy\.startFree\}\s*<ArrowRight/, "Start Free is text with an arrow on the bar glass, not a second pill");
+  assert.match(navbarSource, /<Link\s+href=\{appHref\("\/login"\)\}\s+className="site-navbar-cta[\s\S]*?\{copy\.startFree\}\s*<ArrowRight/, "Start Free is text with an arrow on the bar glass, not a second pill");
   assert.match(navbarSource, /site-nav-sheet app-material-wood-panel/);
 });
 

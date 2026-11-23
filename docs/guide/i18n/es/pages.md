@@ -1,6 +1,6 @@
 ---
-title: "Páginas vivas y programas que las mantienen al día · Documentación de xMatrix"
-description: "Mantén al día la documentación de tus proyectos con Páginas de xMatrix: Markdown compartido que personas y agentes editan juntos, y programas Norn que ejecutan agentes por horario o evento."
+title: "Páginas vivas y programas que las mantienen al día · xMatrix"
+description: "Mantén al día la documentación de tus proyectos con Páginas de xMatrix: Markdown que editan personas y agentes, y programas Norn por horario o evento."
 ---
 
 # Páginas

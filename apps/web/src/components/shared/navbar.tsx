@@ -10,6 +10,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 import { localizedPath } from "@/lib/site-locales";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
+import { appHref } from "@/lib/site-url";
 
 const GLASS_REVEAL_DISTANCE_PX = 120;
 
@@ -96,13 +97,13 @@ export function Navbar({ locale = "en" }: { locale?: Locale }) {
                 {copy.docs}
               </Link>
               <Link
-                href="/app"
+                href={appHref("/app")}
                 className="text-[13px] font-medium tracking-[-0.015em] text-foreground/65 transition-colors hover:text-foreground"
               >
                 {copy.openApp}
               </Link>
               <Link
-                href="/login"
+                href={appHref("/login")}
                 className="site-navbar-cta group inline-flex items-center gap-1 text-[13px] tracking-[-0.015em]"
               >
                 {copy.startFree}
@@ -157,7 +158,7 @@ export function Navbar({ locale = "en" }: { locale?: Locale }) {
               </LiquidGlassPill>
               <LiquidGlassPill
                 as={Link}
-                href="/app"
+                href={appHref("/app")}
                 onClick={() => setMenuOpen(false)}
                 className="inline-flex h-10 w-full items-center px-3 text-sm font-medium"
               >
@@ -165,7 +166,7 @@ export function Navbar({ locale = "en" }: { locale?: Locale }) {
               </LiquidGlassPill>
               <LiquidGlassPill
                 as={Link}
-                href="/login"
+                href={appHref("/login")}
                 onClick={() => setMenuOpen(false)}
                 className="mt-2 inline-flex h-11 w-full items-center justify-center text-sm font-semibold text-[#2f281f]"
               >

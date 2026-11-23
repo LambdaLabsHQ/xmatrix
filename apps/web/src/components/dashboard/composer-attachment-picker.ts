@@ -1,15 +1,24 @@
-import type {
-  DesktopBridge,
-  NativeAttachmentPickerSource,
-} from "@/lib/desktop/bridge";
-
-export const NATIVE_ATTACHMENT_CHUNK_BYTES = 2 * 1024 * 1024;
+import type { NativeAttachmentPickerSource } from "@/lib/desktop/bridge";
 
 export const COMPOSER_ATTACHMENT_SOURCES: readonly NativeAttachmentPickerSource[] = [
   "photos",
   "camera",
   "files",
 ];
+
+/** Maximum age of an armed one-shot source before `runOpenPanelWith` treats it as stale. */
+export const PENDING_ATTACHMENT_SOURCE_TTL_MS = 5000;
+
+export type PendingAttachmentSourceRecord = {
+  source: NativeAttachmentPickerSource;
+  expiresAt: number;
+};
+
+declare global {
+  interface Window {
+    __xmatrixPendingAttachmentSource?: PendingAttachmentSourceRecord | null;
+  }
+}
 
 export type AttachmentPanelKeyStep =
   | { active: number; pick?: undefined }
@@ -40,69 +49,57 @@ export function attachmentPanelKey(input: {
   return null;
 }
 
-function decodeBase64Chunk(base64: string): Uint8Array<ArrayBuffer> {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
+/**
+ * Arms a one-shot attachment source synchronously before `fileInput.click()` so
+ * iOS `WKUIDelegate.webView(_:runOpenPanelWith:...)` can atomically read and
+ * clear it without losing transient user activation across an async boundary.
+ */
+export function armNativeAttachmentSource(
+  source: NativeAttachmentPickerSource,
+  now = Date.now(),
+): PendingAttachmentSourceRecord {
+  const record: PendingAttachmentSourceRecord = {
+    source,
+    expiresAt: now + PENDING_ATTACHMENT_SOURCE_TTL_MS,
+  };
+  if (typeof window !== "undefined") {
+    window.__xmatrixPendingAttachmentSource = record;
   }
-  return bytes;
+  return record;
 }
 
 /**
- * Reads files selected through the native iOS picker bridge in bounded chunks
- * so large videos never cross WebKit's IPC boundary as one giant base64 blob.
+ * Consumes and clears the armed source if it is still fresh; returns null for
+ * unrelated `<input type="file">` clicks (such as the profile avatar picker).
  */
-export async function loadNativePickedAttachments(
-  bridge: Pick<DesktopBridge, "pickAttachments" | "readPickedAttachmentChunk" | "releasePickedAttachment">,
-  source: NativeAttachmentPickerSource,
-  maxBytes: number,
-  maxBytesLabel: string,
-  chunkBytes = NATIVE_ATTACHMENT_CHUNK_BYTES,
-): Promise<File[]> {
-  if (!bridge.pickAttachments || !bridge.readPickedAttachmentChunk) {
-    return [];
-  }
-  const picked = await bridge.pickAttachments({ source });
-  if (!Array.isArray(picked) || picked.length === 0) return [];
+export function consumePendingAttachmentSource(now = Date.now()): NativeAttachmentPickerSource | null {
+  if (typeof window === "undefined") return null;
+  const record = window.__xmatrixPendingAttachmentSource;
+  window.__xmatrixPendingAttachmentSource = null;
+  if (!record || record.expiresAt < now) return null;
+  return COMPOSER_ATTACHMENT_SOURCES.includes(record.source) ? record.source : null;
+}
 
-  const files: File[] = [];
-  try {
-    for (const item of picked) {
-      if (item.size > maxBytes) {
-        throw new Error(`File must be ${maxBytesLabel} or smaller.`);
-      }
-      const parts: BlobPart[] = [];
-      let offset = 0;
-      const readCap = Math.max(0, Math.min(item.size, maxBytes));
-      while (offset < readCap) {
-        const length = Math.min(chunkBytes, readCap - offset);
-        const chunk = await bridge.readPickedAttachmentChunk({
-          token: item.token,
-          offset,
-          length,
-        });
-        if (chunk.dataBase64) {
-          parts.push(decodeBase64Chunk(chunk.dataBase64));
-        }
-        if (chunk.eof) break;
-        if (!Number.isFinite(chunk.bytesRead) || chunk.bytesRead <= 0) {
-          throw new Error("Could not read the selected file.");
-        }
-        offset += chunk.bytesRead;
-      }
-      files.push(
-        new File(parts, item.name || "attachment", {
-          type: item.mimeType || "application/octet-stream",
-        })
-      );
-    }
-    return files;
-  } finally {
-    if (bridge.releasePickedAttachment) {
-      await Promise.allSettled(
-        picked.map((item) => bridge.releasePickedAttachment!({ token: item.token }))
-      );
-    }
+export function clearPendingAttachmentSource(): void {
+  if (typeof window !== "undefined") {
+    window.__xmatrixPendingAttachmentSource = null;
   }
+}
+
+export type DraftPickOrigin = {
+  generation: number;
+  scope: string | null;
+};
+
+/**
+ * Returns true only when an async picker or file-input selection still belongs
+ * to the draft that opened it (guards A→B, A→B→A, and closed thread/composer).
+ */
+export function isDraftPickCurrent(
+  origin: DraftPickOrigin | null,
+  current: { mounted: boolean; generation: number; scope: string | null },
+): boolean {
+  if (!current.mounted) return false;
+  if (!origin) return true;
+  return origin.generation === current.generation && origin.scope === current.scope;
 }

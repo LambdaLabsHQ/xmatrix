@@ -236,23 +236,12 @@ test.describe("mock-auth app fixture", () => {
       }
     });
 
-    test("attach morphs the single composer capsule upward and streams native picked files", async ({ page }, testInfo) => {
-      const sampleBytes = Buffer.from("native-ios-attachment-payload");
-      await page.addInitScript((encoded) => {
-        const pickedSources: string[] = [];
-        const releasedTokens: string[] = [];
-        const raw = atob(encoded);
-        const bytes = new Uint8Array(raw.length);
-        for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
-        const toBase64 = (slice: Uint8Array) => {
-          let binary = "";
-          for (const byte of slice) binary += String.fromCharCode(byte);
-          return btoa(binary);
-        };
-        (window as unknown as Record<string, unknown>).__nativeAttachLog = { pickedSources, releasedTokens };
+    test("attach morphs the single composer capsule upward, handles mid-flight toggle, and arms native open panel", async ({ page }, testInfo) => {
+      await page.addInitScript(() => {
         (window as unknown as Record<string, unknown>).xmatrixDesktop = {
           client: "ios",
           platform: "ios",
+          nativeAttachmentOpenPanel: true,
           getContext: async () => ({ client: "ios", platform: "ios", version: "1.0.0", isPackaged: true, startUrl: "https://xmatrix.sh/app" }),
           setBadge: async () => {},
           setTitle: async () => {},
@@ -262,23 +251,8 @@ test.describe("mock-auth app fixture", () => {
           openCliInstall: async () => {},
           checkForUpdates: async () => {},
           setMobileTabState: async () => {},
-          pickAttachments: async ({ source }: { source: string }) => {
-            pickedSources.push(source);
-            return [{ token: "ios-tok-1", name: "notes.txt", mimeType: "text/plain", size: bytes.length }];
-          },
-          readPickedAttachmentChunk: async ({ offset, length }: { token: string; offset: number; length: number }) => {
-            const slice = bytes.subarray(offset, offset + Math.min(length, 10));
-            return {
-              dataBase64: toBase64(slice),
-              bytesRead: slice.length,
-              eof: offset + slice.length >= bytes.length,
-            };
-          },
-          releasePickedAttachment: async ({ token }: { token: string }) => {
-            releasedTokens.push(token);
-          },
         };
-      }, sampleBytes.toString("base64"));
+      });
 
       const composerBox = await openIosNativeDockChannel(page, async () => {
         await fixtureRule(page, {
@@ -316,10 +290,13 @@ test.describe("mock-auth app fixture", () => {
           triggerCenter: triggerRect.left + triggerRect.width / 2,
           iconCenters,
           optionBackdrops: options.map((option) => getComputedStyle(option).backdropFilter),
+          preActive: options.some((option) => option.getAttribute("data-active") === "true"),
         };
       });
-      expect(geometry.boxRect.height).toBeGreaterThan(restingBox!.height + 100);
+      const openHeight = geometry.boxRect.height;
+      expect(openHeight).toBeGreaterThan(restingBox!.height + 100);
       expect(geometry.boxRect.bottom).toBeCloseTo(restingBox!.y + restingBox!.height, 0);
+      expect(geometry.preActive).toBe(false);
       for (const center of geometry.iconCenters) {
         expect(Math.abs(center - geometry.triggerCenter)).toBeLessThan(1);
       }
@@ -331,31 +308,59 @@ test.describe("mock-auth app fixture", () => {
       await page.screenshot({ path: openShot, fullPage: false });
       await testInfo.attach("ios-composer-attach-morph", { path: openShot, contentType: "image/png" });
 
+      async function expectSettledAtRestingHeight() {
+        await expect(page.locator(".app-composer-box-morphing")).toHaveCount(0);
+        await expect.poll(async () => (await composerBox.boundingBox())?.height ?? 0)
+          .toBeCloseTo(restingBox!.height, 0);
+      }
+
       // Tapping outside dismisses the morphed panel back to resting height.
       await page.locator(".app-message-timeline").click({ position: { x: 200, y: 200 } });
       await expect(menu).toHaveCount(0);
-      await expect(page.locator(".app-composer-box-morphing")).toHaveCount(0);
-      await expect.poll(async () => (await composerBox.boundingBox())?.height ?? 0)
-        .toBeCloseTo(restingBox!.height, 0);
+      await expectSettledAtRestingHeight();
 
-      // Re-open and pick Choose Files: panel closes, native picker streams chunks,
-      // temp token is released, and the file uploads through the normal intake path.
+      // Interrupting an in-flight open morph must close smoothly from its live height
+      // without jumping past the settled open height, while keeping closing content mounted.
+      const interruptCheck = await page.evaluate(async () => {
+        const box = document.querySelector<HTMLElement>(".app-composer-box:not(.app-agent-work-card)")!;
+        const trigger = box.querySelector<HTMLButtonElement>(".composer-attach .app-composer-inline-icon")!;
+        trigger.click();
+        await new Promise((resolve) => window.setTimeout(resolve, 90));
+        const midHeight = box.getBoundingClientRect().height;
+        trigger.click();
+        const heights: number[] = [];
+        let sawClosingPanel = false;
+        for (let frame = 0; frame < 6; frame += 1) {
+          await new Promise((resolve) => window.requestAnimationFrame(resolve));
+          heights.push(box.getBoundingClientRect().height);
+          if (box.querySelector(".app-composer-panel-closing")) sawClosingPanel = true;
+        }
+        return { midHeight, maxAfterClose: Math.max(...heights), sawClosingPanel };
+      });
+      expect(interruptCheck.maxAfterClose).toBeLessThanOrEqual(interruptCheck.midHeight + 2);
+      expect(interruptCheck.sawClosingPanel).toBe(true);
+      await expectSettledAtRestingHeight();
+
+      // Picking Choose Files synchronously arms the one-shot source and clicks
+      // the composer's file input so WKUIDelegate.runOpenPanelWith receives it.
       await attachButton.click();
       await expect(menu).toBeVisible();
-      await menu.getByRole("menuitem", { name: "Choose Files" }).click();
+      const [fileChooser] = await Promise.all([
+        page.waitForEvent("filechooser"),
+        menu.getByRole("menuitem", { name: "Choose Files" }).click(),
+      ]);
+      const armedSource = await page.evaluate(() =>
+        (window as unknown as { __xmatrixPendingAttachmentSource?: { source: string } | null })
+          .__xmatrixPendingAttachmentSource?.source ?? null
+      );
+      expect(armedSource).toBe("files");
+      await fileChooser.setFiles({
+        name: "notes.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("disk-backed-file-payload"),
+      });
       await expect(menu).toHaveCount(0);
       await expect(composerBox.getByText("notes.txt")).toBeVisible();
-
-      const nativeLog = await page.evaluate(() =>
-        (window as unknown as Record<string, unknown>).__nativeAttachLog as {
-          pickedSources: string[];
-          releasedTokens: string[];
-        }
-      );
-      expect(nativeLog).toEqual({
-        pickedSources: ["files"],
-        releasedTokens: ["ios-tok-1"],
-      });
     });
   });
 

@@ -9,7 +9,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Linear Agents Alternatives (2026): Linear vs xMatrix",
     metaDescription:
-      "Comparing Linear Agents alternatives? Skip expiring prepaid sandbox credits, cloud-only ticket runs, and Enterprise-gated audit logs with xMatrix's local Channels and living Pages.",
+      "Comparing Linear Agents alternatives? Skip expiring sandbox credits, cloud-only ticket runs and Enterprise-gated audit logs with local Channels and Pages.",
     eyebrow: "Linear Agents Alternative · Linear vs xMatrix",
     headline: "Linear Agents Alternative: Run Agents on Your Own Machines & Subscriptions — Works Alongside Linear",
     lead: "Linear is an extraordinary issue tracker, and Linear Agents turns well-scoped issues into cloud sandbox PRs—at $0.25 per 20 minutes plus token spend from a separate prepaid wallet that expires in 12 months. Keep Linear for issue tracking and connect it to xMatrix to run 35 coding harnesses on your own machines in live Channels and living Pages.",
@@ -113,7 +113,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Notion Custom Agents Alternatives (2026) — xMatrix",
     metaDescription:
-      "Looking for Notion Custom Agents alternatives? Escape the $20–$24 Business gate, three credit wallets, creator-drained pauses, and mobile limits with xMatrix living Pages.",
+      "Looking for Notion Custom Agents alternatives? Skip the $20–$24 Business gate, three credit wallets and creator-drained pauses with xMatrix living Pages.",
     eyebrow: "Notion Custom Agents Alternative · Notion vs xMatrix",
     headline: "Notion Custom Agents Alternative: Living Pages Updated as Agents Ship Code — Without Three Credit Wallets",
     lead: "Notion Custom Agents sit behind a $20–$24/seat Business paywall and a convoluted three-wallet credit system where shared agents drain their creator's personal Select credits and pause mid-run. xMatrix updates living Pages automatically as 35 coding harnesses ship in your real repos—no credit wallets required.",
@@ -216,7 +216,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Slack Code Alternatives (2026): No 15-Msg API Cap",
     metaDescription:
-      "Searching for Slack Code alternatives? Escape Slack's 1 req/min, 15-message history clampdown on custom apps, 90-day Free caps, and missing agent runtimes with xMatrix.",
+      "Looking for Slack Code alternatives? Escape 1 req/min limits, 15-message history on custom apps and 90-day Free caps, with real agent runtimes in xMatrix.",
     eyebrow: "Slack Code Alternative · Slack Code vs xMatrix",
     headline: "Slack Code Alternative: Agents on Your Machines, Decisions on Living Pages — Works Alongside Slack",
     lead: "Slack Code API adds task channels and diff previews inside Slack, but Slack is still just a chat shell with no agent runtime, no living documentation, and severe API throttling (1 req/min, 15 messages max on history endpoints for non-Marketplace apps). Keep Slack connected via xMatrix's Slack connector while running 35 coding harnesses on your own machines and keeping decisions in living Pages.",
@@ -318,7 +318,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Nowledge Mem Alternatives (2026): vs xMatrix",
     metaDescription:
-      "Comparing Nowledge Mem alternatives? Don't just extract memory fragments from chats—run coding agents across machines and keep authoritative living Pages current in xMatrix.",
+      "Comparing Nowledge Mem alternatives? Go beyond memory fragments from chats: run coding agents across machines and keep living Pages current in xMatrix.",
     eyebrow: "Nowledge Mem Alternative · Nowledge Mem vs xMatrix",
     headline: "Nowledge Mem Alternative: Team Project Memory Written by the Agents Doing the Work",
     lead: "Nowledge Mem builds a clever local graph/vector memory layer across AI tools, but it is a passive memory store—it guesses facts from old chats, cannot run coding agents or govern external tools, and its Team workspace remains in private beta. In xMatrix, the working runs write authoritative living Pages your whole team shares today.",
@@ -421,7 +421,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "EverOS (EverMemOS) Alternatives (2026): vs xMatrix",
     metaDescription:
-      "Searching for EverOS or EverMemOS alternatives? Move beyond single-machine SQLite locks, hidden extraction LLM bills, and no team sync to xMatrix Channels and living Pages.",
+      "Looking for EverOS or EverMemOS alternatives? Leave single-machine SQLite locks, hidden extraction LLM bills and no team sync for xMatrix Channels and Pages.",
     eyebrow: "EverOS (EverMemOS) Alternative · EverOS vs xMatrix",
     headline: "EverOS Alternative: Multi-Machine Project Memory Written by the Agents Doing the Work",
     lead: "EverOS (EverMemOS) pairs Markdown files with local SQLite and LanceDB indexes, but its open-source v1 explicitly refuses a second service on the same directory, excludes multi-tenancy and sync, and burns continuous background LLM tokens on extraction. xMatrix gives teams real-time multi-machine execution across 35 harnesses and authoritative living Pages.",
@@ -523,7 +523,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "YouMind Alternatives (2026): YouMind vs xMatrix",
     metaDescription:
-      "Comparing YouMind alternatives? Trade $20–$200/mo solo credit tiers and missing Android/team support for xMatrix's $10/seat multiplayer coding Channels, local repo runs, and living Pages.",
+      "Comparing YouMind alternatives? Trade $20–$200/mo solo credit tiers for xMatrix's $10/seat multiplayer coding Channels, local repo runs and living Pages.",
     eyebrow: "YouMind Alternative · YouMind vs xMatrix",
     headline: "The YouMind Alternative Built for Team Coding Agents, Android, and Real Repos",
     lead: "YouMind is a slick solo creation studio for synthesizing videos, podcasts, and web research into slides and articles ($20–$200/month in credits), but it lacks native team collaboration, has no Android app, and only bridges GitHub/Linear context rather than running local coding agents. xMatrix coordinates real code, research, and operations in one multiplayer Space.",
@@ -625,7 +625,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     statusNote: "Google Jules entered read-only mode on November 11, 2026 and shuts down completely on December 31, 2026.",
     metaTitle: "Google Jules Alternatives (Dec 2026 Shutdown) — xMatrix",
     metaDescription:
-      "Google Jules went read-only Nov 11 and shuts down Dec 31, 2026. Bring exported Jules memories, schedules, and GitHub repos to xMatrix and run Antigravity, Claude Code, and Codex together.",
+      "Google Jules went read-only Nov 11 and shuts down Dec 31, 2026. Bring Jules memories, schedules and repos to xMatrix; run Antigravity, Claude Code and Codex.",
     eyebrow: "Google Jules Alternative · Dec 31 Shutdown Migration",
     headline: "Move Async GitHub Work Off Google Jules Before Dec 31 — Keep Dispatching From Your Phone",
     lead: "Google Jules stopped running new sessions on November 11, 2026 and turns off completely on December 31, 2026, with no automatic migration of memories, schedules, or tasks. xMatrix lets you import exported context into living Pages and keep dispatching async GitHub PRs from your phone or Web—running Google Antigravity and 34 other harnesses on an always-on computer or your own VPS.",

@@ -132,7 +132,7 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       macZipIntel: "macOS ZIP, Intel",
     },
     support: {
-      metaTitle: "Support — xMatrix",
+      metaTitle: "xMatrix Support: account, billing, connectors and agents",
       metaDescription:
         "Ask a question, report a problem, or get help with your xMatrix account, subscription, apps and connected agents.",
       title: "Support",
@@ -224,7 +224,7 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       macZipIntel: "macOS ZIP（Intel）",
     },
     support: {
-      metaTitle: "支持 — xMatrix",
+      metaTitle: "xMatrix 支持：账号、订阅、连接器与编程智能体帮助",
       metaDescription: "咨询问题、反馈故障，或获取 xMatrix 账号、订阅、连接器与编程智能体的使用帮助。",
       title: "支持",
       intro: "使用 xMatrix 遇到问题？联系 MadeByRobot, LLC 团队咨询账号、订阅或反馈应用问题。",
@@ -310,7 +310,7 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       macZipIntel: "macOS ZIP（Intel）",
     },
     support: {
-      metaTitle: "支援 — xMatrix",
+      metaTitle: "xMatrix 支援：帳號、訂閱、整合工具與程式設計代理協助",
       metaDescription: "提問、回報問題，或取得 xMatrix 帳號、訂閱、整合工具與代理連線的協助。",
       title: "支援",
       intro: "使用 xMatrix 需要協助嗎？聯繫 MadeByRobot, LLC 團隊詢問帳號、訂閱問題或回報應用程式異常。",
@@ -396,7 +396,7 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       macZipIntel: "macOS ZIP（Intel）",
     },
     support: {
-      metaTitle: "サポート — xMatrix",
+      metaTitle: "xMatrix サポート：アカウント・料金・連携アプリ・エージェント",
       metaDescription: "xMatrix のアカウント、サブスクリプション、連携アプリ、接続済みエージェントに関するご質問や不具合報告はこちら。",
       title: "サポート",
       intro: "xMatrix についてお困りですか？アカウント・料金のご相談や不具合報告は MadeByRobot, LLC チームまでご連絡ください。",
@@ -482,7 +482,7 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       macZipIntel: "macOS ZIP (Intel)",
     },
     support: {
-      metaTitle: "지원 — xMatrix",
+      metaTitle: "xMatrix 지원: 계정, 구독, 연동 앱, 코딩 에이전트 도움말",
       metaDescription: "xMatrix 계정, 구독, 연동 앱 및 코딩 에이전트 관련 문의와 문제 신고 안내.",
       title: "지원",
       intro: "xMatrix 사용 중 도움이 필요하신가요? 계정, 구독 문의 또는 앱 문제 제보는 MadeByRobot, LLC 팀으로 연락해 주세요.",
@@ -536,7 +536,7 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
   es: {
     download: {
       metaTitle: "Descargar xMatrix para macOS, Windows y Android",
-      metaDescription: "Descarga la app de escritorio de xMatrix para macOS (Apple Silicon e Intel) y Windows, o el APK de Android, para coordinar tus agentes de código desde cualquier lugar.",
+      metaDescription: "Descarga xMatrix para macOS (Apple Silicon e Intel) y Windows, o el APK de Android, y coordina tus agentes de código desde cualquier lugar.",
       getXMatrix: "Obtén xMatrix",
       useOnWeb: "Usa xMatrix en la web",
       openWebApp: "Abrir app web",
@@ -568,7 +568,7 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       macZipIntel: "macOS ZIP, Intel",
     },
     support: {
-      metaTitle: "Soporte — xMatrix",
+      metaTitle: "Soporte de xMatrix: cuenta, suscripción, conectores y agentes",
       metaDescription: "Haz una pregunta, reporta un problema o recibe ayuda con tu cuenta, suscripción, conectores y agentes de xMatrix.",
       title: "Soporte",
       intro: "¿Necesitas ayuda con xMatrix? Escribe al equipo de MadeByRobot, LLC para consultas de cuenta, suscripción o reportes de fallos.",
