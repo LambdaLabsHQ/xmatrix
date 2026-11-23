@@ -1610,6 +1610,50 @@ integration("durable X uploads claim explicit allow once and retain one scoped e
     await stage("expiry-cleanup-trigger");
     const expired = (await sql("SELECT status,encrypted_value_json FROM data.app_connector_action_requests WHERE request_id=$1", [expiry.requestId])).rows[0];
     assert.deepEqual(expired, { status: "completed", encrypted_value_json: null });
+
+    // A Norn program's request: an approval runs nothing, and what was approved is performed once, by one `perform`.
+    await policyMode("ask");
+    const held = await stage("program-prepared", { actionId: "publish_video", heldFor: "rprepare1" });
+    assert.equal((await requests.pending({ channelId, spaceId: space, actorUserId: "owner" })).some(row => row.requestId === held.requestId), true);
+    const claim = (performRef, prepareRef = "rprepare1") => requests.claimHeld({ spaceId: space, channelId, prepareRef, performRef });
+    assert.match((await claim("rperform1")).refusal, /pending, not approved/u, "nothing runs before it is answered");
+    const heldAnswer = await requests.decide({ ...held, actorUserId: "owner", allow: true });
+    assert.deepEqual([heldAnswer.claimed, heldAnswer.request.status, heldAnswer.request.nornPrepareRef, heldAnswer.payload],
+      [false, "approved", "rprepare1", undefined], "approving dispatches nothing");
+    assert.equal(await requests.executingUpload(held), null);
+    assert.equal((await requests.heldRequest({ spaceId: space, prepareRef: "rprepare1" })).status, "approved");
+    const performing = await claim("rperform1");
+    assert.deepEqual([performing.request.status, performing.request.nornPerformRef], ["executing", "rperform1"]);
+    assert.deepEqual((await claim("rperform1")).request.requestId, held.requestId, "the same perform finds its own claim again");
+    assert.match((await claim("rperform2")).refusal, /performed once/u);
+    assert.deepEqual(await authorize(held), { decidedByPerson: true });
+    assert.equal((await requests.executingUpload(held)).request.actionId, "publish_video");
+    await requests.settleUpload({ ...held, status: "completed", receipt: "X publish_video: completed; Posted.",
+      result: { summary: "Posted", url: "https://x.com/company/status/1" } });
+    assert.deepEqual((await requests.uploadOutcome(held)).result, { summary: "Posted", url: "https://x.com/company/status/1" });
+    assert.match((await claim("rperform3")).refusal, /performed once/u);
+
+    // Under Read and write the permission admits it, and nobody is recorded as having decided.
+    await policyMode("allow");
+    const heldAdmitted = await stage("program-admitted", { actionId: "publish_video", heldFor: "rprepare2" });
+    assert.equal((await requests.admitHeld(heldAdmitted)).status, "approved");
+    assert.equal((await claim("rperform4", "rprepare2")).request.status, "executing");
+    assert.deepEqual(await authorize(heldAdmitted), { decidedByPerson: false });
+
+    // What the approver could do is read again when it is performed, and a program that ended voids what it never used.
+    await policyMode("ask");
+    const heldDemoted = await stage("program-approver-left", { actionId: "publish_video", heldFor: "rprepare3" });
+    await requests.decide({ ...heldDemoted, actorUserId: "owner", allow: true });
+    await sql("UPDATE data.space_members SET role='viewer' WHERE space_id=$1 AND user_id='owner'", [space]);
+    await assert.rejects(claim("rperform5", "rprepare3"), error => error instanceof AppControlError);
+    await sql("UPDATE data.space_members SET role='owner' WHERE space_id=$1 AND user_id='owner'", [space]);
+    const heldUnanswered = await stage("program-unanswered", { actionId: "publish_video", heldFor: "rprepare4" });
+    assert.deepEqual(await requests.withdrawHeld({ spaceId: space, prepareRefs: ["rprepare3", "rprepare4"] }), [channelId],
+      "an approval that was given stays until its program ends");
+    assert.deepEqual(await requests.withdrawHeld({ spaceId: space, prepareRefs: ["rprepare3", "rprepare4"], approved: true }), [channelId]);
+    assert.match((await claim("rperform5", "rprepare3")).refusal, /expired, not approved/u);
+    assert.equal((await requests.pending({ channelId, spaceId: space, actorUserId: "owner" })).some(row => row.requestId === heldUnanswered.requestId), false);
+    await policyMode("allow");
     const stale = await stage("reconnected-before-start");
     await writeGrant({ ...account, generation: crypto.randomUUID() });
     await assert.rejects(start(stale), error => error.code === "action_request_scope_changed");

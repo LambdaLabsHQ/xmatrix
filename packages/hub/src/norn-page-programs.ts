@@ -4,7 +4,7 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./page-restriction";
 import { deterministicConversationId } from "./deterministic-id";
 import {
-  checkNornProgram, diffNornProgramUpgrade, nornBlocks, nornBlockSource, nornStartLedger, nornStep, pageSpaceLibraries,
+  checkNornProgram, diffNornProgramUpgrade, nornBlocks, nornBlockSource, nornRequestWords, nornStartLedger, nornStep, pageSpaceLibraries,
   pinNornProgram, plainAnswer as answerText, plainResult as resultText, previewNornEdit, verifyNornLedgerMigration,
 } from "./norn-host";
 import { nornFlow } from "./norn-plan";
@@ -146,7 +146,7 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
   const found = await readNornRequest(database(env), { requestId: crypto.randomUUID(), ...input });
   const request = found?.request as LedgerRequest | null | undefined;
   if (!found || !request) return undefined;
-  return { ref: input.requestRef, channelId: found.channelId, holder: request.holder, text: request.text,
+  return { ref: input.requestRef, channelId: found.channelId, ...nornRequestWords(request),
     state: request.reply === null ? "open" : OUTCOMES[request.reply.tag],
     reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
       : "reason" in request.reply ? request.reply.reason : null,
@@ -173,7 +173,7 @@ function programStatus(name: string, source: string, problem: string | undefined
     ...("refusal" in checked ? { problem: checked.refusal } : {}),
     ...(ledger?.ended ? { result: ledger.ended.error ?? (ledger.ended.result ? resultText(ledger.ended.result) : "") } : {}),
     requests: Object.values(ledger?.requests ?? {}).sort((a, b) => a.openedAt - b.openedAt).map(request => ({
-      holder: request.holder, text: request.text, askedAt: new Date(request.openedAt).toISOString(),
+      ...nornRequestWords(request), askedAt: new Date(request.openedAt).toISOString(),
       by: request.by === null ? null : new Date(request.by).toISOString(),
       outcome: request.reply === null ? null : OUTCOMES[request.reply.tag],
       reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)

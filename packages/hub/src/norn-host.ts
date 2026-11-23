@@ -1,4 +1,5 @@
-import { nornLibBlock, nornRunBlock, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken, utf8ByteLength } from "@xmatrix/protocol";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, nornLibBlock, nornRunBlock, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken,
+  utf8ByteLength } from "@xmatrix/protocol";
 import { NORN_HANDED_ON_REASON, type NornProgramState, type NornProgramWrite, type NornStep } from "@xmatrix/db";
 import {
   checkSource, diffProgramUpgrade, elaborate, hostSources, manifestEventForm, pinProgramDefinitions, readInterface, readLibrary,
@@ -8,13 +9,13 @@ import { NORN_STD, NORN_STD_LEGACY_V1 } from "./vendor/norn/std";
 import { parse } from "./vendor/norn/frontend/parser";
 import { compile, type Code } from "./vendor/norn/runtime/code";
 import {
-  delegate, deliverEvent, emptyLedger, evaluate, migrateLedger, occur, previewEdit, reclaim, settle, stop, take, verifyMigration,
+  delegate, deliverEvent, emptyLedger, evaluate, migrateLedger, occur, preparedAction, previewEdit, reclaim, settle, stop, take, verifyMigration,
   type CloudEventInput, type Delegation, type EditPreview, type Ledger, type LedgerRequest, type MigrationReport, type MigrationResult,
   type MigrationStep, type Pass, type PassOptions, type Reply,
 } from "./vendor/norn/runtime/ledger";
 import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
 import {
-  BUILTIN_NORN_LIBRARY_SOURCES, loadBuiltinNornLibraries, NORN_CONNECTOR_EVENT_MANIFESTS,
+  BUILTIN_NORN_LIBRARY_SOURCES, loadBuiltinNornLibraries, nornActionStatement, nornConnectorActionSpecs, NORN_CONNECTOR_EVENT_MANIFESTS,
 } from "./norn-libraries";
 
 /**
@@ -103,7 +104,7 @@ const SOURCES = hostSources(HOST);
 const STD = readLibrary(NORN_STD, "std.norn", HOST);
 /** Pre-edition-1 standard library snapshot pinned for legacy v1 ledgers so AST node IDs stay byte-for-byte identical. */
 const STD_LEGACY_V1 = readLibrary(NORN_STD_LEGACY_V1, "std.norn", HOST);
-/** Built-in application libraries layered on `Events`: `GitHub`, `Gmail`. */
+/** Built-in application libraries layered on `Events` and `Actions`: `GitHub`, `Gmail`, `X`. */
 const BUILTIN_LIBRARIES = loadBuiltinNornLibraries(HOST);
 
 function loadProgramLibraries(
@@ -262,8 +263,41 @@ export const instanceHolder = (holder: string): boolean => /^@[^\s@:()]{1,80}:[1
  * its address only holds a request its holder delegated to it there: a
  * program asks by name, and a new Run takes it.
  */
-const deliverable = (request: Pick<LedgerRequest, "holder" | "delegatedBy">): boolean =>
-  agentHolder(request.holder) || personHolder(request.holder) || (Boolean(request.delegatedBy) && instanceHolder(request.holder));
+const deliverable = (request: Pick<LedgerRequest, "holder" | "delegatedBy" | "action">): boolean =>
+  Boolean(request.action) || agentHolder(request.holder) || personHolder(request.holder) || (Boolean(request.delegatedBy) && instanceHolder(request.holder));
+
+/**
+ * A request of a connected app (Norn spec §6.3): `Actions.prepare`, which
+ * fixes what will be done and has it admitted, or `Actions.perform`, which
+ * does it once. The host holds it; no Agent and no person is delivered it.
+ */
+export type NornAppRequest = LedgerRequest & { action: NonNullable<LedgerRequest["action"]> };
+export const appRequest = (request: Pick<LedgerRequest, "action">): request is NornAppRequest => Boolean(request.action);
+/** A connected app by the name people know it by. */
+const appName = (app: string): string => APP_CONNECTOR_PROVIDER_MANIFESTS.find(manifest => manifest.id === app)?.name ?? app;
+/**
+ * Who a request is asked of and what is asked, as a reader of the program's
+ * flow takes it in. A request of a connected app reads as the app and what it
+ * is to do, never as the host's own holder name.
+ */
+export function nornRequestWords(request: Pick<LedgerRequest, "holder" | "text" | "verb" | "action" | "context">): { holder: string; text: string } {
+  if (!request.action) return { holder: request.holder, text: request.text };
+  return { holder: `@${appName(request.action.app)}`, text: request.verb === "prepare"
+    ? `Approve ${request.text}${request.context ? `: ${request.context}` : ""}` : `Do ${request.text}, as approved` };
+}
+/** What the host answers a `prepare` it admitted with: the one value the program's `perform` takes. */
+export const nornPreparedReply = (request: LedgerRequest): Reply => ({ tag: "Answered", value: preparedAction(request) });
+/** What a completed action answers: the receipt's words, and its link when it gave one. */
+export const nornActionAnswer = (result: { summary: string; url?: string }): Reply => ({ tag: "Answered", value: { type: "record", fields: {
+  summary: text(result.summary), url: result.url ? { type: "variant", name: "Some", args: [text(result.url)] } : { type: "variant", name: "None", args: [] } } } });
+/** Why this host cannot do what a request asks of a connected app; undefined when it can try. */
+function appRefusal(request: NornAppRequest): string | undefined {
+  const { app, name, input } = request.action;
+  if (!nornConnectorActionSpecs(app).some(spec => spec.name === name)) return `This host has no action ${name} of the app ${app}`;
+  if (request.verb !== "prepare") return undefined;
+  const statement = nornActionStatement(app, name, input);
+  return "refusal" in statement ? statement.refusal : undefined;
+}
 
 const typeText = (form: Form): string => form.kind === "base" || form.kind === "named" ? form.name
   : form.kind === "list" ? `list<${typeText(form.element)}>` : form.kind === "tuple" ? `(${form.elements.map(typeText).join(", ")})` : "_";
@@ -566,6 +600,7 @@ export function nornPageEnd(program: { ended: Ledger["ended"]; requests: Record<
   const asked = last?.text.split("\n")[0]?.replace(/[`*_[\]]/gu, "").trim() ?? "";
   const where = ended.error !== null ? `the program stopped: ${ended.error}`
     // The holder's name is written without its @: this tells people, and summons nobody.
+    : last && appRequest(last) ? `${appName(last.action.app)} ${last.text} ${unanswered(last.reply!)}`
     : last ? `${last.holder.replace(/^@/u, "")}, asked “${asked.length > 200 ? `${asked.slice(0, 200)}…` : asked}”, ${unanswered(last.reply!)}`
     : nornEndBody(ended, true);
   const names = [...new Set(people.map(person => person.name).filter(name => /^@[^\s@]+$/u.test(name)))].join(" ");
@@ -626,6 +661,7 @@ export function nornPasses(code: Code, ledger: Ledger, now: number, each: (pass:
       const taker = request.candidates?.find(holder => deliverable({ holder, delegatedBy: null }));
       if (taker) take(ledger, request.id, taker, now);
       const reason = !deliverable(request) ? `This host cannot deliver a request to ${request.holder} yet`
+        : appRequest(request) ? appRefusal(request) ?? null
         : personHolder(request.holder) && Object.keys(request.conditions ?? {}).length ? `${request.holder} is a person: conditions such as ~repo apply to an Agent`
         : (personHolder(request.holder) ? undefined : summonConditions(request).refusal)
           ?? (utf8ByteLength(nornDelivery(request, reference()).body) > MAX_DELIVERY_BYTES ? "The request is too large to deliver in one message" : null);
@@ -731,6 +767,12 @@ export function nornStep(act?: NornAct,
       for (const row of state.requests) {
         const request = ledger.requests[row.requestId];
         if (!row.abandoned || request?.reply !== null || request.epoch !== row.epoch) continue;
+        // The host held it for a connected app, and the time it gave itself to hear of an outcome has passed.
+        if (appRequest(request)) {
+          settle(ledger, request.id, request.holder, { tag: "Broke", reason: request.verb === "prepare"
+            ? "Nobody answered this approval request in 30 days" : "The action stopped without a confirmed result; it was not tried again" }, now, row.epoch);
+          continue;
+        }
         const person = personHolder(request.holder);
         const handedOn = ledger.evidence.some(entry => entry.request === request.id && entry.reason === NORN_HANDED_ON_REASON);
         // Work that broke off (a turn that failed, a Run that never started) is not the Agent giving up: the request

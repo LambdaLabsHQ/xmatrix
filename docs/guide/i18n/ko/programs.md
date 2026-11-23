@@ -143,6 +143,47 @@ every(1d)->or(ciFailed("acme/app"))->forEach(_ =>
 
 이 코드는 매일 한 번, 그리고 CI가 실패하는 즉시 라운드를 실행합니다. 스페이스의 앱 연결이 해당 저장소나 앱을 포함하고 있어야 합니다.
 
+## 연결된 앱에서 동작 실행
+
+프로그램은 [연결된 앱](connectors.md)이 지정한 시각에 한 가지 일을 스스로 하게 할 수 있습니다. 그 시각에 에이전트가 실행 중일 필요가 없습니다. 두 단계입니다. **준비**는 실행할 내용을 그대로 고정하고 승인을 받습니다. 이때는 아무것도 전송되지 않습니다. **게시**는 그것을 한 번 실행합니다.
+
+```norn
+open Std
+let post = (video, text, ~at) => spawn(~key=video, () => {
+  let ready = X.prepareVideo("@acme", video, text)->wait?
+  after(at)->wait
+  X.publish(ready)->wait
+})
+ignore(all([
+  post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
+  post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
+]))
+never()->wait
+```
+
+프로그램이 시작되면 두 게시물이 바로 승인을 요청하므로 한 번에 모두 답할 수 있습니다. 이후 각 게시물은 자기 시각에 전송됩니다. 목록에 한 줄을 추가하면 새 게시물에 대해서만 묻습니다. 마지막 줄은 프로그램을 계속 실행 상태로 두어 목록을 늘려 갈 수 있게 합니다. 이미 전송된 게시물은 그 줄을 남겨 두든 지우든 다시 전송되지 않습니다.
+
+승인은 해당 앱의 단일 권한을 따릅니다.
+
+| 권한 | 프로그램이 동작을 준비할 때 |
+| --- | --- |
+| 읽기 및 쓰기(Read and write) | 즉시 승인됩니다 |
+| 먼저 묻기(Ask first) | 대화의 **Pending approvals**에 표시되며, Space 관리자가 사용될 계정, 본문, 첨부 파일을 보고 답합니다 |
+| 읽기 전용(Read only) | 거부됩니다 |
+
+승인은 그 내용의 그 동작 하나에만 적용되며 30일 동안 유효합니다. 실행 시각에 xMatrix는 연결과 계정이 승인 당시와 같은지, 승인한 사람이 여전히 승인할 수 있는지 다시 확인합니다. 하나라도 성립하지 않으면 아무것도 전송되지 않고 프로그램이 그 이유를 읽습니다. 결과를 알 수 없는 동작은 실패로 보고되며 다시 시도하지 않습니다. 동영상 첨부 파일은 프로그램 자신의 대화에 있어야 합니다.
+
+`X.preparePost(account, text)`는 동영상 없는 게시물을 준비합니다. 다른 앱의 동작은 이름으로 요청하며, 입력은 해당 명령의 두 부분입니다. 작성법은 `xmatrix connector list`에서 볼 수 있습니다.
+
+```norn
+type command = {target: string, text: string}
+type done = {summary: string, url: option<string>}
+let post: Actions.action<command, done> = Actions.action("slack", "post")
+
+let ready = Actions.prepare(post, {target: "#releases", text: "4.2 is out."})->wait?
+Actions.perform(ready)->wait
+```
+
 ## 에이전트의 단일 질문
 
 답변 하나만 필요한 에이전트는 프로그램을 작성하지 않고 명령어로 바로 질문해 답을 받습니다.

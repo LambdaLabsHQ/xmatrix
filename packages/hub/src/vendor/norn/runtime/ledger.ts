@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@3a8adebc52c4e8af22a0b40ddf7a2dfd7ca36f03; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@879866cb314729dd7e6be1621ac64fc433c3309e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -74,6 +74,13 @@ export interface LedgerRequest {
   options: Value[] | null;
   /** What a `run` must report, when the checker decided it (docs/types.md §5a); null means the host's report. */
   form: ReportForm | null;
+  /**
+   * For a request of the host itself (`Actions.prepare`, `Actions.perform`,
+   * spec §6.3): the connected app and its action. A `prepare` holds the input
+   * it fixed; a `perform` names the `prepare` request whose answer it does.
+   * Absent on every request of a participant.
+   */
+  action?: { app: string; name: string; input: Value | null; prepared: string | null };
   by: number | null;
   openedAt: number;
   reply: Reply | null;
@@ -318,7 +325,19 @@ export interface PassOptions {
 class ProgramError extends Error {}
 
 const VERBS = ["ask", "confirm", "choose", "run", "judge"];
+/** The requests a program makes of the host's connected apps (spec §6.3), by the name the ledger keeps as their verb. */
+const ACTION_VERBS: Record<string, "prepare" | "perform"> = { "Actions.prepare": "prepare", "Actions.perform": "perform" };
+/** Who holds a request of a connected app: the app, never a participant. */
+export const appHolder = (app: string): string => `app:${app}`;
+/**
+ * What `Actions.prepare` answers once the host has admitted the action: the
+ * one value `Actions.perform` takes. It names the request, and the ledger is
+ * what makes it good: a value of this shape that no admitted `prepare` of the
+ * same ledger stands behind performs nothing.
+ */
+export const preparedAction = (request: Pick<LedgerRequest, "id">): Value => variant("Prepared", text(request.id));
 const LABELS: Record<string, string[]> = {
+  "Actions.prepare": ["by", "about"], "Actions.perform": ["by"],
   ask: ["by", "about"], confirm: ["by", "about"], choose: ["by", "about"], run: ["context", "by", "about", "form"], judge: ["about"],
   wait: [], waitUntil: [], cancel: [], handOver: [], status: [], say: [], first: [], sameAs: [], spawn: ["key"], withinEnter: [], withinExit: [],
 };
@@ -412,6 +431,7 @@ export function delegate(ledger: Ledger, id: string, from: string, to: string, n
   const refusal = !request ? "No such request"
     : request.reply !== null ? "The request has already ended"
     : request.verb === "judge" ? "Only the host's judge decides a judgement"
+    : request.action ? "The host performs an action; it is nobody's to delegate"
     : request.candidates?.length ? "Nobody of the group has taken the request yet"
     : request.holder !== from || (options.epoch !== undefined && options.epoch !== request.epoch) ? "Not the request's holder"
     : (request.delegatedBy ?? null) !== null ? "A delegate answers the request or gives it back; they cannot delegate it again"
@@ -455,6 +475,9 @@ function formError(request: LedgerRequest, reply: Reply): string | null {
     case "confirm": return answer.type === "variant" && ["Yes", "No"].includes(answer.name) && !answer.args.length ? null : "The answer must be Yes or No";
     case "choose": return request.options!.some(option => equal(option, answer)) ? null : "The answer is not one of the options";
     case "judge": return answer.type === "bool" ? null : "A judgement must be true or false";
+    // Only the host admits an action, and the answer is the request's own token; what an action answers is the host's to check.
+    case "prepare": return equal(answer, preparedAction(request)) ? null : "A prepared action is answered with preparedAction(request)";
+    case "perform": return null;
     default: return runFormError(answer, request.form);
   }
 }
@@ -1114,6 +1137,51 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
         }
       }
       return { value: { type: "request", id: childReq.id }, at: childReq.openedAt };
+    }
+
+    if (ACTION_VERBS[name]) {
+      const verb = ACTION_VERBS[name];
+      let action: NonNullable<LedgerRequest["action"]>;
+      if (verb === "prepare") {
+        const [named, input] = args;
+        if (args.length !== 2 || named?.type !== "variant" || named.name !== "Action" || named.args[0]?.type !== "string" || named.args[1]?.type !== "string") {
+          throw new ProgramError("Actions.prepare needs an action and its input");
+        }
+        action = { app: named.args[0].value, name: named.args[1].value, input: input!, prepared: null };
+      } else {
+        const [token] = args;
+        const admitted = token?.type === "variant" && token.name === "Prepared" && token.args[0]?.type === "string" ? ledger.requests[token.args[0].value] : undefined;
+        if (args.length !== 1 || admitted?.verb !== "prepare" || !admitted.action || admitted.reply?.tag !== "Answered") {
+          throw new ProgramError("Actions.perform needs what Actions.prepare answered in this program");
+        }
+        action = { app: admitted.action.app, name: admitted.action.name, input: null, prepared: admitted.id };
+      }
+      const { by: _by, ...kept } = labels;
+      const address = identity("request", { name: verb, who: null, args, labels: kept });
+      const resolvedAddress = v2 ? resolveAddress(address, ledger.moves) : address;
+      let request = v2 ? byAddress.get(resolvedAddress) : ledger.requests[address];
+      if (!request) {
+        if (!permitted()) return revoked();
+        const id = v2 ? nextUniqueRequestId(resolvedAddress) : address;
+        request = ledger.requests[id] = {
+          id, ...(v2 ? { address: resolvedAddress } : {}), verb, holder: appHolder(action.app), candidates: null,
+          excluded: [], delegatedBy: null, epoch: 0, text: action.name, conditions: {},
+          about: labels.about ? show(labels.about) : null, context: action.input === null ? null : show(action.input),
+          options: null, form: null, action,
+          by: clampBy(instant(labels.by, now)), openedAt: now, reply: null, settledAt: null, detached: false,
+          openedBy: options.openedBy ?? currentScope(), spawnOwner: currentSpawnOwner(),
+        };
+        if (v2) byAddress.set(resolvedAddress, request);
+        log.push({ kind: "opened", request: { ...request } });
+      } else if (request.reply === null) {
+        // The deadline is not part of what is done: moving it amends the same request.
+        const by = clampBy(instant(labels.by, request.openedAt));
+        if (by !== request.by) { pass.rescheduled.push({ id: request.id, from: request.by, to: by }); request.by = by; }
+        request.detached = false;
+      }
+      reached.add(request.id);
+      if (request.reply === null && request.by !== null && request.by <= now) close(request, { tag: "NoReply" }, request.by);
+      return { value: { type: "request", id: request.id }, at: request.openedAt };
     }
 
     if (VERBS.includes(name)) {
@@ -1843,6 +1911,7 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
     if (name === "cancel" || name === "handOver") {
       if (args.length !== (name === "handOver" ? 2 : 1)) throw new ProgramError(`${name} needs a request${name === "handOver" ? " and its next holder" : ""}`);
       const request = handle(name, args[0]), next = name === "handOver" ? participant(args[1]) : null;
+      if (next !== null && request.action) throw new ProgramError("An action cannot be handed over: the host performs it");
       const key = identity(name, { id: request.id, next });
       if (!ledger.entries[key]) {
         if (!permitted()) return revoked();
