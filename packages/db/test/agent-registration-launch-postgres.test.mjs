@@ -38,7 +38,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
       "0001_expand_space_placement.sql", "0024_expand_global_space_routing.sql", "0057_expand_agent_display_names.sql",
       "0117_expand_instance_rest_state.sql", "0160_expand_instance_wake.sql", "0185_expand_space_harness_profiles.sql",
       "0228_expand_agent_quota_retries.sql", "0244_expand_norn_programs.sql",
-      "0265_expand_norn_event_deliveries.sql", "0267_expand_registration_quota_pool_reconciliations.sql"]) {
+      "0265_expand_norn_event_deliveries.sql", "0267_expand_registration_quota_pool_reconciliations.sql",
+      "0268_expand_norn_request_host_due.sql"]) {
       await sql(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
     }
     await sql(`ALTER TABLE data.instances ADD COLUMN IF NOT EXISTS presentation_json jsonb NOT NULL DEFAULT '{}'::jsonb;

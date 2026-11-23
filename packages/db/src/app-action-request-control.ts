@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { utf8ByteLength } from "@xmatrix/protocol";
+import { isXDurableAction, utf8ByteLength, X_DURABLE_ACTIONS } from "@xmatrix/protocol";
 import { requireChannelCapability } from "./channel-capability-policy.js";
 import { AppControlError } from "./app-control.js";
 import { appCredentialValueLimit } from "./app-credential-control.js";
@@ -17,6 +17,17 @@ export interface AppActionRequestPayload {
   preview: Record<string, string>;
 }
 
+/** The X actions only the durable executor dispatches, as SQL. */
+const X_DURABLE_ACTIONS_SQL = `(${X_DURABLE_ACTIONS.map(action => `'${action}'`).join(",")})`;
+/**
+ * The requests the durable executor runs: an X video action, and any action a
+ * Norn program performs (docs/architecture/norn-host.md "Asking a connected
+ * app"). Its outcome is kept until whoever asked has been told.
+ */
+const DURABLE_SQL = `((provider_id='x' AND action_id IN ${X_DURABLE_ACTIONS_SQL}) OR norn_perform_ref IS NOT NULL)`;
+/** How long an action a program prepared can still be approved, and then performed. */
+const HELD_INTERVAL = "30 days";
+
 export interface XUploadReference { requestId: string; spaceId: string; channelId: string }
 export interface XExecutingUpload {
   request: ReturnType<typeof view> & { connectionId: string };
@@ -27,6 +38,8 @@ export interface XUploadOutcome {
   payload: Pick<AppActionRequestPayload, "messageId" | "senderKind" | "senderId">;
   receipt: string;
   status: "completed" | "failed" | "blocked";
+  /** What a completed action gave back, for a program that reads it as its answer. */
+  result?: { summary: string; url?: string };
 }
 
 function uploadOutcomeValue(value: unknown, status: unknown): Omit<XUploadOutcome, "request"> {
@@ -40,16 +53,22 @@ function uploadOutcomeValue(value: unknown, status: unknown): Omit<XUploadOutcom
   const identifier = (field: unknown): field is string => typeof field === "string" && !!field.trim() && utf8ByteLength(field) <= 300;
   if (!identifier(payload.messageId) || (payload.senderKind !== "user" && payload.senderKind !== "agent") ||
       (payload.senderId !== undefined && !identifier(payload.senderId))) throw invalid();
+  const result = outcome.result as Record<string, unknown> | undefined;
+  if (result !== undefined && (!result || typeof result !== "object" || Array.isArray(result) || typeof result.summary !== "string" ||
+      (result.url !== undefined && typeof result.url !== "string"))) throw invalid();
   return { receipt: outcome.receipt, status: status as XUploadOutcome["status"], payload: {
     messageId: payload.messageId, senderKind: payload.senderKind,
     ...(payload.senderId !== undefined ? { senderId: payload.senderId } : {}),
-  } };
+  }, ...(result ? { result: { summary: String(result.summary), ...(typeof result.url === "string" ? { url: result.url } : {}) } } : {}) };
 }
 
 function view(row: QueryResultRow) {
   return { requestId: String(row.request_id), channelId: String(row.channel_id), spaceId: String(row.space_id),
     providerId: String(row.provider_id), actionId: String(row.action_id), requestedBy: String(row.requested_by),
-    status: String(row.status), expiresAt: new Date(row.expires_at as string).toISOString() };
+    status: String(row.status), expiresAt: new Date(row.expires_at as string).toISOString(),
+    /** The program's `prepare` request this serves, and the `perform` that runs it, by their references. */
+    nornPrepareRef: typeof row.norn_prepare_ref === "string" ? row.norn_prepare_ref : null,
+    nornPerformRef: typeof row.norn_perform_ref === "string" ? row.norn_perform_ref : null };
 }
 
 export class PostgresAppActionRequestRepository {
@@ -133,7 +152,7 @@ export class PostgresAppActionRequestRepository {
   }
 
   private async requireUploadAllow(tx: DatabaseTransaction, row: QueryResultRow) {
-    if (row.provider_id !== "x" || row.action_id !== "upload_video") {
+    if (!isXDurableAction(String(row.provider_id), String(row.action_id))) {
       throw new AppControlError("action_request_scope_changed", 409, "This request cannot start an allowed upload");
     }
     const policies = await tx.query<QueryResultRow>({ name: "app_action_request_upload_write_v1", text: `SELECT permission_mode
@@ -155,7 +174,9 @@ export class PostgresAppActionRequestRepository {
   }
 
   async create(input: { requestId: string; connectionId: string; channelId: string; providerId: string;
-    actionId: string; requestedBy: string; payload: AppActionRequestPayload }) {
+    actionId: string; requestedBy: string; payload: AppActionRequestPayload;
+    /** The Norn program's `prepare` request this serves: approving it runs nothing until the program performs it. */
+    heldFor?: string }) {
     const requestId = text(input.requestId, "requestId", 240);
     if (utf8ByteLength(JSON.stringify(input.payload)) > 64 * 1024) {
       throw new AppControlError("invalid_app_request", 400, "Action approval input is too large");
@@ -176,18 +197,19 @@ export class PostgresAppActionRequestRepository {
         WHERE request_id IN (SELECT request_id FROM data.app_connector_action_requests
           WHERE space_id=$1 AND expires_at<=now() AND encrypted_value_json IS NOT NULL ORDER BY expires_at LIMIT 50)`,
       values: [scope.space_id], maxRows: 0 });
-      await tx.query({ name: "app_action_request_insert_v1", text: `INSERT INTO data.app_connector_action_requests
+      await tx.query({ name: "app_action_request_insert_v2", text: `INSERT INTO data.app_connector_action_requests
         (request_id,space_id,channel_id,connection_id,provider_id,action_id,requested_by,connection_generation,
-         credential_version,encrypted_value_json,status,created_at,expires_at,updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'pending',now(),now()+interval '24 hours',now())
+         credential_version,encrypted_value_json,status,created_at,expires_at,updated_at,norn_prepare_ref)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'pending',now(),
+          now()+CASE WHEN $11::text IS NULL THEN interval '24 hours' ELSE interval '${HELD_INTERVAL}' END,now(),$11)
         ON CONFLICT (request_id) DO NOTHING`, values: [requestId, scope.space_id, input.channelId, input.connectionId,
       input.providerId, input.actionId, input.requestedBy, scope.generation, scope.credential_version,
-      JSON.stringify(envelope)], maxRows: 0 });
+      JSON.stringify(envelope), input.heldFor ?? null], maxRows: 0 });
       const rows = await tx.query<QueryResultRow>({ name: "app_action_request_created_v1", text:
         "SELECT * FROM data.app_connector_action_requests WHERE request_id=$1 LIMIT 1", values: [requestId], maxRows: 1 });
       const row = rows[0]!;
       if (row.connection_id !== input.connectionId || row.channel_id !== input.channelId || row.requested_by !== input.requestedBy ||
-        row.action_id !== input.actionId || row.provider_id !== input.providerId) {
+        row.action_id !== input.actionId || row.provider_id !== input.providerId || (row.norn_prepare_ref ?? null) !== (input.heldFor ?? null)) {
         throw new AppControlError("action_request_conflict", 409, "Action approval identity changed");
       }
       if (row.status === "pending" && JSON.stringify(await this.decrypt(row)) !== JSON.stringify(input.payload)) {
@@ -241,10 +263,13 @@ export class PostgresAppActionRequestRepository {
       if (!locked[0]) throw new AppControlError("action_request_not_found", 404, "Action approval not found");
       if (locked[0].status !== "pending") return { request: view(locked[0]), claimed: false as const };
       const payload = input.allow ? xPayload ?? await this.decrypt(row) : undefined;
-      const status = input.allow ? "executing" : "denied";
+      // A program's request is approved here and run when the program performs it: this decision dispatches nothing.
+      const held = row.norn_prepare_ref !== null && row.norn_prepare_ref !== undefined;
+      const status = !input.allow ? "denied" : held ? "approved" : "executing";
       await tx.query({ name: "app_action_request_claim_v1", text: `UPDATE data.app_connector_action_requests
         SET status=$2,decided_by=$3,updated_at=now(),encrypted_value_json=CASE WHEN $2='denied' THEN NULL ELSE encrypted_value_json END
         WHERE request_id=$1 AND status='pending'`, values: [input.requestId, status, input.actorUserId], maxRows: 0 });
+      if (held) return { request: { ...view(row), status }, claimed: false as const };
       return { request: { ...view(row), status }, claimed: input.allow, payload };
     });
   }
@@ -255,9 +280,9 @@ export class PostgresAppActionRequestRepository {
       await requireChannelCapability(tx, { channelId: input.channelId, spaceId: input.spaceId,
         principal: { kind: "user", id: input.actorUserId }, capability: "app_new_work",
         error: failure => new AppControlError(failure.code, failure.status, failure.message) });
-      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_start_read_v1", text: `SELECT *
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_start_read_v2", text: `SELECT *
         FROM data.app_connector_action_requests WHERE request_id=$1 AND space_id=$2 AND channel_id=$3
-          AND requested_by=$4 AND provider_id='x' AND action_id='upload_video' LIMIT 1`,
+          AND requested_by=$4 AND provider_id='x' AND action_id IN ${X_DURABLE_ACTIONS_SQL} LIMIT 1`,
       values: [input.requestId, input.spaceId, input.channelId, input.actorUserId], maxRows: 1 });
       const row = rows[0];
       if (!row) throw new AppControlError("action_request_not_found", 404, "Upload request not found");
@@ -292,16 +317,86 @@ export class PostgresAppActionRequestRepository {
       if (row.decided_by !== null) await this.requireAdmin(tx, String(row.space_id), String(row.decided_by), channelId);
       const scope = await this.snapshot(tx, connectionId, channelId, String(row.requested_by));
       await this.requireApprovedGrant(scope, row);
-      if (row.decided_by === null) await this.requireUploadAllow(tx, row);
+      const held = typeof row.norn_prepare_ref === "string";
+      if (row.decided_by === null && !held) await this.requireUploadAllow(tx, row);
+      // Nobody decided a program's request that the connection's permission admitted: the caller reads that permission again.
+      return { decidedByPerson: row.decided_by !== null };
     });
+  }
+
+  /**
+   * A program's request the connection's permission admits without a person
+   * (the Hub read that permission): it is approved, and runs when the program
+   * performs it.
+   */
+  async admitHeld(input: { requestId: string; spaceId: string; channelId: string }) {
+    return this.transaction("admit-held", async tx => {
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_admit_held_v1", text: `UPDATE
+        data.app_connector_action_requests SET status='approved',decided_by=NULL,updated_at=now()
+        WHERE request_id=$1 AND space_id=$2 AND channel_id=$3 AND norn_prepare_ref IS NOT NULL AND status='pending'
+          AND expires_at>now() RETURNING *`, values: [input.requestId, input.spaceId, input.channelId], maxRows: 1 });
+      return rows[0] ? view(rows[0]) : null;
+    });
+  }
+
+  /** How the action request of a program's `prepare` stands, by that request's reference. */
+  async heldRequest(input: { spaceId: string; prepareRef: string }) {
+    return this.transaction("held-request", async tx => {
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_held_v1", text: `SELECT *,(expires_at<=now()) AS lapsed
+        FROM data.app_connector_action_requests WHERE space_id=$1 AND norn_prepare_ref=$2 LIMIT 1`,
+      values: [input.spaceId, input.prepareRef], maxRows: 1 });
+      return rows[0] ? { ...view(rows[0]), lapsed: rows[0].lapsed === true, decidedBy: rows[0].decided_by === null ? null : String(rows[0].decided_by) } : null;
+    });
+  }
+
+  /**
+   * A program performs what was admitted: the one step from approved to
+   * executing, taken once. What was approved is checked again as a decision
+   * checks it: the approver is still an admin who reads the conversation, and
+   * the connection and its account are the ones approved. Returns why it
+   * cannot run instead; a repeat by the same `perform` finds its own claim.
+   */
+  async claimHeld(input: { spaceId: string; channelId: string; prepareRef: string; performRef: string }) {
+    return this.transaction("claim-held", async tx => {
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_claim_held_lock_v1", text: `SELECT *,(expires_at<=now()) AS lapsed
+        FROM data.app_connector_action_requests WHERE space_id=$1 AND channel_id=$2 AND norn_prepare_ref=$3 FOR UPDATE`,
+      values: [input.spaceId, input.channelId, input.prepareRef], maxRows: 1 });
+      const row = rows[0];
+      if (!row) return { refusal: "What was prepared is not known in this conversation" };
+      if (row.norn_perform_ref === input.performRef && row.status === "executing") return { request: view(row) };
+      if (row.norn_perform_ref !== null) return { refusal: "It was performed before; a prepared action is performed once" };
+      if (row.status !== "approved") return { refusal: `It is ${String(row.status)}, not approved` };
+      if (row.lapsed === true) return { refusal: "Its approval is older than 30 days; prepare it again" };
+      if (row.decided_by !== null) await this.requireAdmin(tx, input.spaceId, String(row.decided_by), input.channelId);
+      const scope = await this.snapshot(tx, String(row.connection_id), input.channelId, String(row.requested_by));
+      await this.requireApprovedGrant(scope, row);
+      await tx.query({ name: "app_action_request_claim_held_v1", text: `UPDATE data.app_connector_action_requests
+        SET status='executing',norn_perform_ref=$2,updated_at=now() WHERE request_id=$1 AND status='approved'`,
+      values: [row.request_id, input.performRef], maxRows: 0 });
+      return { request: { ...view(row), status: "executing", nornPerformRef: input.performRef } };
+    });
+  }
+
+  /**
+   * Programs no longer ask for these: an approval nobody answered is taken
+   * back, and with `approved` one that was given and never used is void. The
+   * frozen input goes with it.
+   */
+  async withdrawHeld(input: { spaceId: string; prepareRefs: string[]; approved?: boolean }): Promise<string[]> {
+    if (!input.prepareRefs.length) return [];
+    return this.transaction("withdraw-held", async tx => (await tx.query<QueryResultRow>({ name: "app_action_request_withdraw_held_v1",
+      text: `UPDATE data.app_connector_action_requests SET status='expired',encrypted_value_json=NULL,updated_at=now()
+        WHERE space_id=$1 AND norn_prepare_ref=ANY($2::text[]) AND (status='pending' OR ($3 AND status='approved'))
+        RETURNING channel_id`, values: [input.spaceId, input.prepareRefs, input.approved === true], maxRows: 1_000 }))
+      .map(row => String(row.channel_id)));
   }
 
   /** Server-only recovery input; the durable scheduler stores this reference, never the payload. */
   async executingUpload(input: XUploadReference): Promise<XExecutingUpload | null> {
     return this.transaction("executing-upload", async tx => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_executing_upload_v1", text: `SELECT *
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_executing_upload_v3", text: `SELECT *
         FROM data.app_connector_action_requests WHERE request_id=$1 AND space_id=$2 AND channel_id=$3
-          AND provider_id='x' AND action_id='upload_video' AND status='executing' AND expires_at>now()
+          AND ${DURABLE_SQL} AND status='executing' AND expires_at>now()
         LIMIT 1 FOR SHARE`, values: [input.requestId, input.spaceId, input.channelId], maxRows: 1 });
       const row = rows[0];
       return row ? { request: { ...view(row), connectionId: String(row.connection_id) }, payload: await this.decrypt(row) } : null;
@@ -309,21 +404,23 @@ export class PostgresAppActionRequestRepository {
   }
 
   /** Persist one bounded encrypted receipt before attempting its Channel append. */
-  async settleUpload(input: XUploadReference & { status: XUploadOutcome["status"]; receipt: string }): Promise<{ stored: boolean }> {
+  async settleUpload(input: XUploadReference & { status: XUploadOutcome["status"]; receipt: string;
+    result?: XUploadOutcome["result"] }): Promise<{ stored: boolean }> {
     if (!["completed", "failed", "blocked"].includes(input.status) || typeof input.receipt !== "string" ||
         !input.receipt.trim() || utf8ByteLength(input.receipt) > 64 * 1024) {
       throw new AppControlError("invalid_app_request", 400, "Upload receipt is invalid");
     }
     return this.transaction("settle-upload", async tx => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_settle_lock_v1", text: `SELECT *
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_settle_lock_v3", text: `SELECT *
         FROM data.app_connector_action_requests WHERE request_id=$1 AND space_id=$2 AND channel_id=$3
-          AND provider_id='x' AND action_id='upload_video' AND status='executing' AND expires_at>now() FOR UPDATE`,
+          AND ${DURABLE_SQL} AND status='executing' AND expires_at>now() FOR UPDATE`,
       values: [input.requestId, input.spaceId, input.channelId], maxRows: 1 });
       const row = rows[0];
       if (!row) return { stored: false };
       const payload = await this.decrypt(row);
       const outcome = uploadOutcomeValue({ status: input.status, receipt: input.receipt,
-        payload: { messageId: payload.messageId, senderKind: payload.senderKind, senderId: payload.senderId } }, input.status);
+        payload: { messageId: payload.messageId, senderKind: payload.senderKind, senderId: payload.senderId },
+        ...(input.result ? { result: input.result } : {}) }, input.status);
       const plaintext = JSON.stringify(outcome);
       if (utf8ByteLength(plaintext) > 64 * 1024) throw new AppControlError("invalid_app_request", 400, "Upload outcome is too large");
       const envelope = await encryptSecretValue(this.material, `app-action-request:${input.requestId}`, "outcome", 1, plaintext);
@@ -336,9 +433,9 @@ export class PostgresAppActionRequestRepository {
 
   async uploadOutcome(input: XUploadReference): Promise<XUploadOutcome | null> {
     return this.transaction("upload-outcome", async tx => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_outcome_v1", text: `SELECT *
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_outcome_v3", text: `SELECT *
         FROM data.app_connector_action_requests WHERE request_id=$1 AND space_id=$2 AND channel_id=$3
-          AND provider_id='x' AND action_id='upload_video' AND status IN ('completed','failed','blocked')
+          AND ${DURABLE_SQL} AND status IN ('completed','failed','blocked')
           AND encrypted_value_json IS NOT NULL AND expires_at>now() LIMIT 1 FOR SHARE`,
       values: [input.requestId, input.spaceId, input.channelId], maxRows: 1 });
       const row = rows[0];
@@ -355,9 +452,9 @@ export class PostgresAppActionRequestRepository {
 
   /** Called only after the trusted publisher confirms this receipt's Channel append. */
   async clearUploadOutcome(input: XUploadReference): Promise<void> {
-    await this.transaction("clear-upload-outcome", tx => tx.query({ name: "app_action_request_upload_outcome_clear_v1", text: `UPDATE
+    await this.transaction("clear-upload-outcome", tx => tx.query({ name: "app_action_request_upload_outcome_clear_v3", text: `UPDATE
       data.app_connector_action_requests SET encrypted_value_json=NULL,updated_at=now()
-      WHERE request_id=$1 AND space_id=$2 AND channel_id=$3 AND provider_id='x' AND action_id='upload_video'
+      WHERE request_id=$1 AND space_id=$2 AND channel_id=$3 AND ${DURABLE_SQL}
         AND status IN ('completed','failed','blocked')`, values: [input.requestId, input.spaceId, input.channelId], maxRows: 0 }));
   }
 

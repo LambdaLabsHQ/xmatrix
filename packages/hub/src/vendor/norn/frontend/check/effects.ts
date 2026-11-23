@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@3a8adebc52c4e8af22a0b40ddf7a2dfd7ca36f03; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@879866cb314729dd7e6be1621ac64fc433c3309e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The effects shown for review (docs/types.md §8, spec §12 item 5): the effect
  * families a program may perform, and the participant and ref literals that

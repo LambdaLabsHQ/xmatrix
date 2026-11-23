@@ -222,3 +222,78 @@ test("X media command parsers reject unscoped sources and raw media IDs", () => 
     { account: "@company", messageId: "message-1", attachmentId: "video-1" });
   assert.equal(typeof actions.media_status.parse({ target: "101", text: "303" }), "string");
 });
+
+// publish_video owns the gap between an approval and its post: the upload happens when the post is published, so
+// what was approved is the attachment and the text, and nothing is posted unless X finished that very upload.
+function publishing(options = {}) {
+  const f = fixture(options);
+  const posts = [], pauses = [];
+  const actions = createXMediaActions({
+    prepareAccount: async (_context, input) => ({ ...input, accountId: account.id, accountGeneration: account.generation, accountUsername: account.username }),
+    frozenAccount: async () => account,
+    postText: value => typeof value === "string" && value.trim().length > 0 && value.length <= 280,
+    publish: async (_context, selected, post) => {
+      posts.push({ account: selected, ...post });
+      if (options.postLost) throw new TypeError("response lost after sending");
+      return { id: "909", url: "https://x.com/company/status/909" };
+    },
+    pause: async milliseconds => { pauses.push(milliseconds); options.afterPause?.(f.state, pauses.length); },
+  });
+  const context = { authorizeWrite: f.dependencies.authorizeWrite, xMedia: f.media };
+  return { ...f, actions, context, posts, pauses };
+}
+const publishStatement = { target: "@company", text: JSON.stringify({ text: "Stop pasting API keys.", video: "message-1/video-1" }) };
+
+test("X publish_video uploads the approved attachment at publish time and posts once X finished processing it", async () => {
+  const f = publishing({ afterPause: (state, count) => { state.processing = count < 2 ? { state: "in_progress", check_after_secs: 30 } : { state: "succeeded" }; } });
+  const parsed = f.actions.publish_video.parse(publishStatement);
+  assert.deepEqual(parsed, { account: "@company", text: "Stop pasting API keys.", messageId: "message-1", attachmentId: "video-1" });
+  const prepared = await f.actions.publish_video.prepare(f.context, parsed);
+  assert.deepEqual(prepared, { ...parsed, accountId: "101", accountGeneration: "grant-1", accountUsername: "company",
+    sourceName: "video.mp4", sourceSize: String(f.bytes.length), sourceHash: "a".repeat(64), sourceVersion: "1" });
+  assert.equal(f.calls.length, 0, "an approval request uploads nothing");
+
+  const result = await f.actions.publish_video.execute(f.context, prepared);
+  assert.deepEqual(f.calls.map(call => call.path.replace(/^\/2\/media\/upload/u, "")),
+    ["/initialize", "/303/append", "/303/append", "/303/append", "/303/finalize", "?command=STATUS&media_id=303", "?command=STATUS&media_id=303"]);
+  assert.deepEqual(f.pauses, [2_000, 10_000], "the wait follows X's hint, at most ten seconds at a time");
+  assert.deepEqual(f.posts, [{ account, text: "Stop pasting API keys.", mediaId: "303" }]);
+  assert.equal(result.url, "https://x.com/company/status/909");
+  assert.match(result.summary, /^Posted with video as @company \(X account 101\): 909\nApproved source: message-1\/video-1; \d+ bytes; SHA-256 a{64}\.$/u);
+});
+
+test("X publish_video posts nothing when the attachment changed, processing failed or ran out of time", async t => {
+  const changed = publishing();
+  const prepared = await changed.actions.publish_video.prepare(changed.context, changed.actions.publish_video.parse(publishStatement));
+  changed.state.hash = changed.state.r2Hash = "b".repeat(64);
+  await assert.rejects(changed.actions.publish_video.execute(changed.context, prepared), error => error.status === 409);
+  assert.equal(changed.calls.length, 0, "a changed attachment is never uploaded");
+  assert.equal(changed.posts.length, 0);
+
+  const failed = publishing({ afterPause: state => { state.processing = { state: "failed" }; } });
+  await assert.rejects(failed.actions.publish_video.execute(failed.context,
+    await failed.actions.publish_video.prepare(failed.context, failed.actions.publish_video.parse(publishStatement))),
+  error => error.status === 422 && /nothing was posted/u.test(error.message));
+  assert.equal(failed.posts.length, 0);
+
+  const clock = t.mock.timers;
+  clock.enable({ apis: ["Date"], now: 1_000_000 });
+  try {
+    const slow = publishing({ afterPause: () => clock.tick(60_000) });
+    await assert.rejects(slow.actions.publish_video.execute(slow.context,
+      await slow.actions.publish_video.prepare(slow.context, slow.actions.publish_video.parse(publishStatement))),
+    error => error.status === 504 && /nothing was posted/u.test(error.message));
+    assert.equal(slow.posts.length, 0, "past the bound the post is not attempted");
+  } finally { clock.reset(); }
+});
+
+test("X publish_video takes one account, one exact text and one attachment of this Channel", () => {
+  const { actions } = publishing();
+  const parse = (target, body) => actions.publish_video.parse({ target, text: typeof body === "string" ? body : JSON.stringify(body) });
+  for (const target of ["*", "company", "@company/1"]) assert.equal(typeof parse(target, { text: "Hello", video: "message-1/video-1" }), "string");
+  for (const body of ["Hello", { text: "Hello" }, { video: "message-1/video-1" }, { text: "", video: "message-1/video-1" },
+    { text: "Hello", video: "https://example.com/video.mp4" }, { text: "Hello", video: "message-1/video-1", mediaId: "303" },
+    { text: "x".repeat(281), video: "message-1/video-1" }]) {
+    assert.equal(typeof parse("@company", body), "string", JSON.stringify(body));
+  }
+});

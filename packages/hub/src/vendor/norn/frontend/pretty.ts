@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@3a8adebc52c4e8af22a0b40ddf7a2dfd7ca36f03; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@879866cb314729dd7e6be1621ac64fc433c3309e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * A readable outline of a syntax tree, as printed by `norn parse`: one node
  * per line with its scalar fields and span, children indented below it.

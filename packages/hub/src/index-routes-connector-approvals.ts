@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { plainRecord } from "@xmatrix/protocol";
+import { isXDurableAction, plainRecord } from "@xmatrix/protocol";
 import { requireAuth, requireHumanAuth, readBoundedRequestBody, requestErrorStatus } from "./index-shared";
 import { getAppConnectorProvider } from "./app-connectors";
 import { publishCommandStatus } from "./connectors/command-support";
@@ -10,6 +10,7 @@ import { connectorActionCatalog } from "./connectors/action-catalog";
 import { announceActionRequests, runConnectorAction } from "./connectors/connector-commands";
 import type { Env } from "./types";
 import { enqueueXUpload } from "./connectors/x-upload-executor-do";
+import { settleNornAppRequest } from "./norn-programs";
 
 /** Decisions accept only a request reference; provider input always comes from the frozen encrypted request. */
 export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
@@ -46,11 +47,24 @@ export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
       const result = await repository.decide({ ...scope, requestId: c.req.param("requestId"), allow: decision.decision === "allow" });
       // Answered either way, it no longer waits: every admin's dock drops it.
       await announceActionRequests(c.env, scope.spaceId, scope.channelId);
+      // A Norn program asked for this one: the answer is the program's to read, and nothing runs until it performs it.
+      // A repeated decision tells the program again, which changes nothing once it has heard.
+      const { nornPrepareRef } = result.request;
+      if (nornPrepareRef && (result.request.status === "approved" || result.request.status === "denied")) {
+        await settleNornAppRequest(c.env, { channelId: scope.channelId, requestRef: nornPrepareRef,
+          outcome: result.request.status === "approved" ? { admitted: true } : { declined: "A Space admin declined it" } });
+      }
       if (!result.claimed || !result.payload) {
-        if (result.request.providerId === "x" && result.request.actionId === "upload_video" && result.request.status === "executing") {
+        if (isXDurableAction(result.request.providerId, result.request.actionId) && result.request.status === "executing") {
           await enqueueXUpload(c.env, { requestId: result.request.requestId, spaceId: scope.spaceId, channelId: scope.channelId });
         }
         const manifest = getAppConnectorProvider(result.request.providerId);
+        if (manifest && nornPrepareRef && result.request.status === "approved") {
+          // Approved ahead of its time: the conversation reads that nothing was sent yet.
+          await publishCommandStatus(manifest, { env: c.env, channelId: scope.channelId,
+            actorUserId: scope.actorUserId, messageId: `${result.request.requestId}:approved`, commandMessageId: null, body: "" },
+          [`${manifest.name} ${result.request.actionId}: approved; nothing was sent yet. It runs when its program performs it.`]);
+        }
         if (manifest && result.request.status === "denied") {
           // Denial erases the encrypted input, including its command message id.
           // The request reference identifies the notice, but is not a reply target.
@@ -61,9 +75,9 @@ export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
         return c.json({ request: result.request }, 200, { "cache-control": "private, no-store" });
       }
       const { request, payload } = result;
-      if (request.providerId === "x" && request.actionId === "upload_video") {
+      if (isXDurableAction(request.providerId, request.actionId)) {
         await enqueueXUpload(c.env, { requestId: request.requestId, spaceId: scope.spaceId, channelId: scope.channelId });
-        return c.json({ request, receipt: "X upload_video: queued; the result will reply in this Channel." },
+        return c.json({ request, receipt: `X ${request.actionId}: queued; the result will reply in this Channel.` },
           200, { "cache-control": "private, no-store" });
       }
       const provider = connectorProvider(request.providerId);

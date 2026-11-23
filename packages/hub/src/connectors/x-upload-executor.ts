@@ -3,9 +3,11 @@ import type { XExecutingUpload, XUploadOutcome, XUploadReference } from "@xmatri
 const JOB_KEY = "job:v1";
 const RECOVERY_MS = 150_000;
 const MAX_ATTEMPTS = 12;
-const UNCERTAIN_RECEIPT = "X video upload stopped without a confirmed result. It was not automatically retried. Check the connected account before requesting a new upload.";
+const UNCERTAIN_RECEIPT = "The X video action stopped without a confirmed result. It was not automatically retried. Check the connected account for the upload or the post before requesting it again.";
 
-export type XUploadResult = { status: "completed" | "failed" | "blocked"; receipt: string };
+export type XUploadResult = { status: "completed" | "failed" | "blocked"; receipt: string;
+  /** What a completed action gave back, kept with its receipt. */
+  result?: { summary: string; url?: string } };
 interface Job extends XUploadReference { phase: "queued" | "started" | "done"; attempts: number }
 interface Transaction {
   get<T>(key: string): Promise<T | undefined>;

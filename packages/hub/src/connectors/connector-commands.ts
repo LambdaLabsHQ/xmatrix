@@ -6,7 +6,7 @@ import { teamsActionCapability } from "./teams-native";
 import { dingtalkActionCapability } from "./dingtalk-native";
 import { telegramActionCapability } from "./telegram-native";
 import { wecomActionCapability } from "./wecom-native";
-import { connectorActionPolicy, PRIVATE_CONNECTOR_RESULT, sha256Hex, utf8ByteLength, type ConnectorResultVisibility,
+import { connectorActionPolicy, isXDurableAction, PRIVATE_CONNECTOR_RESULT, sha256Hex, utf8ByteLength, type ConnectorResultVisibility,
   type ConnectorActionPolicy } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "../app-connectors";
 import { parseActionCommand } from "./action-parse";
@@ -190,31 +190,42 @@ export async function runConnectorAction(providerId: string, input: ConnectorCom
   return receipt;
 }
 
-/** Only the durable executor dispatches a consumed X video request. */
-export async function executeDurableXUpload(env: Env, job: XExecutingUpload): Promise<{
-  status: "completed" | "failed" | "blocked"; receipt: string;
+/**
+ * Only the durable executor dispatches a consumed request: an X video action,
+ * or an action a Norn program performs. `action` is the request's own
+ * executor. What a completed action gave back is kept beside its receipt, for
+ * a program that reads it as its answer.
+ */
+export async function executeDurableXUpload(env: Env, job: XExecutingUpload, action: ConnectorAction | undefined = X_ACTIONS[job.request.actionId]): Promise<{
+  status: "completed" | "failed" | "blocked"; receipt: string; result?: { summary: string; url?: string };
 }> {
   const { request, payload } = job;
-  const receipt = await runAction("x", { env, channelId: request.channelId,
+  if (!action) return { status: "blocked", receipt: `${request.providerId} ${request.actionId}: blocked; the action is no longer available.` };
+  let result: { summary: string; url?: string } | undefined;
+  const receipt = await runAction(request.providerId, { env, channelId: request.channelId,
     actorUserId: request.requestedBy, messageId: `${payload.messageId}:upload-result`,
     commandMessageId: payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
-  "upload_video", X_ACTIONS.upload_video!, payload.statement,
-  { requestId: request.requestId, prepared: payload.prepared });
-  return { status: /: completed;/u.test(receipt) ? "completed" : /: blocked;/u.test(receipt) ? "blocked" : "failed", receipt };
+  request.actionId, action, payload.statement,
+  { requestId: request.requestId, prepared: payload.prepared, onResult: given => { result = given; } });
+  const status = /: completed;/u.test(receipt) ? "completed" : /: blocked;/u.test(receipt) ? "blocked" : "failed";
+  return { status, receipt, ...(status === "completed" && result ? { result } : {}) };
 }
 
 /** The persisted outcome is retried with one canonical append identity. */
 export async function publishDurableXUploadReceipt(env: Env, outcome: XUploadOutcome): Promise<void> {
   const { request, payload } = outcome;
-  await publishCommandStatus(getAppConnectorProvider("x")!, { env, channelId: request.channelId,
+  await publishCommandStatus(getAppConnectorProvider(request.providerId)!, { env, channelId: request.channelId,
     actorUserId: request.requestedBy, messageId: `${payload.messageId}:upload-result`,
-    commandMessageId: payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
+    // A program's action was asked for in xMatrix's own delivery message, which takes no reply: its receipt stands by itself.
+    commandMessageId: request.nornPerformRef ? null : payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
   [outcome.receipt]);
 }
 
 async function runAction(providerId: string, input: ConnectorCommandInput, actionId: string,
   action: ConnectorAction, statement: Parameters<ConnectorAction["parse"]>[0],
-  approved?: { requestId: string; prepared: Record<string, string> }): Promise<string> {
+  approved?: { requestId: string; prepared: Record<string, string>;
+    /** Told what the action gave back when it completed, before it is worded as a receipt. */
+    onResult?: (result: { summary: string; url?: string }) => void }): Promise<string> {
   const manifest = getAppConnectorProvider(providerId)!;
   const result = (status: "completed" | "failed" | "blocked", summary: string) =>
     commandResult(manifest.name, actionId, { status, summary });
@@ -229,7 +240,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   const policyInput = { providerId, connectionId: scope.connectionId, actionId };
   const mode = await connectionActionPolicy(input.env, policyInput);
   const requestId = `action-request:${await sha256Hex(JSON.stringify([scope.connectionId, input.channelId, input.messageId, actionId]))}`;
-  const durableUpload = providerId === "x" && actionId === "upload_video";
+  const durableUpload = isXDurableAction(providerId, actionId);
   if (!approved && action.effect === "write") {
     const staged = await connectorActionRequestRepository(input.env).find(requestId, scope.connectionId, input.channelId, input.actorUserId);
     if (staged) {
@@ -245,9 +256,11 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
     if (typeof liveScope === "string" || liveScope.spaceId !== scope.spaceId || liveScope.connectionId !== scope.connectionId) {
       throw new ProviderRequestError(409, `${manifest.name} Channel access changed before posting`);
     }
-    if (approved) await connectorActionRequestRepository(input.env).authorize(approved.requestId, scope.connectionId, input.channelId);
+    // A request a person approved runs under "ask"; one the permission itself admitted runs only while it still does.
+    const byPerson = approved
+      ? (await connectorActionRequestRepository(input.env).authorize(approved.requestId, scope.connectionId, input.channelId)).decidedByPerson : false;
     const changed = await connectionActionPolicy(input.env, policyInput);
-    if (changed === "disallow" || (changed === "ask" && !approved)) {
+    if (changed === "disallow" || (changed === "ask" && !byPerson)) {
       throw new ProviderRequestError(403, actionRefusal({ actionId, mode: changed })!);
     }
   };
@@ -256,17 +269,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       const context = await actionContext(providerId, input, scope.spaceId, actionId, action, authorizeWrite);
       if (typeof context === "string") return result("blocked", context);
       const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
-      const preview = providerId === "googlecalendar" || (providerId === "appstoreconnect" && prepared.preview)
-        ? JSON.parse(prepared.preview!) as Record<string, string>
-        : providerId === "gmail"
-        ? gmailPreview(prepared)
-        : providerId === "x" && actionId === "accounts" ? { account: "Connected X accounts owned by the requesting member", text: "List handles and account IDs" }
-        : providerId === "x" ? { account: `@${prepared.accountUsername} (X account ${prepared.accountId})`,
-          text: prepared.text ?? "", ...(prepared.postId ? { quotedPost: prepared.postId } : {}),
-          ...(prepared.mediaReceipt ? { video: "Video from this account and Channel's approved upload receipt" } : {}),
-          ...(prepared.sourceName ? { filename: prepared.sourceName, bytes: prepared.sourceSize!,
-            sha256: prepared.sourceHash!, attachment: `${prepared.messageId}/${prepared.attachmentId}` } : {}) }
-        : { target: statement.target, text: statement.text };
+      const preview = actionPreview(providerId, actionId, prepared, statement);
       const request = await connectorActionRequestRepository(input.env).create({ requestId,
         connectionId: scope.connectionId, channelId: input.channelId, providerId, actionId, requestedBy: input.actorUserId,
         payload: { messageId: input.messageId, senderKind: input.senderKind ?? "user", senderId: input.senderId,
@@ -296,6 +299,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       await authorizeWrite();
       try {
         const result = await action.execute(context, parsed);
+        approved?.onResult?.({ summary: result.summary, ...(result.url ? { url: result.url } : {}) });
         const summary = result.url ? `${result.summary} — ${result.url}` : result.summary;
         return { status: "completed", summary: `${summary}${context.x?.billingSummary?.() ? `\n${context.x.billingSummary()}` : ""}` };
       } catch (error) {
@@ -317,6 +321,75 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
     }
   });
 }
+
+/** What an admin is shown of a request before answering it: the frozen account, recipient and content. */
+function actionPreview(providerId: string, actionId: string, prepared: Record<string, string>,
+  statement: Parameters<ConnectorAction["parse"]>[0]): Record<string, string> {
+  return providerId === "googlecalendar" || (providerId === "appstoreconnect" && prepared.preview)
+    ? JSON.parse(prepared.preview!) as Record<string, string>
+    : providerId === "gmail"
+    ? gmailPreview(prepared)
+    : providerId === "x" && actionId === "accounts" ? { account: "Connected X accounts owned by the requesting member", text: "List handles and account IDs" }
+    : providerId === "x" ? { account: `@${prepared.accountUsername} (X account ${prepared.accountId})`,
+      text: prepared.text ?? "", ...(prepared.postId ? { quotedPost: prepared.postId } : {}),
+      ...(prepared.mediaReceipt ? { video: "Video from this account and Channel's approved upload receipt" } : {}),
+      ...(prepared.sourceName ? { filename: prepared.sourceName, bytes: prepared.sourceSize!,
+        sha256: prepared.sourceHash!, attachment: `${prepared.messageId}/${prepared.attachmentId}` } : {}) }
+    : { target: statement.target, text: statement.text };
+}
+
+/**
+ * Stages an action a Norn program prepared (docs/architecture/norn-host.md
+ * "Asking a connected app"): parsed and frozen as a Channel command's is, and
+ * held. Under "ask" a Space admin answers it in Pending approvals; under
+ * "write" the permission admits it. Either way nothing runs until the program
+ * performs it. `messageId` is the program's own delivery message, so a repeat
+ * stages nothing twice.
+ */
+export async function stageHeldAction(env: Env, input: { channelId: string; actorUserId: string; messageId: string;
+  providerId: string; actionId: string; action: ConnectorAction; statement: Parameters<ConnectorAction["parse"]>[0]; heldFor: string }):
+  Promise<{ status: "pending" | "approved"; requestId: string } | { status: "blocked" | "failed"; reason: string }> {
+  const manifest = getAppConnectorProvider(input.providerId);
+  if (!manifest) return { status: "failed", reason: `unknown connector ${input.providerId}` };
+  const { providerId, actionId, action, statement } = input;
+  const command: ConnectorCommandInput = { env, channelId: input.channelId, actorUserId: input.actorUserId, messageId: input.messageId,
+    commandMessageId: input.messageId, body: "", senderKind: "user" };
+  const parsed = action.parse(statement);
+  if (typeof parsed === "string") return { status: "failed", reason: parsed };
+  if (action.callerOnly) return { status: "blocked", reason: "its result is for the caller alone, so a program cannot ask for it" };
+  try {
+    const scope = await commandScope(manifest, command, checkAppConnection);
+    if (typeof scope === "string") return { status: "blocked", reason: scope };
+    const mode = await connectionActionPolicy(env, { providerId, connectionId: scope.connectionId, actionId });
+    if (mode === "disallow") return { status: "blocked", reason: actionRefusal({ actionId, mode })! };
+    const requestId = `action-request:${await sha256Hex(JSON.stringify([scope.connectionId, input.channelId, input.messageId, actionId]))}`;
+    const repository = connectorActionRequestRepository(env);
+    const context = await actionContext(providerId, command, scope.spaceId, actionId, action, async () => {
+      throw new ProviderRequestError(403, "Preparing an action writes nothing");
+    });
+    if (typeof context === "string") return { status: "blocked", reason: context };
+    const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
+    const request = await repository.create({ requestId, connectionId: scope.connectionId, channelId: input.channelId, providerId,
+      actionId, requestedBy: input.actorUserId, heldFor: input.heldFor,
+      payload: { messageId: input.messageId, senderKind: "user", statement, prepared,
+        preview: { ...actionPreview(providerId, actionId, prepared, statement), runs: "When its program performs it, not when you answer" } } });
+    if (request.status === "pending" && mode === "allow") {
+      await repository.admitHeld({ requestId, spaceId: scope.spaceId, channelId: input.channelId });
+      return { status: "approved", requestId };
+    }
+    if (request.status === "pending") await announceActionRequests(env, scope.spaceId, input.channelId);
+    return request.status === "pending" || request.status === "approved" ? { status: request.status, requestId }
+      : { status: "blocked", reason: `its approval request is ${request.status}` };
+  } catch (error) {
+    const shared = actionAuthorityFailure(error);
+    if (shared) return { status: "blocked", reason: shared };
+    if (error instanceof ConnectorRemedy && error.status === 403) return { status: "blocked", reason: error.message };
+    return { status: "failed", reason: error instanceof ProviderRequestError ? error.message : "could not prepare the action" };
+  }
+}
+
+/** Why a prepared action cannot run now, in the fixed words of a lost authority; undefined for any other failure. */
+export const heldAuthorityFailure = (error: unknown): string | undefined => actionAuthorityFailure(error);
 
 /** Local authority refusals use fixed recovery copy, never arbitrary exception text. */
 function actionAuthorityFailure(error: unknown): string | undefined {

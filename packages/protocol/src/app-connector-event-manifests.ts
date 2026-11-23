@@ -102,6 +102,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       writeAction("post", "Publish post", "Publish as the explicitly selected account. Optional mediaReceipt must come from this account and Channel's video upload. Asks for approval of the exact account and content by default.", '<account> {"text":"…","mediaReceipt":"optional upload_video receipt"}'),
       writeAction("quote", "Quote post (Enterprise)", "Publish a quote as the selected account. X requires Enterprise API access; unavailable on self-serve pay-per-use.", "<account>/<post id> <text>"),
       writeAction("upload_video", "Upload video", "Upload one MP4 attachment from this Channel to the selected account. At most 64 MiB; separate approval is needed to publish the uploaded video.", "<account> <message id>/<attachment id>"),
+      writeAction("publish_video", "Publish post with video", "Upload one MP4 attachment from this Channel and publish it with the exact text as the selected account, in one approval. The video is uploaded when the post is published, so the approval does not expire with an upload receipt.", '<account> {"text":"…","video":"<message id>/<attachment id>"}'),
       readAction("media_status", "Read video processing status", "Check one uploaded video's processing state for its account-bound receipt.", "<account> <upload_video receipt>"),
     ],
   }),

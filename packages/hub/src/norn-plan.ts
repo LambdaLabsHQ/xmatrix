@@ -1,5 +1,5 @@
 import type { PageProgramStep } from "@xmatrix/protocol";
-import { nornPasses, plainResult } from "./norn-host";
+import { appRequest, nornActionAnswer, nornPasses, nornPreparedReply, nornRequestWords, plainResult } from "./norn-host";
 import type { Form, ReportForm } from "./vendor/norn/frontend/check/index";
 import type { Code } from "./vendor/norn/runtime/code";
 import { occur, settle, type Ledger, type LedgerRequest, type Reply } from "./vendor/norn/runtime/ledger";
@@ -58,6 +58,11 @@ function answers(request: LedgerRequest): { label: string; value: Value }[] {
   if (request.verb === "choose") return (request.options ?? []).map(option => ({ label: show(option), value: option }));
   if (request.verb === "judge") return [true, false].map(value => ({ label: String(value), value: { type: "bool", value } }));
   if (request.verb === "ask") return [{ label: "answered", value: text(UNWRITTEN) }];
+  // A request of a connected app: admitted, or done with a receipt nobody has yet.
+  if (appRequest(request)) {
+    const reply = request.verb === "prepare" ? nornPreparedReply(request) : nornActionAnswer({ summary: UNWRITTEN });
+    return reply.tag === "Answered" ? [{ label: request.verb === "prepare" ? "approved" : "done", value: reply.value }] : [];
+  }
   const report = request.form;
   if (report === null) return [{ label: "answered", value: { type: "record", fields: { text: text(UNWRITTEN) } } }];
   const definition = report.form.kind === "named" ? report.definitions[report.form.name] : undefined;
@@ -176,7 +181,7 @@ function flow(reading: Reading, ledger: Ledger, from: number, path: Path): PageP
     // The same asked of the same participant as before on this way: a function that calls itself has come round.
     const asking = JSON.stringify([request.verb, request.holder, request.conditions, request.text]);
     if (!open && asked.includes(asking)) return [...steps, { kind: "again", text: request.text }];
-    const ask: Ask = { kind: "ask", verb: request.verb, holder: request.holder, conditions: request.conditions ?? {}, text: request.text,
+    const ask: Ask = { kind: "ask", verb: request.verb, ...nornRequestWords(request), conditions: request.conditions ?? {},
       options: (request.options ?? []).map(show), open, by: open && request.by !== null ? new Date(request.by).toISOString() : null,
       within: open || request.by === null ? null : request.by - request.openedAt, main: null, otherwise: [] };
     const late = [request.by, until].filter((each): each is number => each !== null);

@@ -143,6 +143,47 @@ every(1d)->or(ciFailed("acme/app"))->forEach(_ =>
 
 這段程式每天定期檢查一次，並且在 CI 一失敗時就立刻啟動修復。Space 的外部連線必須已涵蓋對應的儲存庫或應用程式。
 
+## 讓已連結的應用程式執行動作
+
+程式可以讓[已連結的應用程式](connectors.md)在你指定的時間自行完成一件事，到時不需要任何 Agent 在線。分兩步：**準備**把要做的內容原樣固定並取得放行，此時不會送出任何東西；**發布**把它執行一次。
+
+```norn
+open Std
+let post = (video, text, ~at) => spawn(~key=video, () => {
+  let ready = X.prepareVideo("@acme", video, text)->wait?
+  after(at)->wait
+  X.publish(ready)->wait
+})
+ignore(all([
+  post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
+  post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
+]))
+never()->wait
+```
+
+程式一啟動，兩則貼文就同時請求放行，你可以一次批完；之後各自在自己的時間送出。在清單加一行，只會多問新加的那一則。最後一行讓程式持續執行，清單才能不斷追加：已經送出的貼文不會再送，無論那一行留著還是刪掉。
+
+「放行」依該應用程式唯一的權限處理：
+
+| 權限 | 程式準備一個動作時 |
+| --- | --- |
+| 讀寫（Read and write） | 直接放行 |
+| 先詢問（Ask first） | 出現在對話的 **待審批（Pending approvals）**，Space 管理員能看到將使用的帳號、內文與附件，然後回答 |
+| 唯讀（Read only） | 被拒絕 |
+
+一次批准只對應這一個動作與這份內容，30 天內有效。到時 xMatrix 會再核對一次：連結與帳號仍是批准時的那個，批准的人仍有權批准；任何一項不成立就不送出，程式會讀到原因。結果不確定的動作記為失敗，絕不自動重試。影片附件必須在程式自己的對話裡。
+
+`X.preparePost(account, text)` 準備一則不含影片的貼文。其他應用程式的動作以名稱呼叫，輸入是其命令的兩部分，寫法見 `xmatrix connector list`：
+
+```norn
+type command = {target: string, text: string}
+type done = {summary: string, url: option<string>}
+let post: Actions.action<command, done> = Actions.action("slack", "post")
+
+let ready = Actions.prepare(post, {target: "#releases", text: "4.2 is out."})->wait?
+Actions.perform(ready)->wait
+```
+
 ## Agent 單次提問
 
 如果 Agent 只需要問一個問題取得回覆，不需要特地寫一支程式，直接用指令提問即可，回覆會直接傳回給它：
