@@ -9444,182 +9444,158 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   .xmatrix-app .app-status-pulse[data-live] .app-status-pulse-sweep { display: none; animation: none; }
 }
 
-/* First-message launch choice: a quiet brass card under a new conversation's
-   first message. Solid fills only — no wood, no glass. The bottom rule drains
-   over the three-second window; Jev's pick wears a brass edge and tag. */
-.xmatrix-app .launch-choice {
-  --launch-brass: var(--m-ink-attention, oklch(0.48 0.1 66));
-  position: relative;
-  /* Block, not inline: an inline chip shares a line box and can open a gap
+/* Launch line: what xMatrix is about to do with a new conversation's first
+   message, as one sentence on the paper under it. No card, edge, fill or
+   chip: the words are the reader's grey, an Agent's name is ink, and the
+   author's ways out are words at the end of the line. Its menu is the app's
+   paper menu (first principles redesign, Daniel 2026-11-23: the brass card of
+   Agent pills did not belong on paper). */
+.xmatrix-app .launch-line {
+  /* Block, not inline: an inline line shares a line box and can open a gap
      between the words and a picture on the same message. */
-  display: flex;
-  width: fit-content;
-  flex-direction: column;
-  max-width: 100%;
-  margin-top: 8px;
-  padding: 6px 8px;
-  overflow: hidden;
-  border: 1px solid color-mix(in oklab, var(--launch-brass) 24%, transparent);
-  border-radius: 12px;
-  background: color-mix(in oklab, var(--launch-brass) 6%, var(--background, white));
-  color: var(--foreground);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.xmatrix-app .launch-choice-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  column-gap: 12px;
+  max-width: 100%;
+  min-height: 24px;
+  margin-top: 6px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 450;
+  line-height: 24px;
 }
 
-.xmatrix-app .launch-choice-label {
-  padding: 0 4px;
-  color: var(--launch-brass);
-  font-weight: 700;
-  letter-spacing: 0.01em;
+.xmatrix-app .launch-line-status {
+  min-width: 0;
 }
 
-.xmatrix-app .launch-choice-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+/* Still reading: the words breathe, and stand still once there is a reading. */
+.xmatrix-app .launch-line[data-live] .launch-line-status {
+  animation: launch-line-reading 1.6s ease-in-out infinite;
 }
 
-.xmatrix-app.xmatrix-app.xmatrix-app :is(.launch-choice-option, .launch-choice-skip) {
+@keyframes launch-line-reading {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.xmatrix-app .launch-line-agent {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  font-weight: 600;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
-}
-
-.xmatrix-app.xmatrix-app.xmatrix-app .launch-choice-option {
-  padding: 0 10px 0 5px;
-  background: color-mix(in oklab, var(--foreground) 6%, var(--background, white));
+  vertical-align: top;
   color: var(--foreground);
+  font-weight: 620;
 }
 
-.xmatrix-app.xmatrix-app.xmatrix-app .launch-choice-skip {
-  padding: 0 10px;
-  background: transparent;
-  color: var(--muted-foreground);
-}
-
-.xmatrix-app.xmatrix-app.xmatrix-app :is(.launch-choice-option, .launch-choice-skip):not(:disabled):hover {
-  border-color: color-mix(in oklab, var(--launch-brass) 55%, transparent);
-  color: var(--foreground);
-}
-
-.xmatrix-app.xmatrix-app.xmatrix-app :is(.launch-choice-option, .launch-choice-skip)[data-recommended] {
-  border-color: var(--launch-brass);
-}
-
-.xmatrix-app.xmatrix-app.xmatrix-app :is(.launch-choice-option, .launch-choice-skip)[data-picked] {
-  border-color: var(--launch-brass);
-  background: var(--launch-brass);
-  color: oklch(0.99 0.003 85);
-}
-
-.xmatrix-app.xmatrix-app.xmatrix-app :is(.launch-choice-option, .launch-choice-skip):disabled {
-  cursor: default;
-}
-
-.xmatrix-app .launch-choice[data-state="reading"] .launch-choice-option:not([data-recommended]) {
-  opacity: 0.5;
-}
-
-.xmatrix-app .launch-choice-icon {
-  width: 18px;
-  height: 18px;
+.xmatrix-app .launch-line-mark {
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
   border-radius: 999px;
   object-fit: cover;
 }
 
-.xmatrix-app .launch-choice-icon-blank {
+.xmatrix-app .launch-line-mark-blank {
   background: color-mix(in oklab, var(--foreground) 14%, transparent);
 }
 
-.xmatrix-app .launch-choice-jev {
-  margin-left: -2px;
-  padding: 0 4px;
-  border-radius: 4px;
-  background: color-mix(in oklab, var(--launch-brass) 16%, transparent);
-  color: var(--launch-brass);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  line-height: 14px;
-}
-
-.xmatrix-app .launch-choice-option[data-picked] .launch-choice-jev {
-  background: oklch(1 0 0 / 0.22);
-  color: inherit;
-}
-
-.xmatrix-app .launch-choice-count {
-  min-width: 2ch;
-  margin-left: auto;
-  padding-right: 2px;
-  color: var(--launch-brass);
+.xmatrix-app .launch-line-count {
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  text-align: right;
 }
 
-.xmatrix-app .launch-choice-drain {
-  position: absolute;
-  inset: auto 0 0;
-  height: 2px;
-  background: var(--launch-brass);
-  transform-origin: left center;
-  animation: launch-choice-drain linear forwards;
+/* An action is a word: ink a step above the sentence, the paper's own tint
+   under the pointer. Its box reaches past the word so the word itself stays
+   on the sentence's spacing. */
+.xmatrix-app.xmatrix-app.xmatrix-app .launch-line-action {
+  height: 24px;
+  margin: 0 -6px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in oklab, var(--foreground) 78%, transparent);
+  font: inherit;
+  font-weight: 620;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
-@keyframes launch-choice-drain {
-  from { transform: scaleX(1); }
-  to { transform: scaleX(0); }
+.xmatrix-app.xmatrix-app.xmatrix-app .launch-line-action:is(:hover, [aria-expanded="true"]):not(:disabled) {
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+  color: var(--foreground);
 }
 
-.xmatrix-app .launch-choice-error {
-  margin: 4px 4px 0;
+.xmatrix-app.xmatrix-app.xmatrix-app .launch-line-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.xmatrix-app .launch-line-error {
+  flex-basis: 100%;
   color: var(--m-ink-alert, var(--destructive));
 }
 
-/* Settled: one line, no card fill. */
-.xmatrix-app .launch-choice.launch-choice-settled {
-  flex-direction: row;
+/* A thumb's target on a phone, without moving the sentence. */
+@media (pointer: coarse) {
+  .xmatrix-app .launch-line { min-height: 32px; }
+  .xmatrix-app.xmatrix-app.xmatrix-app .launch-line-action { height: 32px; margin: 0 -8px; padding: 0 8px; }
+}
+
+.xmatrix-app.launch-agent-menu .launch-agent-menu-row {
+  display: flex;
+  flex-shrink: 0;
   align-items: center;
-  gap: 8px;
-  padding: 3px 10px 3px 4px;
-  border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
-  background: transparent;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 520;
+  text-align: left;
 }
 
-.xmatrix-app .launch-choice[data-state="none"] {
-  padding-left: 10px;
+.xmatrix-app.launch-agent-menu .launch-line-mark {
+  width: 18px;
+  height: 18px;
 }
 
-.xmatrix-app .launch-choice-agent {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 600;
-}
-
-.xmatrix-app .launch-choice-settled .launch-choice-label { padding: 0; color: var(--foreground); font-weight: 600; }
-
-.xmatrix-app .launch-choice-note {
+.xmatrix-app.launch-agent-menu .launch-agent-menu-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  padding: 1px;
   color: var(--muted-foreground);
 }
 
+.xmatrix-app.launch-agent-menu .launch-agent-menu-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xmatrix-app.launch-agent-menu .launch-agent-menu-note {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 450;
+}
+
+.xmatrix-app.launch-agent-menu .launch-agent-menu-rule {
+  flex-shrink: 0;
+  height: 1px;
+  background: color-mix(in oklch, var(--foreground) 12%, transparent);
+}
+
+@media (pointer: coarse) {
+  .xmatrix-app.launch-agent-menu .launch-agent-menu-row { min-height: 44px; font-size: 15px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .xmatrix-app .launch-choice-drain { animation: none; }
+  .xmatrix-app .launch-line[data-live] .launch-line-status { animation: none; }
 }
 
 /* Rail update: a whiter liquid-glass disc the size of the profile avatar,

@@ -477,6 +477,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onNearTop,
   onOpenAgentTrace,
   onRunChannelCommand,
+  onComposeMention,
   onOpenHumanProfile,
   currentUserIdentityId,
   onReact,
@@ -523,6 +524,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
   /** Sends one command as the viewer, for a refused command's next step. Absent when the viewer cannot write here. */
   onRunChannelCommand?: (body: string) => Promise<void>;
+  onComposeMention?: (mention: string) => void;
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
   onOpenHumanProfile: (userId: string) => void;
   currentUserIdentityId: string;
@@ -1201,6 +1203,8 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchChoiceOffered={offersLaunchChoice(message, channel)}
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
+                  followed={rows[rows.length - 1]?.id !== message.id}
+                  onComposeMention={onComposeMention}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
                   foldsDiscussionHead={inPageMargin}
                   turnContinued={continuedTurnFailures.has(message.id)}
@@ -1780,6 +1784,8 @@ export const MessageRow = memo(function MessageRow({
   launchChoiceOffered = false,
   launchOptions = NO_LAUNCH_OPTIONS,
   onLaunchChoice,
+  followed = false,
+  onComposeMention,
   contextOnly = false,
   initiallyExpanded = false,
   foldsDiscussionHead = false,
@@ -1833,6 +1839,10 @@ export const MessageRow = memo(function MessageRow({
   launchOptions?: readonly InteractionLaunchOption[];
   /** `shown`: the author now sees the choice, so its window starts there. */
   onLaunchChoice?: (messageId: string, body: string, harness: string | null | "shown") => Promise<void>;
+  /** Something follows this message in the conversation. */
+  followed?: boolean;
+  /** Puts `@<mention>` in the composer, for a summon its author finishes there. */
+  onComposeMention?: (mention: string) => void;
   /** A thread root rendered from its parent Channel; media remains source-owned. */
   contextOnly?: boolean;
   /** Keep the opening context of a thread readable before folding later long messages. */
@@ -3039,7 +3049,8 @@ export const MessageRow = memo(function MessageRow({
         {/* After the words and the pictures. A choice between them reads as a second message. */}
         {!recalled && !editing && !contextOnly && !askOffered && message.messageId && onLaunchChoice && (launchWindow || launchChoiceOffered) && (
           <FirstMessageLaunchChoice messageId={message.messageId} window={launchWindow} offeredAt={launchChoiceOffered ? message.sentAt : undefined}
-            own={Boolean(message.own)} options={launchOptions}
+            own={Boolean(message.own)} followed={followed} options={launchOptions}
+            onSummon={message.own ? onRunCommand : undefined} onCompose={onComposeMention}
             onChoose={harness => onLaunchChoice(message.messageId!, message.body, harness)}
             onShown={() => onLaunchChoice(message.messageId!, message.body, "shown")} />
         )}
