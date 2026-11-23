@@ -3,7 +3,7 @@
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { messageMachineIdentity, registrationMachineBusy, registrationMachineName } from "./machine-name-presentation";
 import { AttachmentLightbox, ImageGalleryLightbox, LIGHTBOX_BUTTON_CLASS, type GalleryImage } from "./attachment-lightbox";
-import { MediaDownloadProgress, MediaPlayer } from "./media-player";
+import { MediaDownloadProgress, MediaPlayer, MessageVideoAttachment } from "./media-player";
 import { AgentIdentityLabels } from "./agent-identity-labels";
 import { BranchBadge, tagClass } from "./status-tag";
 import { messageLinkOriginLabel, messageLinkOriginTitle, type MessageLinkOrigin } from "./message-link-origin";
@@ -2505,42 +2505,20 @@ export const MessageRow = memo(function MessageRow({
             </button>
           </div>
         ) : displayAttachment.kind === "video" ? (
-          <div className="message-video-attachment relative aspect-video max-h-[28rem] w-full overflow-hidden border border-border bg-black">
-            {source ? (
-              <MediaPlayer
-                kind="video"
-                name={displayAttachment.name}
-                src={source}
-                poster={displayAttachment.thumbnailUrl}
-                className="absolute inset-0 h-full w-full bg-black object-contain"
-              />
-            ) : mediaLoadFailed ? (
-              <AttachmentMediaUnavailable />
-            ) : (
-              <MediaDownloadProgress label="Downloading video" progress={mediaProgress} />
-            )}
-            {upload && <SentUploadProgress upload={upload} media />}
-            <button
-              type="button"
-              title={`Open ${displayAttachment.name}`}
-              aria-label={`Open ${displayAttachment.name}`}
-              onClick={() => void openMessageAttachment(displayAttachment)}
-              className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
-            >
-              <Maximize2 className="size-4.5" />
-            </button>
-            {source && (
-              <button
-                type="button"
-                title={`Download ${displayAttachment.name}`}
-                aria-label={`Download ${displayAttachment.name}`}
-                onClick={() => void downloadMessageAttachment(displayAttachment)}
-                className="absolute right-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
-              >
-                <Download className="size-4.5" />
-              </button>
-            )}
-          </div>
+          <MessageVideoAttachment
+            name={displayAttachment.name}
+            source={source}
+            poster={displayAttachment.thumbnailUrl}
+            width={displayAttachment.width}
+            height={displayAttachment.height}
+            mediaLoadFailed={mediaLoadFailed}
+            mediaProgress={mediaProgress}
+            mediaStore={mediaStore}
+            onOpen={() => void openMessageAttachment(displayAttachment)}
+            onDownload={() => void downloadMessageAttachment(displayAttachment)}
+            unavailable={<AttachmentMediaUnavailable />}
+            uploadOverlay={upload ? <SentUploadProgress upload={upload} media /> : undefined}
+          />
         ) : displayAttachment.kind === "markdown" || displayAttachment.kind === "file" ? (
           <button
             type="button"

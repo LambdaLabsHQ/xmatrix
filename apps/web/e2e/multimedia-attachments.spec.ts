@@ -33,6 +33,46 @@ test("generic MIME WebM plays inline and in the lightbox; audio files have nativ
   await expect.poll(() => page.getByRole("dialog").locator("video").evaluate((element: HTMLVideoElement) => element.videoWidth)).toBe(32);
 });
 
+test("video attachments respect their original portrait and landscape aspect ratios", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const portrait = videoFixture({ width: 1080, height: 1920 });
+  const landscape = videoFixture({ width: 1920, height: 1080 });
+  await page.route("**/e2e-media/portrait-meta.webm", (route) => route.fulfill({ contentType: "video/webm", body: portrait }));
+  await page.route("**/e2e-media/portrait-raw.webm", (route) => route.fulfill({ contentType: "video/webm", body: portrait }));
+  await page.route("**/e2e-media/landscape.webm", (route) => route.fulfill({ contentType: "video/webm", body: landscape }));
+  await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: 1, lastMessageSequence: 1 }, [{
+    messageId: "video-aspect-message", channelId: E2E_CHANNEL.id, sequence: 1,
+    body: "Aspect ratio check", sentAt: E2E_NOW, from: E2E_USER_SENDER,
+    attachments: [
+      { id: "portrait-meta", kind: "video", name: "portrait-meta.webm", mimeType: "video/webm", size: portrait.length, url: "/e2e-media/portrait-meta.webm", width: 1080, height: 1920 },
+      { id: "portrait-raw", kind: "video", name: "portrait-raw.webm", mimeType: "video/webm", size: portrait.length, url: "/e2e-media/portrait-raw.webm" },
+      { id: "landscape", kind: "video", name: "landscape.webm", mimeType: "video/webm", size: landscape.length, url: "/e2e-media/landscape.webm" },
+    ],
+  }]);
+
+  const containers = page.locator(".message-video-attachment");
+  await expect(containers).toHaveCount(3);
+  for (let index = 0; index < 3; index++) {
+    await expect.poll(() => containers.nth(index).locator("video").evaluate((element: HTMLVideoElement) => element.videoWidth)).toBeGreaterThan(0);
+  }
+
+  const measureRatio = async (index: number) => {
+    const box = await containers.nth(index).boundingBox();
+    expect(box).not.toBeNull();
+    return box!.width / box!.height;
+  };
+
+  await expect.poll(() => measureRatio(0)).toBeCloseTo(1080 / 1920, 1);
+  await expect.poll(() => measureRatio(1)).toBeCloseTo(1080 / 1920, 1);
+  await expect.poll(() => measureRatio(2)).toBeCloseTo(1920 / 1080, 1);
+
+  const portraitBox = await containers.nth(0).boundingBox();
+  const landscapeBox = await containers.nth(2).boundingBox();
+  expect(portraitBox!.height).toBeGreaterThan(portraitBox!.width);
+  expect(landscapeBox!.width).toBeGreaterThan(landscapeBox!.height);
+  expect(portraitBox!.width).toBeLessThan(landscapeBox!.width);
+});
+
 test("Internet media loads only after Preview and playback failures retain the original link", async ({ page }) => {
   let reads = 0;
   await page.route("https://media.example/clip.webm*", (route) => {

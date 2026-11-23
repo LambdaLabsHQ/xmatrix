@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: message video attachments respect their original aspect ratio
+
+Inline video attachments in the conversation timeline previously used a fixed 16:9 full-width box (`aspect-video w-full`), adding black pillarboxes around portrait videos and letterboxes around ultrawide videos. `MessageVideoAttachment` now sizes the video container to the attachment's aspect ratio within the column width and `28rem` max height, using stored attachment `width`/`height` metadata immediately to avoid layout shift and falling back to decoded `videoWidth`/`videoHeight` on `loadedmetadata` (cached per channel media store across virtualized remounts). Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: registration lists read the settings they display
 
 The Agents catalog previously transferred launch instructions and workspace and capability grants even though it only uses model settings and model grants. It now selects the fields the catalog needs, and picks the newest model and parameter observations from one pass over each registration's recent Instances. Models and parameters retain their own observation times and ordering. Detailed configuration and launch admission continue to read their authority records. Hub and DB code without a schema migration. Recovery is a CI-validated Hub beta reverting the change.
