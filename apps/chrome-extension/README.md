@@ -7,7 +7,6 @@ A Manifest V3 extension that puts the person's xMatrix Space in Chrome's side pa
   - The right-click menu has *Ask about “…”* for a selection and *Ask about this page*: it opens the same box on the page (activeTab), with no access to web pages granted.
   - The bar at the top of the panel has *Ask about this page*, which starts a conversation about the page beside it in the app.
   - Right after signing in, the panel asks once whether to turn on the field beside selections (it needs access to web pages). *Not now* goes straight to the app; the right-click menu works either way.
-- **Needs you badge.** The badge counts the conversations waiting on the person. It is the same `attention` count as the web's "Needs you" section.
 
 ## How it fits together
 

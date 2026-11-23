@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  countNeedsYou,
   freshAccessToken,
   hubUrl,
+  listSpaces,
   pollDeviceSignIn,
   withSession,
 } from "../src/hub-client.js";
@@ -33,8 +33,8 @@ const session = { token: "old", refreshToken: "refresh-1", user: null, hubUrl: "
 // once legacy admission is off (client-compatibility-gate.ts); the extension
 // must declare itself as an app on every call.
 test("every call declares an app client identity the Hub's compatibility gate admits", async () => {
-  const { calls, deps } = fakeHub({ "GET /api/channels/attention": () => ({ json: { channels: [] } }) });
-  await countNeedsYou(deps, "t");
+  const { calls, deps } = fakeHub({ "GET /api/spaces": () => ({ json: { spaces: [] } }) });
+  await listSpaces(deps, "t");
   assert.equal(calls[0].headers["x-xmatrix-client-component"], "app");
   assert.equal(calls[0].headers["x-xmatrix-client-protocol"], "2");
   assert.equal(calls[0].headers["x-xmatrix-client-version"], "4.7.3");
@@ -43,33 +43,33 @@ test("every call declares an app client identity the Hub's compatibility gate ad
 
 test("an expired access token is renewed once and the call retried with the new one", async () => {
   const { calls, deps } = fakeHub({
-    "GET /api/channels/attention": ({ headers }) => (headers.authorization === "Bearer new"
-      ? { json: { channels: [] } } : { status: 401, json: { error: "expired" } }),
+    "GET /api/spaces": ({ headers }) => (headers.authorization === "Bearer new"
+      ? { json: { spaces: [] } } : { status: 401, json: { error: "expired" } }),
     "POST /api/auth/refresh": () => ({ json: { token: "new", refreshToken: "refresh-2", user: { id: "u1", name: "Dana" } } }),
   });
   const store = memoryStore(session);
-  await withSession(deps, store, countNeedsYou);
-  assert.deepEqual(calls.map((call) => call.path), ["/api/channels/attention", "/api/auth/refresh", "/api/channels/attention"]);
+  await withSession(deps, store, listSpaces);
+  assert.deepEqual(calls.map((call) => call.path), ["/api/spaces", "/api/auth/refresh", "/api/spaces"]);
   assert.equal(store.peek().refreshToken, "refresh-2");
 });
 
 test("a refused renewal forgets the session so the popup asks to sign in again", async () => {
   const { deps } = fakeHub({
-    "GET /api/channels/attention": () => ({ status: 401, json: { error: "expired" } }),
+    "GET /api/spaces": () => ({ status: 401, json: { error: "expired" } }),
     "POST /api/auth/refresh": () => ({ status: 401, json: { error: "revoked" } }),
   });
   const store = memoryStore(session);
-  await assert.rejects(withSession(deps, store, countNeedsYou), (error) => error.code === "signed_out");
+  await assert.rejects(withSession(deps, store, listSpaces), (error) => error.code === "signed_out");
   assert.equal(store.peek(), null);
 });
 
 test("a renewal that fails for another reason keeps the session", async () => {
   const { deps } = fakeHub({
-    "GET /api/channels/attention": () => ({ status: 401, json: { error: "expired" } }),
+    "GET /api/spaces": () => ({ status: 401, json: { error: "expired" } }),
     "POST /api/auth/refresh": () => ({ status: 503, json: { error: "unavailable" } }),
   });
   const store = memoryStore(session);
-  await assert.rejects(withSession(deps, store, countNeedsYou), (error) => error.status === 503);
+  await assert.rejects(withSession(deps, store, listSpaces), (error) => error.status === 503);
   assert.equal(store.peek(), session);
 });
 
@@ -88,18 +88,6 @@ test("device sign-in reports waiting, then the session, and ends on a declined r
     user: { id: "u1", name: "d@example.test", email: "d@example.test", avatarUrl: undefined },
   });
   await assert.rejects(pollDeviceSignIn(deps, "dc"), /Declined in the browser/u);
-});
-
-test("the badge counts each waiting conversation once across the snapshot and the list", async () => {
-  const { deps } = fakeHub({
-    "GET /api/channels/attention": () => ({
-      json: {
-        channels: [{ id: "a", attention: { unreadAttentionCount: 1 } }, { id: "b", attention: { unreadAttentionCount: 0 } }],
-        attentionSnapshot: { spaces: [{ summaries: [{ channelId: "a", unreadAttentionCount: 3 }, { channelId: "c", unreadAttentionCount: 1 }] }] },
-      },
-    }),
-  });
-  assert.equal(await countNeedsYou(deps, "t"), 2);
 });
 
 function jwt(expSeconds) {
