@@ -14,6 +14,10 @@ import {
   useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties,
 } from "react";
 import { useStableCallback } from "./workspace-shell-helpers";
+import { pageAskDraft, pageTextFile, useExtensionCompanion } from "./use-extension-companion";
+import { absoluteChannelUrl } from "./channel-links";
+import { appAddressHref } from "@/lib/app-address";
+import { announceEmbedPageThread, openEmbedAddress, openEmbedInTab, requestEmbedPageText } from "@/lib/extension-embed";
 import type { AgentTraceTarget } from "./workspace-composer-dialogs";
 import { channelRecentActivityMs } from "./workspace-shell-helpers-extra";
 import { CrossSpaceReadCard, useChannelPendingCrossSpaceReads } from "./cross-space-read-card";
@@ -847,6 +851,47 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       setNewConversationError(userErrorMessage(error, "Couldn't start the conversation"));
       openNewConversation();
     }));
+  // The extension's side panel: the companion of the page beside it (Daniel 2026-11-23). It shows that page's
+  // conversation and nothing else of the workspace; with none, a new conversation about the page.
+  const companion = useExtensionCompanion();
+  const companionPage = companion?.page ?? null;
+  // The page the open new conversation is about, and its text once the extension has read it (only on a click).
+  const [companionAsk, setCompanionAsk] = useState<{ href: string; files: File[] } | null>(null);
+  const askAboutPage = useStableCallback(() => {
+    if (!companionPage) return;
+    setNewConversationDraft(pageAskDraft(companionPage));
+    setNewConversationError(null);
+    setCompanionAsk({ href: companionPage.href, files: [] });
+    requestEmbedPageText();
+    openNewConversation();
+  });
+  // The page's text arrives after the click that asked for it: it joins the conversation as a file that can be removed.
+  useEffect(() => {
+    if (!companionPage?.text || companionAsk?.href !== companionPage.href || companionAsk.files.length) return;
+    const file = pageTextFile(companionPage);
+    if (file) setCompanionAsk({ href: companionPage.href, files: [file] });
+  }, [companionPage, companionAsk]);
+  // With no conversation open, the panel offers one about the page beside it.
+  const companionIdle = Boolean(companion && !selectedChannel && !composingConversation);
+  useEffect(() => {
+    if (companionIdle && companionPage) askAboutPage();
+  }, [companionIdle, companionPage, askAboutPage]);
+  const createCompanionConversation = useStableCallback(async (body: string, mode: "open" | "closed") => {
+    const channel = await createConversationFromComposer(body, mode);
+    const page = companionAsk ? companionPage : null;
+    if (page && page.href === companionAsk?.href) {
+      announceEmbedPageThread({ path: `/app/${channel.spaceId}/channels/${channel.id}`, title: page.title, href: page.href });
+    }
+    setCompanionAsk(null);
+    return channel;
+  });
+  const companionBar = useMemo(() => companion ? {
+    recent: companion.recent,
+    onOpenRecent: (path: string) => void openEmbedAddress(path),
+    onAskPage: companionPage ? askAboutPage : undefined,
+    onOpenInApp: () => openEmbedInTab(selectedChannel && !composingConversation
+      ? absoluteChannelUrl(selectedChannel, spaces) : appAddressHref()),
+  } : undefined, [companion, companionPage, askAboutPage, selectedChannel, composingConversation, spaces]);
   const createNewPage = useStableCallback(() => void pageCreation.create(null));
   // One object while what it offers is the same: the list column that shows it is memoized.
   const listCreate = useMemo<CreateAction | null>(() => view === "messages" && canCreateChannel
@@ -1152,6 +1197,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     <NewConversation
       key={newConversationDraft}
       initialDraft={newConversationDraft}
+      initialFiles={companionAsk?.files}
       space={currentSpace}
       token={token ?? null}
       workspaces={projects}
@@ -1159,7 +1205,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       // As an opened conversation: a phone raises the keyboard when the field is tapped.
       autoFocus={!isMobileViewport}
       error={newConversationError}
-      onCreate={createConversationFromComposer}
+      onCreate={companion ? createCompanionConversation : createConversationFromComposer}
       onSend={sendNewConversationMessage}
       onCancel={() => setComposingConversation(false)}
       onOpenAppsForSpace={openAppsForSpace}
@@ -1592,12 +1638,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             updateControl={railUpdateControl}
           />
         )}
-        {!(view === "messages" && selectedChannel && !composingConversation) && <GlobalSearchBar
+        {!companion && !(view === "messages" && selectedChannel && !composingConversation) && <GlobalSearchBar
           searching={workspaceSearchOpen}
           onOpenSearch={openWorkspaceSearch}
         />}
-        <CreateFab action={mobileCreate} />
-        {!isIOSNativeShell && (
+        {!companion && <CreateFab action={mobileCreate} />}
+        {!isIOSNativeShell && !companion && (
           <SlidingMobileTabDock
             slide={dockTabSlide}
             activeView={view}
@@ -1681,18 +1727,22 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             }
             onOpenChannelDetails={openMobileChannelDetails}
             onSelectSpace={selectSpace}
+            companion={companionBar}
           />
-          <DockTabSlideLayer store={dockTabSlide} rootRef={shellRootRef} view={view} bar={tabRootBar} />
-          <MobileListTransitionLayer
+          {!companion && <DockTabSlideLayer store={dockTabSlide} rootRef={shellRootRef} view={view} bar={tabRootBar} />}
+          {!companion && <MobileListTransitionLayer
             store={listTransition}
             bar={tabRootBar}
             listCreate={listCreate}
             webDock={!isIOSNativeShell}
             statusLive={statusLive}
             onChangeView={changeDockTab}
-          />
+          />}
 
-          {agentConfigDialog ? (
+          {companion ? (
+            // The companion is one conversation: the page's, or a new one about the page.
+            composingConversation || !selectedChannel ? newConversationSurface : channelConversationSurface
+          ) : agentConfigDialog ? (
             <AgentConfigPage
               state={agentConfigDialog}
               form={agentConfigForm}

@@ -75,7 +75,9 @@ import {
   CircleArrowUp,
   CircleHelp,
   Hash,
+  History as HistoryIcon,
   MessagesSquare,
+  SquareArrowOutUpRight,
   Lock,
   Loader2,
   LogOut,
@@ -564,7 +566,14 @@ export function TopWorkspaceBar({
   onSelectSpace,
   onClosePageConversation,
   ghost,
+  companion,
 }: {
+  /**
+   * The extension's side panel, the companion of the page beside it: the bar
+   * has no way back to lists, names the Space it asks in, and holds the page's
+   * conversations: Recent, a new one about this page, and the full app.
+   */
+  companion?: CompanionBar;
   /** A copy of a bar drawn only while screens change: the channel list's over a conversation's
       (use-mobile-list-transition), or the tab being left (use-dock-tab-slide). Inert and unread. */
   ghost?: "app-list-transition-target" | "app-dock-tab-slide-outgoing";
@@ -605,7 +614,9 @@ export function TopWorkspaceBar({
   // A machine or an agent opened in the Agents tab has its own way back on its paper, so the bar stays the Space's.
   const tabRoot = !showBack && (DOCK_TAB_VIEWS.includes(view) || isFleetView(view));
   const mobileTitle =
-    conversationOpen && channel
+    companion && composingOpen
+      ? "Ask about this page"
+      : conversationOpen && channel
       ? channelTitle(channel)
       : composingOpen
       ? "New conversation"
@@ -617,9 +628,9 @@ export function TopWorkspaceBar({
   // A pushed screen (conversation, page, new conversation) is named by its
   // title alone: the Space is the one the list just showed, and a member count
   // under it says nothing about the conversation.
-  const mobileSubtitle = showBack || tabRoot ? null : spaceName;
+  const mobileSubtitle = companion ? spaceName : showBack || tabRoot ? null : spaceName;
   // A pushed screen's back chevron is cut into the same wood sign as its title.
-  const backButton = (showBack || showMoreBack) ? (
+  const backButton = (showBack || showMoreBack) && !companion ? (
     <button
       title={conversationOverPage ? "Back to page" : pageOpen ? "Back to pages" : showBack ? "Back to channels" : "Back to More"}
       aria-label={conversationOverPage ? "Back to page" : pageOpen ? "Back to pages" : showBack ? "Back to channels"
@@ -646,7 +657,7 @@ export function TopWorkspaceBar({
     >
       <div className="relative min-w-0 flex-1 md:hidden">
         <SignWithBack back={backButton}>
-        {spaces.length > 1 && !showBack ? (
+        {spaces.length > 1 && (!showBack || companion) ? (
           <>
             <button
               type="button"
@@ -699,7 +710,7 @@ export function TopWorkspaceBar({
         )}
         </SignWithBack>
       </div>
-      {onOpenSearch && !showBack && (
+      {onOpenSearch && !showBack && !companion && (
         // Desktop search is the window's search bar and ⌘F; this icon is the phone's, and the
         // topbar is hidden on desktop. Channel detail bars keep Share / More
         // only — no search.
@@ -716,7 +727,8 @@ export function TopWorkspaceBar({
       )}
       {/* Empty on a plank, where it would only push the search glyph off the content line. */}
       <div className="flex items-center gap-0.5 empty:hidden sm:col-start-3 sm:justify-self-end">
-        {conversationOpen && channel && onShareChannel && (
+        {companion && <CompanionActions companion={companion} />}
+        {conversationOpen && channel && onShareChannel && !companion && (
           <button
             type="button"
             title={shareCopied ? "Link copied" : "Share"}
@@ -739,7 +751,7 @@ export function TopWorkspaceBar({
             {shareCopied ? <Check className="size-4 text-primary" /> : <Share className="size-4" />}
           </button>
         )}
-        {conversationOpen && channel && onOpenChannelDetails && (
+        {conversationOpen && channel && onOpenChannelDetails && !companion && (
           <button
             type="button"
             title="More"
@@ -833,6 +845,68 @@ export function MobileChannelSummaryPlaque({
         )}
       </div>
     </div>
+  );
+}
+
+/** What the side panel's bar offers (TopWorkspaceBar `companion`). */
+export type CompanionBar = {
+  recent: readonly { path: string; title: string; href: string }[];
+  onOpenRecent: (path: string) => void;
+  /** A new conversation about the page beside the panel; absent where the page cannot be read. */
+  onAskPage?: () => void;
+  /** The open conversation in the full xMatrix app, in a browser tab. */
+  onOpenInApp: () => void;
+};
+
+const COMPANION_BUTTON = "relative z-10 flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-card/10 hover:text-foreground";
+
+/** Recent, +, and the full app: the side panel's whole navigation. */
+function CompanionActions({ companion }: { companion: CompanionBar }) {
+  const [recentOpen, setRecentOpen] = useState(false);
+  return (
+    <>
+      {companion.recent.length > 0 && (
+        <button type="button" title="Recent" aria-label="Recent" aria-haspopup="dialog" aria-expanded={recentOpen}
+          onClick={() => setRecentOpen(true)} className={COMPANION_BUTTON}>
+          <HistoryIcon className="size-4" />
+        </button>
+      )}
+      {companion.onAskPage && (
+        <button type="button" title="Ask about this page" aria-label="Ask about this page"
+          onClick={companion.onAskPage} className={COMPANION_BUTTON}>
+          <Plus className="size-5" />
+        </button>
+      )}
+      <button type="button" title="Open in xMatrix" aria-label="Open in xMatrix"
+        onClick={companion.onOpenInApp} className={COMPANION_BUTTON}>
+        <SquareArrowOutUpRight className="size-4" />
+      </button>
+      <Sheet open={recentOpen} onOpenChange={setRecentOpen}>
+        <SheetContent side="bottom" showCloseButton={false} className="xmatrix-app app-mobile-space-sheet">
+          <div className="app-mobile-space-sheet-grabber" aria-hidden="true" />
+          <header className="app-mobile-space-sheet-header">
+            <h2>Recent</h2>
+          </header>
+          <div className="app-mobile-space-sheet-list" role="listbox" aria-label="Recent conversations">
+            {companion.recent.map((item) => (
+              <button key={item.path} type="button" role="option" aria-selected={false}
+                className="app-mobile-space-option"
+                onClick={() => {
+                  setRecentOpen(false);
+                  companion.onOpenRecent(item.path);
+                }}>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-black leading-5">{item.title}</span>
+                  <span className="mt-0.5 block truncate text-[11px] font-semibold leading-4 text-muted-foreground">
+                    {new URL(item.href).host}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }
 
