@@ -601,20 +601,23 @@ final class WebContainerTests: XCTestCase {
         XCTAssertEqual(store.count, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: expiring.fileURL.path))
 
-        // An active batch larger than maxEntries never self-evicts its own URLs,
-        // while an earlier batch is evicted once a newer batch pushes past capacity.
+        // Capacity fails closed rather than deleting live files from earlier
+        // batches; slots reopen once entries are released or expire past TTL.
         let boundedStore = AttachmentStagingStore(rootDirectory: root, now: { clock }, maxEntries: 2, purgeExistingOnInit: false)
-        let firstBatch = UUID()
-        let oldEntry = try boundedStore.stage(data: Data("old".utf8), name: "old.txt", batchID: firstBatch)
-        clock = clock.addingTimeInterval(1)
-        let activeBatch = UUID()
-        let activeURLs = try (0..<4).map { index in
-            try boundedStore.stage(data: Data("item-\(index)".utf8), name: "item-\(index).txt", batchID: activeBatch).fileURL
+        let first = try boundedStore.stage(data: Data("first".utf8), name: "first.txt")
+        let second = try boundedStore.stage(data: Data("second".utf8), name: "second.txt")
+        XCTAssertThrowsError(try boundedStore.stage(data: Data("third".utf8), name: "third.txt")) { error in
+            XCTAssertEqual(error as? AttachmentStagingError, .capacityReached)
         }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: oldEntry.fileURL.path))
-        for url in activeURLs {
-            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), url.lastPathComponent)
-        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.fileURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.fileURL.path))
+        XCTAssertEqual(boundedStore.count, 2)
+
+        boundedStore.release(token: first.token)
+        let third = try boundedStore.stage(data: Data("third".utf8), name: "third.txt")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.fileURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: third.fileURL.path))
+        XCTAssertEqual(boundedStore.count, 2)
     }
 
     func testArmedAttachmentSourceScriptConsumesOnceAndIgnoresExpiredRecords() async throws {

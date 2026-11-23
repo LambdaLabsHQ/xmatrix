@@ -9,9 +9,12 @@ enum AttachmentPickerSource: String {
     case files
 }
 
+enum AttachmentStagingError: Error, Equatable {
+    case capacityReached
+}
+
 struct StagedAttachment {
     let token: String
-    let batchID: UUID
     let fileURL: URL
     let directoryURL: URL
     let name: String
@@ -20,8 +23,9 @@ struct StagedAttachment {
 
 /// Keeps temporary copies of picked media and documents on disk long enough for
 /// WebKit's disk-backed `File` objects to finish preview, compression, upload,
-/// and retries, while bounding count and lifetime on disk. Entries belonging to
-/// the currently staging batch are never evicted before their URLs reach WebKit.
+/// and retries, while bounding count and lifetime on disk. Live entries are
+/// never silently evicted out from under WebKit; staging fails closed once the
+/// store is at capacity until expired entries age out or tokens are released.
 final class AttachmentStagingStore: @unchecked Sendable {
     static let maxEntries = 256
     static let maxBatchSelection = 64
@@ -52,24 +56,15 @@ final class AttachmentStagingStore: @unchecked Sendable {
         releaseAll()
     }
 
-    func stage(
-        copying sourceURL: URL,
-        suggestedName: String? = nil,
-        batchID: UUID = UUID()
-    ) throws -> StagedAttachment {
+    func stage(copying sourceURL: URL, suggestedName: String? = nil) throws -> StagedAttachment {
         let rawName = suggestedName?.isEmpty == false ? suggestedName! : sourceURL.lastPathComponent
-        return try stageFile(rawName: rawName, fallbackExtension: sourceURL.pathExtension, batchID: batchID) { destination in
+        return try stageFile(rawName: rawName, fallbackExtension: sourceURL.pathExtension) { destination in
             try FileManager.default.copyItem(at: sourceURL, to: destination)
         }
     }
 
-    func stage(
-        data: Data,
-        name: String,
-        fallbackExtension: String? = nil,
-        batchID: UUID = UUID()
-    ) throws -> StagedAttachment {
-        try stageFile(rawName: name, fallbackExtension: fallbackExtension, batchID: batchID) { destination in
+    func stage(data: Data, name: String, fallbackExtension: String? = nil) throws -> StagedAttachment {
+        try stageFile(rawName: name, fallbackExtension: fallbackExtension) { destination in
             try data.write(to: destination, options: .atomic)
         }
     }
@@ -77,9 +72,10 @@ final class AttachmentStagingStore: @unchecked Sendable {
     private func stageFile(
         rawName: String,
         fallbackExtension: String?,
-        batchID: UUID,
         write: (URL) throws -> Void
     ) throws -> StagedAttachment {
+        try ensureCapacity()
+
         let token = UUID().uuidString.lowercased()
         let directory = rootDirectory.appendingPathComponent(token, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -88,18 +84,11 @@ final class AttachmentStagingStore: @unchecked Sendable {
         let destination = directory.appendingPathComponent(fileName)
         do {
             try write(destination)
+            return try registerStagedFile(token: token, directory: directory, fileURL: destination, name: fileName)
         } catch {
             try? FileManager.default.removeItem(at: directory)
             throw error
         }
-
-        return registerStagedFile(
-            token: token,
-            batchID: batchID,
-            directory: directory,
-            fileURL: destination,
-            name: fileName
-        )
     }
 
     func release(token: String) {
@@ -132,47 +121,54 @@ final class AttachmentStagingStore: @unchecked Sendable {
         return lock.withLock { entries.count }
     }
 
+    private func ensureCapacity() throws {
+        let result: (dropped: [StagedAttachment], hasRoom: Bool) = lock.withLock {
+            let dropped = pruneExpiredLocked()
+            return (dropped, entries.count < maxEntries)
+        }
+        for item in result.dropped {
+            try? FileManager.default.removeItem(at: item.directoryURL)
+        }
+        guard result.hasRoom else {
+            throw AttachmentStagingError.capacityReached
+        }
+    }
+
     private func registerStagedFile(
         token: String,
-        batchID: UUID,
         directory: URL,
         fileURL: URL,
         name: String
-    ) -> StagedAttachment {
+    ) throws -> StagedAttachment {
         let staged = StagedAttachment(
             token: token,
-            batchID: batchID,
             fileURL: fileURL,
             directoryURL: directory,
             name: name,
             createdAt: now()
         )
-        let evicted: [StagedAttachment] = lock.withLock {
-            var dropped = pruneExpiredLocked(protectedBatchID: batchID)
-            entries[token] = staged
-            while entries.count > maxEntries {
-                guard let oldest = entries.values
-                    .filter({ $0.batchID != batchID })
-                    .min(by: { $0.createdAt < $1.createdAt }) else {
-                    break
-                }
-                if let removed = entries.removeValue(forKey: oldest.token) {
-                    dropped.append(removed)
-                }
+        let outcome: (dropped: [StagedAttachment], accepted: Bool) = lock.withLock {
+            let dropped = pruneExpiredLocked()
+            guard entries.count < maxEntries else {
+                return (dropped, false)
             }
-            return dropped
+            entries[token] = staged
+            return (dropped, true)
         }
-        for item in evicted {
+        for item in outcome.dropped {
             try? FileManager.default.removeItem(at: item.directoryURL)
+        }
+        guard outcome.accepted else {
+            throw AttachmentStagingError.capacityReached
         }
         return staged
     }
 
     @discardableResult
-    private func pruneExpiredLocked(protectedBatchID: UUID? = nil) -> [StagedAttachment] {
+    private func pruneExpiredLocked() -> [StagedAttachment] {
         let cutoff = now().addingTimeInterval(-Self.entryTTL)
         let expiredTokens = entries.values
-            .filter { $0.batchID != protectedBatchID && $0.createdAt < cutoff }
+            .filter { $0.createdAt < cutoff }
             .map(\.token)
         var dropped: [StagedAttachment] = []
         for token in expiredTokens {
@@ -431,11 +427,10 @@ extension NativeAttachmentPicker: PHPickerViewControllerDelegate {
                 return
             }
             let stagingStore = self.store
-            let batchID = UUID()
             let group = DispatchGroup()
             let batch = StagedURLBatch()
 
-            for (index, item) in results.enumerated() {
+            for (index, item) in results.prefix(AttachmentStagingStore.maxBatchSelection).enumerated() {
                 let provider = item.itemProvider
                 guard let typeIdentifier = Self.preferredTypeIdentifier(for: provider.registeredTypeIdentifiers) else {
                     continue
@@ -450,13 +445,13 @@ extension NativeAttachmentPicker: PHPickerViewControllerDelegate {
                         : url.pathExtension
                     let rawName = suggestedName?.isEmpty == false ? suggestedName! : url.lastPathComponent
                     let name = AttachmentStagingStore.sanitizedFilename(rawName, fallbackExtension: ext)
-                    if let staged = try? stagingStore.stage(copying: url, suggestedName: name, batchID: batchID) {
+                    if let staged = try? stagingStore.stage(copying: url, suggestedName: name) {
                         batch.record(index: index, url: staged.fileURL)
                     }
                 }
             }
 
-            let totalCount = results.count
+            let totalCount = min(results.count, AttachmentStagingStore.maxBatchSelection)
             group.notify(queue: .main) {
                 Task { @MainActor [weak self] in
                     self?.finish(batch.orderedURLs(count: totalCount))
@@ -513,12 +508,16 @@ extension NativeAttachmentPicker: UIDocumentPickerDelegate {
             return
         }
         var stagedURLs: [URL] = []
-        let batchID = UUID()
-        for url in urls {
+        for url in urls.prefix(AttachmentStagingStore.maxBatchSelection) {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            if let staged = try? store.stage(copying: url, batchID: batchID) {
+            do {
+                let staged = try store.stage(copying: url)
                 stagedURLs.append(staged.fileURL)
+            } catch AttachmentStagingError.capacityReached {
+                break
+            } catch {
+                continue
             }
         }
         finish(stagedURLs)

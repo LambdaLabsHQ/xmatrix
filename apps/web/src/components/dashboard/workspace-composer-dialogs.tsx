@@ -647,7 +647,9 @@ export const Composer = memo(function Composer({
     setAttachmentError(null);
     setAttachmentMenuActive(null);
     setNativePickerPending(false);
-    pendingFileInputPickRef.current = null;
+    // Keep any in-flight `pendingFileInputPickRef` origin intact across channel
+    // switches so a late `change` from the previous channel fails ownership
+    // validation instead of matching an empty origin in the new channel.
     clearPendingAttachmentSource();
     draftRevisionRef.current += 1;
   }, [composerIdentity]);
@@ -1468,6 +1470,7 @@ export const Composer = memo(function Composer({
   });
 
   function openComposerFileInput(source?: NativeAttachmentPickerSource) {
+    if (nativePickerPending) return;
     pendingFileInputPickRef.current = {
       generation: uploadRegistryRef.current.generation(),
       draftRevision: draftRevisionRef.current,
@@ -1490,7 +1493,7 @@ export const Composer = memo(function Composer({
   }
 
   function handleAttachButtonClick() {
-    if (!attachmentsEnabled || !writable) return;
+    if (!attachmentsEnabled || !writable || nativePickerPending) return;
     const bridge = getDesktopBridge();
     if (bridge?.nativeAttachmentOpenPanel) {
       setInputHistory(null);
@@ -1692,7 +1695,7 @@ export const Composer = memo(function Composer({
               <ComposerIcon
                 label="Attach file"
                 icon={Paperclip}
-                disabled={!attachmentsEnabled}
+                disabled={!attachmentsEnabled || nativePickerPending}
                 active={attachmentMenuOpen}
                 ariaExpanded={attachmentMenuOpen ? true : undefined}
                 ariaControls={attachmentMenuOpen ? attachmentMenuId : undefined}
