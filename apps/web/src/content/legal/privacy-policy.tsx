@@ -370,10 +370,11 @@ export function PrivacyPolicyContent() {
           you send a question does it pass the page title, address, and selected text to xMatrix with
           it. When you ask about a whole page (its side panel&apos;s + , or opening the panel on a page
           without a conversation), it reads that page&apos;s main text and attaches it to the new
-          conversation as a file you can remove before sending. While its side panel is open, an
-          Agent in a conversation you started from a page may ask to read that page again; the
-          extension reads it only if it is still open in a tab. An Agent may also ask to read another
-          page you have open; the panel asks you first and reads it only if you allow it. Page text
+          conversation as a file you can remove before sending. Each message you write in its side
+          panel carries the title and address of the page beside it. While the side panel is open, an
+          Agent in your conversation may read that page, or the page the conversation was started
+          from if it is still open in a tab. An Agent may also ask to read another page you have
+          open; the panel asks you first and reads it only if you allow it. Page text
           read this way goes to that Agent only, and xMatrix does not store it. The extension never
           opens a page for an Agent, does not read pages in the background, record your browsing
           history, or contact any server other than xMatrix. It keeps your sign-in session, and text you picked until the

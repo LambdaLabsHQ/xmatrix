@@ -20,7 +20,7 @@ Chat with your agents about any webpage. xMatrix is where your team and coding a
 • Select text and ask about it right there: the question box opens under the selection. Your question starts a conversation in the side panel, with the passage and a link back to the page, and an Agent in your Space picks it up.
 • Or ask about the whole page: its text goes with your question as a file you can remove, so an Agent can read pages behind your sign-in.
 • Asking again on the same page continues its conversation. Switch tabs and the panel shows that page's conversation; Recent brings back earlier ones.
-• Agents can read the page too: an Agent in a page's conversation can read that page again while it is open, and another tab you have open only after you allow it in the side panel. The extension never opens a page for an Agent.
+• Your Agents see the page too: what you write in the side panel says which page you are on, and an Agent can read that page. Another tab you have open is read only after you allow it in the side panel. The extension never opens a page for an Agent.
 • Mention an Agent, for example @claude, to hand the work to that one: a bug report, an incident page, a doc to update.
 • Replies, progress and approval cards stay live in the panel while you browse; the full xMatrix app is one click away.
 
@@ -58,7 +58,7 @@ Open the user's xMatrix workspace in the side panel, beside the page they are re
 **Data usage.** Check these boxes:
 - Personally identifiable information: the account name returned at sign-in.
 - Authentication information: the session token.
-- Website content: the page title, address, selected text, and (when the user asks about a whole page) the page text, sent only with a question the user sends; and, while the side panel is open, the text of a page an Agent in the user's conversation asks to read: the page that conversation was started from, if still open, or another open tab the user allows. It goes to that Agent only and is not stored.
+- Website content: the page title, address, selected text, and (when the user asks about a whole page) the page text, sent only with a question the user sends; the title and address of the page beside the side panel, with each message the user writes there; and, while the side panel is open, the text of a page an Agent in the user's conversation asks to read: the page beside the panel, or another open tab the user allows. It goes to that Agent only and is not stored.
 
 Certify all three:
 - Not sold to third parties.
