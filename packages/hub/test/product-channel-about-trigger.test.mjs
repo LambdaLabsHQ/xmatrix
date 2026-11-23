@@ -293,6 +293,7 @@ test("a mention-less first message asks whether a new conversation starts an Age
 // is owned by the upload executor rather than the HTTP request.
 test("X video admission is acknowledged before response while reads remain asynchronous", () => {
   assert.equal(productMessageControlFinishesBeforeResponse("@x:upload_video:101 message/attachment"), true);
+  assert.equal(productMessageControlFinishesBeforeResponse('@x:publish_video:101 {"text":"Hello","video":"message/attachment"}'), true);
   assert.equal(productMessageControlFinishesBeforeResponse("@x:timeline:101"), false);
   assert.equal(productMessageControlFinishesBeforeResponse("`@x:upload_video:101 message/attachment`"), false);
 });

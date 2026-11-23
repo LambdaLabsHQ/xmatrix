@@ -100,14 +100,16 @@ test("a decision cannot replace the recipient, text, or frozen provider input", 
   assert.deepEqual(f.calls.at(-1), ["settle", "request", "completed"]);
 });
 
-test("approved X video returns after durable admission without running a provider in HTTP", async () => {
-  const f = fixture({ providerId: "x", actionId: "upload_video" });
-  const response = await f.request("POST", { decision: "allow" });
-  assert.equal(response.status, 200);
-  const result = await response.json();
-  assert.equal(result.request.status, "executing");
-  assert.match(result.receipt, /queued/);
-  assert.deepEqual(f.calls.find(call => call[0] === "queue"),
-    ["queue", { requestId: "request", spaceId: "space", channelId: "channel" }]);
-  assert.equal(f.calls.some(call => call[0] === "run" || call[0] === "settle"), false);
-});
+for (const actionId of ["upload_video", "publish_video"]) {
+  test(`approved X ${actionId} returns after durable admission without running a provider in HTTP`, async () => {
+    const f = fixture({ providerId: "x", actionId });
+    const response = await f.request("POST", { decision: "allow" });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.request.status, "executing");
+    assert.equal(result.receipt, `X ${actionId}: queued; the result will reply in this Channel.`);
+    assert.deepEqual(f.calls.find(call => call[0] === "queue"),
+      ["queue", { requestId: "request", spaceId: "space", channelId: "channel" }]);
+    assert.equal(f.calls.some(call => call[0] === "run" || call[0] === "settle"), false);
+  });
+}

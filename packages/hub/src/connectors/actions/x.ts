@@ -99,6 +99,22 @@ function responsePost(value: unknown): { id: string; text: string } {
   return { id: post.id, text: post.text };
 }
 
+/** One post as the account. Channel write policy is read again immediately before it. */
+async function publish(context: ConnectorActionContext, account: XAccount,
+  post: { text: string; quotedPostId?: string; mediaId?: string }): Promise<{ id: string; url: string }> {
+  if (!context.authorizeWrite) throw new ProviderRequestError(403, "X writes require current Channel authorization");
+  await context.authorizeWrite();
+  // No retries: a lost response can mean the public post already exists.
+  // X currently limits quote_tweet_id to Enterprise plans; the provider
+  // rejects unavailable capabilities rather than silently changing a quote.
+  const payload = await capability(context).request(account, "POST", "/2/tweets", {
+    text: post.text, ...(post.quotedPostId ? { quote_tweet_id: post.quotedPostId } : {}),
+    ...(post.mediaId ? { media: { media_ids: [post.mediaId] } } : {}),
+  });
+  const published = responsePost(payload.data);
+  return { id: published.id, url: `https://x.com/${account.username}/status/${published.id}` };
+}
+
 function writeAction(quote: boolean): ConnectorAction {
   return {
     effect: "write", requires: [], parse: statement => parsePost(statement, quote), prepare: prepareAccount,
@@ -117,17 +133,9 @@ function writeAction(quote: boolean): ConnectorAction {
         mediaId = await context.xMedia.ready(account, input.mediaReceipt);
         if (!ID.test(mediaId)) throw new ProviderRequestError(502, "X did not confirm the uploaded video");
       }
-      await context.authorizeWrite();
-      // No retries: a lost response can mean the public post already exists.
-      // X currently limits quote_tweet_id to Enterprise plans; the provider
-      // rejects unavailable capabilities rather than silently changing a quote.
-      const payload = await capability(context).request(account, "POST", "/2/tweets", {
-        text: input.text, ...(quote ? { quote_tweet_id: input.postId } : {}),
-        ...(mediaId ? { media: { media_ids: [mediaId] } } : {}),
-      });
-      const post = responsePost(payload.data);
-      return { summary: `${quote ? "Quote-posted" : "Posted"} as @${account.username} (X account ${account.id}): ${post.id}`,
-        url: `https://x.com/${account.username}/status/${post.id}` };
+      const post = await publish(context, account, { text: input.text, ...(quote ? { quotedPostId: input.postId! } : {}),
+        ...(mediaId ? { mediaId } : {}) });
+      return { summary: `${quote ? "Quote-posted" : "Posted"} as @${account.username} (X account ${account.id}): ${post.id}`, url: post.url };
     },
   };
 }
@@ -172,5 +180,5 @@ export const X_ACTIONS: Record<string, ConnectorAction> = {
   },
   post: writeAction(false),
   quote: writeAction(true),
-  ...createXMediaActions({ prepareAccount, frozenAccount }),
+  ...createXMediaActions({ prepareAccount, frozenAccount, postText, publish }),
 };

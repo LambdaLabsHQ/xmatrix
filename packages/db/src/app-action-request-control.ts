@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { utf8ByteLength } from "@xmatrix/protocol";
+import { isXDurableAction, utf8ByteLength, X_DURABLE_ACTIONS } from "@xmatrix/protocol";
 import { requireChannelCapability } from "./channel-capability-policy.js";
 import { AppControlError } from "./app-control.js";
 import { appCredentialValueLimit } from "./app-credential-control.js";
@@ -16,6 +16,9 @@ export interface AppActionRequestPayload {
   prepared: Record<string, string>;
   preview: Record<string, string>;
 }
+
+/** The X actions only the durable executor dispatches, as SQL. */
+const X_DURABLE_ACTIONS_SQL = `(${X_DURABLE_ACTIONS.map(action => `'${action}'`).join(",")})`;
 
 export interface XUploadReference { requestId: string; spaceId: string; channelId: string }
 export interface XExecutingUpload {
@@ -133,7 +136,7 @@ export class PostgresAppActionRequestRepository {
   }
 
   private async requireUploadAllow(tx: DatabaseTransaction, row: QueryResultRow) {
-    if (row.provider_id !== "x" || row.action_id !== "upload_video") {
+    if (!isXDurableAction(String(row.provider_id), String(row.action_id))) {
       throw new AppControlError("action_request_scope_changed", 409, "This request cannot start an allowed upload");
     }
     const policies = await tx.query<QueryResultRow>({ name: "app_action_request_upload_write_v1", text: `SELECT permission_mode
@@ -255,9 +258,9 @@ export class PostgresAppActionRequestRepository {
       await requireChannelCapability(tx, { channelId: input.channelId, spaceId: input.spaceId,
         principal: { kind: "user", id: input.actorUserId }, capability: "app_new_work",
         error: failure => new AppControlError(failure.code, failure.status, failure.message) });
-      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_start_read_v1", text: `SELECT *
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_start_read_v2", text: `SELECT *
         FROM data.app_connector_action_requests WHERE request_id=$1 AND space_id=$2 AND channel_id=$3
-          AND requested_by=$4 AND provider_id='x' AND action_id='upload_video' LIMIT 1`,
+          AND requested_by=$4 AND provider_id='x' AND action_id IN ${X_DURABLE_ACTIONS_SQL} LIMIT 1`,
       values: [input.requestId, input.spaceId, input.channelId, input.actorUserId], maxRows: 1 });
       const row = rows[0];
       if (!row) throw new AppControlError("action_request_not_found", 404, "Upload request not found");
@@ -299,9 +302,9 @@ export class PostgresAppActionRequestRepository {
   /** Server-only recovery input; the durable scheduler stores this reference, never the payload. */
   async executingUpload(input: XUploadReference): Promise<XExecutingUpload | null> {
     return this.transaction("executing-upload", async tx => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_executing_upload_v1", text: `SELECT *
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_executing_upload_v2", text: `SELECT *
         FROM data.app_connector_action_requests WHERE request_id=$1 AND space_id=$2 AND channel_id=$3
-          AND provider_id='x' AND action_id='upload_video' AND status='executing' AND expires_at>now()
+          AND provider_id='x' AND action_id IN ${X_DURABLE_ACTIONS_SQL} AND status='executing' AND expires_at>now()
         LIMIT 1 FOR SHARE`, values: [input.requestId, input.spaceId, input.channelId], maxRows: 1 });
       const row = rows[0];
       return row ? { request: { ...view(row), connectionId: String(row.connection_id) }, payload: await this.decrypt(row) } : null;
@@ -315,9 +318,9 @@ export class PostgresAppActionRequestRepository {
       throw new AppControlError("invalid_app_request", 400, "Upload receipt is invalid");
     }
     return this.transaction("settle-upload", async tx => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_settle_lock_v1", text: `SELECT *
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_settle_lock_v2", text: `SELECT *
         FROM data.app_connector_action_requests WHERE request_id=$1 AND space_id=$2 AND channel_id=$3
-          AND provider_id='x' AND action_id='upload_video' AND status='executing' AND expires_at>now() FOR UPDATE`,
+          AND provider_id='x' AND action_id IN ${X_DURABLE_ACTIONS_SQL} AND status='executing' AND expires_at>now() FOR UPDATE`,
       values: [input.requestId, input.spaceId, input.channelId], maxRows: 1 });
       const row = rows[0];
       if (!row) return { stored: false };
@@ -336,9 +339,9 @@ export class PostgresAppActionRequestRepository {
 
   async uploadOutcome(input: XUploadReference): Promise<XUploadOutcome | null> {
     return this.transaction("upload-outcome", async tx => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_outcome_v1", text: `SELECT *
+      const rows = await tx.query<QueryResultRow>({ name: "app_action_request_upload_outcome_v2", text: `SELECT *
         FROM data.app_connector_action_requests WHERE request_id=$1 AND space_id=$2 AND channel_id=$3
-          AND provider_id='x' AND action_id='upload_video' AND status IN ('completed','failed','blocked')
+          AND provider_id='x' AND action_id IN ${X_DURABLE_ACTIONS_SQL} AND status IN ('completed','failed','blocked')
           AND encrypted_value_json IS NOT NULL AND expires_at>now() LIMIT 1 FOR SHARE`,
       values: [input.requestId, input.spaceId, input.channelId], maxRows: 1 });
       const row = rows[0];
@@ -355,9 +358,9 @@ export class PostgresAppActionRequestRepository {
 
   /** Called only after the trusted publisher confirms this receipt's Channel append. */
   async clearUploadOutcome(input: XUploadReference): Promise<void> {
-    await this.transaction("clear-upload-outcome", tx => tx.query({ name: "app_action_request_upload_outcome_clear_v1", text: `UPDATE
+    await this.transaction("clear-upload-outcome", tx => tx.query({ name: "app_action_request_upload_outcome_clear_v2", text: `UPDATE
       data.app_connector_action_requests SET encrypted_value_json=NULL,updated_at=now()
-      WHERE request_id=$1 AND space_id=$2 AND channel_id=$3 AND provider_id='x' AND action_id='upload_video'
+      WHERE request_id=$1 AND space_id=$2 AND channel_id=$3 AND provider_id='x' AND action_id IN ${X_DURABLE_ACTIONS_SQL}
         AND status IN ('completed','failed','blocked')`, values: [input.requestId, input.spaceId, input.channelId], maxRows: 0 }));
   }
 

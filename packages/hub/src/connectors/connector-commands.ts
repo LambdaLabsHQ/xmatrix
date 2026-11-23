@@ -6,7 +6,7 @@ import { teamsActionCapability } from "./teams-native";
 import { dingtalkActionCapability } from "./dingtalk-native";
 import { telegramActionCapability } from "./telegram-native";
 import { wecomActionCapability } from "./wecom-native";
-import { connectorActionPolicy, PRIVATE_CONNECTOR_RESULT, sha256Hex, utf8ByteLength, type ConnectorResultVisibility,
+import { connectorActionPolicy, isXDurableAction, PRIVATE_CONNECTOR_RESULT, sha256Hex, utf8ByteLength, type ConnectorResultVisibility,
   type ConnectorActionPolicy } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "../app-connectors";
 import { parseActionCommand } from "./action-parse";
@@ -190,7 +190,7 @@ export async function runConnectorAction(providerId: string, input: ConnectorCom
   return receipt;
 }
 
-/** Only the durable executor dispatches a consumed X video request. */
+/** Only the durable executor dispatches a consumed X video request: an upload, or an upload with its post. */
 export async function executeDurableXUpload(env: Env, job: XExecutingUpload): Promise<{
   status: "completed" | "failed" | "blocked"; receipt: string;
 }> {
@@ -198,7 +198,7 @@ export async function executeDurableXUpload(env: Env, job: XExecutingUpload): Pr
   const receipt = await runAction("x", { env, channelId: request.channelId,
     actorUserId: request.requestedBy, messageId: `${payload.messageId}:upload-result`,
     commandMessageId: payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
-  "upload_video", X_ACTIONS.upload_video!, payload.statement,
+  request.actionId, X_ACTIONS[request.actionId]!, payload.statement,
   { requestId: request.requestId, prepared: payload.prepared });
   return { status: /: completed;/u.test(receipt) ? "completed" : /: blocked;/u.test(receipt) ? "blocked" : "failed", receipt };
 }
@@ -229,7 +229,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   const policyInput = { providerId, connectionId: scope.connectionId, actionId };
   const mode = await connectionActionPolicy(input.env, policyInput);
   const requestId = `action-request:${await sha256Hex(JSON.stringify([scope.connectionId, input.channelId, input.messageId, actionId]))}`;
-  const durableUpload = providerId === "x" && actionId === "upload_video";
+  const durableUpload = isXDurableAction(providerId, actionId);
   if (!approved && action.effect === "write") {
     const staged = await connectorActionRequestRepository(input.env).find(requestId, scope.connectionId, input.channelId, input.actorUserId);
     if (staged) {
