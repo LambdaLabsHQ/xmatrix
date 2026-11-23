@@ -154,13 +154,14 @@ let post = (video, text, ~at) => spawn(~key=video, () => {
   after(at)->wait
   X.publish(ready)->wait
 })
-all([
+ignore(all([
   post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
   post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
-])
+]))
+never()->wait
 ```
 
-프로그램이 시작되면 두 게시물이 바로 승인을 요청하므로 한 번에 모두 답할 수 있습니다. 이후 각 게시물은 자기 시각에 전송됩니다. 목록에 한 줄을 추가하면 새 게시물에 대해서만 묻습니다.
+프로그램이 시작되면 두 게시물이 바로 승인을 요청하므로 한 번에 모두 답할 수 있습니다. 이후 각 게시물은 자기 시각에 전송됩니다. 목록에 한 줄을 추가하면 새 게시물에 대해서만 묻습니다. 마지막 줄은 프로그램을 계속 실행 상태로 두어 목록을 늘려 갈 수 있게 합니다. 이미 전송된 게시물은 그 줄을 남겨 두든 지우든 다시 전송되지 않습니다.
 
 승인은 해당 앱의 단일 권한을 따릅니다.
 

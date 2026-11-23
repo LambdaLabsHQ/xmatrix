@@ -154,13 +154,14 @@ let post = (video, text, ~at) => spawn(~key=video, () => {
   after(at)->wait
   X.publish(ready)->wait
 })
-all([
+ignore(all([
   post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
   post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
-])
+]))
+never()->wait
 ```
 
-Both posts ask for admission as soon as the program starts, so you answer them in one sitting. Each then goes out at its own time. Adding a line to the list asks only about the new post.
+Both posts ask for admission as soon as the program starts, so you answer them in one sitting. Each then goes out at its own time. Adding a line to the list asks only about the new post. The last line keeps the program running so the list can grow: a post that has gone out is never sent again, whether its line stays or is removed.
 
 What admitting means follows the app's one permission:
 

@@ -25,7 +25,7 @@ Compact reference for authoring and reviewing Norn programs on xMatrix Pages and
 - `X`:
   - `X.preparePost(account, text)`, `X.prepareVideo(account, "<message id>/<attachment id>", text)` -> `request<Actions.prepared<X.posted>>`: nothing is posted yet. The video is an MP4 attachment in the program's conversation.
   - `X.publish(prepared)` -> `request<X.posted>` (`{ summary: string, url: option<string> }`): posts once; the video is uploaded now.
-  - One post each at its own time, approved together: `spawn(~key=video, () => { let ready = X.prepareVideo(…)->wait?; after(at)->wait; X.publish(ready)->wait })`.
+  - One post each at its own time, approved together: `spawn(~key=video, () => { let ready = X.prepareVideo(…)->wait?; after(at)->wait; X.publish(ready)->wait })`. End a list that keeps growing with `never()->wait`: the program then never ends, so its ledger remembers what was posted and an edit never posts it again.
 
 ## Combinators, Collaboration & Safety
 - Streams: `merge`, `or`, `map`, `filter`, `filterMap`, `scan`, `timed`, `gather`, `never`, `every`, `after`, `forEach(~key, ~each=Queue|Latest|Restart|Together|Batch, ~per=?)`.

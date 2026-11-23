@@ -477,6 +477,13 @@ X.publish(ready)->wait
 in its own words (`after`, `every`, an event), so a person approves a week of
 posts in one sitting and each goes out at its time with nobody awake.
 
+A program that ends and is edited afterwards runs again from an empty ledger
+([Programs on a Page](#programs-on-a-page)), which would ask for, and under
+Read and write send, everything its text still lists. A list of posts that
+keeps growing therefore stays running (`never()->wait` as its last line) and
+gives each post its own keyed scope (`spawn(~key=…)`): the ledger then
+remembers each post by its key, and no edit sends one twice.
+
 **What an app can be asked.** Every action a connected app declares, GitHub's
 excepted (`NORN_CONNECTOR_EVENT_MANIFESTS`, `norn-libraries.ts`), which the checker
 reads `Actions.action(app, name)` against. Its input is the two parts of the

@@ -154,13 +154,14 @@ let post = (video, text, ~at) => spawn(~key=video, () => {
   after(at)->wait
   X.publish(ready)->wait
 })
-all([
+ignore(all([
   post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
   post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
-])
+]))
+never()->wait
 ```
 
-Las dos publicaciones piden admisión en cuanto empieza el programa, así que las respondes de una vez. Después cada una sale a su hora. Añadir una línea a la lista solo pregunta por la publicación nueva.
+Las dos publicaciones piden admisión en cuanto empieza el programa, así que las respondes de una vez. Después cada una sale a su hora. Añadir una línea a la lista solo pregunta por la publicación nueva. La última línea mantiene el programa en marcha para que la lista pueda crecer: una publicación que ya salió no se vuelve a enviar, se deje o se quite su línea.
 
 La admisión sigue el único permiso de la app:
 

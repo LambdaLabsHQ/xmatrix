@@ -154,13 +154,14 @@ let post = (video, text, ~at) => spawn(~key=video, () => {
   after(at)->wait
   X.publish(ready)->wait
 })
-all([
+ignore(all([
   post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
   post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
-])
+]))
+never()->wait
 ```
 
-程式一啟動，兩則貼文就同時請求放行，你可以一次批完；之後各自在自己的時間送出。在清單加一行，只會多問新加的那一則。
+程式一啟動，兩則貼文就同時請求放行，你可以一次批完；之後各自在自己的時間送出。在清單加一行，只會多問新加的那一則。最後一行讓程式持續執行，清單才能不斷追加：已經送出的貼文不會再送，無論那一行留著還是刪掉。
 
 「放行」依該應用程式唯一的權限處理：
 
