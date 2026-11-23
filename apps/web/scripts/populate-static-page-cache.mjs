@@ -8,8 +8,21 @@ import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { isCliMain } from "../../../scripts/cli-entrypoint.mjs";
 
-// Every app shell address (/app, /app/<space>/…) is rewritten to this page by middleware.ts.
-const REQUIRED_PAGES = ["workspace"];
+// Every app shell address (/app, /app/<space>/…) is rewritten to workspace by
+// middleware.ts; the public site pages below are what search and AI crawlers
+// fetch, and rendering them per request made them answer in 1–2 s.
+export const REQUIRED_PAGES = [
+  "workspace",
+  "docs",
+  "docs/cli",
+  "alternatives/raft-alternatives",
+  "loc/zh",
+  "loc/zh/download",
+  "loc/zh/support",
+  "loc/zh/docs",
+  "loc/zh/docs/cli",
+  "loc/zh/alternatives/raft-alternatives",
+];
 
 export function populateStaticPageCache(openNextDir) {
   const buildId = readFileSync(join(openNextDir, "assets", "BUILD_ID"), "utf8").trim();

@@ -1,5 +1,5 @@
 ---
-title: "Documentación de xMatrix: ejecuta Claude Code y Codex desde un chat de equipo"
+title: "Docs de xMatrix: ejecuta Claude Code y Codex desde un chat"
 description: "Instala xMatrix, conecta Claude Code, Codex u otro agente de programación en tu propia máquina y asígnale trabajo mencionándolo en una conversación compartida."
 ---
 

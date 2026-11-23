@@ -40,7 +40,8 @@ export function homeMetadata(locale: Locale): Metadata {
 
 /**
  * Who and what the site is, for search engines: the site's name (so results
- * read "xMatrix", not another X-matrix), its maker and the app itself.
+ * read "xMatrix", not another X-matrix) and its maker. No SoftwareApplication:
+ * Google rejects one without a genuine aggregateRating or review, and we have none.
  */
 function homeStructuredData(locale: Locale): string {
   const { home, lang, meta } = landingCopy[locale];
@@ -51,10 +52,8 @@ function homeStructuredData(locale: Locale): string {
     organization,
     { "@type": "WebSite", "@id": url("/#website"), name: "xMatrix", alternateName: "xmatrix.sh", url: url("/"),
       publisher: { "@id": organization["@id"] } },
-    { "@type": "SoftwareApplication", name: "xMatrix", url: url(home), inLanguage: lang, description: meta.description,
-      image: url(shareImage.url), applicationCategory: "DeveloperApplication",
-      operatingSystem: "macOS, Windows, Linux, Android, Web",
-      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" }, publisher: { "@id": organization["@id"] } },
+    { "@type": "WebPage", "@id": url(`${home}#webpage`), name: meta.title, url: url(home), inLanguage: lang,
+      description: meta.description, primaryImageOfPage: url(shareImage.url), isPartOf: { "@id": url("/#website") } },
   ] }).replace(/</gu, "\\u003c");
 }
 

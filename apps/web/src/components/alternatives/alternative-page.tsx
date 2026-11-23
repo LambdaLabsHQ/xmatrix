@@ -8,7 +8,7 @@ import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { relatedAlternatives, type AlternativePage } from "@/lib/alternatives";
 import { SITE_LOCALES, localizedPath, type SiteLocale } from "@/lib/site-locales";
 import { sitePagesCopy } from "@/lib/site-pages-copy";
-import { shareImage, siteUrl } from "@/lib/site-url";
+import { appHref, shareImage, siteUrl } from "@/lib/site-url";
 
 function alternativeStructuredData(page: AlternativePage, locale: SiteLocale): string {
   const abs = (href: string) => new URL(href, siteUrl).href;
@@ -26,16 +26,6 @@ function alternativeStructuredData(page: AlternativePage, locale: SiteLocale): s
         dateModified: page.verifiedDateIso,
         publisher: org,
         primaryImageOfPage: abs(shareImage.url),
-      },
-      {
-        "@type": "SoftwareApplication",
-        name: "xMatrix",
-        url: abs(localizedPath(locale, "/")),
-        inLanguage: SITE_LOCALES[locale].htmlLang,
-        applicationCategory: "DeveloperApplication",
-        operatingSystem: "macOS, Windows, Linux, Android, Web",
-        offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-        publisher: org,
       },
       {
         "@type": "BreadcrumbList",
@@ -113,7 +103,7 @@ export function AlternativeDetailPage({
           <div className="mt-8 flex flex-wrap items-center gap-4">
             <WoodPanel
               as={Link}
-              href="/login"
+              href={appHref("/login")}
               className="site-wood-pill inline-flex h-12 items-center gap-2 px-6 text-sm"
             >
               {chrome.startFreeCta}
@@ -298,7 +288,7 @@ export function AlternativeDetailPage({
               <div className="flex flex-wrap gap-3">
                 <LiquidGlassPill
                   as={Link}
-                  href="/login"
+                  href={appHref("/login")}
                   className="inline-flex h-11 items-center gap-2 px-5 text-sm font-semibold"
                 >
                   {chrome.startFreeShort}

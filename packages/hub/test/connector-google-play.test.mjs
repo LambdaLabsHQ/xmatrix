@@ -184,6 +184,42 @@ test("base_plan prices a new plan in every region Google converts to, keeps exis
   }
 });
 
+test("one_time_product prices a new product in every region, refuses an existing one and can activate", async () => {
+  const money = (currencyCode, units, nanos) => ({ currencyCode, units, ...(nanos ? { nanos } : {}) });
+  const converted = { convertedRegionPrices: { US: { regionCode: "US", price: money("USD", "2", 990000000) }, JP: { regionCode: "JP", price: money("JPY", "450") } },
+    convertedOtherRegionsPrice: { usdPrice: money("USD", "2", 990000000), eurPrice: money("EUR", "2", 990000000) }, regionVersion: { version: "2025/03" } };
+  const input = statement('@googleplay:one_time_product:com.example.game/remove_ads {"title":"Remove Ads","description":"Play without ads","region":"US","price":{"currencyCode":"USD","units":"2","nanos":990000000},"activate":true}');
+  let grants = 0;
+  const activated = { oneTimeProducts: [{ productId: "remove_ads", purchaseOptions: [{ purchaseOptionId: "buy", state: "ACTIVE" }] }] };
+  const { result, calls } = await fetched([{ status: 404, body: { error: { status: "NOT_FOUND", message: "not found" } } }, { body: converted }, { body: {} }, { body: activated }],
+    () => ACTIONS.one_time_product.execute({ credentials, authorizeWrite: async () => { grants++; } }, input));
+  assert.equal(grants, 1);
+  assert.deepEqual(calls.map(call => call.method), ["GET", "POST", "PATCH", "POST"]);
+  const saved = new URL(calls[2].url);
+  assert.match(saved.pathname, /onetimeproducts\/remove_ads$/u);
+  assert.deepEqual(Object.fromEntries(saved.searchParams), { allowMissing: "true", updateMask: "listings,purchaseOptions", "regionsVersion.version": "2025/03" });
+  assert.deepEqual(calls[2].body.listings, [{ languageCode: "en-US", title: "Remove Ads", description: "Play without ads" }]);
+  const option = calls[2].body.purchaseOptions[0];
+  assert.deepEqual([option.purchaseOptionId, option.buyOption.legacyCompatible, option.newRegionsConfig.availability], ["buy", true, "AVAILABLE"]);
+  assert.deepEqual(option.regionalPricingAndAvailabilityConfigs.map(region => [region.regionCode, region.price.units, region.availability]),
+    [["US", "2", "AVAILABLE"], ["JP", "450", "AVAILABLE"]]);
+  assert.match(calls[3].url, /oneTimeProducts\/remove_ads\/purchaseOptions:batchUpdateStates$/u);
+  assert.deepEqual(calls[3].body.requests, [{ activatePurchaseOptionRequest: { packageName: "com.example.game", productId: "remove_ads", purchaseOptionId: "buy" } }]);
+  assert.match(result.summary, /one-time product remove_ads \(purchase option buy\): ACTIVE, priced in 2 regions/u);
+  const taken = await fetched([{ body: { productId: "remove_ads" } }], () => assert.rejects(ACTIONS.one_time_product.execute({ credentials }, input), /already has one-time product remove_ads/u));
+  assert.equal(taken.calls.length, 1);
+  const denied = await fetched([{ status: 403, body: { error: { status: "PERMISSION_DENIED", message: "denied" } } }], () => assert.rejects(ACTIONS.one_time_product.execute({ credentials }, input), /403|denied/u));
+  assert.equal(denied.calls.length, 1);
+  for (const bad of ['@googleplay:one_time_product:com.example.game {"title":"Remove Ads","description":"d","region":"US","price":{"currencyCode":"USD","units":"2"}}',
+    '@googleplay:one_time_product:com.example.game/remove_ads {"description":"d","region":"US","price":{"currencyCode":"USD","units":"2"}}',
+    '@googleplay:one_time_product:com.example.game/remove_ads {"title":"Remove Ads","description":"d","price":{"currencyCode":"USD","units":"2"}}',
+    '@googleplay:one_time_product:com.example.game/Remove_Ads {"title":"Remove Ads","description":"d","region":"US","price":{"currencyCode":"USD","units":"2"}}',
+    '@googleplay:one_time_product:com.example.game/remove_ads {"title":"Remove Ads","description":"d","region":"US","price":{"currencyCode":"usd","units":"2"}}',
+    '@googleplay:one_time_product:com.example.game/remove_ads {"title":"Remove Ads","description":"d","region":"US","price":{"currencyCode":"USD","units":"2"},"free":true}']) {
+    assert.equal(typeof statement(bad), "string", bad);
+  }
+});
+
 test("a read may name the fields it wants, so a large resource fits a bounded result; a write may not", async () => {
   const input = statement(command("api_read", "monetization.subscriptions.get", { path: { packageName: "sh.xmatrix.app", productId: "pro" },
     query: { fields: "basePlans(basePlanId,state)" } }));

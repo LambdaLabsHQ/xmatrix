@@ -105,6 +105,24 @@ and changing one goes through `api_plan`/`api_write`. Without `activate` the
 plan stays a draft. `units` is whole currency units as text; add `nanos` for
 a fraction (`{"units":"9","nanos":990000000}`).
 
+## One-time products
+
+```text
+@googleplay:one_time_product:com.example.game/remove_ads {"title":"Remove Ads","description":"Play without ads","region":"US","price":{"currencyCode":"USD","units":"2","nanos":990000000},"activate":true}
+```
+
+`one_time_product` creates a one-time in-app product, such as a "remove ads"
+purchase, with one listing (`language`, default `en-US`) and one buy purchase
+option (`purchaseOptionId`, default `buy`), available to the legacy Play
+Billing flow as well. Pricing works like `base_plan`: `region` keeps exactly
+the stated price, Google converts it for every other region it sells in, and
+regions Play adds later take the converted USD/EUR price. With `activate` the
+purchase option is activated in the same step; without it the product stays a
+draft. An existing product ID is refused and left unchanged; changing a product
+goes through `api_plan`/`api_write` on `monetization.onetimeproducts.*`.
+The app must already have an uploaded bundle that declares the
+`com.android.vending.BILLING` permission, as Play Console also requires.
+
 ## Catalog operations
 
 ```text

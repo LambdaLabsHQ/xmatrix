@@ -6,6 +6,7 @@ import { landingCopy, type LandingCopy, type Locale } from "@/lib/landing-copy";
 import { SITE_LOCALE_IDS, SITE_LOCALES, localizedPath } from "@/lib/site-locales";
 import { sitePagesCopy } from "@/lib/site-pages-copy";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
+import { appHref } from "@/lib/site-url";
 
 // X verifies the organization by this link back to its account.
 export const X_ACCOUNT_URL = "https://x.com/xMatrix_hq";
@@ -14,15 +15,15 @@ function footerLinks(copy: LandingCopy, locale: Locale) {
   const { links, legalLinks } = copy.footer;
   return {
     [copy.footer.product]: [
-      { label: links.app, href: "/app" },
+      { label: links.app, href: appHref("/app") },
       { label: links.download, href: localizedPath(locale, "/download") },
       { label: links.pricing, href: `${copy.home}#pricing` },
       { label: links.docs, href: localizedPath(locale, "/docs") },
       { label: links.support, href: localizedPath(locale, "/support") },
       { label: "GitHub", href: REPOSITORY_URL },
       { label: "X", href: X_ACCOUNT_URL },
-      { label: links.console, href: "/console" },
-      { label: links.signIn, href: "/login" },
+      { label: links.console, href: appHref("/console") },
+      { label: links.signIn, href: appHref("/login") },
     ],
     [copy.footer.legal]: [
       { label: legalLinks.privacy, href: "/privacy" },

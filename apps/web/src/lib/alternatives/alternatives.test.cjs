@@ -37,6 +37,8 @@ test("every competitor alternative page works across all 6 site locales and reso
       assert.equal(isSitePath(localized.href), true, `${localized.href} must be served at the site origin`);
       assert.ok(localized.metaTitle.length > 10 && localized.metaTitle.length <= 65, `${locale}/${page.slug} metaTitle length (${localized.metaTitle.length})`);
       assert.ok(localized.metaDescription.length >= 40, `${locale}/${page.slug} needs metaDescription`);
+      // Search results cut a snippet near 160 characters.
+      assert.ok(localized.metaDescription.length <= 160, `${locale}/${page.slug} metaDescription is ${localized.metaDescription.length} characters, over 160`);
       assert.ok(localized.headline.length >= 10, `${locale}/${page.slug} needs headline`);
       assert.ok(
         localized.headline.toLowerCase().includes(page.name.toLowerCase()),

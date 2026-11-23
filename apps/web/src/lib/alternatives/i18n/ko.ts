@@ -839,7 +839,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     verifiedDate: "2026년 11월 22일",
     metaTitle: "T3 Code 대안 (2026): T3 Code vs xMatrix",
     metaDescription:
-      "T3 Code 대안을 찾고 계신가요? 실제 사용자 계정 구분, 공유 채널(GitHub Discussion #27974), 살아 있는 프로젝트 페이지(GitHub Discussion #15858), 스페이스 시크릿, 프로바이더 간 핸드오프(GitHub Discussion #15846)를 팀에 더해 보세요.",
+      "T3 Code 대안을 찾고 계신가요? 실제 사용자 계정, 공유 채널, 살아 있는 프로젝트 페이지, 스페이스 시크릿, 프로바이더 간 핸드오프를 팀에 더해 보세요.",
     eyebrow: "T3 Code 대안 · T3 Code vs xMatrix",
     headline: "팀을 위한 T3 Code 대안: 실제 계정 구분, 하나의 채널, 하나의 살아 있는 페이지",
     lead: "T3 Code는 뛰어난 무료 싱글플레이어 코딩 워크벤치이지만, 환경 하나가 계정 하나에 묶이고 공유 살아 있는 프로젝트 페이지가 없으며 프로바이더 할당량이 소진되면 'Limited'에서 그대로 멈춥니다. xMatrix는 공유 채널, 살아 있는 페이지, 스페이스 시크릿, 그리고 보유 머신 전반의 35종 코딩 에이전트를 팀에 제공합니다.",

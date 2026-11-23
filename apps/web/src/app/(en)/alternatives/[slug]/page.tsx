@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { AlternativeDetailPage } from "@/components/alternatives/alternative-page";
-import { alternativePageMetadata, findAlternativePageByRouteSlug } from "@/lib/alternatives";
+import { alternativePageMetadata, alternativePages, findAlternativePageByRouteSlug } from "@/lib/alternatives";
 
 /**
  * Internal render target for flat root-level `/<competitor>-alternatives` URLs
@@ -11,6 +11,11 @@ import { alternativePageMetadata, findAlternativePageByRouteSlug } from "@/lib/a
  * addresses are reachable.
  */
 type Params = { params: Promise<{ slug: string }> };
+
+/** Prerendered at build, so a crawler or visitor never waits for a cold render. */
+export function generateStaticParams() {
+  return alternativePages.map((page) => ({ slug: page.routeSlug }));
+}
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return alternativePageMetadata((await params).slug, "en");
