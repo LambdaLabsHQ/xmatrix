@@ -893,27 +893,31 @@ integration("two writers of the same metadata revision commit exactly one new co
   } finally { await client.end(); }
 });
 
-/** Two more messages in `child` from an Agent Instance that then sleeps: an older wait and a newer mention. */
-async function sleepingAgentAsksTwice(client) {
+/**
+ * The seeded catalog with two more messages in `child` from an Agent Instance
+ * that then sleeps: an older wait and a newer mention.
+ */
+async function catalogWithSleepingAsker() {
+  await seed();
+  const client = new Client({ connectionString });
+  await client.connect();
   await client.query(`INSERT INTO data.messages SELECT (jsonb_populate_record(NULL::data.messages,
     to_jsonb(source)||jsonb_build_object('message_id',item.id,'search_rank_sequence',item.id,
       'timeline_sequence',item.seq,'author_kind','agent','author_id','root-00:1'))).*
     FROM data.messages source CROSS JOIN (VALUES ('older-wait',2),('newer-mention',3)) item(id,seq)
     WHERE source.message_id='message-1'`);
   await client.query(`UPDATE data.instances SET rest_state='sleeping' WHERE instance_id='root-00:1'`);
+  return { client, repository: new PostgresChannelCatalogRepository(
+    createAuthorityDatabase({ connectionString, shardId: "shard-0" })) };
 }
 
 // The aggregate counts Channels, keeps an acknowledged older wait, and cannot
 // pick up another principal's or an unreadable Channel's attention rows.
 integration("catalog counts keep older declared waits without multiplying or widening attention", async () => {
-  await seed();
-  const client = new Client({ connectionString });
-  await client.connect();
-  const repository = new PostgresChannelCatalogRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0" }));
+  const { client, repository } = await catalogWithSleepingAsker();
   const read = () => repository.page({ requestId: crypto.randomUUID(), spaceId: "space-catalog",
     principal: { kind: "user", id: "user-1" }, view: "flat", filter: "all", countsOnly: true });
   try {
-    await sleepingAgentAsksTwice(client);
     await client.query(`INSERT INTO data.message_attention
       (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response) VALUES
       ('space-catalog','user:user-1','child','older-wait','reply',2,$1,TRUE),
@@ -934,13 +938,9 @@ integration("catalog counts keep older declared waits without multiplying or wid
 // A catalog reader learns what waits on it from its own attention rows, one
 // small read for the Space, and it is exactly what each Channel's own row says.
 integration("the attention read answers what every resolved Channel row carries, for waiting Channels only", async () => {
-  await seed();
-  const client = new Client({ connectionString });
-  await client.connect();
-  const repository = new PostgresChannelCatalogRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0" }));
+  const { client, repository } = await catalogWithSleepingAsker();
   const principal = { kind: "user", id: "user-1" };
   try {
-    await sleepingAgentAsksTwice(client);
     await client.query(`INSERT INTO data.message_attention
       (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response) VALUES
       ('space-catalog','user:user-1','child','older-wait','reply',2,$1,TRUE),
