@@ -109,6 +109,7 @@ test('the actual shared Hono dispatch reaches signed Discord PING before generic
     './connectors/registry': { connectorProvider: () => undefined },
     './index-routes-connector-approvals': { registerConnectorApprovalRoutes: noop },
     './index-routes-connector-call': { registerConnectorCallRoutes: noop },
+    './index-routes-browser-read': { registerBrowserReadRoutes: noop },
     './index-routes-gmail-notifications': { registerGmailNotificationRoutes: noop },
     './index-routes-googlechat': { registerGoogleChatRoutes: noop },
     './index-routes-teams': { registerTeamsRoutes: noop },
