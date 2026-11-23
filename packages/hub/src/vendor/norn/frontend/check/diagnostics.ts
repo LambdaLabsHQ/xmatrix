@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@3a8adebc52c4e8af22a0b40ddf7a2dfd7ca36f03; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@879866cb314729dd7e6be1621ac64fc433c3309e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * What the checker reports. A diagnostic reads like a parse error: a message
  * that says what was expected and what was found, and a span. In JSON it also
@@ -106,7 +106,8 @@ export const CODES = {
   "missing-needs": "a library requires a module via needs that was not supplied",
   "type-hole": "a _ type hole inferred by the checker",
   "unknown-event-kind": "Events.kind names an app or event kind that is not in the connector manifest",
-  "manifest-field-mismatch": "a payload type requests a field not declared by the connector event manifest",
+  "unknown-action": "Actions.action names an app or action that is not in the connector manifest",
+  "manifest-field-mismatch": "a payload type does not fit the fields its connector manifest declares",
   "missing-row-field": "a record does not contain a field required by a row constraint",
   "default-report-form": "a run's report type was not constrained and defaulted to the host report",
   "impure-callback": "a stream combinator or accepting validator callback must be pure and cannot perform effects",
