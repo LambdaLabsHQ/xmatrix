@@ -25,7 +25,7 @@ function respond(query) {
   }];
   if (query.name === "norn_request_view_v2") return [{ channel_id: "channel-1", holder: "grok", delegated_by_reader: false, request_json: {} }];
   if (query.name === "norn_deleted_conversations_v1") return [{ channel_id: "gone" }];
-  if (query.name === "norn_page_programs_v1") return [{
+  if (query.name === "norn_page_programs_v2") return [{
     page_name: "stability", program_id: "program-1", channel_id: "channel-1", source: "source",
     state: "running", runs: 1, ledger_json: {},
   }];
