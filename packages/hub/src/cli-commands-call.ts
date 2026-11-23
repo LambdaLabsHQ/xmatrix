@@ -18,3 +18,20 @@ export const CONNECTOR_CALL_COMMAND: CliCommand = {
       : `${result.summary}${result.url ? `\n${result.url}` : ""}\n` };
   },
 };
+
+/**
+ * `xmatrix browse`: the page this conversation was started from, read through
+ * the owner's browser (the Chrome extension's side panel), or with --tab a page
+ * they have open, once they allow it. The browser never opens a page for it.
+ */
+export const BROWSE_COMMAND: CliCommand = {
+  path: ["browse"], about: "Read a page through your owner's browser (the xMatrix Chrome extension)",
+  options: [{ name: "tab", kind: "string", help: "The address of another page your owner has open; they are asked to allow it" },
+    { name: "json", kind: "flag", help: "Print {title, href, text} as JSON" }],
+  async run(call, { options }) {
+    const tab = typeof options.tab === "string" ? options.tab.trim() : "";
+    const result = await call("POST", HUB_ROUTES.browser_read, { requestId: crypto.randomUUID(),
+      target: tab || "conversation" }) as { title: string; href: string; text: string };
+    return { stdout: options.json ? `${JSON.stringify(result)}\n` : result.text };
+  },
+};

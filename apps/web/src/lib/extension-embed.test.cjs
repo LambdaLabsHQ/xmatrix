@@ -134,3 +134,28 @@ test("the page beside the panel is a web page with bounded text, and Recent hold
     { path: "/app/s1/channels/c3", title: "Three", href: "javascript:alert(1)" },
   ]), [{ path: "/app/s1/channels/c1", title: "One", href: "https://a.example/" }]);
 });
+
+// `xmatrix browse`: the Hub's request goes to the panel only, and the panel's approval prompts are checked.
+test("an Agent's page read goes to the side panel, and its approval prompt must name a web page", (t) => {
+  const { win, embed } = load(t, EXTENSION);
+  embed.forwardEmbedBrowserRead({ requestId: "req-12345678", channelId: "c1", target: "conversation", agentName: "claude" });
+  assert.deepEqual(win.parent.posted.at(-1), { origin: EXTENSION, message: { protocol: "xmatrix-embed/1", type: "browser-read",
+    requestId: "req-12345678", channelId: "c1", target: "conversation", agentName: "claude" } });
+  const seen = [];
+  const stop = embed.subscribeEmbedBrowserReadApprovals((approval) => seen.push(approval));
+  const prompt = { protocol: "xmatrix-embed/1", type: "browser-read-approve", requestId: "req-1", agentName: "claude",
+    title: "Inbox", href: "https://mail.example/inbox" };
+  win.dispatch({ source: win.parent, origin: EXTENSION, data: prompt });
+  win.dispatch({ source: win.parent, origin: EXTENSION, data: { ...prompt, requestId: "req-2", href: "chrome://settings" } });
+  win.dispatch({ source: win.parent, origin: "https://evil.example", data: { ...prompt, requestId: "req-3" } });
+  stop();
+  assert.deepEqual(seen, [{ requestId: "req-1", agentName: "claude", title: "Inbox", href: "https://mail.example/inbox" }]);
+  embed.answerEmbedBrowserReadApproval("req-1", true);
+  assert.deepEqual(win.parent.posted.at(-1).message, { protocol: "xmatrix-embed/1", type: "browser-read-approval", requestId: "req-1", allow: true });
+});
+
+test("outside the side panel an Agent's page read goes nowhere", (t) => {
+  const { win, embed } = load(t, "https://evil.example");
+  embed.forwardEmbedBrowserRead({ requestId: "req-12345678", channelId: "c1", target: "conversation", agentName: "claude" });
+  assert.equal(win.parent.posted.length, 0);
+});

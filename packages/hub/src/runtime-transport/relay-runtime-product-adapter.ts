@@ -38,6 +38,9 @@ export const RELAY_RUNTIME_AGENT_INSTANCE_CONNECT_PATH = "/internal/product-conn
 export const RELAY_RUNTIME_MACHINE_DAEMON_CONNECT_PATH = "/internal/product-connect/machine-daemon";
 export const RELAY_RUNTIME_MACHINE_DAEMON_CLAIM_PATH = "/internal/product-control/machine-daemon-claim";
 export const RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH = "/internal/product-control/machine-daemon-wait";
+/** An Agent's request to read a page through its owner's browser waits here for the answer (browser-read.ts). */
+export const RELAY_RUNTIME_BROWSER_READ_WAIT_PATH = "/internal/product-control/browser-read-wait";
+export const RELAY_RUNTIME_BROWSER_READ_ANSWER_PATH = "/internal/product-control/browser-read-answer";
 export const RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH = "/internal/product-control/cli-release-notice";
 export const RELAY_RUNTIME_CLI_UPDATE_CHECK_PATH = "/internal/product-control/cli-update-check";
 export const RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH = "/internal/product-trace/instance-terminal";
@@ -248,6 +251,11 @@ export class RelayRuntimeProductCallbackAdapter {
 
   liveHumanSessions() {
     return this.human.liveSessions();
+  }
+
+  /** Hands a page-read request to the user's live clients; false when none is connected here. */
+  requestHumanBrowserRead(userId: string, message: import("@xmatrix/protocol").HumanBrowserReadRequestedMessage): boolean {
+    return this.human.deliverToUser(userId, message);
   }
 
   liveAgentSessions(selection?: LiveAgentSessionSelection) {

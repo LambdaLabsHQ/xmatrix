@@ -53,6 +53,7 @@ import { NO_BUSY_INSTANCES } from "./agent-work-view";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { AUTH_TOKEN_REJECTED_EVENT, useAuth } from "@/lib/auth-context";
+import { forwardEmbedBrowserRead } from "@/lib/extension-embed";
 import { untilCallerAborts } from "@/lib/query/caller-abort";
 import { userErrorMessage } from "../../lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -2019,6 +2020,11 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         case "agent_list":
           realtimeAgents.set(message.agents);
           setAgentsError(null);
+          break;
+        case "browser_read_requested":
+          // The extension's side panel reads the page; any other client of the person leaves it.
+          forwardEmbedBrowserRead({ requestId: message.requestId, channelId: message.channelId,
+            target: message.target, agentName: message.agentName });
           break;
         case "registration_quota":
           realtimeChannels.instances.receiveQuota(message.registration, message.usage);

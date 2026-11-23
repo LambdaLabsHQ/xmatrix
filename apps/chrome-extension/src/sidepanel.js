@@ -112,6 +112,10 @@ window.addEventListener("message", async (event) => {
     if (tab?.id !== undefined) await ask("rememberPageThread", { tabId: tab.id, path: data.path, title: data.title, href: data.href });
   } else if (data.type === "open-tab" && typeof data.href === "string" && capturableUrl(data.href)) {
     await chrome.tabs.create({ url: data.href });
+  } else if (data.type === "browser-read" && typeof data.requestId === "string") {
+    await answerBrowserRead(data).catch(() => undefined);
+  } else if (data.type === "browser-read-approval" && typeof data.requestId === "string") {
+    approvals.get(data.requestId)?.(data.allow === true);
   } else if (data.type === "signed-out") {
     await ask("signOut");
     await render();
@@ -168,13 +172,11 @@ async function showPage({ text } = {}) {
   shownPage = key;
 }
 
-/** The readable text of the page beside the panel: read only because the person asked about this page. */
-async function readPage() {
-  const tab = await activeTab();
-  if (!tab?.id || !capturableUrl(tab.url ?? "")) return "";
+/** A tab's readable text: its main article, or the whole body, at most 200,000 characters; empty where it cannot be read. */
+async function readTab(tabId) {
   try {
     const [result] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
+      target: { tabId },
       func: () => {
         const root = document.querySelector("article, main, [role='main']") ?? document.body;
         return String(root?.innerText ?? "").replace(/\n{3,}/gu, "\n\n").trim().slice(0, 200_000);
@@ -185,6 +187,89 @@ async function readPage() {
     // A page this extension may not read (no access to it, or the browser's own pages).
     return "";
   }
+}
+
+/** The readable text of the page beside the panel: read only because the person asked about this page. */
+async function readPage() {
+  const tab = await activeTab();
+  if (!tab?.id || !capturableUrl(tab.url ?? "")) return "";
+  return readTab(tab.id);
+}
+
+// ---- Agents reading a page through this browser (`xmatrix browse`, packages/hub src/browser-read.ts).
+//
+// The page the conversation was started from is read at once: the person asked about it there. Another tab is
+// read only once the person allows it, in the app's dialog; a page that is not open is not opened.
+
+/** The open tab showing `page` (a pageKey), the active one first. */
+async function openTabShowing(page) {
+  const tabs = await chrome.tabs.query({});
+  const showing = tabs.filter((tab) => {
+    const href = capturableUrl(tab.url ?? "");
+    return href && pageKey(href) === page;
+  });
+  return showing.find((tab) => tab.active) ?? showing[0] ?? null;
+}
+
+/** The page a conversation was started from: a tab still asking in it, or where Recent says it began. */
+async function conversationPage(channelId) {
+  const stored = await chrome.storage.session.get(null);
+  for (const [key, thread] of Object.entries(stored)) {
+    if (!key.startsWith("askThread:") || thread?.channelId !== channelId) continue;
+    const tab = await chrome.tabs.get(Number(key.slice("askThread:".length))).catch(() => null);
+    const href = capturableUrl(tab?.url ?? "");
+    if (tab && href && pageKey(href) === thread.page) return { page: thread.page, tab };
+    return { page: thread.page, tab: await openTabShowing(thread.page) };
+  }
+  const { recentThreads = [] } = await chrome.storage.local.get("recentThreads");
+  const recent = recentThreads.find((item) => String(item.path).endsWith(`/channels/${encodeURIComponent(channelId)}`));
+  const href = recent && capturableUrl(String(recent.href ?? ""));
+  return href ? { page: pageKey(href), tab: await openTabShowing(pageKey(href)) } : null;
+}
+
+/** The person's choice in the app's dialog, by request: allow, or not (unanswered counts as not). */
+const approvals = new Map();
+function approve(requestId, agentName, tab, href) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => settle(false), 85_000);
+    const settle = (allow) => {
+      clearTimeout(timer);
+      approvals.delete(requestId);
+      resolve(allow);
+    };
+    approvals.set(requestId, settle);
+    postToApp({ type: "browser-read-approve", requestId, agentName,
+      title: pageTitle(tab.title) || new URL(href).host, href });
+  });
+}
+
+async function readForAgent({ channelId, target, agentName, requestId }) {
+  if (target === "conversation") {
+    const found = await conversationPage(String(channelId ?? ""));
+    if (!found) return { refusal: "no-page" };
+    if (!found.tab?.id) return { refusal: "not-open" };
+    const text = await readTab(found.tab.id);
+    return text ? { title: pageTitle(found.tab.title) || "", href: capturableUrl(found.tab.url), text } : { refusal: "unreadable" };
+  }
+  const href = capturableUrl(String(target ?? ""));
+  const tab = href ? await openTabShowing(pageKey(href)) : null;
+  // Without access to web pages the extension cannot see other tabs' addresses at all.
+  if (!tab?.id) return { refusal: await chrome.permissions.contains({ origins: WEB_ORIGINS }) ? "not-open" : "no-access" };
+  const tabHref = capturableUrl(tab.url);
+  if (!(await approve(requestId, String(agentName || "An Agent"), tab, tabHref))) return { refusal: "denied" };
+  const text = await readTab(tab.id);
+  return text ? { title: pageTitle(tab.title) || "", href: tabHref, text } : { refusal: "unreadable" };
+}
+
+async function answerBrowserRead(request) {
+  if (!(await ask("claimBrowserRead", { requestId: request.requestId }))) return;
+  let answer;
+  try {
+    answer = await readForAgent(request);
+  } catch {
+    answer = { refusal: "unreadable" };
+  }
+  await ask("browserReadAnswer", { requestId: request.requestId, answer });
 }
 
 async function showRecent() {

@@ -410,6 +410,8 @@ export function agentRunHttpRouteAllowed(
   // The route stops the run itself, and refuses any Channel but its own.
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/leave$/.test(path)) return true;
   if (request.method === "POST" && path === "/api/invocations/diagnostics") return true;
+  // Reads a page through its owner's browser; the route refuses any Channel the Run is not delegated.
+  if (request.method === "POST" && path === HUB_ROUTES.browser_read) return true;
   // Saves a credential the Run already holds into its Space: the route proves
   // the live Run and refuses an alias the Space already has.
   if (request.method === "POST" && path === HUB_ROUTES.secrets) return true;

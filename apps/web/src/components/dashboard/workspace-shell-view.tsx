@@ -14,6 +14,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties,
 } from "react";
 import { useStableCallback } from "./workspace-shell-helpers";
+import { BrowserReadApprovalDialog } from "./browser-read-approval-dialog";
 import { pageAskDraft, pageTextFile, useExtensionCompanion } from "./use-extension-companion";
 import { absoluteChannelUrl } from "./channel-links";
 import { appAddressHref } from "@/lib/app-address";
@@ -1741,7 +1742,10 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
 
           {companion ? (
             // The companion is one conversation: the page's, or a new one about the page.
-            composingConversation || !selectedChannel ? newConversationSurface : channelConversationSurface
+            <>
+              {composingConversation || !selectedChannel ? newConversationSurface : channelConversationSurface}
+              <BrowserReadApprovalDialog />
+            </>
           ) : agentConfigDialog ? (
             <AgentConfigPage
               state={agentConfigDialog}

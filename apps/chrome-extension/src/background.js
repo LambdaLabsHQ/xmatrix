@@ -6,6 +6,7 @@
 import {
   HubError,
   accountFrom,
+  answerBrowserRead,
   createConversation,
   listSpaces,
   sendMessage,
@@ -293,6 +294,9 @@ async function syncSelectionScript() {
 
 // ---- Requests from the side panel (extension pages only) and the selection button (content script).
 
+/** Agents' page-read requests a side panel took on (panelHandlers.claimBrowserRead). */
+const browserReadClaims = new Set();
+
 const panelHandlers = {
   async state() {
     const session = await store.get();
@@ -336,6 +340,25 @@ const panelHandlers = {
     if (!match || !page || !Number.isInteger(tabId)) return;
     await chrome.storage.session.set({ [`askThread:${tabId}`]: { page: pageKey(page), spaceId: match[1], channelId: match[2], snapshot: null } });
     await rememberRecent({ spaceId: match[1], channelId: match[2], title, href: page });
+  },
+  /**
+   * An Agent's request to read a page reaches every open side panel: the first to claim it answers, so the person
+   * is asked once. Claims are kept for the length of an Agent's wait.
+   */
+  claimBrowserRead({ requestId }) {
+    if (typeof requestId !== "string" || !requestId || browserReadClaims.has(requestId)) return false;
+    browserReadClaims.add(requestId);
+    setTimeout(() => browserReadClaims.delete(requestId), 120_000);
+    return true;
+  },
+  /** The page's text, or why it was not read, back to the Agent waiting for it (packages/hub browser-read.ts). */
+  browserReadAnswer({ requestId, answer }) {
+    if (typeof requestId !== "string" || !answer || typeof answer !== "object") throw new Error("Invalid answer");
+    const body = typeof answer.refusal === "string"
+      ? { refusal: answer.refusal.slice(0, 500) }
+      : { title: String(answer.title ?? "").slice(0, 300), href: String(answer.href ?? ""),
+        text: String(answer.text ?? "").slice(0, 200_000) };
+    return authed((scoped, token) => answerBrowserRead(scoped, token, requestId, body));
   },
   /** The Space the side panel's app shows: where questions asked on a page go. */
   async rememberSpace({ space }) {

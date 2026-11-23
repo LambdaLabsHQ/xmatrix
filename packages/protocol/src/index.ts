@@ -349,6 +349,8 @@ export type {
   HumanPresenceDigestMessage,
   HumanTraceAccessServerMessage,
   HumanServerMessage,
+  HumanBrowserReadRequestedMessage,
+  BrowserReadAnswer,
 } from "./connections/human.js";
 export {
   HUMAN_CLIENT_PRESENCE_COVERAGE,
@@ -363,6 +365,7 @@ export {
   parseHumanWorkspaceResourceChangedMessage,
   parseHumanTraceAccessServerMessage,
   parseTraceAccessGrant,
+  parseBrowserReadAnswer,
 } from "./connections/human.js";
 export {
   rfc3339TimestampEpochNanoseconds,

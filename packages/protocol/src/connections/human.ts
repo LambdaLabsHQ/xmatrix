@@ -151,6 +151,36 @@ export type HumanTraceAccessServerMessage =
   | { type: "trace_access_requested"; grant: TraceAccessGrant }
   | { type: "trace_access_updated"; grant: TraceAccessGrant };
 
+/**
+ * An Agent asks to read a page through its owner's browser: the extension's
+ * side panel answers (`browser_read_answer`). `target` is `conversation` (the
+ * page the conversation was started from) or the address of a tab the person
+ * has open; another tab is read only after the person allows it.
+ */
+export interface HumanBrowserReadRequestedMessage {
+  type: "browser_read_requested";
+  requestId: string;
+  channelId: string;
+  target: string;
+  agentName: string;
+}
+
+/** The side panel's answer: the page's text, or why it was not read. */
+export type BrowserReadAnswer =
+  | { title: string; href: string; text: string }
+  | { refusal: string };
+
+/** Bounds an answer from the person's browser: a web page's title, address and at most 200,000 characters of text. */
+export function parseBrowserReadAnswer(value: unknown): BrowserReadAnswer | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.refusal === "string") return record.refusal.length <= 500 ? { refusal: record.refusal } : null;
+  const { title, href, text } = record;
+  if (typeof title !== "string" || title.length > 300 || typeof text !== "string" || text.length > 200_000 ||
+    typeof href !== "string" || href.length > 2_000 || !/^https?:\/\//u.test(href)) return null;
+  return { title, href, text };
+}
+
 export type HumanServerMessage =
   | { type: "error"; requestId?: string; message: string; failure?: import("../runtime-operation-failure.js").RuntimeOperationFailure }
   /** `ts` is absent on the auto-response to `HUMAN_HEARTBEAT_PING`. */
@@ -207,6 +237,7 @@ export type HumanServerMessage =
       updatedAt: string;
     }
   | { type: "observable_event"; event: ObservabilityEvent }
+  | HumanBrowserReadRequestedMessage
   | HumanTraceAccessServerMessage
   | {
       type: "channel_message_received";
