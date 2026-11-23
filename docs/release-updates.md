@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: registration lists read the settings they display
+
+The Agents catalog previously transferred launch instructions and workspace and capability grants even though it only uses model settings and model grants. It now selects the fields the catalog needs, and picks the newest model and parameter observations from one pass over each registration's recent Instances. Models and parameters retain their own observation times and ordering. Detailed configuration and launch admission continue to read their authority records. Hub and DB code without a schema migration. Recovery is a CI-validated Hub beta reverting the change.
+
 ## Unreleased: Pages read only the Agent details they display
 
 Page links and tree activity fetched full Agent Instance catalogs and then discarded resting Instances. They now read just the display fields of active Instances. Discussion summaries need only message previews and read positions. Page links check access on the linked pages and their ancestors. In the November 21–22 production baseline, the replaced reads returned about 1 GB per day from PostgreSQL across those endpoints. Hub and DB code without a schema migration. Recovery is a CI-validated Hub beta reverting the change.
