@@ -36,6 +36,13 @@ function media(context: ConnectorActionContext): XMediaCapability {
 
 /** Reuse the X adapter's one account selector and approval binding for all media operations. */
 export function createXMediaActions(helpers: AccountHelpers): Record<string, ConnectorAction> {
+  /** What an approval of a video freezes: the account and its grant, and the attachment as it is stored now. */
+  async function prepareSource(context: ConnectorActionContext, input: Record<string, string>): Promise<Record<string, string>> {
+    const prepared = await helpers.prepareAccount(context, input);
+    const account = await helpers.frozenAccount(context, prepared);
+    const source = await media(context).prepareUpload(account, { messageId: input.messageId!, attachmentId: input.attachmentId! });
+    return { ...prepared, ...source };
+  }
   return {
     upload_video: {
       effect: "write", requires: [],
@@ -45,12 +52,7 @@ export function createXMediaActions(helpers: AccountHelpers): Record<string, Con
           ? { account: statement.target, messageId: source[1]!, attachmentId: source[2]! }
           : "select an explicit account and an MP4 attachment in this Channel: @x:upload_video:<account ID or @handle> <messageId>/<attachmentId>";
       },
-      async prepare(context, input) {
-        const prepared = await helpers.prepareAccount(context, input);
-        const account = await helpers.frozenAccount(context, prepared);
-        const source = await media(context).prepareUpload(account, { messageId: input.messageId!, attachmentId: input.attachmentId! });
-        return { ...prepared, ...source };
-      },
+      prepare: prepareSource,
       async execute(context, input) {
         if (!context.authorizeWrite) throw new ProviderRequestError(403, "X writes require current Channel authorization");
         const account = await helpers.frozenAccount(context, input);
@@ -77,12 +79,7 @@ export function createXMediaActions(helpers: AccountHelpers): Record<string, Con
         if (!helpers.postText(input.text)) return "write a nonempty post within X's 280 weighted character limit";
         return { account: statement.target, text: input.text, messageId: input.video[1]!, attachmentId: input.video[2]! };
       },
-      async prepare(context, input) {
-        const prepared = await helpers.prepareAccount(context, input);
-        const account = await helpers.frozenAccount(context, prepared);
-        const source = await media(context).prepareUpload(account, { messageId: input.messageId!, attachmentId: input.attachmentId! });
-        return { ...prepared, ...source };
-      },
+      prepare: prepareSource,
       async execute(context, input) {
         if (!context.authorizeWrite) throw new ProviderRequestError(403, "X writes require current Channel authorization");
         if (!helpers.postText(input.text)) throw new ProviderRequestError(400, "X post input is invalid");
