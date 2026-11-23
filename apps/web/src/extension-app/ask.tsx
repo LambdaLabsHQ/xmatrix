@@ -4,11 +4,12 @@
  * they select).
  *
  * It is the App's conversation composer itself, not a copy: Composer as a new
- * conversation uses it (new-conversation.tsx), in its own glass capsule, its
- * draft opening with the passage quoted, as the App opens a discussion of a
- * passage (handleWebPassage in use-workspace-shell-actions.ts). The composer
- * writes the first message (the quote, the question, the Agents picked with
- * `@`); Escape closes it.
+ * conversation uses it (new-conversation.tsx), in its own glass capsule. It
+ * holds only the question: the selection on the page is the quote (Daniel
+ * 2026-11-23). The message it sends opens with the passage quoted, as the App
+ * opens a discussion of a passage (handleWebPassage in
+ * use-workspace-shell-actions.ts), then the question and the Agents picked
+ * with `@`; Escape closes it.
  *
  * This page talks only to the extension: its session, the passage and the
  * Space come from the service worker over chrome.runtime, never from the page
@@ -17,9 +18,10 @@
  */
 import { createRoot } from "react-dom/client";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { discussionHead, type AuthUser, type SerializedSpace } from "@xmatrix/protocol";
+import { type AuthUser, type SerializedSpace } from "@xmatrix/protocol";
 import { API_ROUTES } from "xmatrix-extension:api-routes";
 import { Composer } from "@/components/dashboard/workspace-composer-dialogs";
+import { askMessage } from "./ask-message";
 import type { ComposerSendSnapshot } from "@/components/dashboard/workspace-shell-message-model";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
@@ -196,10 +198,11 @@ function Surface() {
     measureNow.current();
   }, [shownRound]);
 
-  // The composer has written the message: the quote, the question, the Agents picked in it.
-  const send = async ({ body, invocationSelections }: ComposerSendSnapshot) => {
-    if (!context || sending.current) return;
+  // The composer holds the question and the Agents picked in it; the message adds the passage (askMessage).
+  const send = async ({ body: question, invocationSelections: picked }: ComposerSendSnapshot) => {
+    if (!context?.passage || sending.current) return;
     sending.current = true;
+    const { body, invocationSelections } = await askMessage(context.passage, question, picked, space?.id ?? null);
     // The panel opens on the new conversation; Chrome lets it open only shortly after this keystroke or click.
     if (context.windowId !== null) void extension.sidePanel?.open({ windowId: context.windowId }).catch(() => undefined);
     try {
@@ -227,7 +230,7 @@ function Surface() {
               workspaces={[]}
               localContext={null}
               isJoined
-              draft={discussionHead(passage.text || passage.label, { label: passage.label, href: passage.href })}
+              draft=""
               draftSeedRevision={context.round ?? 0}
               selectedWorkspaceId={null}
               replyTarget={null}
