@@ -1,9 +1,10 @@
+import { BROWSER_READ_WAIT_MS, BrowserReadWaits } from "./browser-read";
 import { runtimeDeliveryFetchIngress, withRuntimeDeliveryIngress } from "./runtime-transport/runtime-delivery-diagnostics";
 import { MACHINE_DAEMON_RUN_WATCH_MS } from "./runtime-transport/machine-daemon-port";
 import { TURN_RETRY_RUNTIME_PATH } from "./agent-turn-retry-policy";
 import { plainDeliveryRecord as plainObject } from "./runtime-transport/delivery-record";
 import { reportError, sendErrorReports } from "@xmatrix/protocol/error-reporting";
-import { HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG } from "@xmatrix/protocol";
+import { HUMAN_HEARTBEAT_PING, HUMAN_HEARTBEAT_PONG, parseBrowserReadAnswer } from "@xmatrix/protocol";
 import { parseAgentChannelLiveDelivery, parseHumanChannelLiveDelivery } from "./runtime-transport/channel-live-delivery";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -24,6 +25,8 @@ import {
   RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH,
   RELAY_RUNTIME_MACHINE_DAEMON_CLAIM_PATH,
   RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH,
+  RELAY_RUNTIME_BROWSER_READ_WAIT_PATH,
+  RELAY_RUNTIME_BROWSER_READ_ANSWER_PATH,
   RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH,
   RELAY_RUNTIME_CLI_UPDATE_CHECK_PATH,
   type RelayRuntimeProductCallbackAdapter,
@@ -179,6 +182,7 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     fetch: (request: Request) => this.fetch(request),
   };
   private readonly machineDaemonWakeSignals = new MachineDaemonWakeSignals();
+  private readonly browserReads = new BrowserReadWaits();
   private readonly pageAssistantOutput = new PageAssistantOutputReceiver();
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -499,6 +503,31 @@ export class RelayRuntimeLive extends DurableObject<Env> {
         }),
         { headers: { "cache-control": "no-store" } },
       );
+    }
+    if (request.method === "POST" && url.pathname === RELAY_RUNTIME_BROWSER_READ_WAIT_PATH) {
+      if (!this.productAdapter) return runtimeTransportUnavailable("product");
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const { ownerUserId, requestId, channelId, target, agentName } = body ?? {};
+      if (typeof ownerUserId !== "string" || typeof requestId !== "string" || typeof channelId !== "string" ||
+          typeof target !== "string" || typeof agentName !== "string") {
+        return Response.json({ error: "Invalid browser read" }, { status: 400, headers: { "cache-control": "no-store" } });
+      }
+      const answer = this.browserReads.wait(requestId, ownerUserId, BROWSER_READ_WAIT_MS);
+      // The owner's live clients get the request; the side panel among them answers it.
+      if (!this.productAdapter.requestHumanBrowserRead(ownerUserId,
+        { type: "browser_read_requested", requestId, channelId, target, agentName })) {
+        this.browserReads.answer(requestId, ownerUserId, { refusal: "offline" });
+      }
+      return Response.json({ answer: await answer }, { headers: { "cache-control": "no-store" } });
+    }
+    if (request.method === "POST" && url.pathname === RELAY_RUNTIME_BROWSER_READ_ANSWER_PATH) {
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const answer = parseBrowserReadAnswer(body?.answer);
+      if (typeof body?.ownerUserId !== "string" || typeof body.requestId !== "string" || !answer) {
+        return Response.json({ error: "Invalid browser read answer" }, { status: 400, headers: { "cache-control": "no-store" } });
+      }
+      const settled = this.browserReads.answer(body.requestId, body.ownerUserId, answer);
+      return Response.json({ settled }, { headers: { "cache-control": "no-store" } });
     }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_MACHINE_DAEMON_WAIT_PATH) {
       const { ownerUserId, machineId, hostId, waitMs: rawWaitMs } = await machineDaemonRequestScope(request);

@@ -222,6 +222,8 @@ export const HUB_ROUTES = {
   connector_usage: "/api/connectors/usage",
   /** Synchronous private read; the authenticated calling Run alone gets its result. */
   connector_call: "/api/connectors/call",
+  /** An Agent reads a page through its Human owner's browser (the Chrome extension's side panel). */
+  browser_read: "/api/browser/read",
   /** The open Norn requests an Agent Run holds or waits on. */
   norn_requests: "/api/norn/requests",
   /** The Run that holds a Norn request answers it. */

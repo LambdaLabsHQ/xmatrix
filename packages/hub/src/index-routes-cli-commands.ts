@@ -2,7 +2,7 @@ import type { Hono } from "hono";
 import type { Env } from "./types";
 import { requireAuth, requestErrorResponse } from "./index-shared";
 import { CliRouteError, commandsListing, runCliCommand, type CliCommand } from "./cli-commands";
-import { CONNECTOR_CALL_COMMAND } from "./cli-commands-call";
+import { BROWSE_COMMAND, CONNECTOR_CALL_COMMAND } from "./cli-commands-call";
 import { NORN_REQUEST_COMMANDS } from "./cli-commands-requests";
 import { SETTINGS_COMMANDS, SETTINGS_GROUP } from "./cli-commands-settings";
 
@@ -12,6 +12,7 @@ const COMMANDS: CliCommand[] = [
     run: async () => ({ stdout: commandsListing(COMMANDS, GROUPS) }),
   },
   CONNECTOR_CALL_COMMAND,
+  BROWSE_COMMAND,
   ...NORN_REQUEST_COMMANDS,
   ...SETTINGS_COMMANDS,
 ];

@@ -231,3 +231,17 @@ export async function sendMessage(deps, token, { channelId, body, clientMessageI
   });
   return { messageId: json.message?.messageId ?? clientMessageId };
 }
+
+/**
+ * Answers an Agent's request to read a page through this browser (`xmatrix
+ * browse`): the page's text, or why it was not read. Only the signed-in owner
+ * may answer their Agents' requests.
+ */
+export async function answerBrowserRead(deps, token, requestId, answer) {
+  const json = await request(deps, `/api/browser/read/${encodeURIComponent(requestId)}/answer`, {
+    method: "POST",
+    token,
+    body: answer,
+  });
+  return json.settled === true;
+}

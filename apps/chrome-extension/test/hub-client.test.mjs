@@ -132,3 +132,13 @@ test("a refused renewal for the side panel signs it out", async () => {
   assert.equal(await freshAccessToken(deps, store), null);
   assert.equal(store.peek(), null);
 });
+
+// An Agent's page read (`xmatrix browse`) is answered by the owner's signed-in extension, nothing more.
+test("a page read is answered to the request's own route, with the owner's token", async () => {
+  const { answerBrowserRead } = await import("../src/hub-client.js");
+  const { calls, deps } = fakeHub({ "POST /api/browser/read/req-12345678/answer": () => ({ json: { settled: true } }) });
+  const settled = await answerBrowserRead(deps, "t", "req-12345678", { title: "A", href: "https://a.test/", text: "hello" });
+  assert.equal(settled, true);
+  assert.equal(calls[0].headers.authorization, "Bearer t");
+  assert.deepEqual(calls[0].body, { title: "A", href: "https://a.test/", text: "hello" });
+});

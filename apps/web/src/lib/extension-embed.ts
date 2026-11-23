@@ -314,6 +314,37 @@ export function requestEmbedPageText() {
   if (parent) postToParent(parent, { type: "page-text" });
 }
 
+/**
+ * An Agent asks to read a page through this person's browser (the Hub's
+ * `browser_read_requested` frame): the side panel reads it and answers the Hub.
+ * Only the extension's side panel takes it; other clients of the person ignore it.
+ */
+export function forwardEmbedBrowserRead(request: { requestId: string; channelId: string; target: string; agentName: string }) {
+  const parent = extensionEmbedParent();
+  if (parent) postToParent(parent, { type: "browser-read", ...request });
+}
+
+/** A tab the Agent asked to read, waiting for the person to allow it. */
+export type EmbedBrowserReadApproval = { requestId: string; agentName: string; title: string; href: string };
+
+/** Requests to read another tab, which the person allows or refuses in the panel. */
+export function subscribeEmbedBrowserReadApprovals(onApproval: (approval: EmbedBrowserReadApproval) => void): () => void {
+  return subscribeParent("browser-read-approve", (data) => {
+    const href = webAddress(data.href);
+    const title = boundedText(data.title, MAX_LABEL_CHARS);
+    const agentName = boundedText(data.agentName, MAX_LABEL_CHARS);
+    if (typeof data.requestId === "string" && data.requestId.length <= 80 && href && title !== null && agentName !== null) {
+      onApproval({ requestId: data.requestId, agentName, title, href });
+    }
+  });
+}
+
+/** The person's choice for a tab an Agent asked to read. */
+export function answerEmbedBrowserReadApproval(requestId: string, allow: boolean) {
+  const parent = extensionEmbedParent();
+  if (parent) postToParent(parent, { type: "browser-read-approval", requestId, allow });
+}
+
 /** Opens an address in a browser tab of its own, from the panel. */
 export function openEmbedInTab(href: string) {
   const parent = extensionEmbedParent();
