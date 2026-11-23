@@ -232,6 +232,95 @@ export function openEmbedAddress(path: string): boolean {
 }
 
 /**
+ * The page beside the side panel, as the extension tells it: the panel is a
+ * companion to that page (Daniel 2026-11-23), not a whole workspace. `text`
+ * is the page's readable text, which "Ask about this page" carries as an
+ * attachment; `path` is the conversation already started from this page.
+ */
+export type EmbedPage = { title: string; href: string; text?: string; path?: string };
+
+/** One conversation started from the extension, for the panel's Recent list. */
+export type EmbedRecent = { path: string; title: string; href: string };
+
+const MAX_PAGE_TEXT_CHARS = 200_000;
+
+function webAddress(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > MAX_HREF_CHARS) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function boundedText(value: unknown, max: number): string | null {
+  return typeof value === "string" && value.length <= max ? value : null;
+}
+
+/** Validates a page message: a web address, bounded title and text, an app conversation path. */
+export function parseEmbedPage(data: Record<string, unknown>): EmbedPage | null {
+  const href = webAddress(data.href);
+  const title = boundedText(data.title, MAX_LABEL_CHARS);
+  if (!href || title === null) return null;
+  const text = boundedText(data.text, MAX_PAGE_TEXT_CHARS);
+  const path = typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path) ? data.path : undefined;
+  return { title, href, ...(text ? { text } : {}), ...(path ? { path } : {}) };
+}
+
+/** Validates the Recent list: at most a few conversations, each an app path with a web page. */
+export function parseEmbedRecent(value: unknown): EmbedRecent[] {
+  if (!Array.isArray(value)) return [];
+  const recent: EmbedRecent[] = [];
+  for (const item of value.slice(0, 10)) {
+    if (!item || typeof item !== "object") continue;
+    const { path, title, href } = item as Record<string, unknown>;
+    const page = webAddress(href);
+    const name = boundedText(title, MAX_LABEL_CHARS);
+    if (typeof path === "string" && APP_CONVERSATION_PATH.test(path) && page && name !== null) {
+      recent.push({ path, title: name, href: page });
+    }
+  }
+  return recent;
+}
+
+/** Whether this app is the extension's side panel: the companion of the page beside it. */
+export function isExtensionCompanion(): boolean {
+  return extensionEmbedParent() !== null;
+}
+
+/** The page beside the panel, each time it changes. */
+export function subscribeEmbedPage(onPage: (page: EmbedPage) => void): () => void {
+  return subscribeParent("page", (data) => {
+    const page = parseEmbedPage(data);
+    if (page) onPage(page);
+  });
+}
+
+/** The conversations started from the extension, newest first, each time the list changes. */
+export function subscribeEmbedRecent(onRecent: (recent: EmbedRecent[]) => void): () => void {
+  return subscribeParent("recent", (data) => onRecent(parseEmbedRecent(data.recent)));
+}
+
+/** Tells the extension a conversation was started here about the page beside the panel. */
+export function announceEmbedPageThread(thread: { path: string; title: string; href: string }) {
+  const parent = extensionEmbedParent();
+  if (parent && APP_CONVERSATION_PATH.test(thread.path)) postToParent(parent, { type: "page-thread", ...thread });
+}
+
+/** Asks the extension to read the page beside the panel (the person asked about it); it answers with a "page" message. */
+export function requestEmbedPageText() {
+  const parent = extensionEmbedParent();
+  if (parent) postToParent(parent, { type: "page-text" });
+}
+
+/** Opens an address in a browser tab of its own, from the panel. */
+export function openEmbedInTab(href: string) {
+  const parent = extensionEmbedParent();
+  if (parent && webAddress(href)) postToParent(parent, { type: "open-tab", href });
+}
+
+/**
  * The extension's question box on a web page (extension-app/ask.tsx) is a
  * packaged page of the extension too, framed by the page it asks about, not
  * by the side panel. It names itself as the same client.

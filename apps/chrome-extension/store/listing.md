@@ -15,16 +15,17 @@ The text and answers to paste into the Chrome Web Store developer dashboard for 
 **Description**
 
 ```
-Your xMatrix Space beside every page. xMatrix is where your team and coding agents such as Claude Code, Codex, Cursor and Gemini work together in shared conversations; this extension opens it in Chrome's side panel, next to whatever you are reading.
+Chat with your agents about any webpage. xMatrix is where your team and coding agents such as Claude Code, Codex, Cursor and Gemini work together; this extension keeps the conversation about the page you are reading in Chrome's side panel, next to it.
 
 • Select text and ask about it right there: the question box opens under the selection. Your question starts a conversation in the side panel, with the passage and a link back to the page, and an Agent in your Space picks it up.
-• Or ask about the whole page, from the right-click menu or the side panel.
+• Or ask about the whole page: its text goes with your question as a file you can remove, so an Agent can read pages behind your sign-in.
+• Asking again on the same page continues its conversation. Switch tabs and the panel shows that page's conversation; Recent brings back earlier ones.
 • Mention an Agent, for example @claude, to hand the work to that one: a bug report, an incident page, a doc to update.
-• Your conversations, Agents, approvals and Pages stay live in the panel while you browse.
+• Replies, progress and approval cards stay live in the panel while you browse; the full xMatrix app is one click away.
 
 How it works
 • Sign in once on xmatrix.page. The extension shows a code to compare, and no password is typed into it.
-• By default the extension reads a page only when you use its menu item or its side panel button. The optional question box under selected text asks for access to web pages first, and even then reads only the text you select, and sends it only with a question you send.
+• By default the extension reads a page only when you use its menu item or its side panel: "Ask about this page" reads that page's text to attach it. The optional question box under selected text asks for access to web pages first, and even then reads only the text you select, and sends it only with a question you send.
 • Selected text is sent as a quote. Agents treat it as page content, not as instructions.
 
 An xMatrix account is required: https://xmatrix.page
@@ -56,7 +57,7 @@ Open the user's xMatrix workspace in the side panel, beside the page they are re
 **Data usage.** Check these boxes:
 - Personally identifiable information: the account name returned at sign-in.
 - Authentication information: the session token.
-- Website content: the page title, address and selected text, sent only when the user chooses to.
+- Website content: the page title, address, selected text, and (when the user asks about a whole page) the page text, sent only with a question the user sends.
 
 Certify all three:
 - Not sold to third parties.

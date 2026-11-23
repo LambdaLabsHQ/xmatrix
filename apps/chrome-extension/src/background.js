@@ -17,7 +17,7 @@ import {
   tokenExpiresAt,
   withSession,
 } from "./hub-client.js";
-import { discussionTitle, pagePassage } from "./passage.js";
+import { capturableUrl, discussionTitle, pagePassage } from "./passage.js";
 
 const SIGN_IN_ALARM = "sign-in";
 const MENU_ASK = "ask";
@@ -202,6 +202,14 @@ function pageKey(href) {
   }
 }
 
+/** The conversations started from the extension, newest first: the panel's Recent. */
+async function rememberRecent({ spaceId, channelId, title, href }) {
+  const path = `/app/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channelId)}`;
+  const { recentThreads = [] } = await chrome.storage.local.get("recentThreads");
+  await chrome.storage.local.set({ recentThreads: [{ path, title: String(title ?? "").slice(0, 300), href, at: Date.now() },
+    ...recentThreads.filter((item) => item.path !== path)].slice(0, 5) });
+}
+
 /**
  * The conversation a tab's questions go to while it stays on one page: the
  * first question there starts it, and the next ones follow up in it (Daniel
@@ -257,6 +265,7 @@ async function askSend(tab, { body, invocationSelections }) {
   await chrome.storage.session.remove(`ask:${tab.id}`);
   await chrome.storage.session.set({ [`askThread:${tab.id}`]: { page: pageKey(passage.href), spaceId: result.space.id,
     channelId: result.channel.id, snapshot: result.channel.snapshot ?? null } });
+  await rememberRecent({ spaceId: result.space.id, channelId: result.channel.id, title: passage.label, href: passage.href });
   await chrome.storage.local.set({ lastSpace: { id: result.space.id, name: result.space.name } });
   // The panel shows it: at once if its app is loaded, or opening straight onto it.
   // For the side panel of the window the question was asked in: another window's panel (or an extension page
@@ -320,6 +329,14 @@ const panelHandlers = {
     });
   },
   takePassages,
+  /** The panel's app started a conversation about the page in this tab ("Ask about this page"): its questions go there now. */
+  async rememberPageThread({ tabId, path, title, href }) {
+    const match = typeof path === "string" && path.match(/^\/app\/([A-Za-z0-9_-]{1,128})\/channels\/([A-Za-z0-9_-]{1,128})$/u);
+    const page = capturableUrl(String(href ?? ""));
+    if (!match || !page || !Number.isInteger(tabId)) return;
+    await chrome.storage.session.set({ [`askThread:${tabId}`]: { page: pageKey(page), spaceId: match[1], channelId: match[2], snapshot: null } });
+    await rememberRecent({ spaceId: match[1], channelId: match[2], title, href: page });
+  },
   /** The Space the side panel's app shows: where questions asked on a page go. */
   async rememberSpace({ space }) {
     const id = typeof space?.id === "string" ? space.id.slice(0, 128) : "";

@@ -120,3 +120,17 @@ test("an address the page is asked to navigate to goes to the open app, which sa
   stop();
   assert.equal(embed.openEmbedAddress("/app/s/channels/c"), false);
 });
+
+test("the page beside the panel is a web page with bounded text, and Recent holds only app conversations", (t) => {
+  const { embed } = load(t, EXTENSION);
+  const page = { title: "Incident 2481", href: "https://status.example.com/i/2481", text: "p99 rose", path: "/app/s1/channels/c1" };
+  assert.deepEqual(embed.parseEmbedPage(page), page);
+  assert.equal(embed.parseEmbedPage({ ...page, href: "file:///etc/passwd" }), null);
+  assert.deepEqual(embed.parseEmbedPage({ ...page, text: "x".repeat(200_001) }), { title: page.title, href: page.href, path: page.path });
+  assert.deepEqual(embed.parseEmbedPage({ ...page, path: "/app/s1/settings" }), { title: page.title, href: page.href, text: page.text });
+  assert.deepEqual(embed.parseEmbedRecent([
+    { path: "/app/s1/channels/c1", title: "One", href: "https://a.example/" },
+    { path: "https://evil.example/", title: "Two", href: "https://a.example/" },
+    { path: "/app/s1/channels/c3", title: "Three", href: "javascript:alert(1)" },
+  ]), [{ path: "/app/s1/channels/c1", title: "One", href: "https://a.example/" }]);
+});

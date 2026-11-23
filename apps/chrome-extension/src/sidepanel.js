@@ -8,7 +8,7 @@
 // only to that origin. Passages picked on a page (the context menu, the
 // selection button, this bar) are handed to the app once it says it is ready.
 
-import { capturableUrl, pagePassage, pageTitle } from "./passage.js";
+import { capturableUrl, pageTitle } from "./passage.js";
 
 const PROTOCOL = "xmatrix-embed/1";
 const APP_ORIGIN = window.location.origin;
@@ -103,6 +103,15 @@ window.addEventListener("message", async (event) => {
     appReady = true;
     await deliverPassages();
     await showOpenPath();
+    await showRecent();
+    await showPage();
+  } else if (data.type === "page-text") {
+    await showPage({ text: await readPage() });
+  } else if (data.type === "page-thread" && typeof data.path === "string") {
+    const tab = await activeTab();
+    if (tab?.id !== undefined) await ask("rememberPageThread", { tabId: tab.id, path: data.path, title: data.title, href: data.href });
+  } else if (data.type === "open-tab" && typeof data.href === "string" && capturableUrl(data.href)) {
+    await chrome.tabs.create({ url: data.href });
   } else if (data.type === "signed-out") {
     await ask("signOut");
     await render();
@@ -112,49 +121,78 @@ window.addEventListener("message", async (event) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "session" && changes.passages?.newValue?.length) deliverPassages().catch(() => undefined);
   if (area === "session" && changes.openPath?.newValue && !$("view-app").hidden) showOpenPath().catch(() => undefined);
+  if (area === "local" && changes.recentThreads) showRecent().catch(() => undefined);
+  // A question asked on the page gave it a conversation: the bar knows it now.
+  if (area === "session" && Object.keys(changes).some((key) => key.startsWith("askThread:"))) showPage().catch(() => undefined);
   if ((area === "local" && changes.session) || (area === "session" && changes.signIn)) render().catch(() => undefined);
 });
 
-// ---- The page beside the panel.
+// ---- The page beside the panel. The panel is its companion: the conversation started from it, or one about it.
 
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tab ?? null;
 }
 
-async function renderContext() {
-  const tab = await activeTab();
-  const url = capturableUrl(tab?.url ?? "");
-  $("context").hidden = !url;
-  if (url) {
-    $("context-title").textContent = pageTitle(tab.title) || new URL(url).host;
-    $("context-title").title = url;
-  }
+/** A page as a place to talk about: its address without the fragment (background.js pageKey). */
+function pageKey(href) {
+  const url = new URL(href);
+  url.hash = "";
+  return url.toString();
 }
 
-/** The page's selected text, where this extension may read the page; empty otherwise. */
-async function selectionIn(tab) {
+/** The conversation the tab's questions about its page went to, as the service worker keeps it. */
+async function pageThread(tab, href) {
+  const key = `askThread:${tab.id}`;
+  const { [key]: thread } = await chrome.storage.session.get(key);
+  return thread && thread.page === pageKey(href) ? thread : null;
+}
+
+/**
+ * Tells the app the page beside the panel. A page with a conversation of its
+ * own brings it into view; a page without one leaves the open conversation
+ * where it is, and the app offers to ask about this page (Daniel 2026-11-23).
+ */
+let shownPage = "";
+async function showPage({ text } = {}) {
+  if (!appReady) return;
+  const tab = await activeTab();
+  const href = capturableUrl(tab?.url ?? "");
+  if (!tab || !href) return;
+  const thread = await pageThread(tab, href);
+  const path = thread ? `/app/${encodeURIComponent(thread.spaceId)}/channels/${encodeURIComponent(thread.channelId)}` : undefined;
+  postToApp({ type: "page", title: pageTitle(tab.title) || new URL(href).host, href,
+    ...(path ? { path } : {}), ...(text ? { text } : {}) });
+  const key = `${tab.id} ${pageKey(href)}`;
+  if (path && key !== shownPage) postToApp({ type: "open", path, ...(thread.snapshot ? { channel: thread.snapshot } : {}) });
+  shownPage = key;
+}
+
+/** The readable text of the page beside the panel: read only because the person asked about this page. */
+async function readPage() {
+  const tab = await activeTab();
+  if (!tab?.id || !capturableUrl(tab.url ?? "")) return "";
   try {
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => String(globalThis.getSelection?.() ?? ""),
+      func: () => {
+        const root = document.querySelector("article, main, [role='main']") ?? document.body;
+        return String(root?.innerText ?? "").replace(/\n{3,}/gu, "\n\n").trim().slice(0, 200_000);
+      },
     });
     return typeof result?.result === "string" ? result.result : "";
   } catch {
+    // A page this extension may not read (no access to it, or the browser's own pages).
     return "";
   }
 }
 
-async function sendPage(target) {
-  const tab = await activeTab();
-  if (!tab) return;
-  const passage = pagePassage({ text: await selectionIn(tab), title: tab.title, url: tab.url, target });
-  if (!passage) return;
-  if (appReady) postToApp({ type: "passage", ...passage });
-  else await ask("queuePassage", { passage });
+async function showRecent() {
+  if (!appReady) return;
+  const { recentThreads = [] } = await chrome.storage.local.get("recentThreads");
+  postToApp({ type: "recent", recent: recentThreads.slice(0, 5)
+    .map((item) => ({ path: item.path, title: item.title, href: item.href })) });
 }
-
-$("context-ask").addEventListener("click", () => sendPage("new"));
 
 // Asked from this click: Chrome shows its permission prompt only in a user gesture.
 $("quick-select-on").addEventListener("click", async () => {
@@ -167,9 +205,9 @@ $("quick-select-skip").addEventListener("click", async () => {
   await render();
 });
 
-chrome.tabs.onActivated.addListener(() => renderContext().catch(() => undefined));
+chrome.tabs.onActivated.addListener(() => showPage().catch(() => undefined));
 chrome.tabs.onUpdated.addListener((_id, change, tab) => {
-  if (tab.active && (change.title || change.url || change.status === "complete")) renderContext().catch(() => undefined);
+  if (tab.active && (change.title || change.url)) showPage().catch(() => undefined);
 });
 
 // ---- Signing in.
@@ -193,7 +231,6 @@ async function render() {
     }
     show("view-app");
     await openApp();
-    await renderContext();
     return;
   }
   closeApp();

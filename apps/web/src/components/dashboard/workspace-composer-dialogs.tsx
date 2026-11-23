@@ -277,6 +277,7 @@ export const Composer = memo(function Composer({
   sendTitle,
   inlineActions,
   afterSend,
+  initialFiles,
 }: {
   compact?: boolean;
   channel: ChannelSnapshot | null;
@@ -332,6 +333,8 @@ export const Composer = memo(function Composer({
   /** Extra controls inside the input box, before Send. */
   inlineActions?: ReactNode;
   afterSend?: ReactNode;
+  /** Files the composer opens holding, attached as if dropped on it (the side panel's page text). */
+  initialFiles?: readonly File[];
 }) {
   const channel = useRealtimeChannel(catalogChannel);
   const quoteIsHere = useCallback((href: string) => Boolean(channel && messageHere(href, channel)), [channel]);
@@ -1107,9 +1110,17 @@ export const Composer = memo(function Composer({
     return null;
   }
 
-  function fileCandidates(files: FileList | File[]): AttachmentDropCandidate[] {
+  function fileCandidates(files: FileList | readonly File[]): AttachmentDropCandidate[] {
     return Array.from(files).map((file) => ({ file }));
   }
+
+  // The files it opens with go through the same intake as a drop, once.
+  const takenInitialFilesRef = useRef<readonly File[] | undefined>(undefined);
+  useEffect(() => {
+    if (!initialFiles?.length || !attachmentsEnabled || takenInitialFilesRef.current === initialFiles) return;
+    takenInitialFilesRef.current = initialFiles;
+    void beginAttachmentIntake(() => fileCandidates(initialFiles));
+  });
 
   async function clipboardImageCandidates(
     images: DesktopClipboardImage[]
