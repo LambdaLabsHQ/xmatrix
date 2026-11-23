@@ -87,10 +87,16 @@ export type DraftPickOrigin = {
  */
 export function isDraftPickCurrent(
   origin: DraftPickOrigin | null,
-  current: { mounted: boolean; generation: number; draftRevision: number; scope: string | null },
+  current: {
+    mounted: boolean;
+    generation: number;
+    draftRevision: number;
+    scope: string | null;
+    requireOrigin?: boolean;
+  },
 ): boolean {
   if (!current.mounted) return false;
-  if (!origin) return true;
+  if (!origin) return !current.requireOrigin;
   return (
     origin.generation === current.generation &&
     origin.draftRevision === current.draftRevision &&

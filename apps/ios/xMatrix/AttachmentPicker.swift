@@ -198,14 +198,19 @@ final class AttachmentStagingStore: @unchecked Sendable {
 private final class StagedURLBatch: @unchecked Sendable {
     private let lock = NSLock()
     private var urlsByIndex: [Int: URL] = [:]
+    private var capacityExceeded = false
 
     func record(index: Int, url: URL) {
         lock.withLock { urlsByIndex[index] = url }
     }
 
-    func orderedURLs(count: Int) -> [URL] {
+    func markCapacityExceeded() {
+        lock.withLock { capacityExceeded = true }
+    }
+
+    func result(count: Int) -> (urls: [URL], capacityExceeded: Bool) {
         lock.withLock {
-            (0..<count).compactMap { urlsByIndex[$0] }
+            ((0..<count).compactMap { urlsByIndex[$0] }, capacityExceeded)
         }
     }
 }
@@ -392,6 +397,20 @@ final class NativeAttachmentPicker: NSObject {
         completion?.complete(urls)
     }
 
+    private func presentCapacityNotice() {
+        presentNotice(
+            title: "Attachment storage full",
+            message: "Some selected items could not be attached because temporary attachment storage reached its limit."
+        )
+    }
+
+    private func presentNotice(title: String, message: String) {
+        guard let presenter = Self.topPresenter(from: anchorView) else { return }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        presenter.present(alert, animated: true)
+    }
+
     private static func topPresenter(from view: UIView?) -> UIViewController? {
         guard var presenter = view?.window?.rootViewController else { return nil }
         while let presented = presenter.presentedViewController {
@@ -445,16 +464,24 @@ extension NativeAttachmentPicker: PHPickerViewControllerDelegate {
                         : url.pathExtension
                     let rawName = suggestedName?.isEmpty == false ? suggestedName! : url.lastPathComponent
                     let name = AttachmentStagingStore.sanitizedFilename(rawName, fallbackExtension: ext)
-                    if let staged = try? stagingStore.stage(copying: url, suggestedName: name) {
+                    do {
+                        let staged = try stagingStore.stage(copying: url, suggestedName: name)
                         batch.record(index: index, url: staged.fileURL)
-                    }
+                    } catch AttachmentStagingError.capacityReached {
+                        batch.markCapacityExceeded()
+                    } catch {}
                 }
             }
 
             let totalCount = min(results.count, AttachmentStagingStore.maxBatchSelection)
             group.notify(queue: .main) {
                 Task { @MainActor [weak self] in
-                    self?.finish(batch.orderedURLs(count: totalCount))
+                    guard let self else { return }
+                    let outcome = batch.result(count: totalCount)
+                    self.finish(outcome.urls)
+                    if outcome.capacityExceeded {
+                        self.presentCapacityNotice()
+                    }
                 }
             }
         }
@@ -508,6 +535,8 @@ extension NativeAttachmentPicker: UIDocumentPickerDelegate {
             return
         }
         var stagedURLs: [URL] = []
+        let truncatedCount = urls.count > AttachmentStagingStore.maxBatchSelection
+        var capacityExceeded = false
         for url in urls.prefix(AttachmentStagingStore.maxBatchSelection) {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -515,12 +544,21 @@ extension NativeAttachmentPicker: UIDocumentPickerDelegate {
                 let staged = try store.stage(copying: url)
                 stagedURLs.append(staged.fileURL)
             } catch AttachmentStagingError.capacityReached {
+                capacityExceeded = true
                 break
             } catch {
                 continue
             }
         }
         finish(stagedURLs)
+        if capacityExceeded {
+            presentCapacityNotice()
+        } else if truncatedCount {
+            presentNotice(
+                title: "Attachment limit reached",
+                message: "Only the first \(AttachmentStagingStore.maxBatchSelection) files can be attached at once."
+            )
+        }
     }
 }
 

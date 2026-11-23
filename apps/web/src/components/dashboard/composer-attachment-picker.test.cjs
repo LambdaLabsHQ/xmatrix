@@ -48,7 +48,9 @@ test("draft pick ownership rejects A->B, A->B->A, same-channel sends, and unmoun
   assert.equal(isDraftPickCurrent(origin, { mounted: true, generation: 3, draftRevision: 2, scope: "channel-a" }), false);
   // Composer/thread closed.
   assert.equal(isDraftPickCurrent(origin, { mounted: false, generation: 3, draftRevision: 1, scope: "channel-a" }), false);
-  // Direct drop/setInputFiles with no pending click origin stays allowed while mounted.
+  // Direct drop/setInputFiles with no pending click origin stays allowed when not required,
+  // while native open-panel mode rejects any orphan change missing an origin.
   assert.equal(isDraftPickCurrent(null, { mounted: true, generation: 3, draftRevision: 1, scope: "channel-a" }), true);
+  assert.equal(isDraftPickCurrent(null, { mounted: true, generation: 3, draftRevision: 1, scope: "channel-a", requireOrigin: true }), false);
   assert.equal(isDraftPickCurrent(null, { mounted: false, generation: 3, draftRevision: 1, scope: "channel-a" }), false);
 });
