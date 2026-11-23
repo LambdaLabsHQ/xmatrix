@@ -10,6 +10,8 @@ export {
   type ChannelCatalogPageFilter,
   type ChannelCatalogPageInput,
   type ChannelCatalogPageView,
+  type ChannelCatalogAttentionInput,
+  type ChannelCatalogAttentionSummary,
   type ChannelCatalogResolveInput,
   type ChannelHeadMessage,
 } from "./channel-catalog.js";

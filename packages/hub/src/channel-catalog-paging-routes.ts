@@ -14,6 +14,7 @@ import type { Env } from "./types";
 import { postgresMessageSearch } from "./postgres-message-authority";
 import { getRelayRuntime, requestErrorResponse, requireAuth } from "./index-shared";
 import { channelCatalogPage, resolveChannelCatalog } from "./spaces";
+import { readAttentionSnapshotForUser } from "./channel-catalog-read";
 import {
   loadLiveHumanPresenceFromRuntime,
   tryLoadLiveHumanPresenceFromRuntime,
@@ -35,6 +36,7 @@ export interface ChannelCatalogPagingBoundary {
   requestErrorResponse: typeof requestErrorResponse;
   channelCatalogPage: typeof channelCatalogPage;
   resolveChannelCatalog: typeof resolveChannelCatalog;
+  readAttentionSnapshotForUser: typeof readAttentionSnapshotForUser;
 }
 
 const hubBoundary: ChannelCatalogPagingBoundary = {
@@ -43,6 +45,7 @@ const hubBoundary: ChannelCatalogPagingBoundary = {
   requestErrorResponse,
   channelCatalogPage,
   resolveChannelCatalog,
+  readAttentionSnapshotForUser,
 };
 
 interface BoundChannelCatalogCursor {
@@ -239,6 +242,13 @@ export function registerChannelCatalogPagingRoutes(
         protocolVersion: 1, ...cursorBinding, position: payload.nextCursor,
       }) : null,
     }, 200, { "cache-control": "private, no-store" });
+  }));
+
+  app.get(HUB_ROUTES.channel_attention, async (c) => authorized(c, async (userId) => {
+    const read = await boundary.readAttentionSnapshotForUser(c.env, { kind: "user", id: userId });
+    return read.ok
+      ? c.json({ attentionSnapshot: read.attentionSnapshot }, 200, { "cache-control": "private, no-store" })
+      : read.response;
   }));
 
   app.post(HUB_ROUTES.channel_catalog_resolve, async (c) => authorized(c, async (userId) => {

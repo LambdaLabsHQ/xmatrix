@@ -61,6 +61,23 @@ export interface ChannelCatalogPageInput {
   countsOnly?: boolean;
 }
 
+export interface ChannelCatalogAttentionInput {
+  requestId: string;
+  spaceId: string;
+  principal: { kind: "user" | "agent"; id: string };
+}
+
+/** One Channel's attention as a catalog row carries it. */
+export interface ChannelCatalogAttentionSummary {
+  channelId: string;
+  unreadAttentionCount: number;
+  lastAttentionAt?: string;
+  lastMessageId?: string;
+  lastMessageSequence?: number;
+  primaryTriggerKind?: string;
+  updatedAt: string;
+}
+
 export interface ChannelCatalogResolveInput {
   requestId: string;
   spaceId: string;
@@ -126,6 +143,20 @@ interface CatalogPageEnvelope extends QueryResultRow {
 interface CatalogResolveRow extends CatalogRow {
   requested_channel_id: string;
   requested_route_token: string | null;
+}
+
+interface CatalogAttentionRow {
+  channel_id: string;
+  attention_count: string | number | null;
+  last_attention_at: string | Date | null;
+  last_attention_message_id: string | null;
+  last_attention_sequence: string | number | null;
+  last_attention_kind: string | null;
+}
+
+interface CatalogAttentionEnvelope extends QueryResultRow {
+  principal_authorized: boolean;
+  attention_rows: CatalogAttentionRow[] | null;
 }
 
 interface CatalogResolveEnvelope extends QueryResultRow {
@@ -206,6 +237,23 @@ function safeCount(value: string | number | null | undefined): number {
   return result;
 }
 
+/** What waits on the principal in one Channel, from its aggregated attention rows. */
+function attentionSummary(row: CatalogAttentionRow, activityAt?: string): ChannelCatalogAttentionSummary {
+  const lastAttentionAt = row.last_attention_at ? iso(row.last_attention_at) : undefined;
+  const updatedAt = lastAttentionAt ?? activityAt;
+  if (!updatedAt) throw new DatabaseContractError("catalog attention time is invalid");
+  return {
+    channelId: row.channel_id,
+    unreadAttentionCount: safeCount(row.attention_count),
+    ...(lastAttentionAt ? { lastAttentionAt } : {}),
+    ...(row.last_attention_message_id ? { lastMessageId: row.last_attention_message_id } : {}),
+    ...(row.last_attention_sequence === null ? {}
+      : { lastMessageSequence: safeCount(row.last_attention_sequence) }),
+    ...(row.last_attention_kind ? { primaryTriggerKind: row.last_attention_kind } : {}),
+    updatedAt,
+  };
+}
+
 /**
  * An open Channel's Human members are exactly the Space's members. Live Human
  * presence is overlaid at the Hub read boundary from RelayRuntime sessions, and
@@ -263,18 +311,7 @@ function serialize(
       : {}),
     memberPresence,
     memberReadSequences: {},
-    ...(attentionCount > 0 ? {
-      attention: {
-        channelId: row.channel_id,
-        unreadAttentionCount: attentionCount,
-        ...(row.last_attention_at ? { lastAttentionAt: iso(row.last_attention_at) } : {}),
-        ...(row.last_attention_message_id ? { lastMessageId: row.last_attention_message_id } : {}),
-        ...(row.last_attention_sequence === null ? {}
-          : { lastMessageSequence: safeCount(row.last_attention_sequence) }),
-        ...(row.last_attention_kind ? { primaryTriggerKind: row.last_attention_kind } : {}),
-        updatedAt: row.last_attention_at ? iso(row.last_attention_at) : activityAt,
-      },
-    } : {}),
+    ...(attentionCount > 0 ? { attention: attentionSummary(row, activityAt) } : {}),
     ...(createdBy ? { createdBy } : {}),
     createdAt: iso(row.created_at),
     updatedAt,
@@ -710,6 +747,64 @@ export class PostgresChannelCatalogRepository {
           mentions: safeCount(stats.mentions_count),
         } : null,
       };
+    });
+  }
+
+  /**
+   * What holds the principal's attention across the Space: one summary for
+   * each readable Channel that has any, read from the principal's own
+   * attention rows. A catalog reader needs only these, so it never resolves
+   * every Channel's whole row to learn which few are waiting.
+   */
+  async attention(input: ChannelCatalogAttentionInput): Promise<ChannelCatalogAttentionSummary[]> {
+    if (!this.ownsRequestSession) {
+      return this.withRequestSession((repository) => repository.attention(input));
+    }
+    const { requestId, spaceId, principalId } = catalogRequest(input);
+    return this.withPlacedReads(
+      requestId, "channel-catalog.attention", spaceId, async (transaction) => {
+      const envelopes = await transaction.query<CatalogAttentionEnvelope>({
+        name: "channel_catalog_attention_v1",
+        text: `WITH catalog_input AS (
+            SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind
+          ), ${PRINCIPAL_CONTEXT_CTE}, ${RESOLVE_AUTHORIZED_CHANNELS_CTE},
+          -- Attention is aggregated first: a long-lived member holds thousands
+          -- of read rows and only a few Channels still wait, so the access
+          -- rule is asked of those few, not of every row.
+          attended AS MATERIALIZED (
+            SELECT item.channel_id,COUNT(*)::bigint AS attention_count,
+              MAX(item.created_at) AS last_attention_at,
+              (ARRAY_AGG(item.message_id ORDER BY item.timeline_sequence DESC))[1]
+                AS last_attention_message_id,
+              MAX(item.timeline_sequence) AS last_attention_sequence,
+              (ARRAY_AGG(item.kind ORDER BY item.timeline_sequence DESC))[1]
+                AS last_attention_kind
+            FROM catalog_input input
+            JOIN data.message_attention item ON item.space_id=input.space_id
+              AND item.subject_id=input.principal_kind||':'||input.principal_id
+            LEFT JOIN data.delivery_cursors cursor_row
+              ON cursor_row.space_id=item.space_id AND cursor_row.channel_id=item.channel_id
+                AND cursor_row.subject_id=item.subject_id
+            WHERE (${declaredWaitStandsSql("item")}
+                OR item.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
+            GROUP BY item.channel_id
+          ), waiting AS (
+            SELECT attended.* FROM attended
+            WHERE EXISTS (SELECT 1 FROM authorized_channels channel
+              WHERE channel.channel_id=attended.channel_id)
+          )
+          SELECT context.authorized AS principal_authorized,
+            COALESCE((SELECT jsonb_agg(to_jsonb(waiting) ORDER BY waiting.channel_id)
+              FROM waiting),'[]') AS attention_rows
+          FROM principal_context context`,
+        values: [spaceId, principalId, input.principal.kind], maxRows: 1,
+      });
+      const envelope = envelopes[0];
+      if (!envelope) throw new DatabaseContractError("Catalog attention is unavailable");
+      if (!envelope.principal_authorized) {
+        throw new ControlError("space_not_found", 404, "Space not found");
+      }
+      return (envelope.attention_rows ?? []).map((row) => attentionSummary(row));
     });
   }
 

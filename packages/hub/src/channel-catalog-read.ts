@@ -304,36 +304,65 @@ export function createChannelCatalogReader({
     for (const [projectedSpaceId, ids] of bySpace) {
       let complete = true;
       const summaries: ChannelAttentionSummary[] = [];
-      for (let offset = 0; offset < ids.length; offset += 200) {
-        const startedAt = Date.now();
-        if (metrics) metrics.projectionReads += 1;
-        try {
-          const operation = readSpaceAttentionProjection(
-            env, projectedSpaceId, subjectId, ids.slice(offset, offset + 200),
-          );
-          const rows = deadline
-            ? await deadline.wait("projection", operation)
-            : await operation;
-          for (const row of rows) {
-            if (row.summary && typeof row.summary === "object" && !Array.isArray(row.summary)) {
-              summaries.push(row.summary as unknown as ChannelAttentionSummary);
-            }
+      const visible = new Set(ids);
+      const startedAt = Date.now();
+      if (metrics) metrics.projectionReads += 1;
+      try {
+        // An empty Space has nothing waiting; every other Space answers in one read.
+        const operation = ids.length === 0 ? Promise.resolve([])
+          : readSpaceAttentionProjection(env, projectedSpaceId, subjectId);
+        const rows = deadline
+          ? await deadline.wait("projection", operation)
+          : await operation;
+        for (const row of rows) {
+          // The read covers the Space; this catalog shows only its visible Channels.
+          if (typeof row.channelId !== "string" || !visible.has(row.channelId)) continue;
+          if (row.summary && typeof row.summary === "object" && !Array.isArray(row.summary)) {
+            summaries.push(row.summary as unknown as ChannelAttentionSummary);
           }
-        } catch (error) {
-          complete = false;
-          console.error("Space attention projection read failed", {
-            spaceId: projectedSpaceId,
-            channelCount: Math.min(200, ids.length - offset),
-            error: error instanceof Error ? error.message : String(error),
-          });
-          break;
-        } finally {
-          if (metrics) metrics.projectionWallMs += Date.now() - startedAt;
         }
+      } catch (error) {
+        complete = false;
+        console.error("Space attention projection read failed", {
+          spaceId: projectedSpaceId,
+          channelCount: ids.length,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (metrics) metrics.projectionWallMs += Date.now() - startedAt;
       }
       spaces.push({ spaceId: projectedSpaceId, complete, summaries: complete ? summaries : [] });
     }
     return { protocolVersion: 1, spaces };
+  }
+
+  /**
+   * What waits on a person across their Spaces, without the catalog: a badge
+   * or a count needs the few Channels that hold their attention, and reading
+   * every Channel's row to find them costs megabytes each time.
+   */
+  async function readAttentionSnapshotForUser(
+    env: Env,
+    principal: { kind: "user"; id: string },
+  ): Promise<{ ok: true; attentionSnapshot: ChannelAttentionSnapshot } | { ok: false; response: Response }> {
+    const listed = await listChannelCatalogSpaceIds(env, principal);
+    if (!listed.ok) return listed;
+    const spaces: ChannelAttentionSnapshot["spaces"] = [];
+    for (let offset = 0; offset < listed.spaceIds.length; offset += 8) {
+      spaces.push(...await Promise.all(listed.spaceIds.slice(offset, offset + 8).map(async (spaceId) => {
+        try {
+          const rows = await readSpaceAttentionProjection(env, spaceId, `user:${principal.id}`);
+          return { spaceId, complete: true,
+            summaries: rows.map((row) => row.summary as unknown as ChannelAttentionSummary) };
+        } catch (error) {
+          console.error("Space attention projection read failed", {
+            spaceId, error: error instanceof Error ? error.message : String(error),
+          });
+          return { spaceId, complete: false, summaries: [] };
+        }
+      })));
+    }
+    return { ok: true, attentionSnapshot: { protocolVersion: 1, spaces } };
   }
 
   async function listChannelCatalogSpaceIds(
@@ -362,6 +391,7 @@ export function createChannelCatalogReader({
     readChannelForPrincipal,
     readCompleteAuthorityChannelCatalog,
     listChannelCatalogSpaceIds,
+    readAttentionSnapshotForUser,
   };
 }
 
@@ -370,4 +400,5 @@ export const {
   readChannelForPrincipal,
   readCompleteAuthorityChannelCatalog,
   listChannelCatalogSpaceIds,
+  readAttentionSnapshotForUser,
 } = createChannelCatalogReader(hubCatalogReadBoundary);

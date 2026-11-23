@@ -57,6 +57,9 @@ test("catalog query variants parse after their SQL fragments are assembled", asy
     if (query.name.startsWith("channel_catalog_resolve_")) return [{
       principal_authorized: true, resolved_rows: [],
     }];
+    if (query.name === "channel_catalog_attention_v1") return [{
+      principal_authorized: true, attention_rows: [],
+    }];
     if (query.name === "space_placement_resolve_v1") return [activePlacementRow("space", { planClass: "test" })];
     if (query.name === "channel_list_member_v1") return [{ role: "owner" }];
     if (query.name === "channel_list_agent_v3") return [{ present: 1 }];
@@ -78,6 +81,7 @@ test("catalog query variants parse after their SQL fragments are assembled", asy
     await catalog.page({ ...base, view: "tree", filter: "all", scopeChannelId: "channel", limit: 10 });
     await catalog.resolve({ ...base, channelIds: ["channel"] });
     await catalog.resolve({ ...base, channelIds: [], routeToken: "c72dq68erek" });
+    await catalog.attention(base);
     await new PostgresSpaceControlRepository(database, "shard-0").listChannels(base);
     await new PostgresSpaceControlRepository(database, "shard-0").listChannels({
       ...base, familyOfChannelId: "channel",
@@ -86,6 +90,7 @@ test("catalog query variants parse after their SQL fragments are assembled", asy
   assert.ok([...checked].some((name) => name.startsWith("channel_catalog_page_")));
   assert.ok([...checked].some((name) => name.startsWith("channel_catalog_counts_")));
   assert.ok([...checked].some((name) => name.startsWith("channel_catalog_resolve_")));
+  assert.ok(checked.has("channel_catalog_attention_v1"));
   assert.ok(checked.has("channel_list_v9"));
 });
 

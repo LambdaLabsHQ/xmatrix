@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: what waits on a person is read on its own, not through the whole Channel catalog
+
+The Chrome extension's badge asked the Hub for the complete Channel catalog once a minute to count the conversations that wait on the signed-in person. In a Space of about 3,600 Channels each of those reads paged every Channel row, every resting Agent record, and then resolved every Channel's full row again 200 at a time only to keep its attention summary: about 17 MB from PostgreSQL per read, roughly 1 GB an hour from one installed extension, and the largest single source of database egress since 2026-11-22. `PostgresChannelCatalogRepository.attention` (`channel_catalog_attention_v1`) now reads the principal's own attention rows and returns one summary for each readable Channel that still has any (a few kilobytes for the same Space). The complete catalog read (`GET /api/channels`) uses it once per Space in place of the 200-Channel resolves, with the same summaries on the same rows; `GET /api/channels/attention` answers the attention snapshot alone for a signed-in person, and the extension badge reads that. A Space whose attention cannot be read is marked incomplete, as before. Recovery is reverting the change; nothing is stored differently.
+
 ## Unreleased: a new person's message in the welcome conversation is answered
 
 A person with no agent who wrote in their welcome conversation without naming anyone got no reply: the "connect a computer first" answer only read a conversation's first message, and the welcome conversation's first message is xMatrix's own setup step. That message now gets the same `connect-agents` step, once per conversation, as a new conversation's first message does. Someone with an agent, and every other conversation, is unchanged. Hub only. Recovery is a CI-validated beta reverting this change.
