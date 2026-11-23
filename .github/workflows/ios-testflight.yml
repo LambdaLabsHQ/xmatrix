@@ -11,7 +11,7 @@ jobs:
   upload:
     environment: production
     timeout-minutes: 60
-    runs-on: ${{ github.event.repository.private && vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
+    runs-on: ${{ github.event.repository.private && vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'xcode-27' }}
     permissions:
       actions: read
       contents: read
