@@ -33,7 +33,7 @@ test("GCP uses an isolated offline Cloud grant with the company Google client, i
   const client = oauthClient(company, "gcp");
   const authorize = new URL(await oauthAuthorizeUrl(client, { spaceId: "space", userId: "admin", redirectUri: "https://hub.test/cb" }));
   assert.equal(authorize.searchParams.get("client_id"), company.CONNECTOR_GOOGLE_CLIENT_ID);
-  assert.equal(authorize.searchParams.get("scope"), scope);
+  assert.equal(authorize.searchParams.get("scope"), `openid https://www.googleapis.com/auth/userinfo.email ${scope}`);
   assert.equal(authorize.searchParams.get("include_granted_scopes"), "false");
   const grant = { access_token: "a", refresh_token: "r", token_type: "Bearer", expires_in: 3600, scope };
   assert.equal((await fetched([{ body: grant }], () => exchangeOAuthGrant(client, "code", "https://hub.test/cb"))).result.fields.oauthToken, "a");
