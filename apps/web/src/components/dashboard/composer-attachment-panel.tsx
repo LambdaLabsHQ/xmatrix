@@ -38,7 +38,7 @@ export function ComposerAttachmentPanel({
       role="menu"
       aria-label="Attach"
       data-testid="composer-attachment-panel"
-      className="app-composer-attach-menu flex flex-col gap-0.5 border-b border-border/45 px-[var(--app-composer-pad,0.375rem)] pt-1.5 pb-1 [animation:app-composer-attach-in_220ms_cubic-bezier(0.16,1,0.3,1)] motion-reduce:animate-none"
+      className="app-composer-attach-menu flex flex-col gap-0.5 border-b border-border/45 px-[var(--app-composer-pad,0.375rem)] pt-1.5 pb-1 [animation:app-composer-attach-in_180ms_cubic-bezier(0.16,1,0.3,1)] motion-reduce:animate-none"
       onTouchStart={stopTouchPropagation}
       onTouchMove={stopTouchPropagation}
     >

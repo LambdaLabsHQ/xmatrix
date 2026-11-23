@@ -314,7 +314,46 @@ test.describe("mock-auth app fixture", () => {
           .toBeCloseTo(restingBox!.height, 0);
       }
 
-      // Tapping outside dismisses the morphed panel back to resting height.
+      // Tapping outside dismisses the morphed panel back to resting height without
+      // shifting the closing menu upward or spiking `--app-composer-height` at settle.
+      const closeIntegrity = await page.evaluate(async () => {
+        const surface = document.querySelector<HTMLElement>(".app-message-surface")!;
+        const box = document.querySelector<HTMLElement>(".app-composer-box:not(.app-agent-work-card)")!;
+        const filesRow = box.querySelector<HTMLElement>('[data-attach-source="files"]')!;
+        const openFilesTop = filesRow.getBoundingClientRect().top;
+        const initialSurfaceHeight = Number.parseFloat(surface.style.getPropertyValue("--app-composer-height")) || 0;
+        const observedSurfaceHeights: number[] = [initialSurfaceHeight];
+        const mo = new MutationObserver(() => {
+          const val = Number.parseFloat(surface.style.getPropertyValue("--app-composer-height"));
+          if (Number.isFinite(val)) observedSurfaceHeights.push(val);
+        });
+        mo.observe(surface, { attributes: true, attributeFilter: ["style"] });
+
+        const trigger = box.querySelector<HTMLButtonElement>(".composer-attach .app-composer-inline-icon")!;
+        trigger.click();
+        await new Promise((resolve) => window.requestAnimationFrame(resolve));
+        const closingFilesRow = box.querySelector<HTMLElement>('.app-composer-panel-closing [data-attach-source="files"]');
+        const closingFilesTop = closingFilesRow?.getBoundingClientRect().top ?? null;
+
+        await new Promise((resolve) => window.setTimeout(resolve, 360));
+        mo.disconnect();
+        return {
+          openFilesTop,
+          closingFilesTop,
+          initialSurfaceHeight,
+          maxObservedSurfaceHeight: Math.max(...observedSurfaceHeights),
+        };
+      });
+      await expect(menu).toHaveCount(0);
+      await expectSettledAtRestingHeight();
+      expect(closeIntegrity.closingFilesTop).not.toBeNull();
+      expect(Math.abs(closeIntegrity.closingFilesTop! - closeIntegrity.openFilesTop)).toBeLessThanOrEqual(2);
+      expect(closeIntegrity.maxObservedSurfaceHeight).toBeLessThanOrEqual(closeIntegrity.initialSurfaceHeight + 2);
+
+      // Re-open and verify tapping outside also dismisses cleanly.
+      await attachButton.click();
+      await expect(menu).toBeVisible();
+      await expect(page.locator(".app-composer-box-morphing")).toHaveCount(0);
       await page.locator(".app-message-timeline").click({ position: { x: 200, y: 200 } });
       await expect(menu).toHaveCount(0);
       await expectSettledAtRestingHeight();

@@ -151,7 +151,6 @@ function ComposerInputSurface({
   const internalFieldRef = useRef<ComposerField | null>(null);
   const fieldRef = fieldRefProp ?? internalFieldRef;
   const boxRef = useRef<HTMLElement | null>(null);
-  const inputRowRef = useRef<HTMLDivElement | null>(null);
   const { user } = useAuth();
   // Plain text has no addresses to paint. Do not rebuild the interaction
   // registry on every activity report until a draft actually contains one.
@@ -190,8 +189,9 @@ function ComposerInputSurface({
   // rapid toggles never snap.
   const settledBoxHeightRef = useRef<number | null>(null);
   const activeMorphAnimationRef = useRef<Animation | null>(null);
+  const pendingMorphCleanupRef = useRef<Animation | null>(null);
   const latestPanelRef = useRef<{ key: string; node: ReactNode } | null>(null);
-  const [closingPanel, setClosingPanel] = useState<{ node: ReactNode; bottomOffset: number } | null>(null);
+  const [closingPanel, setClosingPanel] = useState<ReactNode>(null);
   if (!completion.isCompletionOpen && panel) {
     latestPanelRef.current = { key: panelKey ?? "panel", node: panel };
   }
@@ -199,10 +199,20 @@ function ComposerInputSurface({
     const box = boxRef.current;
     if (!box) return;
     const observer = new ResizeObserver(() => {
-      if (!box.getAnimations().length) settledBoxHeightRef.current = box.getBoundingClientRect().height;
+      if (!activeMorphAnimationRef.current && !pendingMorphCleanupRef.current) {
+        settledBoxHeightRef.current = box.getBoundingClientRect().height;
+      }
     });
     observer.observe(box);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      const active = activeMorphAnimationRef.current;
+      activeMorphAnimationRef.current = null;
+      active?.cancel();
+      const pending = pendingMorphCleanupRef.current;
+      pendingMorphCleanupRef.current = null;
+      pending?.cancel();
+    };
   }, []);
   const morphStateKey = completion.isCompletionOpen ? "completion" : panel ? (panelKey ?? "panel") : "closed";
   const panelOpen = morphStateKey !== "closed";
@@ -212,16 +222,19 @@ function ComposerInputSurface({
     if (!box) return;
     const previousKey = prevMorphStateKeyRef.current;
     if (previousKey === morphStateKey) {
-      if (settledBoxHeightRef.current === null && !box.getAnimations().length) {
+      if (settledBoxHeightRef.current === null && !activeMorphAnimationRef.current && !pendingMorphCleanupRef.current) {
         settledBoxHeightRef.current = box.getBoundingClientRect().height;
       }
       return;
     }
     prevMorphStateKeyRef.current = morphStateKey;
-    const running = box.getAnimations();
-    const from = running.length > 0 ? box.getBoundingClientRect().height : settledBoxHeightRef.current;
-    for (const animation of running) animation.cancel();
+    const active = activeMorphAnimationRef.current;
+    const pending = pendingMorphCleanupRef.current;
+    const from = (active || pending) ? box.getBoundingClientRect().height : settledBoxHeightRef.current;
     activeMorphAnimationRef.current = null;
+    pendingMorphCleanupRef.current = null;
+    active?.cancel();
+    pending?.cancel();
     const to = box.getBoundingClientRect().height;
     settledBoxHeightRef.current = to;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -230,28 +243,51 @@ function ComposerInputSurface({
       setClosingPanel(null);
       return;
     }
-    if (panelOpen) {
-      setClosingPanel(null);
-    } else if (previousKey !== "completion" && latestPanelRef.current) {
-      const bottomOffset = inputRowRef.current?.getBoundingClientRect().height ?? 0;
-      setClosingPanel({ node: latestPanelRef.current.node, bottomOffset });
-    } else {
-      setClosingPanel(null);
-    }
+    const holdClosingPanel = !panelOpen && previousKey !== "completion" && Boolean(latestPanelRef.current);
+    setClosingPanel(holdClosingPanel ? latestPanelRef.current!.node : null);
     box.classList.add("app-composer-box-morphing");
-    const animation = box.animate([{ height: `${from}px` }, { height: `${to}px` }], panelOpen
-      ? { duration: 360, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }
-      : { duration: 240, easing: "cubic-bezier(0.4, 0, 0.2, 1)" });
+    const animation = box.animate(
+      [{ height: `${from}px` }, { height: `${to}px` }],
+      panelOpen
+        ? { duration: 320, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }
+        : {
+            duration: 220,
+            easing: "cubic-bezier(0.4, 0, 0.2, 1)",
+            fill: holdClosingPanel ? "forwards" : "none",
+          }
+    );
     activeMorphAnimationRef.current = animation;
-    const settle = () => {
+    animation.onfinish = () => {
+      if (activeMorphAnimationRef.current !== animation) return;
+      activeMorphAnimationRef.current = null;
+      if (holdClosingPanel) {
+        // Keep the `fill: "forwards"` closed height and `.app-composer-box-morphing`
+        // until React removes `closingPanel` from the DOM; releasing earlier lets
+        // the box flash back to its open height and spike `--app-composer-height`.
+        pendingMorphCleanupRef.current = animation;
+        setClosingPanel(null);
+        return;
+      }
+      box.classList.remove("app-composer-box-morphing");
+    };
+    animation.oncancel = () => {
       if (activeMorphAnimationRef.current !== animation) return;
       activeMorphAnimationRef.current = null;
       box.classList.remove("app-composer-box-morphing");
-      setClosingPanel(null);
+      if (holdClosingPanel) setClosingPanel(null);
     };
-    animation.onfinish = settle;
-    animation.oncancel = settle;
   }, [morphStateKey, panelOpen]);
+
+  useLayoutEffect(() => {
+    if (closingPanel !== null) return;
+    const pending = pendingMorphCleanupRef.current;
+    if (!pending) return;
+    pendingMorphCleanupRef.current = null;
+    pending.cancel();
+    if (!activeMorphAnimationRef.current) {
+      boxRef.current?.classList.remove("app-composer-box-morphing");
+    }
+  }, [closingPanel]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -282,7 +318,7 @@ function ComposerInputSurface({
         ref={boxRef}
         fill
         className={cn(
-          "app-composer-box app-material-liquid-pill relative min-w-0 flex-1 border border-input bg-card shadow-sm transition-all duration-200 focus-within:border-ring",
+          "app-composer-box app-material-liquid-pill relative min-w-0 flex-1 border border-input bg-card shadow-sm transition-colors duration-200 focus-within:border-ring",
           (completion.isCompletionOpen || panel) && "app-composer-box-mentions-open",
           boxClassName
         )}
@@ -314,16 +350,15 @@ function ComposerInputSurface({
         {!panelOpen && closingPanel && (
           <div
             aria-hidden="true"
-            className="app-composer-panel-closing pointer-events-none absolute inset-x-0 z-[2] [animation:app-composer-attach-out_200ms_cubic-bezier(0.4,0,0.2,1)_forwards] motion-reduce:animate-none [&_.app-composer-attach-menu]:animate-none"
-            style={{ bottom: `${closingPanel.bottomOffset}px` }}
+            className="app-composer-panel-closing pointer-events-none [animation:app-composer-attach-out_170ms_cubic-bezier(0.4,0,0.2,1)_forwards] motion-reduce:animate-none [&_.app-composer-attach-menu]:!animate-none"
           >
-            {closingPanel.node}
+            {closingPanel}
           </div>
         )}
         {/* One capsule: attach, text, actions and send share the glass. When
             the text wraps or a header shows, the same surface grows into a
             panel and the controls stay on its bottom edge. */}
-        <div ref={inputRowRef} className="composer-input-row flex min-w-0 items-end gap-2">
+        <div className="composer-input-row flex min-w-0 items-end gap-2">
           {inputLeading}
           <ComposerEditor
             fieldRef={fieldRef}
