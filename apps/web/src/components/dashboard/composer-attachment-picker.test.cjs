@@ -129,10 +129,12 @@ test("page-wide native attachment panel serializes across composers and settles 
   assert.equal(delivered.length, 1);
   assert.deepEqual(delivered[0].origin, firstOrigin);
 
-  // Second composer can now open and settle via cancel.
+  // Second composer can now open as a single-image unarmed picker (e.g. avatar)
+  // without leaking an armed source, and settle via cancel.
   assert.equal(
     openNativeAttachmentPanel({
-      source: "files",
+      multiple: false,
+      accept: "image/png,image/jpeg,image/webp",
       origin: secondOrigin,
       deliver: () => {
         throw new Error("cancel must not deliver");
@@ -141,6 +143,9 @@ test("page-wide native attachment panel serializes across composers and settles 
     true
   );
   assert.equal(clickCount, 2);
+  assert.equal(fakeInput.multiple, false);
+  assert.equal(fakeInput.accept, "image/png,image/jpeg,image/webp");
+  assert.equal(globalThis.window.__xmatrixPendingAttachmentSource, null);
   listeners.get("cancel")();
   assert.equal(getActiveNativeAttachmentPanel(), null);
   assert.ok(notifications >= 4);

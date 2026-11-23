@@ -176,7 +176,9 @@ export function getActiveNativeAttachmentPanel(): DraftPickOrigin | null {
  * composers while rejecting stale files from unmounted or switched drafts.
  */
 export function openNativeAttachmentPanel(input: {
-  source: NativeAttachmentPickerSource;
+  source?: NativeAttachmentPickerSource;
+  multiple?: boolean;
+  accept?: string;
   origin: DraftPickOrigin;
   deliver: (files: FileList | null, origin: DraftPickOrigin) => void;
 }): boolean {
@@ -185,7 +187,10 @@ export function openNativeAttachmentPanel(input: {
   if (!element) return false;
   activeNativePanel = { origin: input.origin, deliver: input.deliver };
   notifyNativePanelListeners();
-  armNativeAttachmentSource(input.source);
+  element.multiple = input.multiple ?? true;
+  element.accept = input.accept ?? "";
+  if (input.source) armNativeAttachmentSource(input.source);
+  else clearPendingAttachmentSource();
   element.click();
   return true;
 }
