@@ -893,22 +893,31 @@ integration("two writers of the same metadata revision commit exactly one new co
   } finally { await client.end(); }
 });
 
-// The aggregate counts Channels, keeps an acknowledged older wait, and cannot
-// pick up another principal's or an unreadable Channel's attention rows.
-integration("catalog counts keep older declared waits without multiplying or widening attention", async () => {
+/**
+ * The seeded catalog with two more messages in `child` from an Agent Instance
+ * that then sleeps: an older wait and a newer mention.
+ */
+async function catalogWithSleepingAsker() {
   await seed();
   const client = new Client({ connectionString });
   await client.connect();
-  const repository = new PostgresChannelCatalogRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0" }));
+  await client.query(`INSERT INTO data.messages SELECT (jsonb_populate_record(NULL::data.messages,
+    to_jsonb(source)||jsonb_build_object('message_id',item.id,'search_rank_sequence',item.id,
+      'timeline_sequence',item.seq,'author_kind','agent','author_id','root-00:1'))).*
+    FROM data.messages source CROSS JOIN (VALUES ('older-wait',2),('newer-mention',3)) item(id,seq)
+    WHERE source.message_id='message-1'`);
+  await client.query(`UPDATE data.instances SET rest_state='sleeping' WHERE instance_id='root-00:1'`);
+  return { client, repository: new PostgresChannelCatalogRepository(
+    createAuthorityDatabase({ connectionString, shardId: "shard-0" })) };
+}
+
+// The aggregate counts Channels, keeps an acknowledged older wait, and cannot
+// pick up another principal's or an unreadable Channel's attention rows.
+integration("catalog counts keep older declared waits without multiplying or widening attention", async () => {
+  const { client, repository } = await catalogWithSleepingAsker();
   const read = () => repository.page({ requestId: crypto.randomUUID(), spaceId: "space-catalog",
     principal: { kind: "user", id: "user-1" }, view: "flat", filter: "all", countsOnly: true });
   try {
-    await client.query(`INSERT INTO data.messages SELECT (jsonb_populate_record(NULL::data.messages,
-      to_jsonb(source)||jsonb_build_object('message_id',item.id,'search_rank_sequence',item.id,
-        'timeline_sequence',item.seq,'author_kind','agent','author_id','root-00:1'))).*
-      FROM data.messages source CROSS JOIN (VALUES ('older-wait',2),('newer-mention',3)) item(id,seq)
-      WHERE source.message_id='message-1'`);
-    await client.query(`UPDATE data.instances SET rest_state='sleeping' WHERE instance_id='root-00:1'`);
     await client.query(`INSERT INTO data.message_attention
       (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response) VALUES
       ('space-catalog','user:user-1','child','older-wait','reply',2,$1,TRUE),
@@ -924,6 +933,53 @@ integration("catalog counts keep older declared waits without multiplying or wid
     await client.query(`DELETE FROM data.delivery_cursors WHERE space_id='space-catalog' AND subject_id='user:user-1'`);
     assert.deepEqual((await read()).counts, { active: 60, unread: 1, mentions: 1 });
   } finally { await client.end(); }
+});
+
+// A catalog reader learns what waits on it from its own attention rows, one
+// small read for the Space, and it is exactly what each Channel's own row says.
+integration("the attention read answers what every resolved Channel row carries, for waiting Channels only", async () => {
+  const { client, repository } = await catalogWithSleepingAsker();
+  const principal = { kind: "user", id: "user-1" };
+  try {
+    await client.query(`INSERT INTO data.message_attention
+      (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response) VALUES
+      ('space-catalog','user:user-1','child','older-wait','reply',2,$1,TRUE),
+      ('space-catalog','user:user-1','child','newer-mention','mention',3,$1,FALSE),
+      ('space-catalog','user:user-1','root-00','read-already','mention',1,$1,FALSE),
+      ('space-catalog','user:user-1','closed-hidden','hidden','mention',1,$1,FALSE),
+      ('space-catalog','user:someone-else','grandchild','other-principal','mention',1,$1,FALSE)`, [now]);
+    await client.query(`INSERT INTO data.delivery_cursors
+      (space_id,subject_id,channel_id,acknowledged_sequence,version,updated_at)
+      VALUES ('space-catalog','user:user-1','root-00',1,1,$1)`, [now]);
+    const read = () => repository.attention({ requestId: crypto.randomUUID(), spaceId: "space-catalog", principal });
+    const resolved = async () => (await repository.resolve({ requestId: crypto.randomUUID(),
+      spaceId: "space-catalog", principal, channelIds: ["child", "root-00", "grandchild", "closed-hidden"],
+      includeParticipants: false })).channels.flatMap((channel) => channel.attention
+      ? [{ attention: channel.attention, waitingMessage: channel.waitingMessage }] : []);
+    const waiting = await read();
+    assert.deepEqual(waiting.map((row) => row.attention.channelId), ["child"]);
+    assert.equal(waiting[0].attention.unreadAttentionCount, 3);
+    assert.equal(waiting[0].attention.lastMessageId, "newer-mention");
+    // The message that waits rides along, as it does on the Channel's own row.
+    assert.equal(waiting[0].waitingMessage.messageId, "newer-mention");
+    assert.deepEqual(waiting, await resolved());
+    // Reading to the head leaves only the wait its asker still holds.
+    await client.query(`INSERT INTO data.delivery_cursors
+      (space_id,subject_id,channel_id,acknowledged_sequence,version,updated_at)
+      VALUES ('space-catalog','user:user-1','child',3,1,$1)`, [now]);
+    assert.deepEqual((await read()).map(({ attention, waitingMessage }) =>
+      [attention.channelId, attention.unreadAttentionCount, attention.lastMessageId, waitingMessage.messageId]),
+      [["child", 1, "older-wait", "older-wait"]]);
+    assert.deepEqual(await read(), await resolved());
+    await client.query(`UPDATE data.instances SET rest_state='stopped' WHERE instance_id='root-00:1'`);
+    assert.deepEqual(await read(), []);
+    await assert.rejects(repository.attention({ requestId: crypto.randomUUID(), spaceId: "space-catalog",
+      principal: { kind: "user", id: "not-a-member" } }), /Space not found/u);
+  } finally {
+    // The seed keeps read cursors; the next test starts from none.
+    await client.query(`DELETE FROM data.delivery_cursors WHERE space_id='space-catalog' AND subject_id='user:user-1'`);
+    await client.end();
+  }
 });
 
 // Production nested-looped every readable Channel against an aggregate of the

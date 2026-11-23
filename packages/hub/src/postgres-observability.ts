@@ -86,6 +86,7 @@ function safeRowCount(value: number): number {
 function operationStage(value: string): string {
   if (value === "postgres.readiness") return "postgres.readiness";
   if (value.startsWith("channel-catalog.page")) return "postgres.catalog";
+  if (value.startsWith("channel-catalog.attention")) return "postgres.catalog";
   if (value.startsWith("channel-catalog.resolve")) return "postgres.resolve";
   if (value.startsWith("message.history")) return "postgres.history";
   if (value.startsWith("channel.direct-find")) return "postgres.direct";

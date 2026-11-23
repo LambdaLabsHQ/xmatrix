@@ -33,7 +33,7 @@ const session = { token: "old", refreshToken: "refresh-1", user: null, hubUrl: "
 // once legacy admission is off (client-compatibility-gate.ts); the extension
 // must declare itself as an app on every call.
 test("every call declares an app client identity the Hub's compatibility gate admits", async () => {
-  const { calls, deps } = fakeHub({ "GET /api/channels": () => ({ json: { channels: [] } }) });
+  const { calls, deps } = fakeHub({ "GET /api/channels/attention": () => ({ json: { channels: [] } }) });
   await countNeedsYou(deps, "t");
   assert.equal(calls[0].headers["x-xmatrix-client-component"], "app");
   assert.equal(calls[0].headers["x-xmatrix-client-protocol"], "2");
@@ -43,19 +43,19 @@ test("every call declares an app client identity the Hub's compatibility gate ad
 
 test("an expired access token is renewed once and the call retried with the new one", async () => {
   const { calls, deps } = fakeHub({
-    "GET /api/channels": ({ headers }) => (headers.authorization === "Bearer new"
+    "GET /api/channels/attention": ({ headers }) => (headers.authorization === "Bearer new"
       ? { json: { channels: [] } } : { status: 401, json: { error: "expired" } }),
     "POST /api/auth/refresh": () => ({ json: { token: "new", refreshToken: "refresh-2", user: { id: "u1", name: "Dana" } } }),
   });
   const store = memoryStore(session);
   await withSession(deps, store, countNeedsYou);
-  assert.deepEqual(calls.map((call) => call.path), ["/api/channels", "/api/auth/refresh", "/api/channels"]);
+  assert.deepEqual(calls.map((call) => call.path), ["/api/channels/attention", "/api/auth/refresh", "/api/channels/attention"]);
   assert.equal(store.peek().refreshToken, "refresh-2");
 });
 
 test("a refused renewal forgets the session so the popup asks to sign in again", async () => {
   const { deps } = fakeHub({
-    "GET /api/channels": () => ({ status: 401, json: { error: "expired" } }),
+    "GET /api/channels/attention": () => ({ status: 401, json: { error: "expired" } }),
     "POST /api/auth/refresh": () => ({ status: 401, json: { error: "revoked" } }),
   });
   const store = memoryStore(session);
@@ -65,7 +65,7 @@ test("a refused renewal forgets the session so the popup asks to sign in again",
 
 test("a renewal that fails for another reason keeps the session", async () => {
   const { deps } = fakeHub({
-    "GET /api/channels": () => ({ status: 401, json: { error: "expired" } }),
+    "GET /api/channels/attention": () => ({ status: 401, json: { error: "expired" } }),
     "POST /api/auth/refresh": () => ({ status: 503, json: { error: "unavailable" } }),
   });
   const store = memoryStore(session);
@@ -92,7 +92,7 @@ test("device sign-in reports waiting, then the session, and ends on a declined r
 
 test("the badge counts each waiting conversation once across the snapshot and the list", async () => {
   const { deps } = fakeHub({
-    "GET /api/channels": () => ({
+    "GET /api/channels/attention": () => ({
       json: {
         channels: [{ id: "a", attention: { unreadAttentionCount: 1 } }, { id: "b", attention: { unreadAttentionCount: 0 } }],
         attentionSnapshot: { spaces: [{ summaries: [{ channelId: "a", unreadAttentionCount: 3 }, { channelId: "c", unreadAttentionCount: 1 }] }] },

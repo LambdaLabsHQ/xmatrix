@@ -2,7 +2,7 @@ import { MessageAuthorityError, type MessageLiveRouting } from "@xmatrix/db";
 import type { AuthorityPrincipal } from "./product-message-command";
 import type { Env } from "./types";
 import { postBillingNotice } from "./billing-notice";
-import { resolveChannelCatalog } from "./spaces";
+import { channelCatalogAttention } from "./spaces";
 import {
   deliverToAudience,
   RUNTIME_CHANNEL_MESSAGE_URL,
@@ -212,32 +212,21 @@ export function committedLiveRouting(committed: Record<string, unknown>): LiveRo
   return committedRouting.get(committed);
 }
 
+/**
+ * What waits on `subjectId` across the Space, one row for each Channel they
+ * may read that has any. One narrow read answers for the whole Space, however
+ * many Channels it holds.
+ */
 export async function readSpaceAttentionProjection(
   env: Env,
   spaceId: string,
   subjectId: string,
-  channelIds: string[],
 ): Promise<Record<string, unknown>[]> {
-  if (channelIds.length === 0) return [];
-  if (channelIds.length > 200) throw new Error("Space attention read exceeds 200 Channels");
-
   const match = /^(user|agent):(.+)$/u.exec(subjectId);
   if (!match) throw new Error("Space attention principal is invalid");
   const principal = { kind: match[1] === "user" ? "user" as const : "agent" as const, id: match[2]! };
-  const payload = await resolveChannelCatalog(env, {
-    spaceId, principal, channelIds, includeParticipants: false,
-  }) as Record<string, unknown>;
-  if (!Array.isArray(payload.channels)) throw new Error("PostgreSQL attention response is invalid");
-  return payload.channels.map((value) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error("PostgreSQL attention Channel is invalid");
-    }
-    const channel = value as Record<string, unknown>;
-    if (typeof channel.id !== "string" || !channelIds.includes(channel.id)) {
-      throw new Error("PostgreSQL attention Channel binding is invalid");
-    }
-    return { channelId: channel.id, subjectId, ...(channel.attention ? { summary: channel.attention } : {}) };
-  });
+  const summaries = await channelCatalogAttention(env, { spaceId, principal });
+  return summaries.map((summary) => ({ channelId: String(summary.channelId), subjectId, summary }));
 }
 
 async function sealAttachments(

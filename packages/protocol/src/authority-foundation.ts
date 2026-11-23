@@ -361,6 +361,8 @@ export const HUB_ROUTES = {
   message_search: "/api/messages/search",
   search_rerank: "/api/search/rerank",
   channel_catalog_resolve: "/api/channels/resolve",
+  /** What waits on the signed-in person, in every Space: the few Channels that have any, never the catalog. */
+  channel_attention: "/api/channels/attention",
   channel: (channelId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}`,
   channel_history: (channelId: string) =>

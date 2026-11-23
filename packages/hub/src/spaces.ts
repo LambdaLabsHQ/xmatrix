@@ -350,6 +350,17 @@ export async function resolveChannelCatalog(env: SpacesEnv, input: Omit<CatalogR
   return { ...resolved, channels: channels.map(withChannelHeadPreview) };
 }
 
+/**
+ * What waits on the reader in each Channel of the Space they may read, as a
+ * catalog row's `attention` says it; Channels with nothing waiting are absent.
+ */
+export async function channelCatalogAttention(env: SpacesEnv,
+  input: Omit<Parameters<PostgresChannelCatalogRepository["attention"]>[0], "requestId">) {
+  const { database, requestId } = spaces(env);
+  const waiting = await new PostgresChannelCatalogRepository(database).attention({ requestId, ...input });
+  return waiting.map((row) => withChannelHeadPreview({ ...row }).attention as Record<string, unknown>);
+}
+
 export function getChannelCatalogRevision(env: SpacesEnv, input: { spaceId: string; principal: Principal }) {
   const { repository, requestId } = spaces(env);
   return repository.getChannelCatalogRevision({ requestId, ...input });
