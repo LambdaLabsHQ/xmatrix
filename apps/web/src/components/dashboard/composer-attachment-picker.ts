@@ -1,15 +1,15 @@
 import type { NativeAttachmentPickerSource } from "@/lib/desktop/bridge";
 
-export const COMPOSER_ATTACHMENT_SOURCES: readonly NativeAttachmentPickerSource[] = [
+const COMPOSER_ATTACHMENT_SOURCES: readonly NativeAttachmentPickerSource[] = [
   "photos",
   "camera",
   "files",
 ];
 
 /** Maximum age of an armed one-shot source before `runOpenPanelWith` treats it as stale. */
-export const PENDING_ATTACHMENT_SOURCE_TTL_MS = 5000;
+const PENDING_ATTACHMENT_SOURCE_TTL_MS = 5000;
 
-export type PendingAttachmentSourceRecord = {
+type PendingAttachmentSourceRecord = {
   source: NativeAttachmentPickerSource;
   expiresAt: number;
 };
@@ -54,7 +54,7 @@ export function attachmentPanelKey(input: {
  * iOS `WKUIDelegate.webView(_:runOpenPanelWith:...)` can atomically read and
  * clear it without losing transient user activation across an async boundary.
  */
-export function armNativeAttachmentSource(
+function armNativeAttachmentSource(
   source: NativeAttachmentPickerSource,
   now = Date.now(),
 ): PendingAttachmentSourceRecord {
@@ -75,6 +75,7 @@ export function clearPendingAttachmentSource(): void {
 }
 
 export type DraftPickOrigin = {
+  ownerId: string;
   generation: number;
   draftRevision: number;
   scope: string | null;
@@ -88,6 +89,7 @@ export type DraftPickOrigin = {
 export function isDraftPickCurrent(
   origin: DraftPickOrigin | null,
   current: {
+    ownerId?: string;
     mounted: boolean;
     generation: number;
     draftRevision: number;
@@ -97,9 +99,93 @@ export function isDraftPickCurrent(
 ): boolean {
   if (!current.mounted) return false;
   if (!origin) return !current.requireOrigin;
+  if (current.ownerId !== undefined && origin.ownerId !== current.ownerId) return false;
   return (
     origin.generation === current.generation &&
     origin.draftRevision === current.draftRevision &&
     origin.scope === current.scope
   );
+}
+
+type ActiveNativePanelRequest = {
+  origin: DraftPickOrigin;
+  deliver: (files: FileList | null, origin: DraftPickOrigin) => void;
+};
+
+let activeNativePanel: ActiveNativePanelRequest | null = null;
+let sharedNativeFileInput: HTMLInputElement | null = null;
+const panelListeners = new Set<() => void>();
+
+function notifyNativePanelListeners() {
+  for (const listener of panelListeners) listener();
+}
+
+function settleActiveNativePanel(files: FileList | null) {
+  const request = activeNativePanel;
+  activeNativePanel = null;
+  clearPendingAttachmentSource();
+  notifyNativePanelListeners();
+  if (request && files && files.length > 0) {
+    request.deliver(files, request.origin);
+  }
+}
+
+function ensureSharedNativeFileInput(): HTMLInputElement | null {
+  if (typeof document === "undefined" || !document.body) return null;
+  if (sharedNativeFileInput && sharedNativeFileInput.isConnected) {
+    return sharedNativeFileInput;
+  }
+  const input = document.createElement("input");
+  input.type = "file";
+  input.multiple = true;
+  input.tabIndex = -1;
+  input.setAttribute("aria-hidden", "true");
+  input.style.display = "none";
+  input.addEventListener("change", () => {
+    const files = input.files;
+    settleActiveNativePanel(files);
+    input.value = "";
+  });
+  input.addEventListener("cancel", () => {
+    settleActiveNativePanel(null);
+    input.value = "";
+  });
+  document.body.appendChild(input);
+  sharedNativeFileInput = input;
+  return input;
+}
+
+export function subscribeNativeAttachmentPanel(listener: () => void): () => void {
+  panelListeners.add(listener);
+  return () => panelListeners.delete(listener);
+}
+
+/**
+ * Returns the currently active page-wide native open-panel origin, or null when
+ * idle. WebKit enforces one open panel per WKWebView page, so every Composer
+ * observes this single state rather than keeping isolated per-instance locks.
+ */
+export function getActiveNativeAttachmentPanel(): DraftPickOrigin | null {
+  return activeNativePanel?.origin ?? null;
+}
+
+/**
+ * Opens a native iOS open panel through one document-level `<input type="file">`
+ * that outlives individual Composer mounts (e.g. closing New Conversation while
+ * iCloud downloads), ensuring `change`/`cancel` always settles and unlocks later
+ * composers while rejecting stale files from unmounted or switched drafts.
+ */
+export function openNativeAttachmentPanel(input: {
+  source: NativeAttachmentPickerSource;
+  origin: DraftPickOrigin;
+  deliver: (files: FileList | null, origin: DraftPickOrigin) => void;
+}): boolean {
+  if (activeNativePanel) return false;
+  const element = ensureSharedNativeFileInput();
+  if (!element) return false;
+  activeNativePanel = { origin: input.origin, deliver: input.deliver };
+  notifyNativePanelListeners();
+  armNativeAttachmentSource(input.source);
+  element.click();
+  return true;
 }

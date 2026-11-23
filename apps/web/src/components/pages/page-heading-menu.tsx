@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, type ComponentType } from "react";
+import { useRef, type ComponentType } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { PenLine } from "lucide-react";
-import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
+import { useAnchoredMenuDismiss } from "@/components/dashboard/use-overlay-dismiss";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 
 /** What a heading offers on a phone, each said in words. */
@@ -27,17 +27,8 @@ function HeadingMenuPopup({ anchor, title, menu, onClose }: {
   anchor: HTMLElement; title: string; menu: HeadingMenu; onClose: () => void;
 }) {
   const popup = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    // The page scrolling away from the heading takes its menu with it.
-    const scrolled = () => onClose();
-    window.addEventListener("scroll", scrolled, { capture: true, passive: true });
-    const stop = listenForOverlayDismissal((event) => {
-      const target = event.target instanceof Node ? event.target : null;
-      if (target && (anchor.contains(target) || popup.current?.contains(target))) return;
-      onClose();
-    }, onClose);
-    return () => { window.removeEventListener("scroll", scrolled, { capture: true }); stop(); };
-  }, [anchor, onClose]);
+  // The page scrolling away from the heading takes its menu with it.
+  useAnchoredMenuDismiss(anchor, popup, onClose);
   const place = anchor.getBoundingClientRect();
   const list = items(menu);
   // Below the "⋯", or above it when the window has no room below.

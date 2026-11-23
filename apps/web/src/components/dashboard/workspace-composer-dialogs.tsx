@@ -91,6 +91,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -135,10 +136,12 @@ import { inputHistoryKey, readInputHistory, rememberInput, type ComposerInputHis
 import { ComposerInputHistoryPanel } from "./composer-input-history-panel";
 import { ComposerAttachmentPanel } from "./composer-attachment-panel";
 import {
-  armNativeAttachmentSource,
   attachmentPanelKey,
   clearPendingAttachmentSource,
+  getActiveNativeAttachmentPanel,
   isDraftPickCurrent,
+  openNativeAttachmentPanel,
+  subscribeNativeAttachmentPanel,
   type DraftPickOrigin,
 } from "./composer-attachment-picker";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
@@ -444,8 +447,13 @@ export const Composer = memo(function Composer({
   const uploadRegistryRef = useRef(createAttachmentUploadRegistry());
   const mountedRef = useRef(true);
   const draftRevisionRef = useRef(0);
+  const composerOwnerId = useId();
   const pendingFileInputPickRef = useRef<DraftPickOrigin | null>(null);
-  const [pendingNativePick, setPendingNativePick] = useState<DraftPickOrigin | null>(null);
+  const activeNativePanel = useSyncExternalStore(
+    subscribeNativeAttachmentPanel,
+    getActiveNativeAttachmentPanel,
+    () => null
+  );
   const handledMentionInsertRequestIdRef = useRef<number | null>(null);
   const handledAutoFocusRequestRef = useRef(0);
   // Set while files are inbound but have no row yet (the desktop clipboard
@@ -459,13 +467,16 @@ export const Composer = memo(function Composer({
   const sentUploadsRef = useRef(new Map<string, SentUpload>());
   const uploadGateRef = useRef(boundedConcurrency(ATTACHMENT_UPLOAD_CONCURRENCY));
   const composerIdentity = draftIdentity ?? channel?.id ?? null;
-  // Separate "this reused file input still has an in-flight native open panel"
-  // from "the currently visible draft is waiting on its own pick before Send".
-  // Switching from A to B lets B send text right away while keeping the shared
-  // file input locked until A's native change/cancel settles.
-  const nativeInputBusy = pendingNativePick !== null;
+  // Separate "this WebView page still has an in-flight native open panel" from
+  // "the currently visible draft is waiting on its own pick before Send".
+  // Switching channels or closing New Conversation lets other drafts send text
+  // right away while keeping the page-wide open panel serialized until WebKit's
+  // change/cancel settles.
+  const nativeInputBusy = activeNativePanel !== null;
   const currentDraftPickerBusy =
-    pendingNativePick !== null && pendingNativePick.scope === composerIdentity;
+    activeNativePanel !== null &&
+    activeNativePanel.ownerId === composerOwnerId &&
+    activeNativePanel.scope === composerIdentity;
   useLayoutEffect(() => setOpenComposerImageId(null), [composerIdentity]);
   const channelIdRef = useRef<string | null>(composerIdentity);
   const composerDropSinkId = useId();
@@ -624,14 +635,12 @@ export const Composer = memo(function Composer({
     const handleFileInputCancel = () => {
       pendingFileInputPickRef.current = null;
       clearPendingAttachmentSource();
-      if (mountedRef.current) setPendingNativePick(null);
     };
     input?.addEventListener("cancel", handleFileInputCancel);
     return () => {
       mountedRef.current = false;
       input?.removeEventListener("cancel", handleFileInputCancel);
       pendingFileInputPickRef.current = null;
-      clearPendingAttachmentSource();
       uploadRegistry.cancelAll();
       for (const url of previewUrls.values()) URL.revokeObjectURL(url);
       previewUrls.clear();
@@ -653,11 +662,10 @@ export const Composer = memo(function Composer({
     setPendingAttachments([]);
     setAttachmentError(null);
     setAttachmentMenuActive(null);
-    // Keep any in-flight `pendingNativePick` / `pendingFileInputPickRef` origin
-    // intact across channel switches so the reused `<input type="file">` waits
-    // for the previous channel's `change`/`cancel` to settle and rejects stale
-    // files, while the new channel can still compose and send text freely.
-    clearPendingAttachmentSource();
+    // Keep any in-flight `pendingFileInputPickRef` / page-wide native panel
+    // origin intact across channel switches so late `change` events from the
+    // previous channel fail ownership validation while the new channel can
+    // compose and send text freely.
     draftRevisionRef.current += 1;
   }, [composerIdentity]);
 
@@ -784,6 +792,7 @@ export const Composer = memo(function Composer({
     load: () => AttachmentDropCandidate[] | Promise<AttachmentDropCandidate[]>
   ): Promise<number> {
     const origin: DraftPickOrigin = {
+      ownerId: composerOwnerId,
       generation: uploadRegistryRef.current.generation(),
       draftRevision: draftRevisionRef.current,
       scope: channelIdRef.current,
@@ -806,6 +815,7 @@ export const Composer = memo(function Composer({
       // If the reader switched conversations (including A→B→A), sent the draft,
       // or closed this composer while waiting for files, drop the stale pick cleanly.
       if (!isDraftPickCurrent(origin, {
+        ownerId: composerOwnerId,
         mounted: mountedRef.current,
         generation: uploadRegistryRef.current.generation(),
         draftRevision: draftRevisionRef.current,
@@ -824,6 +834,7 @@ export const Composer = memo(function Composer({
       // would surface as an unhandled rejection and nothing else. Whatever rows
       // exist have already been failed by the stage that threw.
       if (isDraftPickCurrent(origin, {
+        ownerId: composerOwnerId,
         mounted: mountedRef.current,
         generation: uploadRegistryRef.current.generation(),
         draftRevision: draftRevisionRef.current,
@@ -1476,22 +1487,43 @@ export const Composer = memo(function Composer({
     },
   });
 
-  function openComposerFileInput(source?: NativeAttachmentPickerSource) {
-    if (nativeInputBusy) return;
-    const origin: DraftPickOrigin = {
+  function currentDraftOrigin(): DraftPickOrigin {
+    return {
+      ownerId: composerOwnerId,
       generation: uploadRegistryRef.current.generation(),
       draftRevision: draftRevisionRef.current,
       scope: channelIdRef.current,
     };
-    pendingFileInputPickRef.current = origin;
+  }
+
+  function openComposerFileInput(source?: NativeAttachmentPickerSource) {
+    if (nativeInputBusy) return;
+    const origin = currentDraftOrigin();
     if (source) {
-      // Hold this input and its originating draft's Send until the native open
-      // panel returns `change` or `cancel`.
-      setPendingNativePick(origin);
-      armNativeAttachmentSource(source);
-    } else {
-      clearPendingAttachmentSource();
+      openNativeAttachmentPanel({
+        source,
+        origin,
+        deliver: (files, pickOrigin) => {
+          const picked = files ? fileCandidates(files) : [];
+          if (
+            picked.length > 0 &&
+            isDraftPickCurrent(pickOrigin, {
+              ownerId: composerOwnerId,
+              mounted: mountedRef.current,
+              generation: uploadRegistryRef.current.generation(),
+              draftRevision: draftRevisionRef.current,
+              scope: channelIdRef.current,
+              requireOrigin: true,
+            })
+          ) {
+            void beginAttachmentIntake(() => picked);
+          }
+        },
+      });
+      return;
     }
+    pendingFileInputPickRef.current = origin;
+    clearPendingAttachmentSource();
     fileInputRef.current?.click();
   }
 
@@ -1573,12 +1605,12 @@ export const Composer = memo(function Composer({
           const pickOrigin = pendingFileInputPickRef.current;
           pendingFileInputPickRef.current = null;
           clearPendingAttachmentSource();
-          setPendingNativePick(null);
           const picked = event.target.files ? fileCandidates(event.target.files) : [];
           event.target.value = "";
           if (
             picked.length > 0 &&
             isDraftPickCurrent(pickOrigin, {
+              ownerId: composerOwnerId,
               mounted: mountedRef.current,
               generation: uploadRegistryRef.current.generation(),
               draftRevision: draftRevisionRef.current,
