@@ -190,16 +190,39 @@ export async function runConnectorAction(providerId: string, input: ConnectorCom
   return receipt;
 }
 
+/** How an action a Norn program performed ended, as the program reads it. */
+export type ProgramActionOutcome = { done: { summary: string; url?: string } } | { blocked: string } | { failed: string };
+type ProgramActionExecutor = (providerId: string, actionId: string) => ConnectorAction | undefined;
+type ProgramActionSettlement = (env: Env, input: { channelId: string; requestRef: string; outcome: ProgramActionOutcome }) => Promise<void>;
+let installedActionExecutors: ProgramActionExecutor | undefined;
+let installedProgramActionOutcome: ProgramActionSettlement | undefined;
+
+/* The durable executor runs any provider's action for a Norn program, and tells the program how it ended. Both
+ * reach this file again: the providers through the registry, the program through the Norn host. As with the app
+ * connection check, each installs its part once it is loaded, so this file imports neither. */
+export function installActionExecutors(lookup: ProgramActionExecutor): void {
+  installedActionExecutors = lookup;
+}
+export function installProgramActionOutcome(settle: ProgramActionSettlement): void {
+  installedProgramActionOutcome = settle;
+}
+/** The executor of one action of a connected app, as its provider installs it. */
+export function actionExecutor(providerId: string, actionId: string): ConnectorAction | undefined {
+  if (!installedActionExecutors) throw new Error("connectors/registry.ts has not installed the action executors");
+  return installedActionExecutors(providerId, actionId);
+}
+
 /**
  * Only the durable executor dispatches a consumed request: an X video action,
- * or an action a Norn program performs. `action` is the request's own
+ * or an action a Norn program performs, which runs with its own provider's
  * executor. What a completed action gave back is kept beside its receipt, for
  * a program that reads it as its answer.
  */
-export async function executeDurableXUpload(env: Env, job: XExecutingUpload, action: ConnectorAction | undefined = X_ACTIONS[job.request.actionId]): Promise<{
+export async function executeDurableXUpload(env: Env, job: XExecutingUpload): Promise<{
   status: "completed" | "failed" | "blocked"; receipt: string; result?: { summary: string; url?: string };
 }> {
   const { request, payload } = job;
+  const action = request.nornPerformRef ? actionExecutor(request.providerId, request.actionId) : X_ACTIONS[request.actionId];
   if (!action) return { status: "blocked", receipt: `${request.providerId} ${request.actionId}: blocked; the action is no longer available.` };
   let result: { summary: string; url?: string } | undefined;
   const receipt = await runAction(request.providerId, { env, channelId: request.channelId,
@@ -211,9 +234,19 @@ export async function executeDurableXUpload(env: Env, job: XExecutingUpload, act
   return { status, receipt, ...(status === "completed" && result ? { result } : {}) };
 }
 
-/** The persisted outcome is retried with one canonical append identity. */
+/**
+ * The persisted outcome is retried with one canonical append identity. A
+ * program has its answer first; its receipt in the conversation follows, and
+ * a repeat of either changes nothing.
+ */
 export async function publishDurableXUploadReceipt(env: Env, outcome: XUploadOutcome): Promise<void> {
   const { request, payload } = outcome;
+  if (request.nornPerformRef) {
+    if (!installedProgramActionOutcome) throw new Error("norn-programs.ts has not installed the program action outcome");
+    await installedProgramActionOutcome(env, { channelId: request.channelId, requestRef: request.nornPerformRef,
+      outcome: outcome.status === "completed" ? { done: outcome.result ?? { summary: outcome.receipt } }
+        : outcome.status === "blocked" ? { blocked: outcome.receipt } : { failed: outcome.receipt } });
+  }
   await publishCommandStatus(getAppConnectorProvider(request.providerId)!, { env, channelId: request.channelId,
     actorUserId: request.requestedBy, messageId: `${payload.messageId}:upload-result`,
     // A program's action was asked for in xMatrix's own delivery message, which takes no reply: its receipt stands by itself.
