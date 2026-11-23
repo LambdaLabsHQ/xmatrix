@@ -1,10 +1,7 @@
 import { AppControlError } from "@xmatrix/db";
 import { getAppConnectorProvider } from "./app-connectors";
-import { connectorActionCatalog } from "./connectors/action-catalog";
-import { announceActionRequests, heldAuthorityFailure, stageHeldAction } from "./connectors/connector-commands";
+import { actionExecutor, announceActionRequests, heldAuthorityFailure, stageHeldAction } from "./connectors/connector-commands";
 import { connectorActionRequestRepository } from "./connectors/credentials";
-import type { ConnectorAction } from "./connectors/provider";
-import { connectorProvider } from "./connectors/registry";
 import { enqueueXUpload } from "./connectors/x-upload-executor-do";
 import { nornPreparedReply, type NornAppRequest } from "./norn-host";
 import { nornActionStatement } from "./norn-libraries";
@@ -23,12 +20,6 @@ const APPROVAL_MS = 30 * 24 * 60 * 60_000;
 /** How long the host waits to hear how a performed action ended before it reads it as lost. */
 const PERFORM_REPORT_MS = 30 * 60_000;
 
-/** The executor of one action of a connected app, as the provider installs it. */
-export function nornActionExecutor(providerId: string, actionId: string): ConnectorAction | undefined {
-  const provider = connectorProvider(providerId);
-  return provider ? connectorActionCatalog(provider.id, provider.actions).get(actionId)?.executor : undefined;
-}
-
 /**
  * How a delivery to a connected app went: the request is the host's to hear
  * about (`held`), with what to say in the conversation, or it ended at once
@@ -45,7 +36,7 @@ export async function deliverNornAppRequest(env: Env, input: { spaceId: string; 
   if (input.request.verb === "prepare") {
     const statement = nornActionStatement(app, name, input.request.action.input);
     if ("refusal" in statement) return { reply: { tag: "Broke", reason: statement.refusal } };
-    const action = nornActionExecutor(app, name);
+    const action = actionExecutor(app, name);
     if (!action) return { reply: { tag: "Broke", reason: `${label} is not an action this host runs` } };
     const staged = await stageHeldAction(env, { channelId: input.channelId, actorUserId: input.authorityUserId,
       messageId: input.deliveryMessageId, providerId: app, actionId: name, action, statement, heldFor: input.requestRef });

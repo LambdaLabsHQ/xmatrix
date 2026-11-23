@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import * as host from "../src/norn-host.ts";
 import * as libraries from "../src/norn-libraries.ts";
@@ -15,8 +17,8 @@ function fixture({ staged = { status: "pending", requestId: "action-request:1" }
   const actions = load(name => ({
     "@xmatrix/db": { AppControlError },
     "./app-connectors": { getAppConnectorProvider: id => (id === "x" ? { id: "x", name: "X" } : undefined) },
-    "./connectors/action-catalog": { connectorActionCatalog: () => new Map(known ? [["publish_video", { executor: { effect: "write" } }]] : []) },
     "./connectors/connector-commands": {
+      actionExecutor: (providerId, actionId) => (known && providerId === "x" && actionId === "publish_video" ? { effect: "write" } : undefined),
       stageHeldAction: async (_env, input) => { calls.push(["stage", input]); return staged; },
       heldAuthorityFailure: error => (error.code === "action_request_forbidden" ? "Current access no longer permits this approval; a Space admin must review it." : undefined),
       announceActionRequests: async (_env, spaceId, channelId) => { calls.push(["announce", spaceId, channelId]); },
@@ -25,7 +27,6 @@ function fixture({ staged = { status: "pending", requestId: "action-request:1" }
       claimHeld: async input => { calls.push(["claim", input]); if (claim instanceof Error) throw claim; return claim; },
       withdrawHeld: async input => { calls.push(["withdraw", input]); return ["channel", "channel"]; },
     }) },
-    "./connectors/registry": { connectorProvider: id => (id === "x" ? { id: "x", actions: {} } : undefined) },
     "./connectors/x-upload-executor-do": { enqueueXUpload: async (_env, ref) => { calls.push(["queue", ref]); } },
     "./norn-host": host, "./norn-libraries": libraries,
   })[name]);
@@ -85,4 +86,17 @@ test("withdrawing what programs no longer ask tells each conversation's admins o
   const f = fixture();
   await f.actions.withdrawNornAppRequests({}, { spaceId: "space", prepareRefs: ["r1", "r2"], ended: true });
   assert.deepEqual(f.calls, [["withdraw", { spaceId: "space", prepareRefs: ["r1", "r2"], approved: true }], ["announce", "space", "channel"]]);
+});
+
+// The connector's command runner is loaded by the registry's providers while they are built, so nothing it imports
+// may lead back to the registry: a provider would then be built from a module that has not run yet. Each of these
+// is where a Worker, a Durable Object or a test starts loading from.
+test("the Norn host and the connectors load in any order", () => {
+  for (const entry of ["connectors/connector-commands.ts", "connectors/x-upload-executor-do.ts", "connectors/registry.ts",
+    "connectors/platform-providers.ts", "norn-actions.ts", "norn-programs.ts", "index-routes-connector-approvals.ts"]) {
+    const loaded = spawnSync(process.execPath, ["--import", "tsx", "--import", "./test/support/platform-preload.mjs", "--input-type=module",
+      "-e", `await import(${JSON.stringify(new URL(`../src/${entry}`, import.meta.url).href)});`],
+    { cwd: fileURLToPath(new URL("..", import.meta.url)), encoding: "utf8" });
+    assert.equal(loaded.status, 0, `${entry} does not load by itself:\n${loaded.stderr.split("\n").slice(0, 6).join("\n")}`);
+  }
 });
