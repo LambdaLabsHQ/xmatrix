@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: Pages read only the Agent details they display
+
+Page links and tree activity fetched full Agent Instance catalogs and then discarded resting Instances. They now read just the display fields of active Instances. Discussion summaries need only message previews and read positions. Page links check access on the linked pages and their ancestors. In the November 21–22 production baseline, the replaced reads returned about 1 GB per day from PostgreSQL across those endpoints. Hub and DB code without a schema migration. Recovery is a CI-validated Hub beta reverting the change.
+
 ## Unreleased: one page's access check reads its ancestors, not every page of the Space
 
 Every page request (a read, a section update, a conversation's edits) checked access by reading a row for every page in the Space, about 22 KB for a Space of 240 pages, some 35,000 times a day. Access is inherited from ancestors alone, so a check for named pages now reads those pages and their ancestor chain (`page_chain_access_v1`, a recursive read by primary key) and resolves access over that chain exactly as before; reads that need every readable page (the tree, search, link lists) keep `page_tree_access_v3`. A Space past the page limit no longer refuses a single page's read. Recovery is reverting the change.

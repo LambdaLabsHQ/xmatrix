@@ -1,10 +1,9 @@
 import type { QueryResultRow } from "pg";
 import type { PageConversation } from "@xmatrix/protocol";
-import { isLiveAgentStatus } from "@xmatrix/protocol";
 import type { DatabaseTransaction } from "./contracts.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import type { ChannelHeadMessage } from "./channel-catalog.js";
-import { loadChannelAgentPresence } from "./channel-agent-presence.js";
+import { loadPageLiveAgents } from "./channel-agent-presence.js";
 import { messagePreviewColumnsSql, readMessagePreview } from "./message-preview.js";
 import { PageControlError } from "./page-control.js";
 
@@ -44,7 +43,7 @@ function iso(value: string | Date): string {
  * page's links come with them in one (`PostgresPageRepository.links`).
  */
 export async function describePageConversations(tx: DatabaseTransaction, spaceId: string, userId: string,
-  ids: readonly string[]): Promise<PageConversationRecord[]> {
+  ids: readonly string[], { includeAgents = true }: { includeAgents?: boolean } = {}): Promise<PageConversationRecord[]> {
   const conversationIds = [...new Set(ids)];
   if (conversationIds.length > MAX_PAGE_CONVERSATIONS ||
       conversationIds.some((id) => typeof id !== "string" || !id || id.length > 300)) {
@@ -72,20 +71,9 @@ export async function describePageConversations(tx: DatabaseTransaction, spaceId
     values: [spaceId, conversationIds, userId],
     maxRows: MAX_PAGE_CONVERSATIONS,
   });
-  const presence = await loadChannelAgentPresence(tx, spaceId, rows.map((row) => row.channel_id));
+  const agentsByChannel = includeAgents
+    ? await loadPageLiveAgents(tx, spaceId, rows.map((row) => row.channel_id)) : undefined;
   return rows.map((row): PageConversationRecord => {
-    const agents = Object.values(presence.get(row.channel_id) ?? {}).flatMap((member) => {
-      // A sleeping Instance is not working on anything; only live ones are shown.
-      if (member.kind !== "agent") return [];
-      return (member.instances ?? []).flatMap((instance) => {
-        if (!isLiveAgentStatus(instance.status)) return [];
-        return [{
-          instanceId: instance.id, name: instance.label || member.label || "Agent",
-          status: instance.status,
-          ...(member.registration?.harness ? { harness: member.registration.harness } : {}),
-        }];
-      });
-    });
     return {
       conversationId: row.channel_id,
       name: row.name,
@@ -93,7 +81,7 @@ export async function describePageConversations(tx: DatabaseTransaction, spaceId
         ? row.sent_at : row.activity_at),
       headSequence: Number(row.timeline_sequence ?? 0),
       readSequence: Number(row.read_sequence ?? 0),
-      agents,
+      agents: agentsByChannel?.get(row.channel_id)?.map(({ connectedAt: _connectedAt, ...agent }) => agent) ?? [],
       head: row.message_id ? {
         messageId: row.message_id,
         sequence: Number(row.timeline_sequence),

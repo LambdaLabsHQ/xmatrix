@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, pageTitleLine, utf8ByteLength } from "@xmatrix/protocol";
+import { LIVE_AGENT_STATUS_SQL, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, pageTitleLine, utf8ByteLength } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import { spaceBilling } from "@xmatrix/billing";
 import { readsOnly } from "./space-roles.js";
@@ -9,7 +9,7 @@ import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { singleReadStatements } from "./single-read-statements.js";
 import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 import { channelCapabilityPredicate, requireChannelCapability } from "./channel-capability-policy.js";
-import { loadChannelAgentPresence } from "./channel-agent-presence.js";
+import { loadPageLiveAgents } from "./channel-agent-presence.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
 import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
@@ -380,23 +380,21 @@ type TreeDetail = "all" | readonly string[];
 
 /**
  * Every page in the Space with the actor's effective access, parents first.
- * `scope: "chains"` reads only the detailed pages and their ancestors: access
- * is inherited from ancestors alone, so a read of one page needs no other
- * row, and a Space of hundreds of pages no longer sends them all on every
- * page request.
+ * `chainIds` restricts the read to those pages and their ancestors. Details
+ * such as title and summary are only needed by readers that display them.
  */
 async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor,
-  detail: TreeDetail = "all", scope: "space" | "chains" = "space"): Promise<TreeRow[]> {
-  const chains = scope === "chains" && detail !== "all";
+  detail: TreeDetail = "all", chainIds?: readonly string[]): Promise<TreeRow[]> {
+  if (chainIds?.length === 0) return [];
   // One statement: each page with the actor's own grant on it and whether it is the Space's governance page.
   // Every page request checks access through here, so its round trips and bytes are paid on every one.
   const detailed = (expression: string) =>
     `CASE WHEN $3::text[] IS NULL OR p.page_id=ANY($3::text[]) THEN ${expression} END`;
   const rows = await tx.query<PageRow & { actor_access: "read" | "edit" | null; is_governance: boolean }>({
-    name: chains ? "page_chain_access_v1" : "page_tree_access_v3",
-    text: `${chains ? `WITH RECURSIVE chain AS (
+    name: chainIds ? "page_chain_access_v2" : "page_tree_access_v3",
+    text: `${chainIds ? `WITH RECURSIVE chain AS (
         SELECT page.page_id,page.parent_page_id FROM data.pages page
-        WHERE page.space_id=$1 AND page.page_id=ANY($3::text[])
+        WHERE page.space_id=$1 AND page.page_id=ANY($4::text[])
         UNION
         SELECT parent.page_id,parent.parent_page_id FROM chain
         JOIN data.pages parent ON parent.space_id=$1 AND parent.page_id=chain.parent_page_id
@@ -412,10 +410,11 @@ async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: A
         COALESCE(p.page_id=(SELECT s.metadata_json->>'governancePageId' FROM data.spaces s WHERE s.space_id=$1),
           false) AS is_governance
       FROM data.pages p
-      WHERE p.space_id=$1${chains ? " AND p.page_id IN (SELECT chain.page_id FROM chain)" : ""}
+      WHERE p.space_id=$1${chainIds ? " AND p.page_id IN (SELECT chain.page_id FROM chain)" : ""}
       ORDER BY p.parent_page_id NULLS FIRST, p.position, p.page_id
       LIMIT ${MAX_PAGES + 1}`,
-    values: [spaceId, actor.userId, detail === "all" ? null : [...detail]], maxRows: MAX_PAGES + 1,
+    values: [spaceId, actor.userId, detail === "all" ? null : detail, ...(chainIds ? [chainIds] : [])],
+    maxRows: MAX_PAGES + 1,
   });
   if (rows.length > MAX_PAGES) throw new PageControlError("page_tree_too_large", 409);
   const byId = new Map(rows.map((row) => [row.page_id, row]));
@@ -475,13 +474,13 @@ export class PostgresPageRepository {
   }
 
   private accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor,
-    detail: TreeDetail = "all", scope: "space" | "chains" = "space"): Promise<TreeRow[]> {
-    return accessibleTree(tx, spaceId, actor, detail, scope);
+    detail: TreeDetail = "all", chainIds?: readonly string[]): Promise<TreeRow[]> {
+    return accessibleTree(tx, spaceId, actor, detail, chainIds);
   }
 
   private async page(tx: DatabaseTransaction, spaceId: string, actor: Actor, pageId: string,
     need: "read" | "edit"): Promise<TreeRow> {
-    const tree = await this.accessibleTree(tx, spaceId, actor, [pageId], "chains");
+    const tree = await this.accessibleTree(tx, spaceId, actor, [pageId], [pageId]);
     const row = tree.find((item) => item.page_id === pageId);
     if (!row) throw new PageControlError("page_not_found", 404);
     if (need === "edit" && !row.canEdit) throw new PageControlError("page_edit_forbidden", 403);
@@ -563,7 +562,8 @@ export class PostgresPageRepository {
       const edited = new Set((await linkRows(tx, spaceId, null, input.conversationId))
         .filter((link) => link.source === "edit").map((link) => link.page_id));
       if (edited.size === 0) return { spaceId, edits: [] };
-      const tree = new Map((await this.accessibleTree(tx, spaceId, actor, [...edited], "chains"))
+      const editedIds = [...edited];
+      const tree = new Map((await this.accessibleTree(tx, spaceId, actor, editedIds, editedIds))
         .filter((row) => edited.has(row.page_id)).map((row) => [row.page_id, row]));
       if (tree.size === 0) return { spaceId, edits: [] };
       const rows = await tx.query<QueryResultRow & { message_id: string; page_id: string; revision: string;
@@ -1856,8 +1856,10 @@ export class PostgresPageRepository {
     }
     return this.readInSpace(bounded(input.requestId, "requestId"), "page.links", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
-      const readable = new Set((await this.accessibleTree(tx, spaceId, actor, [])).map((row) => row.page_id));
-      if (input.pageId && !readable.has(input.pageId)) throw new PageControlError("page_not_found", 404);
+      if (input.pageId) {
+        const access = await this.accessibleTree(tx, spaceId, actor, [], [input.pageId]);
+        if (!access.some((row) => row.page_id === input.pageId)) throw new PageControlError("page_not_found", 404);
+      }
       if (input.conversationId) {
         await requireChannelCapability(tx, { capability: "message_content_read",
           channelId: bounded(input.conversationId, "conversationId"), spaceId,
@@ -1865,6 +1867,9 @@ export class PostgresPageRepository {
           error: (failure) => new PageControlError(failure.code, failure.status) });
       }
       const rows = await linkRows(tx, spaceId, input.pageId ?? null, input.conversationId ?? null);
+      const pageIds = [...new Set(rows.map((row) => row.page_id))];
+      const readable = new Set(input.pageId ? [input.pageId]
+        : (await this.accessibleTree(tx, spaceId, actor, [], pageIds)).map((row) => row.page_id));
       // A link grants nothing: only links whose page this reader may open are
       // returned, and for a page listing only conversations the reader may open.
       const visible = new Set(input.pageId ? (await tx.query<QueryResultRow & { channel_id: string }>({
@@ -1937,25 +1942,17 @@ export class PostgresPageRepository {
         discussionsOf.set(row.page_id, [...(discussionsOf.get(row.page_id) ?? []), row.conversation_id]);
       }
       const visible = rows.filter((row) => readable.has(row.page_id));
-      const presence = await loadChannelAgentPresence(tx, spaceId, visible.map((row) => row.conversation_id));
+      const presence = await loadPageLiveAgents(tx, spaceId, visible.map((row) => row.conversation_id));
       const byPage = new Map<string, PageTreeAgent[]>();
       for (const row of visible) {
         const seenAt = Date.parse(iso(row.last_seen_at));
-        for (const member of Object.values(presence.get(row.conversation_id) ?? {})) {
-          if (member.kind !== "agent") continue;
-          for (const instance of member.instances ?? []) {
-            // A sleeping Instance is not on the page; an earlier Run in the
-            // same conversation read the page, not this one.
-            const status = instance.status;
-            if (!isLiveAgentStatus(status) || Date.parse(instance.connectedAt) > seenAt) continue;
-            const agents = byPage.get(row.page_id) ?? [];
-            agents.push({ instanceId: instance.id, name: instance.label || member.label || "Agent",
-              status,
-              ...(member.registration?.harness ? { harness: member.registration.harness } : {}),
-              conversationId: row.conversation_id, activity: row.source === "edit" ? "editing" : "viewing",
-              blockId: row.block_id });
-            byPage.set(row.page_id, agents);
-          }
+        for (const { connectedAt, ...agent } of presence.get(row.conversation_id) ?? []) {
+          // An earlier Run in the same conversation may have read the page.
+          if (Date.parse(connectedAt) > seenAt) continue;
+          const agents = byPage.get(row.page_id) ?? [];
+          agents.push({ ...agent, conversationId: row.conversation_id,
+            activity: row.source === "edit" ? "editing" : "viewing", blockId: row.block_id });
+          byPage.set(row.page_id, agents);
         }
       }
       // The section an Agent is in, by its heading, read from the page's head.
