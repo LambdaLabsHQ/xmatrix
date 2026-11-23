@@ -196,15 +196,19 @@ test.describe("mock-auth app fixture", () => {
   test.describe("iOS app", () => {
     test.use({ viewport: { width: 430, height: 932 }, deviceScaleFactor: 3 });
 
-    test("composer is a taller capsule concentric with the device corners", async ({ page }, testInfo) => {
+    async function openIosNativeDockChannel(page: Page, afterFixtures?: () => Promise<void>) {
       await installMockAppFixtures(page);
+      if (afterFixtures) await afterFixtures();
       await page.goto("/app/fixture-space/channels/launch");
       await expect(page.locator(".app-message-timeline").getByText("Mobile list pass is ready for screenshot review.")).toBeVisible();
       await page.locator(".xmatrix-app-shell:not([aria-busy])").evaluate((shell) => {
         shell.classList.add("xmatrix-app-native-dock");
       });
+      return page.locator(".app-composer-box:not(.app-agent-work-card)").first();
+    }
 
-      const composerBox = page.locator(".app-composer-box:not(.app-agent-work-card)").first();
+    test("composer is a taller capsule concentric with the device corners", async ({ page }, testInfo) => {
+      const composerBox = await openIosNativeDockChannel(page);
       // null = a build that does not report the radius yet; 0 = square corners.
       for (const [displayRadius, margin] of [[null, 27], [62, 34], [55, 27], [0, 12]] as const) {
         await page.evaluate((radius) => {
@@ -230,6 +234,128 @@ test.describe("mock-auth app fixture", () => {
           await testInfo.attach("ios-composer-concentric", { path, contentType: "image/png" });
         }
       }
+    });
+
+    test("attach morphs the single composer capsule upward and streams native picked files", async ({ page }, testInfo) => {
+      const sampleBytes = Buffer.from("native-ios-attachment-payload");
+      await page.addInitScript((encoded) => {
+        const pickedSources: string[] = [];
+        const releasedTokens: string[] = [];
+        const raw = atob(encoded);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+        const toBase64 = (slice: Uint8Array) => {
+          let binary = "";
+          for (const byte of slice) binary += String.fromCharCode(byte);
+          return btoa(binary);
+        };
+        (window as unknown as Record<string, unknown>).__nativeAttachLog = { pickedSources, releasedTokens };
+        (window as unknown as Record<string, unknown>).xmatrixDesktop = {
+          client: "ios",
+          platform: "ios",
+          getContext: async () => ({ client: "ios", platform: "ios", version: "1.0.0", isPackaged: true, startUrl: "https://xmatrix.sh/app" }),
+          setBadge: async () => {},
+          setTitle: async () => {},
+          notify: async () => true,
+          openExternal: async () => {},
+          checkCliInstalled: async () => ({ installed: false }),
+          openCliInstall: async () => {},
+          checkForUpdates: async () => {},
+          setMobileTabState: async () => {},
+          pickAttachments: async ({ source }: { source: string }) => {
+            pickedSources.push(source);
+            return [{ token: "ios-tok-1", name: "notes.txt", mimeType: "text/plain", size: bytes.length }];
+          },
+          readPickedAttachmentChunk: async ({ offset, length }: { token: string; offset: number; length: number }) => {
+            const slice = bytes.subarray(offset, offset + Math.min(length, 10));
+            return {
+              dataBase64: toBase64(slice),
+              bytesRead: slice.length,
+              eof: offset + slice.length >= bytes.length,
+            };
+          },
+          releasePickedAttachment: async ({ token }: { token: string }) => {
+            releasedTokens.push(token);
+          },
+        };
+      }, sampleBytes.toString("base64"));
+
+      const composerBox = await openIosNativeDockChannel(page, async () => {
+        await fixtureRule(page, {
+          id: "r2-uploads",
+          pattern: "**/api/xmatrix/relay-v2/private-r2/uploads/*/scope/*",
+          responder: { kind: "r2Upload", attachmentId: "att-native-1" },
+        });
+      });
+
+      const attachButton = composerBox.getByRole("button", { name: "Attach file" });
+      await expect(attachButton).toBeVisible();
+      const restingBox = await composerBox.boundingBox();
+      expect(restingBox).toBeTruthy();
+
+      await attachButton.click();
+      const menu = composerBox.getByTestId("composer-attachment-panel");
+      await expect(menu).toBeVisible();
+      await expect(page.locator(".app-composer-box-morphing")).toHaveCount(0);
+
+      // The menu lives inside the same single glass box (no nested glass), grows
+      // upward while keeping the bottom edge pinned, and aligns every icon column
+      // directly over the paperclip trigger.
+      const geometry = await page.evaluate(() => {
+        const box = document.querySelector<HTMLElement>(".app-composer-box:not(.app-agent-work-card)")!;
+        const trigger = box.querySelector<HTMLElement>(".composer-attach .app-composer-inline-icon")!;
+        const options = Array.from(box.querySelectorAll<HTMLElement>(".app-composer-attach-option"));
+        const iconCenters = options.map((option) => {
+          const icon = option.querySelector<HTMLElement>(".app-composer-attach-option-icon")!;
+          const rect = icon.getBoundingClientRect();
+          return rect.left + rect.width / 2;
+        });
+        const triggerRect = trigger.getBoundingClientRect();
+        return {
+          boxRect: box.getBoundingClientRect(),
+          triggerCenter: triggerRect.left + triggerRect.width / 2,
+          iconCenters,
+          optionBackdrops: options.map((option) => getComputedStyle(option).backdropFilter),
+        };
+      });
+      expect(geometry.boxRect.height).toBeGreaterThan(restingBox!.height + 100);
+      expect(geometry.boxRect.bottom).toBeCloseTo(restingBox!.y + restingBox!.height, 0);
+      for (const center of geometry.iconCenters) {
+        expect(Math.abs(center - geometry.triggerCenter)).toBeLessThan(1);
+      }
+      for (const backdrop of geometry.optionBackdrops) {
+        expect(backdrop).toBe("none");
+      }
+
+      const openShot = testInfo.outputPath("ios-composer-attach-morph.png");
+      await page.screenshot({ path: openShot, fullPage: false });
+      await testInfo.attach("ios-composer-attach-morph", { path: openShot, contentType: "image/png" });
+
+      // Tapping outside dismisses the morphed panel back to resting height.
+      await page.locator(".app-message-timeline").click({ position: { x: 200, y: 200 } });
+      await expect(menu).toHaveCount(0);
+      await expect(page.locator(".app-composer-box-morphing")).toHaveCount(0);
+      await expect.poll(async () => (await composerBox.boundingBox())?.height ?? 0)
+        .toBeCloseTo(restingBox!.height, 0);
+
+      // Re-open and pick Choose Files: panel closes, native picker streams chunks,
+      // temp token is released, and the file uploads through the normal intake path.
+      await attachButton.click();
+      await expect(menu).toBeVisible();
+      await menu.getByRole("menuitem", { name: "Choose Files" }).click();
+      await expect(menu).toHaveCount(0);
+      await expect(composerBox.getByText("notes.txt")).toBeVisible();
+
+      const nativeLog = await page.evaluate(() =>
+        (window as unknown as Record<string, unknown>).__nativeAttachLog as {
+          pickedSources: string[];
+          releasedTokens: string[];
+        }
+      );
+      expect(nativeLog).toEqual({
+        pickedSources: ["files"],
+        releasedTokens: ["ios-tok-1"],
+      });
     });
   });
 

@@ -569,4 +569,67 @@ final class WebContainerTests: XCTestCase {
             XCTAssertFalse(AppSignIn.isHubSignInStart(URL(string: page)!), page)
         }
     }
+
+    func testAttachmentStagingStoreReadsBoundedChunksAndCleansUpOnRelease() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xmatrix-staging-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        var clock = Date(timeIntervalSince1970: 1_700_000_000)
+        let store = AttachmentStagingStore(rootDirectory: root, now: { clock })
+        let payload = Data("hello-native-attachment-chunked-stream".utf8)
+        let staged = try store.stage(data: payload, name: "../clip.mp4", mimeType: "video/mp4")
+
+        XCTAssertEqual(staged.name, "clip.mp4")
+        XCTAssertEqual(staged.mimeType, "video/mp4")
+        XCTAssertEqual(staged.size, Int64(payload.count))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.fileURL.path))
+
+        var collected = Data()
+        var offset: Int64 = 0
+        var reads = 0
+        while true {
+            let chunk = try store.readChunk(token: staged.token, offset: offset, length: 10)
+            let base64 = try XCTUnwrap(chunk["dataBase64"] as? String)
+            let bytesRead = try XCTUnwrap(chunk["bytesRead"] as? Int)
+            let eof = try XCTUnwrap(chunk["eof"] as? Bool)
+            let decoded = try XCTUnwrap(Data(base64Encoded: base64))
+            XCTAssertEqual(decoded.count, bytesRead)
+            collected.append(decoded)
+            offset += Int64(bytesRead)
+            reads += 1
+            if eof { break }
+        }
+        XCTAssertEqual(collected, payload)
+        XCTAssertGreaterThan(reads, 1)
+
+        // Invalid range is rejected.
+        XCTAssertThrowsError(try store.readChunk(token: staged.token, offset: -1, length: 10))
+        XCTAssertThrowsError(try store.readChunk(token: staged.token, offset: 0, length: 0))
+
+        // Release deletes the staged file and invalidates the token.
+        store.release(token: staged.token)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.fileURL.path))
+        XCTAssertThrowsError(try store.readChunk(token: staged.token, offset: 0, length: 10))
+
+        // Expired entries are pruned once TTL passes.
+        let expiring = try store.stage(data: Data("temp".utf8), name: "note.txt", mimeType: "text/plain")
+        clock = clock.addingTimeInterval(AttachmentStagingStore.entryTTL + 1)
+        XCTAssertEqual(store.count, 0)
+        XCTAssertThrowsError(try store.readChunk(token: expiring.token, offset: 0, length: 4))
+    }
+
+    func testAttachmentPickerPrefersMovieTypesAndSanitizesNames() {
+        XCTAssertEqual(
+            NativeAttachmentPicker.preferredTypeIdentifier(for: ["public.jpeg", "public.mpeg-4"]),
+            "public.mpeg-4"
+        )
+        XCTAssertEqual(
+            NativeAttachmentPicker.preferredTypeIdentifier(for: ["public.plain-text", "public.png"]),
+            "public.png"
+        )
+        XCTAssertEqual(AttachmentStagingStore.sanitizedFilename("  ../photo  ", fallbackExtension: "jpg"), "photo.jpg")
+        XCTAssertEqual(AttachmentStagingStore.sanitizedFilename("..", fallbackExtension: "png"), "attachment.png")
+        XCTAssertEqual(AttachmentStagingStore.resolvedMimeType(explicit: nil, filename: "clip.mp4"), "video/mp4")
+    }
 }

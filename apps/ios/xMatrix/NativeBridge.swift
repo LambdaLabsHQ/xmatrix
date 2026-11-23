@@ -6,6 +6,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
     weak var webView: WKWebView?
     private let subscriptions = AppleSubscriptions()
     @MainActor private var signInFlow: AppSignIn?
+    @MainActor private var attachmentPickerFlow: NativeAttachmentPicker?
     var onMobileTabStateChanged: ((MobileTabState) -> Void)?
     var onOpenURL: ((URL) -> Void)?
     private static let notificationURLKey = "xmatrix.url"
@@ -82,6 +83,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         authorizeInBrowser: (request) => invoke("authorizeInBrowser", request),
         signInWithApple: (request) => invoke("signInWithApple", request),
         getClipboardImages: () => invoke("getClipboardImages"),
+        pickAttachments: (input) => invoke("pickAttachments", input),
+        readPickedAttachmentChunk: (input) => invoke("readPickedAttachmentChunk", input),
+        releasePickedAttachment: (input) => invoke("releasePickedAttachment", input),
         checkCliInstalled: () => invoke("checkCliInstalled"),
         openCliInstall: () => invoke("openCliInstall"),
         setMobileTabState: (state) => invoke("setMobileTabState", state),
@@ -226,6 +230,31 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case "getClipboardImages":
             return clipboardImages()
 
+        case "pickAttachments":
+            guard
+                let rawSource = payload?["source"] as? String,
+                let source = AttachmentPickerSource(rawValue: rawSource)
+            else {
+                throw NSError(
+                    domain: "sh.xmatrix.app",
+                    code: 400,
+                    userInfo: [NSLocalizedDescriptionKey: "Unsupported attachment source."]
+                )
+            }
+            return try await attachmentPicker().pick(source: source)
+
+        case "readPickedAttachmentChunk":
+            let token = payload?["token"] as? String ?? ""
+            let offset = int64Value(payload?["offset"])
+            let length = intValue(payload?["length"])
+            return try attachmentPicker().store.readChunk(token: token, offset: offset, length: length)
+
+        case "releasePickedAttachment":
+            if let token = payload?["token"] as? String, !token.isEmpty {
+                attachmentPicker().store.release(token: token)
+            }
+            return NSNull()
+
         case "checkCliInstalled":
             return ["installed": false]
 
@@ -253,6 +282,14 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         signInFlow = flow
         flow.anchorView = webView
         return flow
+    }
+
+    @MainActor
+    private func attachmentPicker() -> NativeAttachmentPicker {
+        let picker = attachmentPickerFlow ?? NativeAttachmentPicker()
+        attachmentPickerFlow = picker
+        picker.anchorView = webView
+        return picker
     }
 
     @MainActor
@@ -505,6 +542,25 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             return value.intValue
         }
         if let value = value as? String, let parsed = Int(value) {
+            return parsed
+        }
+        return 0
+    }
+
+    private func int64Value(_ value: Any?) -> Int64 {
+        if let value = value as? Int64 {
+            return value
+        }
+        if let value = value as? Int {
+            return Int64(value)
+        }
+        if let value = value as? Double {
+            return Int64(value)
+        }
+        if let value = value as? NSNumber {
+            return value.int64Value
+        }
+        if let value = value as? String, let parsed = Int64(value) {
             return parsed
         }
         return 0

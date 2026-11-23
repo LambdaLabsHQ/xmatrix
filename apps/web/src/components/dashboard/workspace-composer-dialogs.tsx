@@ -133,6 +133,12 @@ import {
 import type { ComposerField, ComposerKeyEvent } from "@/components/dashboard/composer-editor";
 import { inputHistoryKey, readInputHistory, rememberInput, type ComposerInputHistoryEntry } from "./composer-input-history";
 import { ComposerInputHistoryPanel } from "./composer-input-history-panel";
+import { ComposerAttachmentPanel } from "./composer-attachment-panel";
+import {
+  attachmentPanelKey,
+  loadNativePickedAttachments,
+} from "./composer-attachment-picker";
+import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { isImeKeyDown } from "@/lib/ime-keydown";
 import { useAuth } from "@/lib/auth-context";
 
@@ -171,6 +177,7 @@ import {
 import {
   getDesktopBridge,
   type DesktopClipboardImage,
+  type NativeAttachmentPickerSource,
 } from "@/lib/desktop/bridge";
 
 import { xmatrixApiRequest, xmatrixRawResponse } from "@/lib/query/api-client";
@@ -419,6 +426,9 @@ export const Composer = memo(function Composer({
     onDraftChange(value, invocationDraftRef.current);
   };
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [attachmentMenuActive, setAttachmentMenuActive] = useState<number | null>(null);
+  const attachmentMenuId = useId();
+  const attachmentMenuOpen = attachmentMenuActive !== null && attachmentsEnabled && writable;
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [openComposerImageId, setOpenComposerImageId] = useState<string | null>(null);
   // Draft images open out of their cards here and return into them.
@@ -485,6 +495,26 @@ export const Composer = memo(function Composer({
     setOpenComposerImageId(null);
     return true;
   });
+  useSystemBackHandler(attachmentMenuOpen, () => {
+    setAttachmentMenuActive(null);
+    return true;
+  });
+
+  useEffect(() => {
+    if (!attachmentMenuOpen) return;
+    return listenForOverlayDismissal(
+      (event) => {
+        const target = event.target;
+        if (target instanceof Node && composerRef.current?.contains(target)) return;
+        setAttachmentMenuActive(null);
+      },
+      () => setAttachmentMenuActive(null)
+    );
+  }, [attachmentMenuOpen]);
+
+  useEffect(() => {
+    if (!attachmentsEnabled || !writable) setAttachmentMenuActive(null);
+  }, [attachmentsEnabled, writable]);
 
   useEffect(() => {
     // A removed draft image takes its preview with it.
@@ -595,6 +625,7 @@ export const Composer = memo(function Composer({
     pendingPreviewUrlsRef.current.clear();
     setPendingAttachments([]);
     setAttachmentError(null);
+    setAttachmentMenuActive(null);
   }, [composerIdentity]);
 
   useEffect(() => {
@@ -1388,6 +1419,54 @@ export const Composer = memo(function Composer({
     },
   });
 
+  function pickNativeAttachments(source: NativeAttachmentPickerSource) {
+    setAttachmentMenuActive(null);
+    const bridge = getDesktopBridge();
+    if (!bridge?.pickAttachments || !bridge?.readPickedAttachmentChunk) {
+      fileInputRef.current?.click();
+      return;
+    }
+    void beginAttachmentIntake(async () =>
+      fileCandidates(
+        await loadNativePickedAttachments(
+          bridge,
+          source,
+          MAX_ATTACHMENT_BYTES,
+          formatFileSize(MAX_ATTACHMENT_BYTES)
+        )
+      )
+    );
+  }
+
+  function handleAttachButtonClick() {
+    if (!attachmentsEnabled || !writable) return;
+    const bridge = getDesktopBridge();
+    if (bridge?.pickAttachments && bridge?.readPickedAttachmentChunk) {
+      setInputHistory(null);
+      dismissCompletion();
+      setAttachmentMenuActive((current) => (current === null ? -1 : null));
+      return;
+    }
+    fileInputRef.current?.click();
+  }
+
+  function composerPanelKeyDown(event: ComposerKeyEvent): boolean {
+    if (attachmentMenuOpen && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && !isImeKeyDown(event.nativeEvent)) {
+      const step = attachmentPanelKey({
+        open: true,
+        active: attachmentMenuActive ?? -1,
+        key: event.key,
+      });
+      if (step) {
+        event.preventDefault();
+        if (step.pick) pickNativeAttachments(step.pick);
+        else setAttachmentMenuActive(step.active);
+        return true;
+      }
+    }
+    return inputHistoryKeyDown(event);
+  }
+
   function focusComposerTextareaFromPointer(event: ReactPointerEvent<HTMLElement>) {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -1474,6 +1553,7 @@ export const Composer = memo(function Composer({
             if (value.length > 0) {
               clearEmptyPasteAnchor();
             }
+            if (attachmentMenuOpen) setAttachmentMenuActive(null);
             changeDraftFromField(value);
             syncCursor(field);
           }}
@@ -1519,11 +1599,19 @@ export const Composer = memo(function Composer({
           onFieldPaste={(event, field) => {
             void addPastedImages(event, field);
           }}
-          panel={inputHistory && (
+          panel={attachmentMenuOpen ? (
+            <ComposerAttachmentPanel
+              id={attachmentMenuId}
+              active={attachmentMenuActive ?? -1}
+              disabled={!attachmentsEnabled || intakeBusy}
+              onSelect={pickNativeAttachments}
+            />
+          ) : inputHistory ? (
             <ComposerInputHistoryPanel entries={inputHistory.entries} active={inputHistory.active}
               onPick={putInputHistoryEntry} />
-          )}
-          onKeyDownFirst={inputHistoryKeyDown}
+          ) : null}
+          panelKey={attachmentMenuOpen ? "attach" : inputHistory ? "history" : "closed"}
+          onKeyDownFirst={composerPanelKeyDown}
           onKeyDownExtra={(event) => {
             if (
               (event.key === "Backspace" || event.key === "Delete") &&
@@ -1540,7 +1628,11 @@ export const Composer = memo(function Composer({
                 label="Attach file"
                 icon={Paperclip}
                 disabled={!attachmentsEnabled}
-                onClick={() => fileInputRef.current?.click()}
+                active={attachmentMenuOpen}
+                ariaExpanded={attachmentMenuOpen ? true : undefined}
+                ariaControls={attachmentMenuOpen ? attachmentMenuId : undefined}
+                preserveFocus
+                onClick={handleAttachButtonClick}
               />
             </div>
           }
@@ -1611,20 +1703,35 @@ export function ComposerIcon({
   label,
   icon: Icon,
   disabled,
+  active,
+  ariaExpanded,
+  ariaControls,
+  preserveFocus,
   onClick,
 }: {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   disabled?: boolean;
+  active?: boolean;
+  ariaExpanded?: boolean;
+  ariaControls?: string;
+  preserveFocus?: boolean;
   onClick?: () => void;
 }) {
   return (
     <button
       type="button"
       title={label}
+      aria-label={label}
+      aria-expanded={ariaExpanded}
+      aria-controls={ariaControls}
       disabled={disabled}
+      onMouseDown={preserveFocus ? (event) => event.preventDefault() : undefined}
       onClick={onClick}
-      className="composer-icon app-composer-inline-icon flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+      className={cn(
+        "composer-icon app-composer-inline-icon flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
+        active && "app-composer-inline-icon-active text-foreground"
+      )}
     >
       <Icon className="size-[18px] stroke-[1.75]" />
     </button>

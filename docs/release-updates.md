@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: iOS composer attachment menu morphs in place and opens native pickers directly
+
+Tapping the paperclip button in the iOS app previously clicked a hidden `<input type="file" multiple>`, triggering WebKit's `WKFileUploadPanel` popover: with the keyboard open it stayed anchored mid-screen after the composer dropped to the bottom, and with the keyboard closed it morphed as a separate circular glass popup overlapping the composer pill. `ComposerInputAuthority` now runs its single-surface glass height morph for external panels (`ComposerAttachmentPanel` and `ComposerInputHistoryPanel`) as well as completion overlays, and on iOS shells exposing `pickAttachments` / `readPickedAttachmentChunk` / `releasePickedAttachment` the composer capsule itself morphs upward to show Photo Library, Take Photo or Video, and Choose Files aligned directly over the paperclip column. Selecting a source opens `PHPickerViewController`, `UIImagePickerController(.camera)`, or `UIDocumentPickerViewController` directly and streams picked files back in bounded 2 MiB chunks with automatic staged-file cleanup. Desktop, mobile Safari, and older iOS builds without the bridge fall back to the existing `<input type="file">`. Web and iOS. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: registration lists read the settings they display
 
 The Agents catalog previously transferred launch instructions and workspace and capability grants even though it only uses model settings and model grants. It now selects the fields the catalog needs, and picks the newest model and parameter observations from one pass over each registration's recent Instances. Models and parameters retain their own observation times and ordering. Detailed configuration and launch admission continue to read their authority records. Hub and DB code without a schema migration. Recovery is a CI-validated Hub beta reverting the change.

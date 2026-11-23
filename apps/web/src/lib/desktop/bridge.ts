@@ -68,6 +68,21 @@ export type ApplePurchaseTransaction = {
   environment: "Production" | "Sandbox";
 };
 
+export type NativeAttachmentPickerSource = "photos" | "camera" | "files";
+
+export type NativePickedAttachment = {
+  token: string;
+  name: string;
+  mimeType: string;
+  size: number;
+};
+
+export type NativePickedAttachmentChunk = {
+  dataBase64: string;
+  bytesRead: number;
+  eof: boolean;
+};
+
 export type DesktopBridge = {
   googlePlayProducts?: (input: { subscriptionId: string }) => Promise<{ basePlanId: string; displayPrice: string }[]>;
   googlePlayPurchase?: (input: { subscriptionId: string; basePlanId: string; accountToken: string }) => Promise<{
@@ -106,6 +121,19 @@ export type DesktopBridge = {
   getClipboardImages?: () => Promise<DesktopClipboardImage[]>;
   /** Write an image onto the OS clipboard via Electron nativeImage. */
   writeClipboardImage?: (image: DesktopClipboardImage) => Promise<void>;
+  /**
+   * Opens a native attachment source directly (iOS Photos, Camera, or Files)
+   * without WebKit's intermediate file-input menu. Bytes are read in bounded
+   * chunks through `readPickedAttachmentChunk` and freed via `releasePickedAttachment`.
+   * Absent on web and older shells.
+   */
+  pickAttachments?: (input: { source: NativeAttachmentPickerSource }) => Promise<NativePickedAttachment[]>;
+  readPickedAttachmentChunk?: (input: {
+    token: string;
+    offset: number;
+    length: number;
+  }) => Promise<NativePickedAttachmentChunk>;
+  releasePickedAttachment?: (input: { token: string }) => Promise<void>;
   checkCliInstalled: () => Promise<{ installed: boolean; version?: string }>;
   saveCliSession?: (payload: DesktopCliSessionPayload) => Promise<{
     ok: boolean;
