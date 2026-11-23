@@ -191,7 +191,9 @@ async function pendingAsk(tabId) {
 /** The box's session and target, as the side panel's app gets its own: a current access token, never the refresh token. */
 async function askContext(tab) {
   const passage = await pendingAsk(tab.id);
-  const session = await panelHandlers.session({});
+  // The box shows at once with the stored session; a renewal, when one is due, follows (the box asks for "session").
+  const stored = await store.get();
+  const session = stored ? { token: stored.token, user: stored.user ?? null } : null;
   if (!session?.user) throw Object.assign(new Error("Sign in to xMatrix in the side panel first."), { code: "signed_out" });
   const { lastSpace } = await chrome.storage.local.get("lastSpace");
   return { token: session.token, user: session.user, spaceId: lastSpace?.id ?? null,
@@ -333,6 +335,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return true;
   };
   // The selection script runs in web pages: it may only hand over a passage of its own tab.
+  // The person started selecting: this wakes the worker, and renews the sign-in now if it is due, off the box's path.
+  if (message?.type === "askWarm" && sender.tab && !isExtensionPage(sender)) {
+    panelHandlers.session({}).catch(() => undefined);
+    reply({ ok: true });
+    return false;
+  }
   if (message?.type === "askPrepare" && sender.tab && !isExtensionPage(sender)) {
     return answer(setPendingAsk(sender.tab, String(message.text ?? ""),
       { title: typeof message.title === "string" ? message.title : undefined,

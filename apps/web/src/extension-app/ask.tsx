@@ -37,6 +37,8 @@ type AskContext = {
   spaceId: string | null;
   passage: { text: string; label: string; href: string };
   windowId: number | null;
+  /** The selection it was read for: a new one seeds the composer's draft afresh. */
+  round?: number;
 };
 
 type Extension = {
@@ -52,7 +54,7 @@ async function ask<T>(type: string, args?: unknown): Promise<T> {
 }
 
 /** The framing page places and hides the frame; it learns nothing else. */
-function tellFrame(message: { type: "size"; width: number; height: number } | { type: "close" }) {
+function tellFrame(message: { type: "ready" } | { type: "size"; width: number; height: number } | { type: "close" }) {
   window.parent.postMessage({ xmatrixAsk: true, ...message }, "*");
 }
 
@@ -92,6 +94,8 @@ function Surface() {
   const [problem, setProblem] = useState<string | null>(null);
   const sending = useRef(false);
   const frame = useRef<HTMLDivElement>(null);
+  const toldSize = useRef("");
+  const measureNow = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -100,17 +104,26 @@ function Surface() {
       if ((event.data as { xmatrixAsk?: unknown } | null)?.xmatrixAsk === "prepared") setRound((current) => current + 1);
     };
     window.addEventListener("message", onMessage);
+    // The page made this box before the person finished selecting; it hands the passage over once this says ready.
+    tellFrame({ type: "ready" });
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
   useEffect(() => {
+    if (round === 0) return;
     let live = true;
     sending.current = false;
     setProblem(null);
     ask<AskContext>("askContext").then((next) => {
       if (!live) return;
       markExtensionAskSurface(next.token);
-      setContext(next);
+      setContext({ ...next, round });
+      // The stored token may be near its end: a renewed one replaces it, without holding the box back.
+      void ask<{ token: string } | null>("session").then((session) => {
+        if (!live || !session?.token || session.token === next.token) return;
+        markExtensionAskSurface(session.token);
+        setContext((current) => (current ? { ...current, token: session.token } : current));
+      }).catch(() => undefined);
     }).catch((error: unknown) => {
       if (!live) return;
       // Signed out is the person's to fix, so it says so; otherwise the box has no passage to ask about, and stays away.
@@ -138,7 +151,13 @@ function Surface() {
   useLayoutEffect(() => {
     const element = frame.current;
     if (!element) return;
-    const report = () => {
+    // Measured once per burst of changes, and told only when the size changed. Not in an animation frame:
+    // Chrome pauses those in a hidden frame, and the page shows this one only once it hears its size.
+    let scheduled = false;
+    let live = true;
+    const measure = () => {
+      scheduled = false;
+      if (!live) return;
       let bottom = 0, right = 0;
       for (const node of [element, ...element.querySelectorAll("*")]) {
         const rect = node.getBoundingClientRect();
@@ -146,18 +165,36 @@ function Surface() {
         bottom = Math.max(bottom, rect.bottom);
         right = Math.max(right, rect.right);
       }
-      if (bottom > 0) tellFrame({ type: "size", width: Math.ceil(right), height: Math.ceil(bottom) });
+      const size = `${Math.ceil(right)}x${Math.ceil(bottom)}`;
+      if (bottom <= 0 || size === toldSize.current) return;
+      toldSize.current = size;
+      tellFrame({ type: "size", width: Math.ceil(right), height: Math.ceil(bottom) });
     };
-    report();
+    const report = () => {
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(measure);
+    };
+    measureNow.current = measure;
+    measure();
     const observer = new ResizeObserver(report);
     observer.observe(element);
     const mutations = new MutationObserver(report);
     mutations.observe(element, { childList: true, subtree: true, attributes: true });
     return () => {
+      live = false;
       observer.disconnect();
       mutations.disconnect();
     };
   }, []);
+
+  // A new passage is shown once it is drawn: the page shows the box on this size, even when it did not change.
+  const shownRound = context?.round;
+  useLayoutEffect(() => {
+    if (shownRound === undefined) return;
+    toldSize.current = "";
+    measureNow.current();
+  }, [shownRound]);
 
   // The composer has written the message: the quote, the question, the Agents picked in it.
   const send = async ({ body, invocationSelections }: ComposerSendSnapshot) => {
@@ -180,7 +217,6 @@ function Surface() {
         <GrantedAuthProvider token={context.token} user={context.user}>
           <ComposerStage>
             <Composer
-              key={round}
               channel={null}
               draftIdentity="extension-ask"
               instanceTargetScope="none"
@@ -192,7 +228,7 @@ function Surface() {
               localContext={null}
               isJoined
               draft={discussionHead(passage.text || passage.label, { label: passage.label, href: passage.href })}
-              draftSeedRevision={0}
+              draftSeedRevision={context.round ?? 0}
               selectedWorkspaceId={null}
               replyTarget={null}
               attachments={[]}
