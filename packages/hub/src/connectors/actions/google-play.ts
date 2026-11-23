@@ -41,6 +41,17 @@ function releaseRequest(statement: ConnectorActionStatement): Record<string, str
 const PRODUCT_ID = /^[a-z0-9][a-z0-9_.]{0,39}$/u;
 const BASE_PLAN_ID = /^[a-z0-9][a-z0-9-]{0,62}$/u;
 
+/** The `region`, `price` and `activate` fields both pricing actions share, or the reason they are wrong. */
+function pricedFields(packageName: string, fields: Record<string, unknown>): { region: string; price: string; activate?: "true" } | string {
+  if (typeof fields.region !== "string" || !/^[A-Z]{2}$/u.test(fields.region)) return "region is the two-letter region the price is for, such as US; it keeps exactly that price";
+  if (fields.activate !== undefined && typeof fields.activate !== "boolean") return "activate must be true or false";
+  try { playRequest("monetization.convertRegionPrices", { path: { packageName }, body: { price: fields.price } }); }
+  catch (error) { return error instanceof Error ? error.message : "invalid price"; }
+  const price = record(fields.price);
+  if (!/^[A-Z]{3}$/u.test(text(price.currencyCode)) || !/^[1-9]\d{0,8}$|^0$/u.test(text(price.units))) return "price needs currencyCode and units (whole currency units as text), with optional nanos";
+  return { region: fields.region, price: JSON.stringify(fields.price), ...(fields.activate ? { activate: "true" as const } : {}) };
+}
+
 /** `<package>/<subscription>/<base plan> {"period":"P1M","region":"US","price":{"currencyCode":"USD","units":"10"},"activate":true}` */
 function basePlanRequest(statement: ConnectorActionStatement): Record<string, string> | string {
   const [packageName = "", productId = "", basePlanId = "", extra] = statement.target.split("/");
@@ -51,12 +62,42 @@ function basePlanRequest(statement: ConnectorActionStatement): Record<string, st
   if (Object.keys(fields).some(key => !["period", "region", "price", "activate"].includes(key))) return "options are period, region, price, activate";
   if (typeof fields.region !== "string" || !/^[A-Z]{2}$/u.test(fields.region)) return "region is the two-letter region the price is for, such as US; it keeps exactly that price";
   if (typeof fields.period !== "string" || !/^P(?:1W|[1-9]\d?M|1Y)$/u.test(fields.period)) return "period is an ISO 8601 billing period such as P1W, P1M, P3M or P1Y";
-  if (fields.activate !== undefined && typeof fields.activate !== "boolean") return "activate must be true or false";
-  try { playRequest("monetization.convertRegionPrices", { path: { packageName }, body: { price: fields.price } }); }
-  catch (error) { return error instanceof Error ? error.message : "invalid price"; }
-  const price = record(fields.price);
-  if (!/^[A-Z]{3}$/u.test(text(price.currencyCode)) || !/^[1-9]\d{0,8}$|^0$/u.test(text(price.units))) return "price needs currencyCode and units (whole currency units as text), with optional nanos";
-  return { packageName, productId, basePlanId, period: fields.period, region: fields.region, price: JSON.stringify(fields.price), ...(fields.activate ? { activate: "true" } : {}) };
+  const priced = pricedFields(packageName, fields);
+  return typeof priced === "string" ? priced : { packageName, productId, basePlanId, period: fields.period, ...priced };
+}
+
+const PURCHASE_OPTION_ID = /^[a-z0-9][a-z0-9-]{0,62}$/u;
+const LANGUAGE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u;
+const ONE_TIME_FIELDS = ["title", "description", "language", "region", "price", "activate", "purchaseOptionId"];
+
+/** `<package>/<product> {"title":"Remove Ads","description":"…","region":"US","price":{"currencyCode":"USD","units":"2","nanos":990000000},"activate":true}` */
+function oneTimeProductRequest(statement: ConnectorActionStatement): Record<string, string> | string {
+  const [packageName = "", productId = "", extra] = statement.target.split("/");
+  const fields = jsonFields(statement.text.trim());
+  const usage = 'use <package>/<product id> {"title":"Remove Ads","description":"…","region":"US","price":{"currencyCode":"USD","units":"2","nanos":990000000},"activate":true}';
+  if (!PACKAGE_NAME.test(packageName) || !PRODUCT_ID.test(productId) || extra !== undefined || !fields) return usage;
+  if (Object.keys(fields).some(key => !ONE_TIME_FIELDS.includes(key))) return `options are ${ONE_TIME_FIELDS.join(", ")}`;
+  const title = fields.title, description = fields.description, language = fields.language ?? "en-US", purchaseOptionId = fields.purchaseOptionId ?? "buy";
+  if (typeof title !== "string" || !title.trim() || title.length > 55) return "title is the name buyers see, at most 55 characters";
+  if (typeof description !== "string" || !description.trim() || description.length > 200) return "description is what buyers see, at most 200 characters";
+  if (typeof language !== "string" || !LANGUAGE.test(language)) return "language is a BCP 47 code such as en-US";
+  if (typeof purchaseOptionId !== "string" || !PURCHASE_OPTION_ID.test(purchaseOptionId)) return "purchaseOptionId is lowercase letters, digits and hyphens";
+  const priced = pricedFields(packageName, fields);
+  return typeof priced === "string" ? priced : { packageName, productId, title, description, language, purchaseOptionId, ...priced };
+}
+
+/** Google's conversion of one price to every region it sells in; the price's own region keeps exactly that price. */
+async function regionPrices(credentials: Readonly<Record<string, string>>, packageName: string, region: string, price: Record<string, unknown>) {
+  const converted = await play(credentials, "monetization.convertRegionPrices", { path: { packageName }, body: { price } });
+  const regions = Object.values(record(converted.convertedRegionPrices)).map(record).filter(item => /^[A-Z]{2}$/u.test(text(item.regionCode)))
+    .map(item => item.regionCode === region ? { ...item, price } : item);
+  const home = regions.find(item => item.regionCode === region);
+  if (!home || text(record(record(record(converted.convertedRegionPrices)[region]).price).currencyCode) !== price.currencyCode) {
+    throw new ProviderRequestError(400, `${region} is not a region Google Play sells in with ${text(price.currencyCode)}; name the region the price is for`);
+  }
+  const version = text(record(converted.regionVersion).version), other = record(converted.convertedOtherRegionsPrice);
+  if (!regions.length || !version || !other.usdPrice || !other.eurPrice) throw new ProviderRequestError(502, "Google Play did not return converted region prices");
+  return { regions, home, version, other };
 }
 
 export const GOOGLE_PLAY_ACTIONS: Record<string, ConnectorAction> = {
@@ -132,15 +173,7 @@ export const GOOGLE_PLAY_ACTIONS: Record<string, ConnectorAction> = {
       // Google converts the one price to every region it sells in, at its current rates and local price patterns.
       // That pattern also rounds the price's own region (10.00 becomes 9.99), so that region keeps the stated price.
       const price = JSON.parse(input.price!) as Record<string, unknown>;
-      const converted = await play(credentials, "monetization.convertRegionPrices", { path: { packageName }, body: { price } });
-      const regions = Object.values(record(converted.convertedRegionPrices)).map(record).filter(region => /^[A-Z]{2}$/u.test(text(region.regionCode)))
-        .map(region => region.regionCode === input.region ? { ...region, price } : region);
-      const home = regions.find(region => region.regionCode === input.region);
-      if (!home || text(record(record(record(converted.convertedRegionPrices)[input.region!]).price).currencyCode) !== price.currencyCode) {
-        throw new ProviderRequestError(400, `${input.region} is not a region Google Play sells in with ${text(price.currencyCode)}; name the region the price is for`);
-      }
-      const version = text(record(converted.regionVersion).version), other = record(converted.convertedOtherRegionsPrice);
-      if (!regions.length || !version || !other.usdPrice || !other.eurPrice) throw new ProviderRequestError(502, "Google Play did not return converted region prices");
+      const { regions, home, version, other } = await regionPrices(credentials, packageName, input.region!, price);
       const plan = { basePlanId, autoRenewingBasePlanType: { billingPeriodDuration: input.period! },
         regionalConfigs: regions.map(region => ({ regionCode: region.regionCode, newSubscriberAvailability: true, price: region.price })),
         otherRegionsConfig: { usdPrice: other.usdPrice, eurPrice: other.eurPrice, newSubscriberAvailability: true } };
@@ -153,6 +186,33 @@ export const GOOGLE_PLAY_ACTIONS: Record<string, ConnectorAction> = {
       return { summary: `Google Play saved base plan ${basePlanId} on ${productId}: ${input.period}, ${state || "saved"}, priced in ${regions.length} regions (regions version ${version}).\n` +
         playOutput({ [text(home.regionCode)]: home.price, otherRegions: plan.otherRegionsConfig }) +
         "\nRead monetization.subscriptions.get to see every regional price." };
+    },
+  },
+  one_time_product: {
+    effect: "write", requires: ["oauthToken"], parse: oneTimeProductRequest,
+    async execute(context, input) {
+      const { credentials } = context, packageName = input.packageName!, productId = input.productId!, purchaseOptionId = input.purchaseOptionId!;
+      const path = { packageName, productId };
+      const existing = await play(credentials, "monetization.onetimeproducts.get", { path }).catch(error => {
+        if (error instanceof ProviderRequestError && error.status === 404) return undefined;
+        throw error;
+      });
+      if (existing) throw new ProviderRequestError(409, `${packageName} already has one-time product ${productId}; change it with api_plan and api_write`);
+      const price = JSON.parse(input.price!) as Record<string, unknown>;
+      const { regions, home, version, other } = await regionPrices(credentials, packageName, input.region!, price);
+      const product = { packageName, productId, listings: [{ languageCode: input.language!, title: input.title!, description: input.description! }],
+        purchaseOptions: [{ purchaseOptionId, buyOption: { legacyCompatible: true },
+          regionalPricingAndAvailabilityConfigs: regions.map(region => ({ regionCode: region.regionCode, price: region.price, availability: "AVAILABLE" })),
+          newRegionsConfig: { usdPrice: other.usdPrice, eurPrice: other.eurPrice, availability: "AVAILABLE" } }] };
+      await context.authorizeWrite?.();
+      await play(credentials, "monetization.onetimeproducts.patch", { path, query: { allowMissing: true, updateMask: "listings,purchaseOptions", "regionsVersion.version": version }, body: product });
+      const activated = input.activate ? await play(credentials, "monetization.onetimeproducts.purchaseOptions.batchUpdateStates", { path,
+        body: { requests: [{ activatePurchaseOptionRequest: { packageName, productId, purchaseOptionId } }] } }) : undefined;
+      const state = activated ? text(record((Array.isArray(activated.oneTimeProducts) ? activated.oneTimeProducts : []).map(record)
+        .flatMap(item => Array.isArray(item.purchaseOptions) ? item.purchaseOptions.map(record) : []).find(option => option.purchaseOptionId === purchaseOptionId)).state) : "DRAFT";
+      return { summary: `Google Play saved one-time product ${productId} (purchase option ${purchaseOptionId}): ${state || "saved"}, priced in ${regions.length} regions (regions version ${version}).\n` +
+        playOutput({ [text(home.regionCode)]: home.price, newRegions: product.purchaseOptions[0]!.newRegionsConfig }) +
+        "\nRead monetization.onetimeproducts.get to see every regional price." };
     },
   },
   release: {
