@@ -330,22 +330,30 @@ test.describe("mock-auth app fixture", () => {
         mo.observe(surface, { attributes: true, attributeFilter: ["style"] });
 
         const trigger = box.querySelector<HTMLButtonElement>(".composer-attach .app-composer-inline-icon")!;
+        const openPanelAttr = surface.dataset.composerPanelOpen ?? null;
         trigger.click();
         await new Promise((resolve) => window.requestAnimationFrame(resolve));
         const closingFilesRow = box.querySelector<HTMLElement>('.app-composer-panel-closing [data-attach-source="files"]');
         const closingFilesTop = closingFilesRow?.getBoundingClientRect().top ?? null;
+        const closingPanelAttr = surface.dataset.composerPanelOpen ?? null;
 
         await new Promise((resolve) => window.setTimeout(resolve, 360));
         mo.disconnect();
         return {
           openFilesTop,
           closingFilesTop,
+          openPanelAttr,
+          closingPanelAttr,
+          settledPanelAttr: surface.dataset.composerPanelOpen ?? null,
           initialSurfaceHeight,
           maxObservedSurfaceHeight: Math.max(...observedSurfaceHeights),
         };
       });
       await expect(menu).toHaveCount(0);
       await expectSettledAtRestingHeight();
+      expect(closeIntegrity.openPanelAttr).toBe("true");
+      expect(closeIntegrity.closingPanelAttr).toBe("true");
+      expect(closeIntegrity.settledPanelAttr).toBeNull();
       expect(closeIntegrity.closingFilesTop).not.toBeNull();
       expect(Math.abs(closeIntegrity.closingFilesTop! - closeIntegrity.openFilesTop)).toBeLessThanOrEqual(2);
       expect(closeIntegrity.maxObservedSurfaceHeight).toBeLessThanOrEqual(closeIntegrity.initialSurfaceHeight + 2);

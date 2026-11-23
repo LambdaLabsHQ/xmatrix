@@ -3657,7 +3657,10 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   return (
     <div
       ref={dockRef}
-      className="app-agent-work-dock pointer-events-none absolute inset-x-0 z-10 px-5 py-2"
+      className={cn(
+        "app-agent-work-dock pointer-events-none absolute inset-x-0 z-10 px-5 py-2 transition-opacity duration-150 ease-out motion-reduce:transition-none",
+        !inPageMargin && "[[data-composer-panel-open=true]_&]:opacity-0 [[data-composer-panel-open=true]_&_*]:!pointer-events-none"
+      )}
     >
       {approvals}
       {workItems.length > 0 && <div
