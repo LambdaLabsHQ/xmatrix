@@ -942,7 +942,10 @@ integration("an Agent message shows the page revisions its Instance committed th
 });
 
 integration("a page's conversations are described to readers only, with their newest message and live Agents", async () => {
-  const { client, ids, pages, owner } = await pageTest("page-conversations");
+  const { client, ids, owner } = await pageTest("page-conversations");
+  const observations = [];
+  const pages = new PostgresPageRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0",
+    observer: (point) => observations.push(point) }));
   try {
     const { page } = await pages.create({ requestId: crypto.randomUUID(), spaceId: ids.space, principal: owner,
       title: "Margin" });
@@ -963,8 +966,16 @@ integration("a page's conversations are described to readers only, with their ne
       (space_id,channel_id,subject_id,acknowledged_sequence,version,updated_at)
       VALUES ($1,$2,$3,1,1,now())`, [ids.space, ids.open, `user:${ids.member}`]);
     await addSleepingInstance(client, ids);
+    // The margin must stay small even when the Instances have large catalogs.
+    const models = Array.from({ length: 120 }, (_, index) => `model-${index}-${"x".repeat(76)}`);
+    await client.query("UPDATE data.instances SET presentation_json=$2 WHERE channel_id=$1",
+      [ids.open, { models }]);
 
+    observations.length = 0;
     const [open, ...others] = await read(ids.member, [ids.open, ids.closed]);
+    const bytes = observations.filter((point) => point.queryName)
+      .reduce((total, point) => total + point.resultBytes, 0);
+    assert.ok(bytes < 4_096, `describing one page's links transferred ${bytes} PostgreSQL result bytes`);
     assert.deepEqual(others, [], "a conversation the reader cannot open is not described");
     assert.equal(open.conversationId, ids.open);
     assert.equal(open.name, ids.open);
@@ -973,8 +984,7 @@ integration("a page's conversations are described to readers only, with their ne
     assert.deepEqual({ ...open.head, sentAt: undefined }, { messageId: `${ids.open}-m2`, sequence: 2,
       authorKind: "user", authorId: ids.owner, sentAt: undefined, recalledAt: null, preview: null,
       payloadBundleBase64: null, legacyBody: "Ship it" }, "the newest message");
-    assert.deepEqual(open.agents.map(({ instanceId, name, status }) => ({ instanceId, name, status })),
-      [{ instanceId: ids.instance, name: "claude:1", status: "online" }], "the Agents live in it, not the sleeping one");
+    assert.deepEqual(open.agents, [{ instanceId: ids.instance, name: "claude:1", status: "online", harness: "claude" }]);
     assert.ok(Date.parse(open.activityAt) >= Date.parse(open.head.sentAt));
 
     const asOwner = await read(ids.owner, [ids.open, ids.closed]);
@@ -1092,6 +1102,15 @@ integration("pages: one page's read carries its own ancestors' access, not the S
     assert.equal((await call("read", { principal: owner, pageId: leaf.pageId })).page.title, "Leaf");
     assert.equal(observations.find((point) => point.queryName.startsWith("page_chain_access_")).rowCount, 3,
       "a nested page reads itself and its two ancestors");
+    await call("link", { principal: owner, conversationId: ids.open, pageId: leaf.pageId, source: "manual" });
+    observations.length = 0;
+    const linked = (await call("links", { principal: owner, conversationId: ids.open })).links;
+    assert.deepEqual(linked.map((link) => link.pageId), [leaf.pageId]);
+    assert.equal(observations.find((point) => point.queryName.startsWith("page_chain_access_")).rowCount, 3);
+    await call("update", { principal: owner, pageId: created[17].pageId, accessMode: "restricted" });
+    const member = { kind: "user", id: ids.member };
+    await assert.rejects(call("links", { principal: member, pageId: leaf.pageId }), code("page_not_found"));
+    assert.deepEqual((await call("links", { principal: member, conversationId: ids.open })).links, []);
     const listed = (await call("tree", { principal: owner })).pages;
     assert.equal(listed.length, 42);
     assert.ok(listed.filter((item) => /^Page \d+$/u.test(item.title) && item.summary?.text === "s".repeat(240)).length === 40,

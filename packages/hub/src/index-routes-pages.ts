@@ -829,7 +829,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     // Newest first, so a Space with more open discussions than are read describes the recent ones.
     const { pages, described } = await repository(c.env).agentsOnPages({ requestId: crypto.randomUUID(), spaceId,
       principal: caller, describe: (tx, userId, discussions) =>
-        describePageConversations(tx, spaceId, userId, discussions.slice(0, MAX_PAGE_CONVERSATIONS)) });
+        describePageConversations(tx, spaceId, userId, discussions.slice(0, MAX_PAGE_CONVERSATIONS), { includeAgents: false }) });
     const conversations = new Map((described ?? []).map((record) => [record.conversationId, pageConversation(record)]));
     return { pages: pages.map(({ discussions, ...page }): PageTreeActivity =>
       ({ ...page, discussions: pageTreeDiscussions(discussions, conversations) })) };

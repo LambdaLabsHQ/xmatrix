@@ -12,6 +12,7 @@ import {
   type ChannelMemberPresence,
   type InstanceRecord,
   type InstanceRevision,
+  type PageConversation,
   mergeInstanceRecord,
   plainRecord,
   withNewestRegistrationPresentation,
@@ -168,15 +169,18 @@ function withSharedCatalogs<Row extends InstanceRecordRow>(rows: readonly Row[])
     return { ...row, instance_presentation: presentation };
   });
 }
+const AGENT_NAME_SQL = "COALESCE(s.display_name,r.metadata_json->>'agentName','Agent')";
+const SHOWN_OFFLINE_REASON_SQL = "i.presentation_json->>'offlineReason'";
+const LIVE_RECORD_FILTER_SQL = `i.status IN (${LIVE_AGENT_STATUS_SQL}) AND r.status IN ('running','stopping')`;
 /** What every Instance record is made of, whichever read selects it. */
 const RECORD_COLUMNS_SQL = `i.instance_id,i.channel_id,i.channel_instance_id,i.status,r.status AS run_status,
         i.version AS instance_version,i.presentation_json->'presenceVersion' AS presence_version,
         i.presentation_json->'presenceSequence' AS presence_sequence,
-        i.presentation_json->>'offlineReason' AS shown_offline_reason,
+        ${SHOWN_OFFLINE_REASON_SQL} AS shown_offline_reason,
         i.created_at,i.updated_at,${DURABLE_PRESENTATION_SQL},
         r.workspace_machine_id,
         r.workspace_canonical_cwd,${PRESENCE_RUN_METADATA_SQL} AS run_metadata_json,
-        COALESCE(s.display_name,r.metadata_json->>'agentName','Agent') AS agent_name,
+        ${AGENT_NAME_SQL} AS agent_name,
         owner.email AS owner_email,
         b.owner_user_id AS registration_owner,b.machine_id AS registration_machine,b.harness AS registration_harness,
         s.space_id AS registration_space,s.display_name AS registration_display_name,s.version AS registration_version`;
@@ -228,8 +232,7 @@ export async function loadChannelInstanceRecords(
     text: sharingCatalogs(`SELECT ${RECORD_COLUMNS_SQL}
       ${recordFromSql("$1")}
       WHERE i.channel_id=ANY($2::text[])
-        AND i.status IN (${LIVE_AGENT_STATUS_SQL})
-        AND r.status IN ('running','stopping')
+        AND ${LIVE_RECORD_FILTER_SQL}
       ORDER BY i.channel_id,i.channel_instance_id,i.instance_id
       LIMIT 513`),
     values: [spaceId, selected],
@@ -268,6 +271,43 @@ export async function loadChannelInstanceRecords(
     const record = instanceRecord(row);
     if (!record.rest) throw new DatabaseContractError("Resting Agent presence state is invalid");
     placeRecord(byChannel, record);
+  }
+  return byChannel;
+}
+
+type PageLiveAgent = PageConversation["agents"][number] & { connectedAt: string };
+
+/** The active Agents Pages display for Channels already authorized by the caller. */
+export async function loadPageLiveAgents(transaction: DatabaseTransaction, spaceId: string,
+  channelIds: readonly string[]): Promise<Map<string, PageLiveAgent[]>> {
+  const selected = selectedChannels(channelIds);
+  const byChannel = new Map<string, PageLiveAgent[]>(selected.map((channelId) => [channelId, []]));
+  if (selected.length === 0) return byChannel;
+  const rows = await transaction.query<Pick<InstanceRecordRow, "instance_id" | "channel_id" | "channel_instance_id" |
+    "status" | "run_status" | "agent_name" | "shown_offline_reason" | "registration_harness" | "created_at">>({
+    name: "page_conversation_live_agents_v1",
+    text: `SELECT i.instance_id,i.channel_id,i.channel_instance_id,i.status,r.status AS run_status,
+        ${AGENT_NAME_SQL} AS agent_name,${SHOWN_OFFLINE_REASON_SQL} AS shown_offline_reason,
+        b.harness AS registration_harness,i.created_at
+      ${recordFromSql("$1")}
+      WHERE i.channel_id=ANY($2::text[]) AND ${LIVE_RECORD_FILTER_SQL}
+      ORDER BY i.channel_id,i.channel_instance_id,i.instance_id
+      LIMIT ${MAX_ACTIVE_AGENT_INSTANCES + 1}`,
+    values: [spaceId, selected], maxRows: MAX_ACTIVE_AGENT_INSTANCES + 1,
+  });
+  if (rows.length > MAX_ACTIVE_AGENT_INSTANCES) {
+    throw new DatabaseContractError("Active Agent Instance presence limit exceeded");
+  }
+  for (const row of rows) {
+    const { status } = recordState(row);
+    if (!isLiveAgentStatus(status)) continue;
+    const agents = byChannel.get(row.channel_id);
+    if (!agents) throw new DatabaseContractError("Agent presence escaped its selected Channel scope");
+    agents.push({
+      instanceId: row.instance_id, name: instanceLabel(row.agent_name, instanceOrdinal(row)), status,
+      ...(row.registration_harness ? { harness: row.registration_harness } : {}),
+      connectedAt: iso(row.created_at),
+    });
   }
   return byChannel;
 }
@@ -454,7 +494,8 @@ export async function loadVisibleLiveAgentPresence(
  * no rest and no first launch in flight, have left the Channel; both windows
  * and exact reads classify with this one rule.
  */
-function recordState(row: InstanceRecordRow): {
+function recordState(row: Pick<InstanceRecordRow, "status" | "run_status" | "shown_offline_reason" |
+  "rest_state" | "waking" | "launch_in_flight">): {
   status: SerializedAgentInstance["status"];
   rest?: AgentInstanceRest;
   offlineReason?: SerializedAgentInstance["offlineReason"];
@@ -496,13 +537,22 @@ function revisionOf(row: InstanceRecordRow): InstanceRevision {
     ? { version, sequence } : { version, sequence: 0 };
 }
 
-/** One Instance's record. A Run's actor is its Instance, as in runtime
- * presence and message senders; a registration is launch configuration. */
-function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
+function instanceOrdinal(row: Pick<InstanceRecordRow, "channel_instance_id">): string {
   const ordinal = Number(row.channel_instance_id);
   if (!Number.isSafeInteger(ordinal) || ordinal < 1) {
     throw new DatabaseContractError("Agent presence ordinal is invalid");
   }
+  return String(ordinal);
+}
+
+function instanceLabel(name: string, ordinal: string): string {
+  return `${name}:${ordinal}`;
+}
+
+/** One Instance's record. A Run's actor is its Instance, as in runtime
+ * presence and message senders; a registration is launch configuration. */
+function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
+  const channelInstanceId = instanceOrdinal(row);
   const { status, rest, offlineReason: shownOffline } = recordState(row);
   const runMetadata = row.run_metadata_json ?? {};
   const remoteRepo = metadataText(runMetadata, "remoteRepo");
@@ -511,14 +561,13 @@ function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
   const managedWorkspace = !remoteRepo && metadataText(runMetadata, "managedWorkspaceKey") !== undefined;
   const checkedOutRepositories = managedWorkspace ? checkedOutRepos(runMetadata) : [];
   const label = row.agent_name;
-  const channelInstanceId = String(ordinal);
   const { usage: storedUsage, ...presentation } = definedAgentInstanceDurablePresentation(row.instance_presentation);
   const usage = localLlmUsage(storedUsage);
   return {
     id: row.instance_id,
     channelInstanceId,
     channelId: row.channel_id,
-    label: `${label}:${channelInstanceId}`,
+    label: instanceLabel(label, channelInstanceId),
     connectedAt: iso(row.created_at),
     lastSeenAt: iso(row.updated_at),
     status,
