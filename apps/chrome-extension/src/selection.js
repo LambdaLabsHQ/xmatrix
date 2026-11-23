@@ -33,11 +33,19 @@
   const ASK_PAGE = chrome.runtime.getURL("app/ask.html");
   const ORIGIN = new URL(ASK_PAGE).origin;
   let frame = null;
+  let frameReady = false;
+  let prepared = false;
   let anchor = null;
   let shown = "";
 
-  function makeFrame() {
-    frame?.remove();
+  /**
+   * The box is made, hidden, as soon as the person starts selecting, so its
+   * page and the App's scripts load while they drag; by the time they let go
+   * it only has to show the passage. It stays, hidden, for the next selection.
+   */
+  function ensureFrame() {
+    if (frame) return;
+    frameReady = false;
     frame = document.createElement("iframe");
     frame.src = ASK_PAGE;
     frame.title = "Ask xMatrix";
@@ -47,6 +55,21 @@
       // It lays out at a box's size, hidden, until it says how big the composer is.
       + "color-scheme: light; width: 480px; height: 240px; top: 0; left: 0; visibility: hidden;";
     document.documentElement.append(frame);
+  }
+
+  /** Tells the box its passage is ready to read, once both it and the passage are. */
+  function deliver() {
+    if (!frame || !frameReady || !prepared) return;
+    prepared = false;
+    frame.contentWindow?.postMessage({ xmatrixAsk: "prepared" }, ORIGIN);
+  }
+
+  /** Wakes the extension's service worker (and renews its sign-in if due) while the person is still selecting. */
+  let warmed = 0;
+  function warm() {
+    if (Date.now() - warmed < 20_000) return;
+    warmed = Date.now();
+    chrome.runtime.sendMessage({ type: "askWarm" }).catch(() => undefined);
   }
 
   /** Hidden, not removed: the next selection opens it again at once. */
@@ -85,10 +108,11 @@
   async function open(text, rect) {
     anchor = rect;
     shown = text;
+    ensureFrame();
     await chrome.runtime.sendMessage({ type: "askPrepare", text, title: document.title, url: location.href });
     if (shown !== text) return;
-    if (!frame) makeFrame();
-    else frame.contentWindow?.postMessage({ xmatrixAsk: "prepared" }, ORIGIN);
+    prepared = true;
+    deliver();
   }
 
   function onSelection() {
@@ -103,7 +127,10 @@
   listen(window, "message", (event) => {
     // Only the frame this script made, from the extension.
     if (!frame || event.source !== frame.contentWindow || event.origin !== ORIGIN || !event.data?.xmatrixAsk) return;
-    if (event.data.type === "size") {
+    if (event.data.type === "ready") {
+      frameReady = true;
+      deliver();
+    } else if (event.data.type === "size") {
       const { width, height } = event.data;
       if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
         place(Math.min(width, innerWidth - 16), Math.min(height, innerHeight - 16));
@@ -118,6 +145,13 @@
   listen(document, "mousedown", (event) => {
     if (shown && event.target !== frame) hide();
   }, true);
+  // The person is selecting text (not just clicking): get the box ready while they drag.
+  listen(document, "selectionchange", () => {
+    if (frame && frameReady) return;
+    if (globalThis.getSelection()?.isCollapsed !== false || inEditable()) return;
+    ensureFrame();
+    warm();
+  });
   listen(document, "mouseup", (event) => {
     if (event.target === frame) return;
     setTimeout(onSelection, 0);
@@ -136,8 +170,9 @@
     if (message?.type !== "open-ask") return;
     anchor = (!message.page && selectionRect()) || { top: 16, bottom: 16, left: innerWidth };
     shown = String(message.text ?? "");
-    if (!frame) makeFrame();
-    else frame.contentWindow?.postMessage({ xmatrixAsk: "prepared" }, ORIGIN);
+    ensureFrame();
+    prepared = true;
+    deliver();
   };
   chrome.runtime.onMessage.addListener(onOpenAsk);
 
@@ -151,6 +186,7 @@
       }
       frame?.remove();
       frame = null;
+      frameReady = false;
       shown = "";
     },
   };
