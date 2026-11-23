@@ -216,7 +216,8 @@ export async function publishDurableXUploadReceipt(env: Env, outcome: XUploadOut
   const { request, payload } = outcome;
   await publishCommandStatus(getAppConnectorProvider(request.providerId)!, { env, channelId: request.channelId,
     actorUserId: request.requestedBy, messageId: `${payload.messageId}:upload-result`,
-    commandMessageId: payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
+    // A program's action was asked for in xMatrix's own delivery message, which takes no reply: its receipt stands by itself.
+    commandMessageId: request.nornPerformRef ? null : payload.messageId, body: "", senderKind: payload.senderKind, senderId: payload.senderId },
   [outcome.receipt]);
 }
 
