@@ -1,8 +1,13 @@
 import { notFound } from "next/navigation";
 import Document from "@/components/site-document";
-import { SITE_LOCALES, isNonDefaultSiteLocale } from "@/lib/site-locales";
+import { NON_DEFAULT_SITE_LOCALES, SITE_LOCALES, isNonDefaultSiteLocale } from "@/lib/site-locales";
 
 export { metadata, viewport } from "@/components/site-document";
+
+/** Every localized home, download, support and guide page is prerendered for these. */
+export function generateStaticParams() {
+  return NON_DEFAULT_SITE_LOCALES.map((locale) => ({ locale }));
+}
 
 export default async function LocalizedLayout({
   children,

@@ -9,7 +9,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Raft Alternatives (2026): Raft vs xMatrix",
     metaDescription:
-      "Searching for Raft (Slock) alternatives? Compare Raft vs xMatrix: living project Pages instead of buried chat and retired Wiki Agent, 35 coding harnesses, and 35 governed apps.",
+      "Looking for Raft (Slock) alternatives? xMatrix keeps decisions in living project Pages, not buried chat, with 35 coding harnesses and 35 governed apps.",
     eyebrow: "Raft Alternative · Raft vs xMatrix",
     headline: "The Raft Alternative Where Decisions Land in Living Pages, Not Buried Chat",
     lead: "Raft treats coding agents as chat teammates and retired its Wiki Agent in September 2026. xMatrix keeps shared channels for humans and 35 coding harnesses, then turns finished work into living Pages that stay current across every machine and 35 connected apps.",
@@ -112,7 +112,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Lody Alternatives (2026): Lody vs xMatrix",
     metaDescription:
-      "Comparing Lody alternatives? Switch from Lody's single-session worktrees and daemon sync drops to xMatrix's shared multi-human Channels, living Pages, Space secrets, and webhook routines.",
+      "Comparing Lody alternatives? Move from single-session worktrees and daemon sync drops to shared Channels, living Pages, Space secrets and webhook routines.",
     eyebrow: "Lody Alternative · Lody vs xMatrix",
     headline: "Lody Alternative: One Channel, One Living Page — Shared by Your Whole Team and Every Agent",
     lead: "Lody organizes work around isolated one-session-per-worktree threads synced through a closed-source cloud relay. xMatrix brings teammates and 35 coding harnesses into one shared Channel, keeps living Pages current as work lands, and adds Space secrets plus event-driven Norn programs.",
@@ -215,7 +215,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Multica Alternatives (2026): Multica vs xMatrix",
     metaDescription:
-      "Evaluating Multica alternatives? Move beyond headless ticket runs, silent bypassPermissions drops (#9559), and plaintext env vars to xMatrix's live Channels, living Pages, and Space secrets.",
+      "Evaluating Multica alternatives? Replace headless ticket runs, silent bypassPermissions drops and plaintext env vars with live Channels and Space secrets.",
     eyebrow: "Multica Alternative · Multica vs xMatrix",
     headline: "Multica Alternative: Don't Turn Every Request Into a Ticket — Say It Once, Agents Ship, Pages Stay Current",
     lead: "Multica forces every agent task into a headless Kanban issue with bypassPermissions defaults and no living documentation layer. xMatrix lets humans and 35 coding harnesses collaborate live in Channels (or attach an interactive session with xmatrix claude), keeps living Pages current, and governs 35 external apps with Space secrets.",
@@ -319,7 +319,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Paradev & Superset Alternatives (2026): vs xMatrix",
     metaDescription:
-      "Looking for Paradev (Superset) alternatives? Run coding teams on macOS, Windows, Linux, and Android with shared Channels, living Pages, 35 app approvals, and $10/seat pricing.",
+      "Looking for Paradev (Superset) alternatives? Run coding teams on macOS, Windows, Linux and Android with shared Channels, living Pages and $10/seat pricing.",
     eyebrow: "Paradev (Superset) Alternative · Paradev vs xMatrix",
     headline: "Paradev Alternative for Teams on Any OS: Shared Channels, Living Pages, $10/Seat",
     lead: "Paradev (rebranded from Superset in October 2026) is macOS-first, jumps to $60/user/month for Team collaboration, and exposes the whole machine when opening a remote host. xMatrix works across macOS, Windows, Linux, Android, and Web with shared Channels, living Pages, and 35 governed app connectors at $10/human seat/month.",
@@ -423,7 +423,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     statusNote: "Acquired by Meta in November 2026 — Conductor Cloud shut down on November 20, 2026.",
     metaTitle: "Conductor Alternatives After Meta Shutdown (2026)",
     metaDescription:
-      "Conductor was acquired by Meta and shut down Conductor Cloud on Nov 20, 2026. Switch to xMatrix to run Claude Code and Codex teams across macOS, Windows, and Linux at $10/seat.",
+      "Meta acquired Conductor and shut down Conductor Cloud on Nov 20, 2026. Run Claude Code and Codex teams on macOS, Windows and Linux with xMatrix at $10/seat.",
     eyebrow: "Conductor Alternative · Post-Meta Migration",
     headline: "Where to Move After Meta's Conductor Shutdown: Mac, Windows & Linux With Living Pages",
     lead: "Meta acquired Conductor in November 2026, stopped new signups, and shut down Conductor Cloud on November 20, 2026 while putting the macOS-only local app on maintenance support into early 2027. xMatrix is an active, independent home for your 35 coding harnesses on macOS, Windows, and Linux—with team context kept in living Pages.",
@@ -525,7 +525,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Orca Alternatives (2026): Orca vs xMatrix",
     metaDescription:
-      "Comparing Orca (stablyai/orca) alternatives? Trade single-player RAM spikes, 8,900+ open issues, and brittle LAN mobile pairing for xMatrix's multiplayer Channels and living Pages.",
+      "Comparing Orca alternatives? Trade single-player RAM spikes, 8,900+ open issues and brittle LAN phone pairing for xMatrix's multiplayer Channels and Pages.",
     eyebrow: "Orca Alternative · Orca vs xMatrix",
     headline: "Orca Alternative When It's More Than Just You: One Channel, One Living Page, Right-Sized Routing",
     lead: "Orca is a popular open-source single-player ADE for fanning prompts across parallel local worktrees, but multiplayer UI is still missing, fanning one prompt to N agents multiplies token burn, and heavy fleets spike local RAM. xMatrix routes each task to the best-fit agent across 35 harnesses and keeps living Pages current for your whole team.",
@@ -629,7 +629,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "LobeHub (LobeChat) Alternatives (2026): vs xMatrix",
     metaDescription:
-      "Searching for LobeHub or LobeChat alternatives? Skip credit resale markups, 2.0 PostgreSQL/S3 migration friction, and RAG chunk pollution with xMatrix's local coding agents and living Pages.",
+      "Looking for LobeHub or LobeChat alternatives? Skip credit resale markups and the 2.0 PostgreSQL/S3 migration with local coding agents and living Pages.",
     eyebrow: "LobeHub (LobeChat) Alternative · LobeHub vs xMatrix",
     headline: "LobeHub Alternative: For Coding Teams Already Paying for Claude Code or Codex — Stop Buying Credits Twice",
     lead: "LobeHub (rebranded from LobeChat) is a general-purpose AI workspace monetized by reselling model credits, with a heavy 2.0 self-hosting stack and no shared multi-human + multi-agent channels. xMatrix runs 35 coding harnesses directly in your real repos on your existing subscriptions, with Goals for delivery checks and 35 governed app connectors.",
@@ -732,7 +732,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Cumora Alternatives (2026): Cumora vs xMatrix",
     metaDescription:
-      "Comparing Cumora (yetone/cumora) alternatives? Run coding agents directly in your real local repos without offline sandbox blocks (#350), bwrap errors, or invite-only previews.",
+      "Comparing Cumora alternatives? Run coding agents in your real local repos, without offline sandbox blocks (#350), bwrap errors or invite-only previews.",
     eyebrow: "Cumora Alternative · Cumora vs xMatrix",
     headline: "Cumora Alternative: Agents Working in Your Real Repos, Shipping Through Governed Connectors",
     lead: "Cumora puts persona-driven agents into team chat, but locks local BYOA runs inside offline sandboxes separated from your real sessions, hits Bubblewrap and CDN fetch breakages (#350), and remains an invite-only preview. xMatrix runs 35 coding harnesses directly in your repositories and ships through 35 governed connectors and living Pages.",

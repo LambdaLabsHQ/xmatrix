@@ -6,6 +6,7 @@ import {
   LegalList,
   LegalSection,
 } from "@/components/legal/legal-document";
+import { appHref } from "@/lib/site-url";
 
 export function PrivacyPolicyContent() {
   return (
@@ -495,7 +496,7 @@ export function PrivacyPolicyContent() {
         </p>
         <p>
           You can start account deletion in Settings → Account or at the{' '}
-          <Link href="/account/delete">account deletion page</Link>. A recent sign-in, your account
+          <Link href={appHref("/account/delete")}>account deletion page</Link>. A recent sign-in, your account
           email, and explicit confirmation are required. Close owned Spaces, leave other Spaces,
           and stop active agent work before proceeding. You can delete your account before a subscription expires; cancel provider renewal separately to stop future charges. Account deletion does
           not cancel Apple, Google Play, or Stripe subscriptions or move them to another Space.

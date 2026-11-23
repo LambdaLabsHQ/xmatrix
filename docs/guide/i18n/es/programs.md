@@ -1,6 +1,6 @@
 ---
-title: "Programas en Norn: coordina agentes y personas · Documentación de xMatrix"
-description: "Escribe un programa en Norn dentro de una página de xMatrix para coordinar agentes y personas: solicitudes tipadas, plazos, rutinas y eventos, donde cada solicitud termina en respuesta."
+title: "Programas en Norn: coordina agentes y personas · xMatrix"
+description: "Escribe un programa en Norn en una página de xMatrix para coordinar agentes y personas: solicitudes tipadas, plazos, rutinas y eventos."
 ---
 
 # Programas
