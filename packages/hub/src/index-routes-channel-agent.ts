@@ -210,6 +210,11 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
     const spaceId = c.req.query("spaceId");
     // `familyOfChannelId` narrows the read to one Channel and its direct children.
     const familyOfChannelId = c.req.query("familyOfChannelId")?.trim() || undefined;
+    // `find` keeps the Channels whose name, topic or summary holds every word.
+    const find = (c.req.query("find") ?? "").split(/\s+/u).filter(Boolean);
+    if (find.length > 20 || find.some((word) => word.length > 200)) {
+      return c.json({ error: "find holds too many or too long words" }, 400);
+    }
     const observationStartedAt = Date.now();
     const metrics = createChannelCatalogReadMetrics();
     const deadline = createChannelCatalogDeadline({
@@ -238,12 +243,12 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
           ? await readChannelForPrincipal(
               c.env, reader, familyOfChannelId, readerSpaceId, metrics, deadline,
             )
-          : reader.kind === "user" && !readerSpaceId
+          : reader.kind === "user" && !readerSpaceId && find.length === 0
           ? await readSyncedChannelCatalogForUser(
               c.env, reader, c.req.query("catalogSyncToken"), metrics, deadline,
             )
           : await readChannelCatalogForPrincipal(
-              c.env, reader, readerSpaceId, metrics, deadline,
+              c.env, reader, readerSpaceId, metrics, deadline, find,
             );
       let catalog = await readCatalog(principal);
       if (!catalog.ok && authUser.agentRun && (familyOfChannelId || spaceId)) {

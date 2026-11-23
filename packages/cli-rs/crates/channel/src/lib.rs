@@ -61,18 +61,7 @@ pub async fn cmd_channels(
         channels: Vec<protocol::SerializedChannel>,
     }
 
-    let url = if let Some(space_id) = space_id {
-        with_route(
-            hub_url,
-            &format!(
-                "{}?spaceId={}",
-                HubRoutes::CHANNELS,
-                urlencoding::encode(space_id)
-            ),
-        )
-    } else {
-        with_route(hub_url, HubRoutes::CHANNELS)
-    };
+    let url = with_route(hub_url, &channels_route(space_id, find));
     let response: ChannelsResponse = http::request_json(&url, "GET", Some(token), None).await?;
     let mut channels = response.channels;
     if intake {
@@ -95,11 +84,33 @@ pub async fn cmd_channels(
     Ok(())
 }
 
+/// The channel list, narrowed to a Space and to the conversations that hold
+/// the words. The Hub keeps only the matches, so finding one conversation in a
+/// large Space reads a few rows. An older Hub ignores `find` and answers with
+/// the whole list, which `channel_holds_words` filters to the same result.
+pub fn channels_route(space_id: Option<&str>, find: Option<&str>) -> String {
+    let words = find.map(|words| words.split_whitespace().collect::<Vec<_>>().join(" "));
+    let query = [("spaceId", space_id), ("find", words.as_deref())]
+        .into_iter()
+        .filter_map(|(name, value)| {
+            value
+                .filter(|value| !value.is_empty())
+                .map(|value| (name, value))
+        })
+        .map(|(name, value)| format!("{name}={}", urlencoding::encode(value)))
+        .collect::<Vec<_>>()
+        .join("&");
+    if query.is_empty() {
+        HubRoutes::CHANNELS.to_string()
+    } else {
+        format!("{}?{query}", HubRoutes::CHANNELS)
+    }
+}
+
 /// Whether a conversation's title, topic or summary holds every word, whatever the case.
 ///
-/// The list already carries these for every conversation, so finding one costs
-/// the single list request. Reading each conversation's history to search
-/// instead is thousands of requests in a large Space.
+/// The Hub applies the same rule to the list it answers; this keeps the
+/// result the same against a Hub that does not.
 pub fn channel_holds_words(channel: &protocol::SerializedChannel, words: &str) -> bool {
     let text = [&channel.name, &channel.topic, &channel.summary]
         .into_iter()
@@ -1120,11 +1131,10 @@ async fn upload_channel_file_attachments(
     /* The scope has to match what the Hub computes for the message itself
     (relay-authority-domain-commands channelScope), or binding the uploaded object
     fails with "verified canonical attachment ref is unavailable". The Channel's
-    mode and Space come from the channel list: the Hub serves no read of a
-    single Channel, so asking for one answered 404 and no person could attach a
-    file from a terminal. */
+    mode and Space come from the channel list narrowed to this Channel's
+    family: the whole list of a large Space is megabytes for one row. */
     let listed: ChannelsResponse = http::request_json(
-        &with_route(hub_url, HubRoutes::CHANNELS),
+        &with_route(hub_url, &read_context::channel_family_route(channel_id)),
         "GET",
         Some(token),
         None,

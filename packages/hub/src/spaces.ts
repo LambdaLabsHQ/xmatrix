@@ -312,6 +312,8 @@ export async function getChannel(env: SpacesEnv, input: {
 /** One page of a Space's Channels, or a Channel and its thread family. */
 export async function listChannels(env: SpacesEnv, input: {
   principal: Principal; spaceId?: string; channelId?: string; familyOfChannelId?: string;
+  /** Words a listed Channel's name, topic or summary must all hold. */
+  find?: readonly string[];
   cursor?: string; limit?: number;
 }, dependencies: SpacesDependencies = {}) {
   const { repository, requestId } = spaces(env, dependencies);
