@@ -206,6 +206,29 @@ async function askContext(tab) {
  * as it does there (the quoted passage, the question, the Agents picked in
  * it); a message that names nobody lets the Space's routing pick the Agent.
  */
+/** A page as a place to talk about: its address without the fragment. */
+function pageKey(href) {
+  try {
+    const url = new URL(href);
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return href;
+  }
+}
+
+/**
+ * The conversation a tab's questions go to while it stays on one page: the
+ * first question there starts it, and the next ones follow up in it (Daniel
+ * 2026-11-23: asking again on the same page continues the conversation). A
+ * question on another page, or in another Space, starts a new one.
+ */
+async function askThread(tab, href, spaceId) {
+  const key = `askThread:${tab.id}`;
+  const { [key]: thread } = await chrome.storage.session.get(key);
+  return thread && thread.page === pageKey(href) && thread.spaceId === spaceId ? thread : null;
+}
+
 async function askSend(tab, { body, invocationSelections }) {
   const passage = await pendingAsk(tab.id);
   const text = typeof body === "string" ? body.slice(0, 64 * 1024) : "";
@@ -217,6 +240,22 @@ async function askSend(tab, { body, invocationSelections }) {
       spaceId: space.id, name: discussionTitle(passage.text || passage.label), memberName: session.user?.name || "Human" });
     let space = await quickAskSpace(token);
     if (!space) throw new Error("You are not in any Space yet.");
+    // Picks were made against the remembered Space; in another one they do not apply.
+    const remembered = (await chrome.storage.local.get("lastSpace")).lastSpace?.id;
+    const message = (channelId, inSpace) => sendMessage(scoped, token, { channelId, body: text,
+      clientMessageId: crypto.randomUUID(),
+      ...(inSpace === remembered && invocationSelections && typeof invocationSelections === "object"
+        ? { invocationSelections } : {}) });
+    const thread = await askThread(tab, passage.href, space.id);
+    if (thread) {
+      try {
+        await message(thread.channelId, space.id);
+        return { space, channel: { id: thread.channelId, snapshot: thread.snapshot ?? null } };
+      } catch (error) {
+        // The conversation is gone or no longer ours: this question starts a new one.
+        if (!(error instanceof HubError) || ![403, 404].includes(error.status)) throw error;
+      }
+    }
     let channel;
     try {
       channel = await create(space);
@@ -227,13 +266,12 @@ async function askSend(tab, { body, invocationSelections }) {
       if (!space) throw new Error("You are not in any Space yet.");
       channel = await create(space);
     }
-    // Picks were made against the remembered Space; in another one they do not apply.
-    const picks = space.id === (await chrome.storage.local.get("lastSpace")).lastSpace?.id ? invocationSelections : undefined;
-    await sendMessage(scoped, token, { channelId: channel.id, body: text, clientMessageId: crypto.randomUUID(),
-      ...(picks && typeof picks === "object" ? { invocationSelections: picks } : {}) });
+    await message(channel.id, space.id);
     return { space, channel };
   });
   await chrome.storage.session.remove(`ask:${tab.id}`);
+  await chrome.storage.session.set({ [`askThread:${tab.id}`]: { page: pageKey(passage.href), spaceId: result.space.id,
+    channelId: result.channel.id, snapshot: result.channel.snapshot ?? null } });
   await chrome.storage.local.set({ lastSpace: { id: result.space.id, name: result.space.name } });
   // The panel shows it: at once if its app is loaded, or opening straight onto it.
   // For the side panel of the window the question was asked in: another window's panel (or an extension page
@@ -386,6 +424,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === BADGE_ALARM) refreshBadge();
   if (alarm.name === SIGN_IN_ALARM) pollSignIn();
+});
+
+// A closed tab's passage and conversation go with it.
+chrome.tabs.onRemoved.addListener((tabId) => {
+  chrome.storage.session.remove([`ask:${tabId}`, `askThread:${tabId}`]).catch(() => undefined);
 });
 
 chrome.permissions.onAdded.addListener(() => {
