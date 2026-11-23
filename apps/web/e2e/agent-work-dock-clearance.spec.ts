@@ -254,14 +254,23 @@ test("a completion panel covers the timeline instead of pushing it up", async ({
   const open = await tailGeometry(page);
   expect(open.lastRowBottom).toBeCloseTo(beforeGeometry.lastRowBottom, 0);
   expect(open.dockTop).toBeCloseTo(beforeGeometry.dockTop!, 0);
+  await expect.poll(() => page.evaluate(() => {
+    const dock = document.querySelector<HTMLElement>(".app-agent-work-dock");
+    return dock ? getComputedStyle(dock).opacity : null;
+  })).toBe("0");
 
-  // Closing the panel re-measures the resting composer, which never changed.
+  // Closing the panel re-measures the resting composer, which never changed,
+  // and restores the work dock once the glass has shrunk clear of it.
   await page.locator(".composer-textarea").fill("");
   await expect(page.locator(".app-mention-suggestions")).toHaveCount(0);
   await expect(page.locator(".app-composer-box-morphing")).toHaveCount(0);
   await expect
     .poll(async () => (await tailGeometry(page)).lastRowBottom)
     .toBeCloseTo(beforeGeometry.lastRowBottom, 0);
+  await expect.poll(() => page.evaluate(() => {
+    const dock = document.querySelector<HTMLElement>(".app-agent-work-dock");
+    return dock ? getComputedStyle(dock).opacity : null;
+  })).toBe("1");
 });
 
 /* The work dock scroller reserves transparent vertical space above the agent

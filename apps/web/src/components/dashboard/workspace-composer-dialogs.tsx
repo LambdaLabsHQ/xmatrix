@@ -596,7 +596,10 @@ export const Composer = memo(function Composer({
     }
 
     function updateComposerMetrics() {
-      if (completionExpanded() && surfaceElement.style.getPropertyValue("--app-composer-height")) return;
+      const expanded = completionExpanded();
+      if (expanded) surfaceElement.dataset.composerPanelOpen = "true";
+      else delete surfaceElement.dataset.composerPanelOpen;
+      if (expanded && surfaceElement.style.getPropertyValue("--app-composer-height")) return;
       surfaceElement.style.setProperty("--app-composer-height", `${composerElement.offsetHeight}px`);
       // Overlays anchored to this variable only move, so nothing resizes and no
       // observer of theirs is delivered. Announce the write; see
@@ -624,6 +627,7 @@ export const Composer = memo(function Composer({
       window.visualViewport?.removeEventListener("resize", updateComposerMetrics);
       window.visualViewport?.removeEventListener("scroll", updateComposerMetrics);
       surfaceElement.style.removeProperty("--app-composer-height");
+      delete surfaceElement.dataset.composerPanelOpen;
     };
   }, [compact]);
 
