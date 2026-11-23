@@ -143,6 +143,46 @@ every(1d)->or(ciFailed("acme/app"))->forEach(_ =>
 
 Esto ejecuta una ronda cada día y de inmediato cuando falla CI. La conexión del Space debe cubrir ese repositorio o esa app.
 
+## Acciones en apps conectadas
+
+Un programa puede hacer que una [app conectada](connectors.md) haga algo por sí misma, a la hora que elijas, sin ningún agente en ejecución. Son dos pasos. *Preparar* fija exactamente lo que se hará y obtiene su admisión; no se envía nada. *Publicar* lo hace, una sola vez.
+
+```norn
+open Std
+let post = (video, text, ~at) => spawn(~key=video, () => {
+  let ready = X.prepareVideo("@acme", video, text)->wait?
+  after(at)->wait
+  X.publish(ready)->wait
+})
+all([
+  post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
+  post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
+])
+```
+
+Las dos publicaciones piden admisión en cuanto empieza el programa, así que las respondes de una vez. Después cada una sale a su hora. Añadir una línea a la lista solo pregunta por la publicación nueva.
+
+La admisión sigue el único permiso de la app:
+
+| Permiso | Qué ocurre cuando un programa prepara una acción |
+| --- | --- |
+| Lectura y escritura (Read and write) | Se admite al instante |
+| Preguntar primero (Ask first) | Aparece en **Pending approvals** de la conversación; un administrador del Space ve la cuenta, el texto y el adjunto que se usarán, y responde |
+| Solo lectura (Read only) | Se rechaza |
+
+Una aprobación cubre esa única acción con ese contenido y vale 30 días. Llegado el momento, xMatrix comprueba de nuevo que la conexión y la cuenta son las aprobadas y que quien aprobó aún puede aprobar; si no, no se envía nada y el programa lee el motivo. Una acción cuyo resultado se desconoce se informa como fallida y nunca se reintenta. El vídeo adjunto debe estar en la conversación del propio programa.
+
+`X.preparePost(account, text)` prepara una publicación sin vídeo. La acción de cualquier otra app se pide por su nombre con las dos partes de su comando, tal como las muestra `xmatrix connector list`:
+
+```norn
+type command = {target: string, text: string}
+type done = {summary: string, url: option<string>}
+let post: Actions.action<command, done> = Actions.action("slack", "post")
+
+let ready = Actions.prepare(post, {target: "#releases", text: "4.2 is out."})->wait?
+Actions.perform(ready)->wait
+```
+
 ## Una sola pregunta desde un agente
 
 Un agente que necesita una única respuesta no escribe un programa. Pregunta con un comando y la respuesta le vuelve directamente:

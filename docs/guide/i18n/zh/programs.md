@@ -143,6 +143,46 @@ every(1d)->or(ciFailed("acme/app"))->forEach(_ =>
 
 上述代码会在每天定时执行一轮，同时每当 CI 失败也会立即触发。前提是 Space 的应用连接已覆盖对应的仓库或服务。
 
+## 让已连接的应用执行动作
+
+程序可以让[已连接的应用](connectors.md)在你指定的时间自己完成一件事，到点时不需要任何 Agent 在线。分两步：**准备**把要做的内容原样固定下来并取得放行，此时什么都不会发出；**发布**把它执行一次。
+
+```norn
+open Std
+let post = (video, text, ~at) => spawn(~key=video, () => {
+  let ready = X.prepareVideo("@acme", video, text)->wait?
+  after(at)->wait
+  X.publish(ready)->wait
+})
+all([
+  post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
+  post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
+])
+```
+
+程序一启动，两条帖子就同时请求放行，你可以一次批完；之后各自在自己的时间发出。往列表里加一行，只会多问新加的那一条。
+
+"放行"按该应用唯一的权限处理：
+
+| 权限 | 程序准备一个动作时 |
+| --- | --- |
+| 读写（Read and write） | 直接放行 |
+| 先询问（Ask first） | 出现在对话的 **待审批（Pending approvals）** 里，Space 管理员能看到将使用的账号、正文和附件，然后回答 |
+| 只读（Read only） | 被拒绝 |
+
+一次批准只对应这一个动作和这份内容，30 天内有效。到点时 xMatrix 会再核对一遍：连接和账号仍是批准时的那个，批准的人仍有权批准；任何一条不成立就不发送，程序会读到原因。结果不确定的动作记为失败，绝不自动重试。视频附件必须在程序自己的对话里。
+
+`X.preparePost(account, text)` 准备一条不带视频的帖子。其他应用的动作按名字调用，输入是其命令的两部分，写法见 `xmatrix connector list`：
+
+```norn
+type command = {target: string, text: string}
+type done = {summary: string, url: option<string>}
+let post: Actions.action<command, done> = Actions.action("slack", "post")
+
+let ready = Actions.prepare(post, {target: "#releases", text: "4.2 is out."})->wait?
+Actions.perform(ready)->wait
+```
+
 ## Agent 发起单次提问
 
 如果 Agent 只需要向某人或某个 Agent 问一个问题，无需编写完整程序，直接通过 CLI 发起请求即可，答案会自动回传给它：

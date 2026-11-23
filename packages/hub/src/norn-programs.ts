@@ -3,8 +3,9 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { canonicalMentionToken, NORN_ASK_MESSAGE_PREFIX, NORN_DELEGATED_NOTE } from "@xmatrix/protocol";
 import { markCardAnswered } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
-import { agentHolder, checkNornProgram, instanceHolder, nornAnswerBody, nornAsking, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody,
-  nornProgramIn, nornQuestionSource, nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion,
+import { deliverNornAppRequest, withdrawNornAppRequests } from "./norn-actions";
+import { agentHolder, appRequest, checkNornProgram, instanceHolder, nornActionAnswer, nornAnswerBody, nornAsking, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody,
+  nornPreparedReply, nornProgramIn, nornQuestionSource, nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion,
   type NornRequestCard } from "./norn-host";
 import { nornEventDeliveryAllowed, parseNornEventDeliveryPayload } from "./norn-events";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
@@ -153,6 +154,25 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
   if (work.eventDeliveries.length > 0) moreEventDeliveries = true;
   let undeliverable = false;
   for (const delivery of work.deliveries) {
+    // A request of a connected app is the host's own: it is staged or run here, and no Agent or person is delivered it.
+    const asked = delivery.request as LedgerRequest;
+    if (appRequest(asked)) {
+      const scope = { requestId, channelId, programId: delivery.programId };
+      const preparedRef = asked.action.prepared === null ? undefined
+        : await programs.requestRef({ ...scope, ledgerRequestId: asked.action.prepared });
+      const outcome = await deliverNornAppRequest(env, { spaceId: programs.spaceId, channelId, authorityUserId: delivery.authorityUserId,
+        request: asked, requestRef: delivery.requestRef, deliveryMessageId: delivery.deliveryMessageId, ...(preparedRef ? { preparedRef } : {}) });
+      if (outcome.say) await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
+        authorityUserId: delivery.authorityUserId, quiet: true, body: outcome.say });
+      if ("held" in outcome) {
+        await programs.delivered({ ...scope, ledgerRequestId: delivery.requestId, epoch: delivery.epoch, hostDueInMs: outcome.held.dueInMs });
+      } else {
+        // It ended where it was staged: the program reads how in its next pass, which may open what follows.
+        await programs.advance(scope, nornStep({ requestId: delivery.requestId, epoch: delivery.epoch, reply: outcome.reply }));
+        undeliverable = true;
+      }
+      continue;
+    }
     if (personHolder(delivery.holder)) {
       const people = await peopleNamed(programs, { requestId, channelId }, delivery.holder);
       const scope = { requestId, channelId, programId: delivery.programId };
@@ -216,18 +236,47 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
       authorityUserId: report.authorityUserId,
       // An Agent that started the program is told by its address, so it wakes to read the result.
       body: page?.body ?? `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(ended)}` });
+    // An approval the program asked for and never used is void with it.
+    if (report.appRefs.length) await withdrawNornAppRequests(env, { spaceId: programs.spaceId, prepareRefs: report.appRefs, ended: true });
     await programs.reported({ requestId, channelId, programId: report.programId });
   }
   // An Instance started for a request has nothing left to do in the conversation once the request has ended,
   // once its Agent delegated the request to someone else, or once the request was handed on past it.
   for (const release of work.releases) {
-    await letGo(env, channelId, release, "Its request has ended");
+    // A connected app's request started no Instance. One that ended unanswered leaves Pending approvals.
+    if (release.holder?.startsWith("app:")) {
+      if (release.requestRef) await withdrawNornAppRequests(env, { spaceId: programs.spaceId, prepareRefs: [release.requestRef] });
+    } else await letGo(env, channelId, release, "Its request has ended");
     await programs.released({ requestId, channelId, programId: release.programId, ledgerRequestId: release.requestId });
   }
   for (const release of work.delegatedAway) {
     await letGo(env, channelId, release, "Its request went on to another Instance");
     await programs.letGoDelegatedAway({ requestId, channelId, programId: release.programId, ledgerRequestId: release.requestId });
   }
+}
+
+/**
+ * How a request a connected app holds ended, told by whoever learned it: the
+ * approval route when a Space admin answered, the durable executor when the
+ * action ran. The program reads it in the same step. A request that has ended
+ * already takes nothing, so a repeat is safe.
+ */
+export async function settleNornAppRequest(env: Env, input: { channelId: string; requestRef: string;
+  outcome: { admitted: true } | { declined: string } | { done: { summary: string; url?: string } } | { blocked: string } | { failed: string } }): Promise<void> {
+  const requestId = `norn-app:${input.requestRef}:${crypto.randomUUID()}`;
+  const programs = await repository(env, input.channelId, requestId);
+  const held = await programs.appRequest({ requestId, requestRef: input.requestRef });
+  if (!held || held.channelId !== input.channelId) return;
+  const { outcome } = input;
+  // Only the request's own token admits it, so the reply is made from the ledger request the index names.
+  const reply: Reply = "admitted" in outcome ? nornPreparedReply({ id: held.ledgerRequestId } as LedgerRequest)
+    : "done" in outcome ? nornActionAnswer(outcome.done)
+    : "declined" in outcome ? { tag: "Refused", reason: outcome.declined }
+    : "blocked" in outcome ? { tag: "Refused", reason: outcome.blocked } : { tag: "Broke", reason: outcome.failed };
+  await programs.advance({ requestId, channelId: input.channelId, programId: held.programId },
+    nornStep({ requestId: held.ledgerRequestId, epoch: held.epoch, reply }));
+  // What the answer opened, or the program's end, is the coordinator's to deliver.
+  await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
 }
 
 /** Stops the Run of an Instance a request started, if still live, or retires the Instance if it rests. */

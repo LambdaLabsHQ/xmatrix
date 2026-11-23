@@ -459,6 +459,78 @@ The others are let go, also while the program runs, so a routine does not
 leave one Instance per round. In a shared conversation an Agent that has
 answered does not stay to be woken by every later message.
 
+## Asking a connected app
+
+A program has a connected app do one thing by itself, with no Agent and no
+person at the moment it is done
+([Norn spec §6.3](https://github.com/norn-lang/norn/blob/main/docs/spec.md#63-actions)).
+It is two requests, and the host holds both (`app:x`):
+
+```norn
+let ready = X.prepareVideo("@acme", "<message id>/<attachment id>", "Stop pasting API keys.")->wait?
+after(2026-11-24T01:00Z)->wait
+X.publish(ready)->wait
+```
+
+`Actions.prepare` fixes what will be done and has it admitted; nothing is sent.
+`Actions.perform` does what was prepared, once. Between them the program waits
+in its own words (`after`, `every`, an event), so a person approves a week of
+posts in one sitting and each goes out at its time with nobody awake.
+
+**What an app can be asked.** Every action a connected app declares
+(`NORN_CONNECTOR_EVENT_MANIFESTS`, `norn-libraries.ts`), which the checker
+reads `Actions.action(app, name)` against. Its input is the two parts of the
+Channel command, `{target, text}`, or named fields where the host gives the
+action some (`x` `post`, `publish_video`); `nornActionStatement` turns either
+into the command's statement, and the connector parses it as it parses a
+command. Every action answers `{summary, url}`. The `X` library gives X's
+actions their words: `X.preparePost`, `X.prepareVideo`, `X.publish`.
+
+**Prepare** (`deliverNornAppRequest`, `norn-actions.ts`). The coordinator
+stages the action as a command would be staged (`stageHeldAction`): parsed,
+its account and content frozen in the encrypted action-request authority, and
+held for the program's request (`app_connector_action_requests.norn_prepare_ref`,
+expand migration 0269). The acting member is the program's authority, and the
+connection's one permission decides what follows:
+
+| Permission | The `prepare` request |
+| --- | --- |
+| Read and write | `Answered`: the permission admits it, and nobody is recorded as having decided |
+| Ask first | Stays open as a request in the conversation's Pending approvals, showing the frozen account, content and attachment. A Space admin's Allow answers it `Answered`; Disallow, `Refused` |
+| Read only | `Refused` |
+
+An input the connector cannot parse, or an app that is not connected, is
+`Broke` or `Refused` at once. An approval is good for 30 days. The decision
+route tells the program (`settleNornAppRequest`), and approving runs nothing:
+the request's state is `approved`, between pending and executing.
+
+**Perform.** The coordinator takes the one step from approved to executing
+(`claimHeld`), which records the `perform` that took it
+(`norn_perform_ref`), and hands the request's reference to the durable
+executor that runs X's video actions. A second `perform` of the same prepared
+action is `Refused`. What was approved is read again as a decision reads it:
+the approver is still an admin who reads the conversation, and the connection
+and its account are the ones approved. Immediately before the provider is
+called the permission is read once more: a request a person approved runs
+under Ask first, and one the permission admitted runs only while it is still
+Read and write. Anything that no longer holds is `Refused`, and nothing is
+sent.
+
+**The outcome.** The executor marks the action started before any provider
+call and never repeats one whose outcome it does not know: that is reported
+as failed. It gives the program its answer first, then posts the receipt in
+the conversation; both are safe to repeat. Completed is `Answered` with the
+receipt's summary and link, blocked is `Refused`, failed is `Broke`.
+
+**Never silent.** Nothing else reports on a request the host holds, so the
+host sets itself a time to look again (`norn_requests.host_due_at`, expand
+migration 0268), which the coordinator's alarm includes: 30 days for an
+approval, 30 minutes for an action that was handed to the executor. Past it
+the request is `Broke`, with words for each half. It is never handed to
+anyone else as an Agent's broken-off work is. A `prepare` that ends without
+an answer leaves Pending approvals, and when a program ends, an approval it
+asked for and never used is void (`withdrawNornAppRequests`).
+
 ## Saying something
 
 `say(who, text)` tells someone without asking anything of them: a reminder,
@@ -506,7 +578,7 @@ with none whoever saved it, says which request stopped it and why, and
 declares a wait on them: it shows where what needs them shows. Nothing goes on
 by itself from there; the Agent that stayed takes what they say next.
 
-## Events capability and libraries
+## Capabilities and libraries
 
 Edition 1 programs receive outside events through the standard `Events`
 capability interface (`Events.kind(app, kind)`, `Events.events(kind, ~source=?,
@@ -524,6 +596,9 @@ host externals:
   inside the mailbox owner's authorized scope and projects only
   `Gmail.mailRef = { messageId }`, so email addresses, subjects, and bodies
   never leak into public Channel `~about` blocks.
+- **`X`**, on the `Actions` capability ([Asking a connected app](#asking-a-connected-app)):
+  `X.preparePost(account, text)`, `X.prepareVideo(account, video, text)`,
+  `X.publish(prepared)`.
 
 A Page may also declare Space libraries with `` ```norn 1 lib <ModuleName> ``
 (`nornLibBlock` in protocol). When a program on that Page starts or is revised,

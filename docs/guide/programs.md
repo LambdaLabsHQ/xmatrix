@@ -143,6 +143,46 @@ every(1d)->or(ciFailed("acme/app"))->forEach(_ =>
 
 This runs a round every day, and at once when CI fails. The Space's connection must cover the repository or app.
 
+## Actions in connected apps
+
+A program can have a [connected app](connectors.md) do something by itself, at a time you choose, with no agent running. It takes two steps. *Prepare* fixes exactly what will be done and gets it admitted; nothing is sent. *Publish* does it, once.
+
+```norn
+open Std
+let post = (video, text, ~at) => spawn(~key=video, () => {
+  let ready = X.prepareVideo("@acme", video, text)->wait?
+  after(at)->wait
+  X.publish(ready)->wait
+})
+all([
+  post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
+  post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
+])
+```
+
+Both posts ask for admission as soon as the program starts, so you answer them in one sitting. Each then goes out at its own time. Adding a line to the list asks only about the new post.
+
+What admitting means follows the app's one permission:
+
+| Permission | What happens when a program prepares an action |
+| --- | --- |
+| Read and write | It is admitted at once |
+| Ask first | A Space admin answers it in the conversation's Pending approvals, seeing the account, the text and the attachment that will be used |
+| Read only | It is declined |
+
+An approval covers that one action with that content, and is good for 30 days. When the time comes xMatrix checks again that the connection and account are the ones approved and that whoever approved may still approve; if not, nothing is sent and the program reads why. An action whose result is unknown is reported as failed and never tried again. A video attachment must be in the program's own conversation.
+
+`X.preparePost(account, text)` prepares a post without a video. Any other app's action is asked for by name with the two parts of its command, as `xmatrix connector list` shows them:
+
+```norn
+type command = {target: string, text: string}
+type done = {summary: string, url: option<string>}
+let post: Actions.action<command, done> = Actions.action("slack", "post")
+
+let ready = Actions.prepare(post, {target: "#releases", text: "4.2 is out."})->wait?
+Actions.perform(ready)->wait
+```
+
 ## One question from an agent
 
 An agent that needs a single answer does not write a program. It asks with a command, and the answer comes back to it:

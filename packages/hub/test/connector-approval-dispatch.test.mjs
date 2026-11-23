@@ -42,6 +42,7 @@ test("approved actions report stale authority before provider I/O and mask unkno
       repository: { authorize: async () => {
         checks++;
         if (during !== "preflight" || checks === 2) throw failure;
+        return { decidedByPerson: true };
       } }, imports: {
         "./connection-credentials": connectionCredentialsDouble(async () => {
           if (during === "credentials") throw failure;
@@ -112,7 +113,8 @@ test("X allow uploads freeze input and queue once; only the durable executor per
       return stage.request;
     },
     startAllowed: async () => { stage.request.status = "executing"; return { request: stage.request, claimed: true }; },
-    authorize: async () => { authorizations++; },
+    // Nobody decided an upload the Read and write permission admitted: it runs only while that permission still does.
+    authorize: async () => { authorizations++; return { decidedByPerson: false }; },
   };
   const commands = await dispatcher({ providerId: "x", spaceId: "space", mode: async () => mode, repository,
     publish: async (_manifest, input, lines) => { published.push({ input, lines }); }, imports: {

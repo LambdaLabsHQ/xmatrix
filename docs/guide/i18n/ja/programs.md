@@ -143,6 +143,46 @@ every(1d)->or(ciFailed("acme/app"))->forEach(_ =>
 
 このプログラムは毎日 1 回実行されるほか、CI が失敗した際にも即座に起動します。対象のリポジトリやアプリが Space に連携されている必要があります。
 
+## 連携アプリでのアクション
+
+プログラムは、[連携アプリ](connectors.md)に、指定した時刻にひとつの操作を実行させることができます。実行時にエージェントが動いている必要はありません。手順は 2 つです。**準備**は実行内容をそのまま固定して承認を得ます。この時点では何も送信されません。**公開**はそれを 1 回だけ実行します。
+
+```norn
+open Std
+let post = (video, text, ~at) => spawn(~key=video, () => {
+  let ready = X.prepareVideo("@acme", video, text)->wait?
+  after(at)->wait
+  X.publish(ready)->wait
+})
+all([
+  post("<message id>/<attachment id>", "Stop pasting API keys.", ~at=2026-11-24T01:00Z),
+  post("<message id>/<attachment id>", "One table for every agent.", ~at=2026-11-24T09:00Z),
+])
+```
+
+プログラムが始まるとすぐに、両方の投稿が承認を求めるので、まとめて一度に回答できます。その後、それぞれが自分の時刻に送信されます。リストに 1 行追加すると、新しい投稿についてだけ尋ねられます。
+
+承認の扱いは、そのアプリのただひとつの権限に従います。
+
+| 権限 | プログラムがアクションを準備したとき |
+| --- | --- |
+| 読み書き（Read and write） | すぐに承認されます |
+| 確認する（Ask first） | 会話の **Pending approvals** に表示され、Space 管理者が使用されるアカウント、本文、添付ファイルを見て回答します |
+| 読み取り専用（Read only） | 拒否されます |
+
+承認はその内容のそのアクション 1 件だけを対象とし、30 日間有効です。実行時に xMatrix は、接続とアカウントが承認時のものであること、承認した人がいまも承認できることを改めて確認します。どれかが成り立たなければ何も送信されず、プログラムは理由を受け取ります。結果が不明なアクションは失敗として報告され、再試行されません。動画の添付ファイルは、プログラム自身の会話にある必要があります。
+
+`X.preparePost(account, text)` は動画なしの投稿を準備します。ほかのアプリのアクションは名前で指定し、入力はそのコマンドの 2 つの部分です。書き方は `xmatrix connector list` で確認できます。
+
+```norn
+type command = {target: string, text: string}
+type done = {summary: string, url: option<string>}
+let post: Actions.action<command, done> = Actions.action("slack", "post")
+
+let ready = Actions.prepare(post, {target: "#releases", text: "4.2 is out."})->wait?
+Actions.perform(ready)->wait
+```
+
 ## エージェントからの単発の質問
 
 回答を 1 つだけ得たいエージェントはプログラムを書く必要はありません。コマンドで直接質問し、回答を受け取れます。

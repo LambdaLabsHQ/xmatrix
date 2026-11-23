@@ -578,3 +578,117 @@ test("reading a program's flow changes nothing, and a program that has ended has
   step({ requestId: asked.requestId, epoch: asked.epoch, reply: { typed: "ok" } });
   assert.deepEqual(flowOf(state.source, state.ledger, 9_000), []);
 });
+
+// A connected app's request is the host's own (Norn spec §6.3): these own what a program's pass makes of it and
+// what the host answers it with. The connector's approval and execution are owned by the connector tests.
+const publishing = `switch X.prepareVideo("@acme", "message-1/video-1", "Stop pasting API keys.")->wait {
+| Answered(ready) =>
+  after(1d)->wait
+  switch X.publish(ready)->wait {
+  | Answered(posted) => posted.summary
+  | Refused(why) => \`not posted: \${why}\`
+  | other => fail(other)
+  }
+| Refused(why) => \`declined: \${why}\`
+| other => fail(other)
+}`;
+
+test("a program asks a connected app: admitted ahead, done at its time, and never asked twice", async () => {
+  const { nornActionAnswer, nornPreparedReply, nornRequestWords } = await import("../src/norn-host.ts");
+  const { nornActionStatement } = await import("../src/norn-libraries.ts");
+  const { state, step } = program(publishing);
+  const [prepare] = step().open;
+  assert.equal(prepare.holder, "app:x");
+  const asked = state.ledger.requests[prepare.requestId];
+  assert.equal(asked.verb, "prepare");
+  assert.deepEqual([asked.action.app, asked.action.name, asked.action.prepared], ["x", "publish_video", null]);
+  // The program's typed input stands for the command a person or an Agent would have written.
+  assert.deepEqual(nornActionStatement("x", "publish_video", asked.action.input),
+    { target: "@acme", text: JSON.stringify({ text: "Stop pasting API keys.", video: "message-1/video-1" }) });
+  assert.deepEqual(nornRequestWords(asked), { holder: "@X",
+    text: "Approve publish_video: {account: @acme, text: Stop pasting API keys., video: message-1/video-1}" });
+
+  // Admitted: the program waits for its time, and nothing is asked of the app meanwhile.
+  const waiting = step({ requestId: prepare.requestId, epoch: 0, reply: nornPreparedReply(asked) });
+  assert.equal(waiting.result.refusal, undefined);
+  assert.deepEqual(waiting.open, []);
+  assert.equal(waiting.write.nextDueMs, state.ledger.requests[prepare.requestId].settledAt + 86_400_000);
+
+  const [perform, ...more] = step(undefined, { nowMs: waiting.write.nextDueMs }).open;
+  assert.deepEqual(more, []);
+  const doing = state.ledger.requests[perform.requestId];
+  assert.deepEqual([doing.verb, doing.holder, doing.action.prepared], ["perform", "app:x", prepare.requestId]);
+  assert.deepEqual(nornRequestWords(doing), { holder: "@X", text: "Do publish_video, as approved" });
+  // Passes while the app is at work open nothing more.
+  assert.equal(step().open.length, 1);
+  assert.equal(Object.keys(state.ledger.requests).length, 2);
+
+  const done = step({ requestId: perform.requestId, epoch: 0,
+    reply: nornActionAnswer({ summary: "Posted with video as @acme: 909", url: "https://x.com/acme/status/909" }) });
+  assert.equal(done.result.status, "completed");
+  assert.equal(state.ledger.ended.result.value, "Posted with video as @acme: 909");
+});
+
+test("an action a Space admin declines, or that can no longer run, is a reply the program reads", async () => {
+  const { nornPreparedReply } = await import("../src/norn-host.ts");
+  const declined = program(publishing);
+  const [prepare] = declined.step().open;
+  declined.step({ requestId: prepare.requestId, epoch: 0, reply: { tag: "Refused", reason: "A Space admin declined it" } });
+  assert.equal(declined.state.ledger.ended.result.value, "declined: A Space admin declined it");
+
+  // Only the request's own token admits it: a made-up one settles nothing.
+  const forged = program(publishing);
+  const [asked] = forged.step().open;
+  const refused = forged.step({ requestId: asked.requestId, epoch: 0, reply: { tag: "Answered", value: { type: "variant", name: "Prepared", args: [{ type: "string", value: "request:other" }] } } });
+  assert.match(refused.result.refusal, /prepared action/u);
+  assert.equal(refused.open.length, 1);
+
+  const stale = program(publishing);
+  const [first] = stale.step().open;
+  const waiting = stale.step({ requestId: first.requestId, epoch: 0, reply: nornPreparedReply(stale.state.ledger.requests[first.requestId]) });
+  const [perform] = stale.step(undefined, { nowMs: waiting.write.nextDueMs }).open;
+  stale.step({ requestId: perform.requestId, epoch: 0, reply: { tag: "Refused", reason: "The connected account changed" } });
+  assert.equal(stale.state.ledger.ended.result.value, "not posted: The connected account changed");
+});
+
+test("the host gives up on an app's request it never heard about, in words for each half", async () => {
+  const { nornPreparedReply } = await import("../src/norn-host.ts");
+  const unanswered = program(`switch X.preparePost("@acme", "Hello")->wait { | Broke(why) => why | other => fail(other) }`);
+  unanswered.step();
+  unanswered.state.requests[0].abandoned = true;
+  unanswered.step();
+  assert.equal(unanswered.state.ledger.ended.result.value, "Nobody answered this approval request in 30 days");
+
+  const lost = program(`let ready = X.preparePost("@acme", "Hello")->wait?
+switch X.publish(ready)->wait { | Broke(why) => why | other => fail(other) }`);
+  const [prepare] = lost.step().open;
+  const [perform] = lost.step({ requestId: prepare.requestId, epoch: 0, reply: nornPreparedReply(lost.state.ledger.requests[prepare.requestId]) }).open;
+  lost.state.requests.find(row => row.requestId === perform.requestId).abandoned = true;
+  // It is not handed to anyone else, as an Agent's broken-off work is: an action is never tried twice.
+  lost.state.requests.find(row => row.requestId === perform.requestId).brokeOff = true;
+  lost.step();
+  assert.equal(lost.state.ledger.ended.result.value, "The action stopped without a confirmed result; it was not tried again");
+});
+
+test("a program is checked against what each connected app can do", () => {
+  const refusal = source => checkNornProgram(source).refusal ?? "";
+  assert.match(refusal(`let a = Actions.action("x", "pubish_video")\nignore(a)`), /no action "pubish_video".*did you mean "publish_video"/u);
+  assert.match(refusal(`let a = Actions.action("nope", "post")\nignore(a)`), /unknown connector app "nope"/u);
+  assert.match(refusal(`type post = {account: string}\ntype posted = {summary: string}
+let a: Actions.action<post, posted> = Actions.action("x", "post")\nignore(a)`), /requires the field text/u);
+  // Every write an app declares can be asked for, as the command writes it: a target and a text.
+  assert.equal(refusal(`type command = {target: string, text: string}\ntype done = {summary: string, url: option<string>}
+let send: Actions.action<command, done> = Actions.action("slack", "post")
+let ready = Actions.prepare(send, {target: "#general", text: "Shipped."})->wait?
+Actions.perform(ready)->wait`), "");
+});
+
+test("the flow of a program that asks an app reads as the app, approved and then done", () => {
+  const checked = checkNornProgram(publishing);
+  const steps = nornFlow(checked.code, nornStartLedger(1_000), 1_000);
+  const [approve] = steps;
+  assert.deepEqual([approve.kind, approve.holder, approve.verb, approve.main], ["ask", "@X", "prepare", "answered"]);
+  assert.match(approve.text, /^Approve publish_video: /u);
+  assert.deepEqual(steps.slice(1, 3).map(each => [each.kind, each.holder ?? null, each.text ?? null]),
+    [["wait", null, null], ["ask", "@X", "Do publish_video, as approved"]]);
+});
