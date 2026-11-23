@@ -1,5 +1,5 @@
-import { createPgSpawnableScenario, isSpawnOf, runHubCommand as run, startPgHubWorker } from "./agent-launch-postgres.fixture.mjs";
-import { assert, mintAgentRunToken, MOCK_TOKEN, postChannelMessage, randomUUID, test } from "./agent-mention-spawn.fixture.mjs";
+import { createPgSpawnableScenario, launchScenarioRun, runHubCommand as run, startPgHubWorker } from "./agent-launch-postgres.fixture.mjs";
+import { assert, MOCK_TOKEN, randomUUID, test } from "./agent-mention-spawn.fixture.mjs";
 import { humanWsUrl, openWebSocket } from "./e2e-utils.mjs";
 import { websocketInbox as inboxOf } from "./support/websocket-inbox.mjs";
 
@@ -14,12 +14,8 @@ test("an Agent Run reads a page through its owner's browser, and only the owner 
   try {
     const scenario = await createPgSpawnableScenario(worker, { agentName: "codex-browser-read" });
     ({ daemon } = scenario);
-    const { channelId, registration, machineId, canonicalCwd } = scenario;
-    await postChannelMessage(worker, MOCK_TOKEN, channelId,
-      `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}" read the page`);
-    const spawn = await daemon.inbox.waitFor((message) => message.type === "machine_spawn_agent" &&
-      message.channelId === channelId && isSpawnOf(message, registration), "machine spawn");
-    const runToken = await mintAgentRunToken(worker, daemon, spawn, channelId);
+    const { channelId } = scenario;
+    const { token: runToken } = await launchScenarioRun(worker, scenario, "Read the page.");
 
     // A person cannot use it: it is the Agent's way to the page.
     const human = await run(worker, MOCK_TOKEN, ["browse"]);
