@@ -1013,6 +1013,14 @@
   }
 
   .xmatrix-app .message-video-attachment {
+    --message-video-aspect: 1.777778;
+    --message-video-max-height: 28rem;
+    aspect-ratio: var(--message-video-aspect);
+    width: min(100%, calc(var(--message-video-max-height) * var(--message-video-aspect)));
+    max-width: 100%;
+    max-height: var(--message-video-max-height);
+    min-width: min(100%, 10rem);
+    min-height: 6rem;
     border-radius: 0.75rem !important;
     background: #000 !important;
     box-shadow: none;

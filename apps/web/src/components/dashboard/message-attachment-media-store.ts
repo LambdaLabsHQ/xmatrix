@@ -48,6 +48,8 @@ export interface MessageAttachmentMediaStore {
   progressListeners: Set<() => void>;
   /** Loaded images, held so a remounted row paints them without reloading. */
   images: HTMLImageElement[];
+  /** Decoded video dimensions, kept across virtualized row remounts. */
+  videoDimensions: Map<string, { width: number; height: number }>;
   /** Bytes of the media this store holds, for the recent-store budget. */
   bytes: number;
   /** Mounted views using this store; only an unused store can be evicted. */
@@ -146,6 +148,7 @@ export function createMessageAttachmentMediaStore(
     progress: new Map(),
     progressListeners: new Set(),
     images: [],
+    videoDimensions: new Map(),
     bytes: 0,
     users: 0,
   };
@@ -184,7 +187,19 @@ export function releaseMessageAttachmentMediaStore(
   store.progress.clear();
   store.progressListeners.clear();
   store.images = [];
+  store.videoDimensions.clear();
   store.bytes = 0;
+}
+
+/** Remember decoded video dimensions while this authorization-scoped store is active. */
+export function noteMessageAttachmentVideoDimensions(
+  store: MessageAttachmentMediaStore,
+  source: string,
+  dimensions: { width: number; height: number },
+): void {
+  if (!store.active || store.released) return;
+  if (dimensions.width <= 0 || dimensions.height <= 0) return;
+  store.videoDimensions.set(source, dimensions);
 }
 
 /** Commit a late read only while its authorization-scoped owner is active. */
