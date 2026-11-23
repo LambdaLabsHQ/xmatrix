@@ -101,7 +101,7 @@ test("page actions refuse pages outside the named property before any provider c
 test("manifest and executors agree on action effects", () => {
   const manifest = getAppConnectorProvider("googlesearchconsole");
   assert.equal(manifest.status, "available");
-  assert.deepEqual(manifest.oauth.scopes, [...["openid", "https://www.googleapis.com/auth/userinfo.email"], legacyScope, verificationScope]);
+  assert.deepEqual(manifest.oauth.scopes, ["openid", "https://www.googleapis.com/auth/userinfo.email", legacyScope, verificationScope]);
   const effects = Object.fromEntries(manifest.actions.map(action => [action.id, [action.effect]]));
   assert.deepEqual(effects.submit_sitemap, ["write"]);
   for (const id of ["list_sites", "query", "list_sitemaps", "inspect_url"]) assert.equal(effects[id][0], "read");
