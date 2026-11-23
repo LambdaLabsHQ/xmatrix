@@ -151,9 +151,9 @@ moves it on. Nothing extends it past `FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS` after
 sending, and Jev re-reads the deadline until it has passed. Whether the choice
 is still open is the Hub's own `open` in each record, never a comparison with
 the reader's clock. The web shows one line of text under the message, not a
-card and not a list of Agents: "xMatrix is reading", then Jev's pick and the
+card and not a list of Agents: "Choosing an Agent…", then Jev's pick and the
 seconds left, with the author's two ways out as words at its end ("Change" or
-"Choose Agent", and "Don't start"). Opening the menu claims "start nothing"
+"Pick one", and "Don't start"). Opening the menu claims "start nothing"
 first, so choosing is never a race against the window; the Agent picked there
 is the author's own `@<harness>` message, an ordinary summon, and the menu's
 last row puts that summon in the composer, where model, effort, machine and

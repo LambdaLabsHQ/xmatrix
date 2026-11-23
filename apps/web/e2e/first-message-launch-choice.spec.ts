@@ -80,8 +80,8 @@ test("the line is one sentence: reading, then Jev's pick counting down, then the
   const push = await openFresh(page);
   const line = page.locator(".launch-line");
   // The author may act at once, but nothing counts down before Jev's reading.
-  await expect(line).toContainText("xMatrix is reading");
-  await expect(line.getByRole("button", { name: "Choose Agent" })).toBeEnabled();
+  await expect(line).toContainText("Choosing an Agent…");
+  await expect(line.getByRole("button", { name: "Pick one" })).toBeEnabled();
   await expect(line.getByRole("button", { name: "Don't start" })).toBeEnabled();
   await expect(line.locator(".launch-line-count")).toHaveCount(0);
   // A sentence on the paper: no card, and no Agent listed until the author asks.

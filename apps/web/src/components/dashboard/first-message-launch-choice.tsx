@@ -33,7 +33,8 @@ const summonedByMessage = new Set<string>();
 
 /**
  * Under a new conversation's first message, once its words and pictures are
- * together: one line of text saying what xMatrix is about to do with it, and
+ * together: one line of text saying what is about to happen to it ("Choosing an Agent…",
+ * said as the outcome the author waits for, not as what xMatrix does inside), and
  * the author's two ways out. It is a sentence, not a card and not a list of
  * Agents: most authors read it and do nothing.
  *
@@ -139,7 +140,7 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, fo
     : pick ? <><Agent option={pick} /> {remaining !== undefined
       ? <>starts in <span className="launch-line-count">{Math.ceil(remaining / 1000)}s</span></> : "is starting"}</>
     : recommended === null ? "Read as conversation, so no Agent starts"
-    : view.kind === "reading" ? "xMatrix is deciding" : "xMatrix is reading";
+    : "Choosing an Agent…";
   const live = undecided && !pick && recommended !== null;
   // Jev could not read it, or read it as conversation: the same exit either way.
   const asking = view.kind === "none" || recommended === null;
@@ -149,7 +150,7 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, fo
       <span className="launch-line-status">{status}</span>
       {!menu && canAsk && !asking && (
         <button type="button" className="launch-line-action" aria-haspopup="menu" aria-expanded={menu} onClick={() => void choose()}>
-          {pick ? "Change" : "Choose Agent"}
+          {pick ? "Change" : "Pick one"}
         </button>
       )}
       {!menu && canAsk && asking && (
