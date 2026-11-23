@@ -1054,11 +1054,12 @@ integration("the page tree shows each page's Agents: live in a conversation whos
   }
 });
 
-// Every page request checks access through the whole tree; it carried every
-// page's title, timestamps and summary (and parsed every head body for the
-// title) to answer for one page. Those bytes are PlanetScale egress on each
-// page read, link list, section update and conversation edit.
-integration("pages: one page's read carries the other pages' access, not their titles or summaries", async () => {
+// Every page request checked access through the whole tree: first with every
+// page's title, timestamps and summary, then with every page's access row.
+// Access is inherited from ancestors alone, so one page's read carries its own
+// chain and nothing of the Space's other pages. Those bytes are PlanetScale
+// egress on each page read, section update and conversation edit.
+integration("pages: one page's read carries its own ancestors' access, not the Space's other pages", async () => {
   const { client, ids, owner } = await pageTest("page-tree-bytes");
   const observations = [];
   const pages = new PostgresPageRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0",
@@ -1072,16 +1073,28 @@ integration("pages: one page's read carries the other pages' access, not their t
       await call("setSummary", { principal: owner, pageId: page.pageId, baseRevision: 1, summary: "s".repeat(240) });
       created.push(page);
     }
+    // A page two levels down, under a parent only the owner was let into.
+    const { page: child } = await call("create", { principal: owner, title: "Child", body: "# Child\n",
+      parentPageId: created[17].pageId });
+    const { page: leaf } = await call("create", { principal: owner, title: "Leaf", body: "# Leaf\n",
+      parentPageId: child.pageId });
     observations.length = 0;
     const { page } = await call("read", { principal: owner, pageId: created[17].pageId });
     assert.equal(page.title, "Page 17", "the page read still has its own title");
     assert.equal(page.summary.text, "s".repeat(240), "and its own summary");
-    const tree = observations.find((point) => point.queryName.startsWith("page_tree_access_"));
-    assert.ok(tree.resultBytes < 40 * 250,
-      `one page's access read returned ${tree.resultBytes} bytes for a 40-page Space`);
+    assert.equal(observations.some((point) => point.queryName.startsWith("page_tree_access_")), false,
+      "one page's read never reads the Space's tree");
+    const chain = observations.find((point) => point.queryName.startsWith("page_chain_access_"));
+    assert.equal(chain.rowCount, 1, "a root page is its whole chain");
+    assert.ok(chain.resultBytes < 700,
+      `one root page's access read returned ${chain.resultBytes} bytes in a 42-page Space`);
+    observations.length = 0;
+    assert.equal((await call("read", { principal: owner, pageId: leaf.pageId })).page.title, "Leaf");
+    assert.equal(observations.find((point) => point.queryName.startsWith("page_chain_access_")).rowCount, 3,
+      "a nested page reads itself and its two ancestors");
     const listed = (await call("tree", { principal: owner })).pages;
-    assert.equal(listed.length, 40);
-    assert.ok(listed.every((item) => /^Page \d+$/u.test(item.title) && item.summary?.text === "s".repeat(240)),
+    assert.equal(listed.length, 42);
+    assert.ok(listed.filter((item) => /^Page \d+$/u.test(item.title) && item.summary?.text === "s".repeat(240)).length === 40,
       "the tree view still names and summarizes every page");
   } finally {
     await cleanup(client, ids);

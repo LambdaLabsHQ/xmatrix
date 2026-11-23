@@ -378,16 +378,29 @@ type TreeRow = PageRow & AccessView & { governance: boolean };
  */
 type TreeDetail = "all" | readonly string[];
 
-/** Every page in the Space with the actor's effective access, parents first. */
+/**
+ * Every page in the Space with the actor's effective access, parents first.
+ * `scope: "chains"` reads only the detailed pages and their ancestors: access
+ * is inherited from ancestors alone, so a read of one page needs no other
+ * row, and a Space of hundreds of pages no longer sends them all on every
+ * page request.
+ */
 async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor,
-  detail: TreeDetail = "all"): Promise<TreeRow[]> {
+  detail: TreeDetail = "all", scope: "space" | "chains" = "space"): Promise<TreeRow[]> {
+  const chains = scope === "chains" && detail !== "all";
   // One statement: each page with the actor's own grant on it and whether it is the Space's governance page.
   // Every page request checks access through here, so its round trips and bytes are paid on every one.
   const detailed = (expression: string) =>
     `CASE WHEN $3::text[] IS NULL OR p.page_id=ANY($3::text[]) THEN ${expression} END`;
   const rows = await tx.query<PageRow & { actor_access: "read" | "edit" | null; is_governance: boolean }>({
-    name: "page_tree_access_v3",
-    text: `SELECT p.page_id,p.parent_page_id,p.access_mode,p.head_revision,p.agent_suggest_only,
+    name: chains ? "page_chain_access_v1" : "page_tree_access_v3",
+    text: `${chains ? `WITH RECURSIVE chain AS (
+        SELECT page.page_id,page.parent_page_id FROM data.pages page
+        WHERE page.space_id=$1 AND page.page_id=ANY($3::text[])
+        UNION
+        SELECT parent.page_id,parent.parent_page_id FROM chain
+        JOIN data.pages parent ON parent.space_id=$1 AND parent.page_id=chain.parent_page_id
+      ) ` : ""}SELECT p.page_id,p.parent_page_id,p.access_mode,p.head_revision,p.agent_suggest_only,
         ${detailed(`(SELECT data.page_title(r.body) FROM data.page_revisions r
           WHERE r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision)`)} AS title,
         ${detailed("p.position")} AS position,${detailed("p.updated_at")} AS updated_at,
@@ -399,7 +412,8 @@ async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: A
         COALESCE(p.page_id=(SELECT s.metadata_json->>'governancePageId' FROM data.spaces s WHERE s.space_id=$1),
           false) AS is_governance
       FROM data.pages p
-      WHERE p.space_id=$1 ORDER BY p.parent_page_id NULLS FIRST, p.position, p.page_id
+      WHERE p.space_id=$1${chains ? " AND p.page_id IN (SELECT chain.page_id FROM chain)" : ""}
+      ORDER BY p.parent_page_id NULLS FIRST, p.position, p.page_id
       LIMIT ${MAX_PAGES + 1}`,
     values: [spaceId, actor.userId, detail === "all" ? null : [...detail]], maxRows: MAX_PAGES + 1,
   });
@@ -461,13 +475,13 @@ export class PostgresPageRepository {
   }
 
   private accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor,
-    detail: TreeDetail = "all"): Promise<TreeRow[]> {
-    return accessibleTree(tx, spaceId, actor, detail);
+    detail: TreeDetail = "all", scope: "space" | "chains" = "space"): Promise<TreeRow[]> {
+    return accessibleTree(tx, spaceId, actor, detail, scope);
   }
 
   private async page(tx: DatabaseTransaction, spaceId: string, actor: Actor, pageId: string,
     need: "read" | "edit"): Promise<TreeRow> {
-    const tree = await this.accessibleTree(tx, spaceId, actor, [pageId]);
+    const tree = await this.accessibleTree(tx, spaceId, actor, [pageId], "chains");
     const row = tree.find((item) => item.page_id === pageId);
     if (!row) throw new PageControlError("page_not_found", 404);
     if (need === "edit" && !row.canEdit) throw new PageControlError("page_edit_forbidden", 403);
@@ -549,7 +563,7 @@ export class PostgresPageRepository {
       const edited = new Set((await linkRows(tx, spaceId, null, input.conversationId))
         .filter((link) => link.source === "edit").map((link) => link.page_id));
       if (edited.size === 0) return { spaceId, edits: [] };
-      const tree = new Map((await this.accessibleTree(tx, spaceId, actor, [...edited]))
+      const tree = new Map((await this.accessibleTree(tx, spaceId, actor, [...edited], "chains"))
         .filter((row) => edited.has(row.page_id)).map((row) => [row.page_id, row]));
       if (tree.size === 0) return { spaceId, edits: [] };
       const rows = await tx.query<QueryResultRow & { message_id: string; page_id: string; revision: string;

@@ -13,7 +13,7 @@ function respond(query) {
   if (query.name === "machine_name_get_v1") return [{ name: "Workstation" }];
   if (query.name === "space_placement_resolve_v1") return [activePlacementRow()];
   if (query.name === "page_actor_member_v1") return [{ role: "owner" }];
-  if (query.name === "page_tree_access_v3") return [{
+  if (query.name === "page_tree_access_v3" || query.name === "page_chain_access_v1") return [{
     page_id: "page-1", parent_page_id: null, access_mode: "open", head_revision: 3,
     agent_suggest_only: false, title: "Ops", position: "a", updated_at: "2026-11-15T00:00:00.000Z",
     version: 1, published_at: null, summary: null, summary_revision: null, summary_at: null,
