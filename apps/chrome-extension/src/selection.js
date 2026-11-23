@@ -80,13 +80,16 @@
     shown = "";
   }
 
+  /** The frame's clear margin around the box, for its shadow (ask.tsx): the box, not the frame, is placed. */
+  const INSET = 12;
+
   /** Under the selection, or above it when there is no room; inside the window. */
   function place(width, height) {
     if (!frame || !anchor || !shown) return;
-    const below = anchor.bottom + 8;
-    const top = below + height > innerHeight - 8 ? Math.max(8, anchor.top - height - 8) : below;
-    frame.style.top = `${Math.max(8, Math.min(top, innerHeight - height - 8))}px`;
-    frame.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - width - 8))}px`;
+    const below = anchor.bottom + 8 - INSET;
+    const top = below + height > innerHeight ? Math.max(0, anchor.top - height + INSET) : below;
+    frame.style.top = `${Math.max(0, Math.min(top, innerHeight - height))}px`;
+    frame.style.left = `${Math.max(0, Math.min(anchor.left - INSET, innerWidth - width))}px`;
     frame.style.width = `${width}px`;
     frame.style.height = `${height}px`;
     frame.style.visibility = "visible";

@@ -215,7 +215,9 @@ function Surface() {
 
   const passage = context?.passage;
   return (
-    <div ref={frame} className="xmatrix-app w-[30rem]">
+    // Room around the capsule for its shadow (0 10px 30px): the frame clips what falls outside it.
+    // selection.js places the frame this much up and left, so the capsule sits where it did.
+    <div ref={frame} className="xmatrix-app box-content w-[30rem]" style={{ padding: "12px 12px 24px" }}>
       {context && passage ? (
         <GrantedAuthProvider token={context.token} user={context.user}>
           <ComposerStage>
