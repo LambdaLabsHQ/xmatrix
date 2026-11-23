@@ -9,7 +9,7 @@
  */
 import { useLayoutEffect, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
 import { isImeKeyDown } from "@/lib/ime-keydown";
 import { cn } from "@/lib/utils";
@@ -93,10 +93,13 @@ export function SearchPanel({
   activeIndex,
   resultCount,
   children,
-  chips,
-  onRemoveLastChip,
+  filters,
+  resultsHeader,
+  onRemoveLastFilter,
+  onInputFocus,
   onQueryChange,
   onActiveIndexChange,
+  onEscape,
   onCancel,
   onSubmit,
 }: {
@@ -109,19 +112,25 @@ export function SearchPanel({
   activeIndex: number;
   resultCount: number;
   children: React.ReactNode;
-  /** Filters already applied, drawn in the field ahead of the text. */
-  chips?: React.ReactNode;
-  /** Backspace in an empty field takes the last filter off. */
-  onRemoveLastChip?: () => void;
+  /** Filter controls shown below the search field so the input stays full width. */
+  filters?: React.ReactNode;
+  /** Optional pinned control at the top of the results area (e.g. inline filter picker search). */
+  resultsHeader?: React.ReactNode;
+  /** Backspace at the start of the field takes the last filter off. */
+  onRemoveLastFilter?: () => void;
+  onInputFocus?: () => void;
   onQueryChange: (query: string) => void;
   onActiveIndexChange: (index: number) => void;
+  /** Escape handler; defaults to closing the panel when omitted. */
+  onEscape?: () => void;
   onCancel: () => void;
   onSubmit: () => void;
 }) {
   const [placement, setPlacement] = useState<PanelPlacement | null>(null);
+  const handleEscape = onEscape ?? onCancel;
 
-  useSystemBackDismiss(open, onCancel);
-  useEscapeDismiss(open, onCancel);
+  useSystemBackDismiss(open, handleEscape);
+  useEscapeDismiss(open, handleEscape);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -167,12 +176,12 @@ export function SearchPanel({
         >
           <div className="app-search-panel-field flex shrink-0 items-center gap-3">
             <SearchGlyph className="size-4 shrink-0 text-muted-foreground" />
-            {chips}
             <input
               ref={inputRef}
               type="text"
               autoFocus
               value={query}
+              onFocus={onInputFocus}
               onChange={(event) => onQueryChange(event.target.value)}
               onKeyDown={(event) => {
                 // A composing input method owns Enter, the arrows and Escape.
@@ -188,10 +197,17 @@ export function SearchPanel({
                   onSubmit();
                 } else if (event.key === "Escape") {
                   event.preventDefault();
-                  onCancel();
-                } else if (event.key === "Backspace" && !query && onRemoveLastChip) {
+                  event.stopPropagation();
+                  handleEscape();
+                } else if (
+                  event.key === "Backspace"
+                  && !event.repeat
+                  && event.currentTarget.selectionStart === 0
+                  && event.currentTarget.selectionEnd === 0
+                  && onRemoveLastFilter
+                ) {
                   event.preventDefault();
-                  onRemoveLastChip();
+                  onRemoveLastFilter();
                 }
               }}
               data-workspace-search-input=""
@@ -204,7 +220,18 @@ export function SearchPanel({
               <X className="size-4" />
             </button>
           </div>
+          {filters && (
+            <div
+              className="app-search-panel-filters flex shrink-0 flex-wrap items-center gap-1.5 py-2 shadow-[inset_0_1px_0_oklch(0.42_0.012_238/0.08)]"
+              style={{ paddingInline: "calc(var(--app-search-panel-column) - 0.5rem)" }}
+              role="group"
+              aria-label="Search filters"
+            >
+              {filters}
+            </div>
+          )}
           <div className="app-search-panel-results min-h-0 flex-1 overflow-y-auto">
+            {resultsHeader}
             {resultCount === 0 ? (
               <div className="app-search-panel-empty text-muted-foreground">{emptyLabel}</div>
             ) : children}
@@ -218,6 +245,7 @@ export function SearchPanel({
 
 export function SearchResultRow({
   active,
+  selected,
   icon: Icon,
   title,
   subtitle,
@@ -227,6 +255,7 @@ export function SearchResultRow({
   onSelect,
 }: {
   active: boolean;
+  selected?: boolean;
   icon: React.ComponentType<{ className?: string }>;
   title: React.ReactNode;
   subtitle: string;
@@ -249,7 +278,8 @@ export function SearchResultRow({
         <span className="block truncate text-[13px] font-semibold leading-5">{title}</span>
         <span className="block truncate text-[11px] leading-4 text-muted-foreground">{subtitle}</span>
       </span>
-      {hint && <kbd className="app-search-panel-hint shrink-0 text-muted-foreground">{hint}</kbd>}
+      {selected && <Check className="size-3.5 shrink-0 text-foreground" aria-hidden="true" />}
+      {!selected && hint && <kbd className="app-search-panel-hint shrink-0 text-muted-foreground">{hint}</kbd>}
     </button>
   );
 }
