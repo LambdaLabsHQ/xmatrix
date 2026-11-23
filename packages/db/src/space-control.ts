@@ -2602,6 +2602,12 @@ export class PostgresSpaceControlRepository {
      * opened threads) needs exactly this, not the whole Space catalog.
      */
     familyOfChannelId?: string;
+    /**
+     * Words a Channel's name, topic or summary must all hold, whatever the
+     * case. Finding a conversation then reads the few rows that match, not
+     * every Channel of the Space for the caller to filter.
+     */
+    find?: readonly string[];
     cursor?: string;
     limit?: number;
   }): Promise<{
@@ -2616,11 +2622,13 @@ export class PostgresSpaceControlRepository {
     const channelId = input.channelId ? bounded(input.channelId, "channelId") : null;
     const familyOfChannelId = input.familyOfChannelId
       ? bounded(input.familyOfChannelId, "familyOfChannelId") : null;
+    const words = (input.find ?? []).map((word) => bounded(word, "find", 200).toLowerCase());
+    if (words.length > 20) throw new SpaceControlError("invalid_request", 400, "find holds too many words");
     return this.inSpace(requestId, "channel.list", spaceId, async (transaction) => {
       const role = await requireSpacePrincipal(transaction, "channel_list", spaceId, input.principal.kind,
         principalId);
       const rows = await transaction.query<ChannelRow>({
-        name: "channel_list_v9",
+        name: "channel_list_v10",
         text: `SELECT c.channel_id, c.space_id, c.name, c.mode,
             c.metadata_json, c.version, c.created_at, c.updated_at,
             $3::text AS creator_role, s.owner_user_id AS created_by_fallback,
@@ -2650,12 +2658,16 @@ export class PostgresSpaceControlRepository {
           WHERE c.space_id = $1 AND c.channel_id > $4
             AND ($5::text IS NULL OR c.channel_id = $5)
             AND ($8::text IS NULL OR c.channel_id = $8 OR c.metadata_json->>'threadRootChannelId' = $8)
+            AND NOT EXISTS (SELECT 1 FROM UNNEST($9::text[]) word
+              WHERE POSITION(word IN LOWER(CONCAT_WS(E'\\n', c.name,
+                CASE WHEN jsonb_typeof(c.metadata_json->'topic')='string' THEN c.metadata_json->>'topic' END,
+                CASE WHEN jsonb_typeof(c.metadata_json->'summary')='string' THEN c.metadata_json->>'summary' END))) = 0)
             AND ${channelCapabilityPredicate({ capability: "catalog_read", channelAlias: "c",
               principalKindSql: "$7", principalIdSql: "$2" })}
           ORDER BY c.channel_id LIMIT $6`,
         values: [
           spaceId, principalId, role, cursor, channelId, limit + 1, input.principal.kind,
-          familyOfChannelId,
+          familyOfChannelId, words,
         ],
         maxRows: limit + 1,
       });

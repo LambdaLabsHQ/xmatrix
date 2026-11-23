@@ -298,6 +298,30 @@ integration("a family list reads one Channel and the readable threads opened on 
   assert.ok(familyBytes < fullBytes);
 });
 
+// Finding a conversation used to list every Channel of the Space for the
+// caller to filter; the list now keeps only the rows that hold every word.
+integration("a list that names words keeps the readable Channels whose name, topic or summary holds them all", async () => {
+  await seededWith((client) => client.query(`UPDATE data.channels SET metadata_json=CASE channel_id
+      WHEN 'grandchild' THEN jsonb_build_object('topic','Billing egress','summary',7)
+      ELSE jsonb_build_object('summary',$1::text) END
+    WHERE channel_id IN ('child','closed-hidden','grandchild')`, ["Egress 出流量 review"]));
+  const { spaces } = catalogSpaceControl();
+  const found = async (principal, ...find) => (await spaces.listChannels({ requestId: "find-list",
+    spaceId: "space-catalog", principal, limit: 200, find })).channels.map((channel) => channel.id);
+  const user = { kind: "user", id: "user-1" };
+  assert.deepEqual(await found(user, "EGRESS"), ["child", "grandchild"]);
+  // Every word must appear, across the name and the summary together.
+  assert.deepEqual(await found(user, "child", "出流量"), ["child"]);
+  assert.deepEqual(await found(user, "egress", "billing"), ["grandchild"]);
+  assert.deepEqual(await found(user, "egress", "nothing-holds-this"), []);
+  // A closed Channel answers only for those it is open to.
+  assert.deepEqual(await found({ kind: "user", id: "owner" }, "egress"), ["child", "closed-hidden", "grandchild"]);
+  // No words keep the whole readable list.
+  assert.equal((await found(user)).length, 60);
+  await assert.rejects(spaces.listChannels({ requestId: "find-many", spaceId: "space-catalog", principal: user,
+    find: Array.from({ length: 21 }, (_, index) => `word-${index}`) }), /too many words/u);
+});
+
 integration("unreadable Spaces return the same not-found rejection across catalog reads", async (t) => {
   await seed();
   const database = createAuthorityDatabase({ connectionString, shardId: "shard-0" });
@@ -801,6 +825,14 @@ async function seededSpaceControl() {
       SELECT channel_id,space_id,updated_at FROM data.channels`);
     return { client, repository };
   } catch (error) { await client.end(); throw error; }
+}
+
+/** The seeded catalog after one change made on its own connection. */
+async function seededWith(change) {
+  await seed();
+  const client = new Client({ connectionString });
+  await client.connect();
+  await change(client).finally(() => client.end());
 }
 
 function catalogSpaceControl() {

@@ -91,7 +91,7 @@ test("catalog query variants parse after their SQL fragments are assembled", asy
   assert.ok([...checked].some((name) => name.startsWith("channel_catalog_counts_")));
   assert.ok([...checked].some((name) => name.startsWith("channel_catalog_resolve_")));
   assert.ok(checked.has("channel_catalog_attention_v1"));
-  assert.ok(checked.has("channel_list_v9"));
+  assert.ok(checked.has("channel_list_v10"));
 });
 
 test("static named SQL and migration statements parse with PostgreSQL", async () => {

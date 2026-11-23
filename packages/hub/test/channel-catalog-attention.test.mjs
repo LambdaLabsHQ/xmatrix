@@ -49,6 +49,17 @@ test("a complete catalog asks once for a Space's attention, however many Channel
   assert.equal(read.channels[4].attention, undefined);
 });
 
+test("a catalog read that names words asks the list for them, in the one Space or in each", async () => {
+  const one = boundary();
+  await one.reader.readChannelCatalogForPrincipal({}, { kind: "agent", id: "run:1", spaceId: "space-1" },
+    undefined, undefined, undefined, ["egress", "billing"]);
+  assert.deepEqual(one.calls.list.map((input) => [input.spaceId, input.find]),
+    [["space-1", ["egress", "billing"]], ["space-1", ["egress", "billing"]], ["space-1", ["egress", "billing"]]]);
+  const plain = boundary();
+  await plain.reader.readChannelCatalogForPrincipal({}, { kind: "user", id: "viewer" }, "space-1", undefined, undefined, []);
+  assert.equal(plain.calls.list[0].find, undefined);
+});
+
 test("what waits on a person is answered without reading any catalog", async () => {
   const { calls, reader } = boundary();
   const app = new Hono();
