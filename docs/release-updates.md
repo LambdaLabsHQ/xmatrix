@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: public site pages are prerendered, with valid structured data and direct app links
+
+An Ahrefs audit of xmatrix.sh and xmatrix.page found 37 slow pages. Each one was a localized page, a `/docs` page or a `/<slug>-alternatives` page: the Worker rendered them on every request and a cold isolate took 1–2 s. All of them are now prerendered at build: 6 locales × (home, download, support, 10 guide pages, 19 competitor pages). The build fails if a representative page of each kind stops prerendering. The 114 competitor pages and 6 homes no longer carry a `SoftwareApplication` node without ratings, which Google reported as 120 rich-result errors. Site pages on xmatrix.page link to `/app`, `/login`, `/console`, `/billing` and `/account/delete` on the app origin directly instead of through a 302. The footer's Perplexity link goes straight to `/search/new`. Search descriptions and titles that results cut off are rewritten to fit: 47 descriptions over 160 characters and 9 Spanish guide titles. The `/support` titles now say what the page helps with. Web only. Recovery is a CI-validated beta reverting #1994.
+
 ## Unreleased: message video attachments respect their original aspect ratio
 
 Inline video attachments in the conversation timeline previously used a fixed 16:9 full-width box (`aspect-video w-full`), adding black pillarboxes around portrait videos and letterboxes around ultrawide videos. `MessageVideoAttachment` now sizes the video container to the attachment's aspect ratio within the column width and `28rem` max height, using stored attachment `width`/`height` metadata immediately to avoid layout shift and falling back to decoded `videoWidth`/`videoHeight` on `loadedmetadata` (cached per channel media store across virtualized remounts). Web only. Recovery is a CI-validated beta reverting this change.
