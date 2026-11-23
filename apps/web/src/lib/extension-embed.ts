@@ -293,8 +293,22 @@ export function isExtensionCompanion(): boolean {
 export function subscribeEmbedPage(onPage: (page: EmbedPage) => void): () => void {
   return subscribeParent("page", (data) => {
     const page = parseEmbedPage(data);
-    if (page) onPage(page);
+    if (!page) return;
+    pageBesidePanel = { title: page.title, href: page.href };
+    onPage(page);
   });
+}
+
+/** The page beside the side panel, as it last said (subscribeEmbedPage). */
+let pageBesidePanel: { title: string; href: string } | null = null;
+
+/**
+ * The page the person is looking at while they write in the side panel: each
+ * message sent there carries it (browserPageMetadata), so the conversation and
+ * its Agents know which page it is about. Null outside the side panel.
+ */
+export function embedBrowserPage(): { title: string; href: string } | null {
+  return extensionEmbedParent() ? pageBesidePanel : null;
 }
 
 /** The conversations started from the extension, newest first, each time the list changes. */

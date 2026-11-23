@@ -40,3 +40,13 @@ test("the Agent sees the page as text, with where it came from", () => {
 test("`xmatrix browse` is a command", () => {
   assert.deepEqual(BROWSE_COMMAND.path, ["browse"]);
 });
+
+test("the side panel's page-reading capability survives hibernation", async () => {
+  const { parseHumanHibernationAttachment, serializeHumanHibernationAttachment } = await import("../src/runtime-transport/human-hibernation.ts");
+  const session = { user: { id: "u1", email: "u@example.test" }, connectedAt: new Date().toISOString(),
+    lastSeenAt: new Date().toISOString(), focusedChannelId: null, browserRead: true };
+  const restored = parseHumanHibernationAttachment(JSON.parse(JSON.stringify(serializeHumanHibernationAttachment(session, Date.now() + 60_000))));
+  assert.equal(restored?.session.browserRead, true);
+  const without = parseHumanHibernationAttachment(JSON.parse(JSON.stringify(serializeHumanHibernationAttachment({ ...session, browserRead: undefined }, Date.now() + 60_000))));
+  assert.equal(without?.session.browserRead, undefined);
+});

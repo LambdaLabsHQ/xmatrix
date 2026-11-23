@@ -1288,3 +1288,25 @@ fn assert_channel_message_ids(messages: &[InboundChannelMessage], expected: &[&s
         assert_eq!(&message.message_id, expected_id);
     }
 }
+
+#[test]
+fn a_message_from_the_chrome_side_panel_names_the_page_beside_it() {
+    let person = MessageSender {
+        kind: "user".to_string(),
+        label: "Daniel".to_string(),
+        ..test_sender("Daniel")
+    };
+    let metadata = serde_json::json!({ "browserPage": { "title": "Pool  sizing", "href": "https://docs.example.test/pool" } });
+    let prompt = format_incoming_channel_message_with_context(
+        "chan-a", Some("m1"), None, None, false, &person, Some(&metadata), "what does this say?", None, None,
+    );
+    assert!(prompt.contains(
+        "what does this say?\n\nViewing in Chrome: Pool sizing <https://docs.example.test/pool> (`xmatrix browse` reads this page from their browser)"
+    ));
+    // Only a web address is named.
+    let unsafe_page = serde_json::json!({ "browserPage": { "title": "x", "href": "file:///etc/passwd" } });
+    let prompt = format_incoming_channel_message_with_context(
+        "chan-a", Some("m2"), None, None, false, &person, Some(&unsafe_page), "hi", None, None,
+    );
+    assert!(!prompt.contains("Viewing in Chrome"));
+}

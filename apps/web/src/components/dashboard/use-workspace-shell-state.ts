@@ -53,7 +53,7 @@ import { NO_BUSY_INSTANCES } from "./agent-work-view";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { AUTH_TOKEN_REJECTED_EVENT, useAuth } from "@/lib/auth-context";
-import { forwardEmbedBrowserRead } from "@/lib/extension-embed";
+import { forwardEmbedBrowserRead, isExtensionCompanion } from "@/lib/extension-embed";
 import { untilCallerAborts } from "@/lib/query/caller-abort";
 import { userErrorMessage } from "../../lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -106,7 +106,7 @@ import { humanPushConnected, invalidateWorkspaceResources, markHumanPushRetrying
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
-import { ChannelPresenceConflict, decodeChannelAgentPresence, isLiveChannel, type LiveChannel, presenceInstanceId, channelActivityOf, isAgentInstruction, isNornAskProgramMessage, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelAgentPresence, isLiveChannel, type LiveChannel, presenceInstanceId, channelActivityOf, isAgentInstruction, isNornAskProgramMessage, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_BROWSER_READ, HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
@@ -2271,7 +2271,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           // Presence for conversations not on screen may come as a once-a-second
           // digest, and a Channel snapshot may speak for its Agents alone.
           device: { ...browserDevicePresence(desktopBridgeRef.current),
-            capabilities: [HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_DIGEST, HUMAN_CLIENT_PRESENCE_COVERAGE] },
+            capabilities: [HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_DIGEST, HUMAN_CLIENT_PRESENCE_COVERAGE,
+              // Only the extension's side panel reads pages for the person's Agents (`xmatrix browse`).
+              ...(isExtensionCompanion() ? [HUMAN_CLIENT_BROWSER_READ] : [])] },
         }));
       },
       onPacket: (_live, frames) => {

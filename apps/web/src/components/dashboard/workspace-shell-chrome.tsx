@@ -655,7 +655,9 @@ export function TopWorkspaceBar({
       aria-hidden={ghost ? true : undefined}
       inert={Boolean(ghost)}
     >
-      <div className="relative min-w-0 flex-1 md:hidden">
+      {/* The side panel's bar has no back chevron: its sign takes the back's column and the title's, as a
+          conversation's title does, so a Space sign is not squeezed into the back's narrow one. */}
+      <div className="relative min-w-0 flex-1 md:hidden" style={companion ? { gridColumn: "1 / 3" } : undefined}>
         <SignWithBack back={backButton}>
         {spaces.length > 1 && (!showBack || companion) ? (
           <>

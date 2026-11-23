@@ -860,6 +860,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const [companionAsk, setCompanionAsk] = useState<{ href: string; files: File[] } | null>(null);
   const askAboutPage = useStableCallback(() => {
     if (!companionPage) return;
+    // Already asking about this page (the idle panel opened it): + keeps what is written and attached there.
+    // The composer adds each new set of files it is handed, so asking again would attach the page twice.
+    if (composingConversation && companionAsk?.href === companionPage.href) return;
     setNewConversationDraft(pageAskDraft(companionPage));
     setNewConversationError(null);
     setCompanionAsk({ href: companionPage.href, files: [] });

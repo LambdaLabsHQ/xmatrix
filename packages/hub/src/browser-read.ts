@@ -6,8 +6,11 @@
  * (`POST /api/browser/read`); the Hub hands the request to the owner's live
  * clients in that cell and holds the Agent's call open until one answers
  * (`POST /api/browser/read/:id/answer`, by the owner only) or the wait ends.
- * The side panel reads the page the conversation was started from at once;
- * another open tab only after the person allows it; it never opens a page.
+ * The side panel reads at once the page beside it, which the person is
+ * chatting about there (or, asked for it, the page the conversation was
+ * started from); another open tab only after the person allows it; it never
+ * opens a page. Only the side panel's connection is sent the request
+ * (HUMAN_CLIENT_BROWSER_READ), so with it closed the Agent hears at once.
  *
  * Nothing is stored: a request lives in the cell's memory for the length of
  * the Agent's call, and the page's text goes back to the Agent alone.

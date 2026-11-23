@@ -62,6 +62,13 @@ export const HUMAN_CLIENT_PRESENCE_COVERAGE = "presence_coverage_v1";
 export const HUMAN_CLIENT_INSTANCE_RECORDS = "instance_records_v1";
 
 /**
+ * The client reads pages for its person's Agents (the Chrome extension's side
+ * panel): only such a client is sent `browser_read_requested`, so with none
+ * connected the Agent hears at once that the browser is not there.
+ */
+export const HUMAN_CLIENT_BROWSER_READ = "browser_read_v1";
+
+/**
  * Agent presence for conversations this socket is not showing, batched: the
  * latest card per Agent and Instance set since the previous digest. Each card
  * means exactly what an `enhanced_presence` frame with it would.

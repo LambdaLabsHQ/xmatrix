@@ -198,8 +198,9 @@ async function readPage() {
 
 // ---- Agents reading a page through this browser (`xmatrix browse`, packages/hub src/browser-read.ts).
 //
-// The page the conversation was started from is read at once: the person asked about it there. Another tab is
-// read only once the person allows it, in the app's dialog; a page that is not open is not opened.
+// The page beside the panel is read at once: the person is chatting about it there. So is the page the
+// conversation was started from, if a tab still shows it. Another tab is read only once the person allows it,
+// in the app's dialog; a page that is not open is not opened.
 
 /** The open tab showing `page` (a pageKey), the active one first. */
 async function openTabShowing(page) {
@@ -244,6 +245,14 @@ function approve(requestId, agentName, tab, href) {
 }
 
 async function readForAgent({ channelId, target, agentName, requestId }) {
+  // The page beside this panel: the person shows it by chatting here (Daniel 2026-11-23: no prompt for it).
+  if (target === "current") {
+    const [tab] = await chrome.tabs.query({ active: true, windowId: await panelWindow() }).catch(() => []);
+    const href = capturableUrl(tab?.url ?? "");
+    if (!tab?.id || !href) return { refusal: "no-page" };
+    const text = await readTab(tab.id);
+    return text ? { title: pageTitle(tab.title) || "", href, text } : { refusal: "unreadable" };
+  }
   if (target === "conversation") {
     const found = await conversationPage(String(channelId ?? ""));
     if (!found) return { refusal: "no-page" };
