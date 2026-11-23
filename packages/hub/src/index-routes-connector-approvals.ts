@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { plainRecord } from "@xmatrix/protocol";
+import { isXDurableAction, plainRecord } from "@xmatrix/protocol";
 import { requireAuth, requireHumanAuth, readBoundedRequestBody, requestErrorStatus } from "./index-shared";
 import { getAppConnectorProvider } from "./app-connectors";
 import { publishCommandStatus } from "./connectors/command-support";
@@ -47,7 +47,7 @@ export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
       // Answered either way, it no longer waits: every admin's dock drops it.
       await announceActionRequests(c.env, scope.spaceId, scope.channelId);
       if (!result.claimed || !result.payload) {
-        if (result.request.providerId === "x" && result.request.actionId === "upload_video" && result.request.status === "executing") {
+        if (isXDurableAction(result.request.providerId, result.request.actionId) && result.request.status === "executing") {
           await enqueueXUpload(c.env, { requestId: result.request.requestId, spaceId: scope.spaceId, channelId: scope.channelId });
         }
         const manifest = getAppConnectorProvider(result.request.providerId);
@@ -61,9 +61,9 @@ export function registerConnectorApprovalRoutes(app: Hono<{ Bindings: Env }>) {
         return c.json({ request: result.request }, 200, { "cache-control": "private, no-store" });
       }
       const { request, payload } = result;
-      if (request.providerId === "x" && request.actionId === "upload_video") {
+      if (isXDurableAction(request.providerId, request.actionId)) {
         await enqueueXUpload(c.env, { requestId: request.requestId, spaceId: scope.spaceId, channelId: scope.channelId });
-        return c.json({ request, receipt: "X upload_video: queued; the result will reply in this Channel." },
+        return c.json({ request, receipt: `X ${request.actionId}: queued; the result will reply in this Channel.` },
           200, { "cache-control": "private, no-store" });
       }
       const provider = connectorProvider(request.providerId);

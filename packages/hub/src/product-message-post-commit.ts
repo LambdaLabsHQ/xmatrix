@@ -1,7 +1,7 @@
 import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment } from "@xmatrix/protocol";
-import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, isAutoLaunchSummonText, parseAutoLaunchMentions,
+import { isXDurableAction, parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, isAutoLaunchSummonText, parseAutoLaunchMentions,
   isMentionOnlyRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
   REGISTRATION_PREPARATION_REJECTION_CODES, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage,
   AGENT_QUOTA_RETRY_NOTICE_KIND } from "@xmatrix/protocol";
@@ -41,7 +41,7 @@ export function productMessageControlFinishesBeforeResponse(body: string): boole
   const plan = parseMessageInteraction(body);
   return !!plan.stop || plan.controls.length > 0 || plan.launches.length > 0 ||
     plan.reborn.length > 0 || plan.handoff.length > 0 ||
-    parseConnectorActionCommand("x", body)?.actionId === "upload_video";
+    isXDurableAction("x", parseConnectorActionCommand("x", body)?.actionId ?? "");
 }
 
 export type ProductMessagePostCommitEnv = ProductAgentMentionAuthorityEnv & Env;

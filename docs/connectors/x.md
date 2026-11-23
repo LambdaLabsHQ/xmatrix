@@ -112,6 +112,7 @@ the authorizing account can access; choose visibility and Space accordingly.
 | `upload_video` | `<account ID or @handle> <message ID>/<attachment ID>` | Uploads one current-Channel MP4 attachment under its own write approval |
 | `media_status` | `<account ID or @handle> <media receipt>` | Reads processing status once for the scoped upload receipt |
 | `post` | `<account ID or @handle> {"text":"…","mediaReceipt":"…"}` | Publishes the exact text with an optional ready video under the app permission |
+| `publish_video` | `<account ID or @handle> {"text":"…","video":"<message ID>/<attachment ID>"}` | Uploads one current-Channel MP4 attachment and publishes it with the exact text, under one write approval |
 | `quote` | `<account ID or @handle>/<post ID> <text>` | Quotes the selected post with exact text; requires X Enterprise API access |
 
 For example, after `@x:accounts:*` returns the intended stable account ID:
@@ -155,6 +156,17 @@ receipt in `post`'s optional `mediaReceipt` field. The post JSON is limited to
 checks the receipt's scope, current source access and X's ready status again.
 An upload approval does not approve the final public post. Quotes accept text
 only.
+
+`publish_video` does both in one approved action, for a post that goes out
+later than it is approved: an upload receipt lives an hour at most, so a post
+approved today for tomorrow cannot carry one. Its approval freezes the
+account, the exact text and the source attachment as an upload's does, and
+uploads nothing. When it runs, the same durable executor uploads the frozen
+attachment, reads X's processing status until it succeeds, and publishes the
+post with that upload. It posts nothing when the attachment changed, when X
+fails the video, or when processing is not done within the action's bound of
+two minutes and twenty seconds; an uncertain result is reported as failed
+and never tried again.
 
 The X connection defaults to **ask** for every write. A Human Space admin
 chooses one read/ask/write permission for the connection, shared by every

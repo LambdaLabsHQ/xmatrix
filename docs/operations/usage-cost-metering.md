@@ -18,7 +18,7 @@ The code is `packages/hub/src/usage-cost-metering.ts`.
 | `jev` | Attaching a new conversation to a Page | `page_attachment` | `none` / model |
 | `jev` | `POST /api/ai/jev/evaluate` | `evaluate` | `none` / model |
 | `composio` | Gmail actions, Connect, check, mailbox removal, disconnect | `gmail` | Hub action (`search`, `read`, `send`, `reply`, `connect`, `verify`, `mailbox_remove`, `disconnect`) / `proxy`, `connect_link`, `connected_accounts`, `account_delete` |
-| `x` | X actions, Connect, check, token refresh inside them | `x` | Hub action (`post`, `quote`, `read_post`, `timeline`, `accounts`, `upload_video`, `media_status`, `connect`, `verify`) / `posts_create`, `posts_read`, `user_posts_read`, `users_me`, `media_*`, `oauth_token` |
+| `x` | X actions, Connect, check, token refresh inside them | `x` | Hub action (`post`, `quote`, `read_post`, `timeline`, `accounts`, `upload_video`, `publish_video`, `media_status`, `connect`, `verify`) / `posts_create`, `posts_read`, `user_posts_read`, `users_me`, `media_*`, `oauth_token` |
 
 Every Jev call is a point, including the one retry `evaluateRoutingChoices`
 may make and calls that failed or timed out: a failed call may still be
