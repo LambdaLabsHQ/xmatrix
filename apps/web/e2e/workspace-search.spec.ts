@@ -51,10 +51,14 @@ function searchParams(url: string) {
   return new URL(url, "http://localhost").searchParams;
 }
 
-test("⌘F inside a conversation searches only it, and Backspace widens it to the Space", async ({ page }) => {
-  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, RELEASE] });
+test("⌘F inside a conversation puts the filter in the filter bar, keeps the input full width, and lets you remove or switch filters without losing the query", async ({ page }) => {
+  const longChannel = {
+    ...E2E_CHANNEL,
+    name: "SEO 体检后续：robots、/support 跳转、IndexNow 与长标题测试验证",
+  };
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [longChannel, RELEASE] });
   await stubMessageSearch(page);
-  await page.goto(`/app/${E2E_SPACE.id}/channels/${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`/app/${E2E_SPACE.id}/channels/${encodeURIComponent(longChannel.name)}--${longChannel.id}`, { waitUntil: "domcontentloaded" });
   // The startup frame draws the rail before the shell that answers ⌘F; the open conversation's composer is the shell's.
   await expect(page.locator(".app-composer").first()).toBeVisible();
 
@@ -62,16 +66,59 @@ test("⌘F inside a conversation searches only it, and Backspace widens it to th
   const dialog = page.getByRole("dialog", { name: "Search workspace" });
   await expect(dialog).toBeVisible();
   const field = page.locator(".app-search-panel-field");
-  await expect(field.getByText("in #general")).toBeVisible();
+  const filterBar = dialog.getByRole("group", { name: "Search filters" });
+  const input = dialog.locator("[data-workspace-search-input]");
+  const removeChannel = filterBar.getByRole("button", { name: `Remove in #${longChannel.name}` });
+
+  // The condition lives in the dedicated filter bar, never squeezing the search input.
+  await expect(field.locator(".app-search-chip")).toHaveCount(0);
+  await expect(removeChannel).toBeVisible();
+  const [panelBox, inputBox, chipBox, removeBox] = await Promise.all([
+    dialog.boundingBox(),
+    input.boundingBox(),
+    filterBar.locator(".app-search-chip").boundingBox(),
+    removeChannel.boundingBox(),
+  ]);
+  expect(inputBox!.width).toBeGreaterThan(panelBox!.width * 0.65);
+  expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 0.5);
+  expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 0.5);
+
+  // Type a query, verify scoped search, then remove the filter directly while keeping the query.
   await page.keyboard.type("deploy");
   await expect(dialog.getByText("deploy the hub (1)")).toBeVisible();
   await expect.poll(async () => (await fixtureRequests(page, "message-search"))
-    .some((url) => searchParams(url).get("channelId") === E2E_CHANNEL.id)).toBe(true);
+    .some((url) => searchParams(url).get("channelId") === longChannel.id)).toBe(true);
 
-  await page.keyboard.press("Control+a");
+  await removeChannel.click();
+  await expect(removeChannel).toHaveCount(0);
+  await expect(input).toHaveValue("deploy");
+  await expect(input).toBeFocused();
+  await expect.poll(async () => (await fixtureRequests(page, "message-search"))
+    .some((url) => searchParams(url).get("query") === "deploy" && !searchParams(url).has("channelId"))).toBe(true);
+
+  // Add a channel filter from the filter bar picker while preserving the typed query.
+  await filterBar.getByRole("button", { name: "In", exact: true }).click();
+  const pickerInput = dialog.locator("[data-workspace-search-filter-input]");
+  await expect(pickerInput).toBeFocused();
+  await pickerInput.fill("release");
+  await dialog.getByRole("button", { name: /#release-train/u }).click();
+  await expect(filterBar.getByRole("button", { name: "Remove in #release-train" })).toBeVisible();
+  await expect(input).toHaveValue("deploy");
+  await expect(input).toBeFocused();
+
+  // Opening the From picker and pressing Escape closes only the picker, not the search dialog.
+  await filterBar.getByRole("button", { name: "From", exact: true }).click();
+  await expect(dialog.locator("[data-workspace-search-filter-input]")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator("[data-workspace-search-filter-input]")).toHaveCount(0);
+  await expect(input).toBeFocused();
+
+  // Backspace at the start of the query (or empty field) removes the active filter without erasing the query.
+  await input.evaluate((node: HTMLInputElement) => node.setSelectionRange(0, 0));
   await page.keyboard.press("Backspace");
-  await page.keyboard.press("Backspace");
-  await expect(field.getByText("in #general")).toHaveCount(0);
+  await expect(filterBar.getByRole("button", { name: "Remove in #release-train" })).toHaveCount(0);
+  await expect(input).toHaveValue("deploy");
 });
 
 test("search is the window's, not the rail's: the top bar opens it in every view", async ({ page }) => {
@@ -163,7 +210,7 @@ test("conversation actions sit beside its name and borderless search aligns righ
   expect(await search.evaluate((node) => getComputedStyle(node).boxShadow)).toBe("none");
   await search.click();
   await expect(page.getByRole("dialog", { name: "Search workspace" })).toBeVisible();
-  await expect(page.locator(".app-search-panel-field").getByText("in #general")).toHaveCount(0);
+  await expect(page.locator(".app-search-panel-filters .app-search-chip")).toHaveCount(0);
 });
 
 test("a page's controls end before the search icon", async ({ page }) => {
@@ -293,5 +340,29 @@ test.describe("on a phone", () => {
     expect(inputBox.x).toBeCloseTo(rowText.x, 0);
     expect(centre(glyph) - box.x).toBeCloseTo(box.x + box.width - centre(close), 0);
     expect(await input.evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+  });
+
+  test("long conversation filter stays bounded and removable on a phone", async ({ page }) => {
+    const longChannel = {
+      ...E2E_CHANNEL,
+      name: "SEO 体检后续：robots、/support 跳转、IndexNow 与长标题测试验证",
+    };
+    await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [longChannel, RELEASE] });
+    await stubMessageSearch(page);
+    await page.goto(`/app/${E2E_SPACE.id}/channels`, { waitUntil: "domcontentloaded" });
+    const { panel } = await openSearchFromControl(page);
+    const filterBar = panel.getByRole("group", { name: "Search filters" });
+    await filterBar.getByRole("button", { name: "In", exact: true }).click();
+    const pickerInput = panel.locator("[data-workspace-search-filter-input]");
+    await expect(pickerInput).toBeVisible();
+    expect(await pickerInput.evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+    await panel.getByRole("button", { name: new RegExp(`#${longChannel.name}`, "u") }).click();
+    const remove = filterBar.getByRole("button", { name: `Remove in #${longChannel.name}` });
+    await expect(remove).toBeVisible();
+    const [panelBox, removeBox] = await Promise.all([panel.boundingBox(), remove.boundingBox()]);
+    expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 0.5);
+    await remove.click();
+    await expect(remove).toHaveCount(0);
+    await expect(panel.locator("[data-workspace-search-input]")).toHaveValue("deploy");
   });
 });
