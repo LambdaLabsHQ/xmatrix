@@ -112,13 +112,16 @@ async function cleanup(client, ids) {
   await client.query("DELETE FROM control.space_placement WHERE space_id=$1", [ids.space]).catch(() => {});
 }
 
-async function pageTest(prefix) {
+async function pageTest(prefix, observer) {
   assert.ok(connectionString, "XMATRIX_TEST_POSTGRES_URL is required");
   const client = new Client({ connectionString });
   await client.connect();
   try {
     const ids = await fixture(client, `${prefix}-${crypto.randomUUID()}`);
-    const pages = new PostgresPageRepository(database(client));
+    const authority = observer
+      ? createAuthorityDatabase({ connectionString, shardId: "shard-0", observer })
+      : database(client);
+    const pages = new PostgresPageRepository(authority);
     return { client, ids, pages,
       owner: { kind: "user", id: ids.owner, label: "Owner" },
       member: { kind: "user", id: ids.member, label: "Member" },
@@ -942,10 +945,8 @@ integration("an Agent message shows the page revisions its Instance committed th
 });
 
 integration("a page's conversations are described to readers only, with their newest message and live Agents", async () => {
-  const { client, ids, owner } = await pageTest("page-conversations");
   const observations = [];
-  const pages = new PostgresPageRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0",
-    observer: (point) => observations.push(point) }));
+  const { client, ids, pages, owner } = await pageTest("page-conversations", (point) => observations.push(point));
   try {
     const { page } = await pages.create({ requestId: crypto.randomUUID(), spaceId: ids.space, principal: owner,
       title: "Margin" });
@@ -1070,10 +1071,8 @@ integration("the page tree shows each page's Agents: live in a conversation whos
 // chain and nothing of the Space's other pages. Those bytes are PlanetScale
 // egress on each page read, section update and conversation edit.
 integration("pages: one page's read carries its own ancestors' access, not the Space's other pages", async () => {
-  const { client, ids, owner } = await pageTest("page-tree-bytes");
   const observations = [];
-  const pages = new PostgresPageRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0",
-    observer: (point) => observations.push(point) }));
+  const { client, ids, pages, owner } = await pageTest("page-tree-bytes", (point) => observations.push(point));
   try {
     const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: crypto.randomUUID() });
     const created = [];
