@@ -49,6 +49,9 @@ const FIELD_ACTIONS: Readonly<Record<string, readonly ConnectorActionSpec[]>> = 
 };
 /** The actions a program may ask of a connected app: every action the app declares, in the app's manifest. */
 function manifestActions(app: string): readonly ConnectorActionSpec[] {
+  // GitHub's commands run through its App's own pipeline, not through an action executor the host can hold a
+  // request for: a program asks an Agent for those.
+  if (app === "github") return [];
   const declared = APP_CONNECTOR_PROVIDER_MANIFESTS.find(manifest => manifest.id === app)?.actions ?? [];
   const fields = FIELD_ACTIONS[app] ?? [];
   return declared.filter(action => Boolean(action.effect)).map(action => fields.find(spec => spec.name === action.id) ?? commandAction(action.id));

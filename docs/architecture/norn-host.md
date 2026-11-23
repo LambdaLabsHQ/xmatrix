@@ -477,8 +477,8 @@ X.publish(ready)->wait
 in its own words (`after`, `every`, an event), so a person approves a week of
 posts in one sitting and each goes out at its time with nobody awake.
 
-**What an app can be asked.** Every action a connected app declares
-(`NORN_CONNECTOR_EVENT_MANIFESTS`, `norn-libraries.ts`), which the checker
+**What an app can be asked.** Every action a connected app declares, GitHub's
+excepted (`NORN_CONNECTOR_EVENT_MANIFESTS`, `norn-libraries.ts`), which the checker
 reads `Actions.action(app, name)` against. Its input is the two parts of the
 Channel command, `{target, text}`, or named fields where the host gives the
 action some (`x` `post`, `publish_video`); `nornActionStatement` turns either
@@ -616,6 +616,8 @@ for the compact always-on reference.
 
 - Requests to an existing Instance by its address, other than one its holder
   delegated there.
+- GitHub's actions as requests of the app: they run through the GitHub App's
+  own command pipeline, so a program asks an Agent for them.
 - Facts from outside that hold once (a given pull request merged, a release
   that contains it).
 - A preview of what an edit to a Page's program would change before it is saved.

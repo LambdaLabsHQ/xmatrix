@@ -676,6 +676,7 @@ test("a program is checked against what each connected app can do", () => {
   assert.match(refusal(`let a = Actions.action("nope", "post")\nignore(a)`), /unknown connector app "nope"/u);
   assert.match(refusal(`type post = {account: string}\ntype posted = {summary: string}
 let a: Actions.action<post, posted> = Actions.action("x", "post")\nignore(a)`), /requires the field text/u);
+  assert.match(refusal(`let a = Actions.action("github", "merge")\nignore(a)`), /connector "github" has no action "merge"/u);
   // Every write an app declares can be asked for, as the command writes it: a target and a text.
   assert.equal(refusal(`type command = {target: string, text: string}\ntype done = {summary: string, url: option<string>}
 let send: Actions.action<command, done> = Actions.action("slack", "post")
