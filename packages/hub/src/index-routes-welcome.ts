@@ -59,7 +59,7 @@ export function registerWelcomeRoutes(app: Hono<{ Bindings: Env }>): void {
     const principal = { kind: "user" as const, id: owner.id };
     // Membership, read as the caller: a deleted personal Space is not reopened.
     await getSpace(c.env, { spaceId, principal });
-    const channelId = await deterministicConversationId("welcome-conversation", spaceId);
+    const channelId = await welcomeConversationId(spaceId);
     try {
       await createChannel(c.env, {
         commandId: `welcome-conversation:${spaceId}`, channelId, spaceId,
@@ -84,12 +84,22 @@ async function appendWelcomeStep(env: Env, owner: { id: string; email: string },
       label: XMATRIX_SYSTEM_LABEL, name: XMATRIX_SYSTEM_LABEL, avatarUrl: XMATRIX_SYSTEM_AVATAR_URL } });
 }
 
+function welcomeConversationId(personalSpaceId: string): Promise<string> {
+  return deterministicConversationId("welcome-conversation", personalSpaceId);
+}
+
+/** Whether a Channel is this person's own welcome conversation: its id derives from their personal Space. */
+export async function isOwnWelcomeConversation(channelId: string, userId: string): Promise<boolean> {
+  return channelId === await welcomeConversationId(await personalSpaceId(userId));
+}
+
 /**
  * A Human's message found no agent to start (`registration_not_found`). When
  * the Space has no agent of theirs at all, xMatrix answers it with the step
  * that brings one in, so the message is met neither with silence nor with a
  * launch error a new person cannot act on. A first message that summons
- * nobody is answered once per conversation; a summon (`@codex …`) is answered
+ * nobody, or the person's first words in their welcome conversation (after
+ * xMatrix's own step), is answered once per conversation; a summon (`@codex …`) is answered
  * under its own id, as its failure notice would have been. Returns whether the
  * person had no agent, so the caller knows the step answered the message.
  */

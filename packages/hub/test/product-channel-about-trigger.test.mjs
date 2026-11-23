@@ -372,3 +372,22 @@ test("a summon from a person with no agent at all is answered with how to bring 
   assert.equal(guided.length, 0);
   assert.equal(notices.length, 1);
 });
+
+test("a person's message in their welcome conversation, after xMatrix's own step, is answered when they have no agent", async () => {
+  const input = { env: {}, channelId: "welcome", messageId: "hello", senderKind: "user", senderId: "human",
+    actorUserId: "human", body: "你好，怎么开始", sequence: 2 };
+  const guided = [], started = [];
+  const dispatch = { registration: async () => ({ selectionCount: 0, prepared: [] }),
+    newConversation: async value => { started.push(value.messageId); },
+    welcome: async (channelId, userId) => channelId === "welcome" && userId === "human",
+    agentless: async (_env, value) => { guided.push(value); return true; } };
+  assert.equal(await dispatchProductMessageLaunches(input, dispatch), false);
+  assert.deepEqual(guided, [{ channelId: "welcome", messageId: "hello", body: input.body, actorUserId: "human" }],
+    "answered once per conversation, not under the message's own id");
+  assert.deepEqual(started, [], "it is not the conversation's first message");
+  // Any other conversation's later message, an Agent's, or a connector command is not.
+  await dispatchProductMessageLaunches({ ...input, channelId: "other" }, dispatch);
+  await dispatchProductMessageLaunches({ ...input, senderKind: "agent" }, dispatch);
+  await dispatchProductMessageLaunches({ ...input, body: "@gmail:search invoices" }, dispatch);
+  assert.equal(guided.length, 1);
+});

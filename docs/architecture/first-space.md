@@ -72,7 +72,10 @@ is how to connect one.
   page or passage discussion) that finds no agent to start
   (`registration_not_found`) is not met with silence: when the Space has no
   enabled agent at all, xMatrix replies to it with the `connect-agents` step,
-  written once per conversation (`system:connect-agents:<channel id>`). A
+  written once per conversation (`system:connect-agents:<channel id>`). The
+  welcome conversation opens with xMatrix's own step, so the person's message
+  there is never its first; a message from them that summons nobody gets the
+  same step on the same terms. A
   summon such as `@codex …` from a person with no enabled agent gets the same
   step in place of the `registration_not_found` launch failure, written once
   per message (`system:connect-agents:<channel id>:<message id>`); someone who

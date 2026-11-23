@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: a new person's message in the welcome conversation is answered
+
+A person with no agent who wrote in their welcome conversation without naming anyone got no reply: the "connect a computer first" answer only read a conversation's first message, and the welcome conversation's first message is xMatrix's own setup step. That message now gets the same `connect-agents` step, once per conversation, as a new conversation's first message does. Someone with an agent, and every other conversation, is unchanged. Hub only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: competitor alternative pages factual audit, verified source footnotes, 8-link footer, and sitemap lastmod
 
 Audited all 19 competitor comparison landing pages across all 6 published website locales (`en`, `zh`, `zh-tw`, `ja`, `ko`, `es`): aligned every H1 with xMatrix's core living-Pages positioning plus each competitor's real top gap, removed ambiguous cloud-VM wording, updated counts to 35 coding harnesses and 35 connected apps, removed inaccurate "GitHub Ask-first" claims, aligned iOS/mobile wording with `/download` (native macOS/Windows/Android plus Web including iPhone & iPad), included Free's 500 lifetime writes per Space in all CTAs, trimmed quota-handoff over-emphasis off non-quota pages, added verified HTTP-200 clickable source links under every pain point, unified Simplified Chinese terminology (`活页面`), tightened the site-wide footer to 8 flagship comparisons (with all 19 reachable within 2 hops), and added `dateModified` to `WebPage` JSON-LD plus `lastModified` to `sitemap.xml`. Web only. Recovery is a CI-validated beta reverting this change.

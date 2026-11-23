@@ -31,7 +31,7 @@ import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake"
 import { pageReferencesIn } from "@xmatrix/protocol";
 import { firstMessageSummonId, PostgresPageRepository, XMATRIX_SYSTEM_AUTHOR_ID } from "@xmatrix/db";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { guideAgentlessMessage } from "./index-routes-welcome";
+import { guideAgentlessMessage, isOwnWelcomeConversation } from "./index-routes-welcome";
 import { attachConversationToPage } from "./product-page-attachment";
 import { CHANNEL_ACTIVITY_MESSAGE_KIND } from "@xmatrix/protocol";
 
@@ -211,6 +211,7 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
   dispatch: { registration: typeof dispatchRegistrationLaunchesAfterMessage;
     newConversation?: (input: ProductMessagePostCommitInput) => Promise<unknown>;
     agentless?: typeof guideAgentlessMessage;
+    welcome?: typeof isOwnWelcomeConversation;
     sleep?: (ms: number) => Promise<void> } =
     { registration: dispatchRegistrationLaunchesAfterMessage },
   notice = dispatchProductAgentSystemNotice): Promise<boolean> {
@@ -312,6 +313,14 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // Nobody was summoned by the first message of a conversation: Jev reads
     // whether its author wants an Agent to start (an unnamed one or a discussion).
     if (input.sequence === 1) await (dispatch.newConversation ?? startNewConversation)(input);
+    // The welcome conversation opens with xMatrix's own step, so a person's
+    // first words there are never its first message. Nobody else reads it:
+    // with no agent of theirs, they are answered with how to bring one in.
+    else if (input.senderKind === "user" && !connectorForCommand(input.body) &&
+        await (dispatch.welcome ?? isOwnWelcomeConversation)(input.channelId, input.actorUserId)) {
+      await (dispatch.agentless ?? guideAgentlessMessage)(input.env, { channelId: input.channelId,
+        messageId: input.messageId, body: input.body, actorUserId: input.actorUserId });
+    }
     // The append already certified recipient absence, in its commit transaction.
     // Successful interpretation only pushes its current projection; it never
     // creates evidence from a recipient that exited after publication.
