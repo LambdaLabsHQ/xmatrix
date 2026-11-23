@@ -2520,17 +2520,16 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
 
 .xmatrix-app .app-search-chip {
   border-radius: 9999px;
-  border: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
-  background: color-mix(in oklab, var(--foreground) 8%, transparent);
-  overflow: hidden;
+  background: oklch(0.42 0.012 238 / 0.08);
+  padding: 0.125rem 0.375rem 0.125rem 0.625rem;
   white-space: nowrap;
 }
 
 /* The search panel drops from the control that opened it (placed by
    SearchPanel): one glass sheet, its field row a capsule as tall as the
-   composer's, the filter bar and results under it. Rows, filters and the close
-   button are ink on that glass, never glass of their own. The overlay is a
-   portaled .xmatrix-app wrapper, so it drops the app's own paper and safe-area
+   composer's, the results under it. Rows, chips and the close button are ink
+   on that glass, never glass of their own. The overlay is a portaled
+   .xmatrix-app wrapper, so it drops the app's own paper and safe-area
    padding and keeps desktop window-drag regions from swallowing clicks. */
 .xmatrix-app.app-search-overlay {
   background: transparent !important;
