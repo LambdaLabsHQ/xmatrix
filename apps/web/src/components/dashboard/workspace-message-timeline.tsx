@@ -999,13 +999,18 @@ export const MessageTimeline = memo(function MessageTimeline({
     }
   }, [channel?.id, nextTimelineFirstItemIndex, readingAnchor, rows, timelineFirstItemIndex]);
 
-  const handleTimelineAtTopStateChange = useStableCallback((atTop: boolean) => {
-    if (!atTop || loading || olderLoading || !hasOlderMessages || timeline.length === 0) return;
+  const requestOlderHistoryIfEligible = useStableCallback(() => {
+    if (loading || olderLoading || !hasOlderMessages || timeline.length === 0) return;
     // Virtuoso can report the top state while it applies its initial landing
     // at the newest item. Do not turn that programmatic mount into a history
     // request: a real wheel/touch gesture owns pagination.
     if (!timelineUserGestureRef.current) return;
     stableOnNearTop();
+  });
+
+  const handleTimelineAtTopStateChange = useStableCallback((atTop: boolean) => {
+    if (!atTop) return;
+    requestOlderHistoryIfEligible();
   });
 
   const handleTimelineItemsRendered = useStableCallback((items: ListItem<TimelineItem>[]) => {
@@ -1254,6 +1259,7 @@ export const MessageTimeline = memo(function MessageTimeline({
           isTimelineNearBottom(event.currentTarget),
           scrollTop
         );
+        if (scrollTop <= 240) requestOlderHistoryIfEligible();
       }}
       className={cn(
         "app-message-timeline min-h-0 flex-1 overflow-y-auto bg-card",
