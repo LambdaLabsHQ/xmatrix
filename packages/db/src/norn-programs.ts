@@ -174,6 +174,8 @@ const NORN_REQUEST_BROKE_OFF_SQL = `(NOT EXISTS (SELECT 1 FROM data.agent_messag
  * Why the ledger's evidence holds a holding that was given up on: the host
  * handed the request to a new Instance because the work on it broke off.
  */
+/** Why a program whose block left its Page stopped: what its ledger ends with, and what lets the block bring it back. */
+export const NORN_REMOVED_FROM_PAGE = "Removed from its page";
 export const NORN_HANDED_ON_REASON = "The work broke off, and the request was handed to a new Instance";
 /** Why a question an Agent asked with a command stopped: the Agent called it off. */
 const NORN_QUESTION_CALLED_OFF = "Called off by the Agent that asked";
@@ -354,10 +356,21 @@ export class PostgresNornProgramRepository {
 
   /** The program's block left its Page: its next pass ends it and cancels what it left open. */
   async remove(input: Scope): Promise<void> {
-    await this.transaction(input.requestId, "remove", tx => tx.query({ name: "norn_program_remove_v1", text: `UPDATE
-      data.norn_programs SET stop_reason='Removed from its page',updated_at=clock_timestamp()
+    await this.transaction(input.requestId, "remove", tx => tx.query({ name: "norn_program_remove_v2", text: `UPDATE
+      data.norn_programs SET stop_reason=$4,updated_at=clock_timestamp()
       WHERE space_id=$1 AND channel_id=$2 AND program_id=$3 AND state='running' AND stop_reason IS NULL`,
-      values: [this.placement.spaceId, input.channelId, input.programId], maxRows: 0 }));
+      values: [this.placement.spaceId, input.channelId, input.programId, NORN_REMOVED_FROM_PAGE], maxRows: 0 }));
+  }
+
+  /**
+   * The block came back before its program's pass ended it: the removal is
+   * called off and the program goes on. True when there was one to call off.
+   */
+  async restore(input: Scope): Promise<boolean> {
+    return this.transaction(input.requestId, "restore", async tx => (await tx.query({ name: "norn_program_restore_v1",
+      text: `UPDATE data.norn_programs SET stop_reason=NULL,updated_at=clock_timestamp()
+      WHERE space_id=$1 AND channel_id=$2 AND program_id=$3 AND state='running' AND stop_reason=$4 RETURNING program_id`,
+      values: [this.placement.spaceId, input.channelId, input.programId, NORN_REMOVED_FROM_PAGE], maxRows: 1 })).length > 0);
   }
 
   /** The running program's row, held for the rest of the transaction. */
@@ -797,13 +810,14 @@ export async function readDeletedConversations(database: AuthorityDatabase, inpu
 export async function readPageNornPrograms(database: AuthorityDatabase, input: { requestId: string; spaceId: string; pageId: string }) {
   return readInActiveSpace(database, { requestId: input.requestId, operation: "norn.page-programs", spaceId: input.spaceId }, NornSpaceError,
     async tx => (await tx.query<QueryResultRow>({
-      name: "norn_page_programs_v1", text: `SELECT DISTINCT ON (p.page_name) p.page_name,p.program_id,p.channel_id,p.source,p.state,
-          p.ledger_json,(SELECT count(*) FROM data.norn_programs earlier WHERE earlier.space_id=p.space_id
+      name: "norn_page_programs_v2", text: `SELECT DISTINCT ON (p.page_name) p.page_name,p.program_id,p.channel_id,p.source,p.state,
+          p.stop_reason,p.ledger_json,(SELECT count(*) FROM data.norn_programs earlier WHERE earlier.space_id=p.space_id
             AND earlier.page_id=p.page_id AND earlier.page_name=p.page_name)::int AS runs
         FROM data.norn_programs p WHERE p.space_id=$1 AND p.page_id=$2
         ORDER BY p.page_name,p.created_at DESC LIMIT 200`, values: [input.spaceId, input.pageId], maxRows: 200 }))
       .map(row => ({ name: String(row.page_name), programId: String(row.program_id), channelId: String(row.channel_id),
-        source: String(row.source), state: String(row.state), runs: Number(row.runs), ledger: row.ledger_json as unknown })));
+        source: String(row.source), state: String(row.state), stopReason: row.stop_reason == null ? null : String(row.stop_reason),
+        runs: Number(row.runs), ledger: row.ledger_json as unknown })));
 }
 
 /**

@@ -1,4 +1,4 @@
-import { PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornProgram, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
+import { NORN_REMOVED_FROM_PAGE, PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornProgram, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
 import type { NornRequestView, PageProgramStatus, PageScheduleProblem } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./page-restriction";
@@ -50,7 +50,8 @@ export const pageProgramsKey = (body: string): string => JSON.stringify(nornBloc
 /**
  * Makes the Page's programs what its blocks say, as `userId`: a new block
  * starts a program, a changed one revises the program it names, a removed one
- * stops it, and a block changed after its program ended runs again. A block
+ * stops it, and a block changed after its program ended runs again, as does
+ * one that comes back unchanged after its removal stopped its program. A block
  * that does not check changes nothing; the Page's program status says why.
  * Every block is tried: one that cannot be brought up to date fails the sync,
  * which is then made again, without keeping the others from starting.
@@ -88,7 +89,18 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
 
   for (const block of blocks) await each(block.name, async () => {
     const current = programs.find(program => program.name === block.name);
-    if (block.problem || current?.source === block.source || deleted.has(block.name) || "refusal" in checkNornProgram(block.source, libOpts)) return;
+    // A block that left the Page and came back unchanged (a bad edit, then its undo) is not done with:
+    // a removal its program has not ended on yet is called off, and one it ended on runs it again.
+    const removed = current !== undefined && (current.state === "running" ? current.stopReason === NORN_REMOVED_FROM_PAGE
+      : (current.ledger as Ledger | null | undefined)?.ended?.error === NORN_REMOVED_FROM_PAGE);
+    if (block.problem || (current?.source === block.source && !removed) || deleted.has(block.name)
+      || "refusal" in checkNornProgram(block.source, libOpts)) return;
+    if (current?.state === "running" && removed) {
+      const requestId = `norn-page-restore:${current.programId}:${crypto.randomUUID()}`;
+      await (await repository(current.channelId, requestId)).restore({ requestId, channelId: current.channelId, programId: current.programId });
+      await wakeAgentLaunchCoordinator(env, current.channelId, ["norn"]);
+      if (current.source === block.source) return;
+    }
     if (current?.state === "running") {
       const requestId = `norn-page-revise:${current.programId}:${crypto.randomUUID()}`;
       await (await repository(current.channelId, requestId)).revise({ requestId, channelId: current.channelId,
