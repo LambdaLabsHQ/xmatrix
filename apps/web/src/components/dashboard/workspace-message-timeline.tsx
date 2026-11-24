@@ -1155,7 +1155,11 @@ export const MessageTimeline = memo(function MessageTimeline({
 
               </div>
   );
-  const renderTimelineRow = (_index: number, message: TimelineItem) => (
+  const renderTimelineRow = (_index: number, message: TimelineItem) => {
+    const messageKey = message.messageId || message.id;
+    const launchWindow = launchWindowsByMessage.get(messageKey);
+    const launchChoiceOffered = offersLaunchChoice(message, channel);
+    return (
               <div
                 key={message.id}
                 id={messageAnchorId(message)}
@@ -1200,11 +1204,14 @@ export const MessageTimeline = memo(function MessageTimeline({
                   askCatalogReady={registrationCatalog.isSuccess}
                   askHasRegistrations={Boolean(registrationCatalog.data?.registrations.length)}
                   onAskAgent={askAgent}
-                  launchWindow={launchWindowsByMessage.get(message.messageId || message.id)}
-                  launchChoiceOffered={offersLaunchChoice(message, channel)}
+                  launchWindow={launchWindow}
+                  launchChoiceOffered={launchChoiceOffered}
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
-                  followed={rows[rows.length - 1]?.id !== message.id}
+                  // Only a row carrying a first-message launch choice cares whether
+                  // another message follows it; computing it for every row re-renders
+                  // the previous tail on every incoming message.
+                  followed={(Boolean(launchWindow) || launchChoiceOffered) && rows[rows.length - 1]?.id !== message.id}
                   onComposeMention={onComposeMention}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
                   foldsDiscussionHead={inPageMargin}
@@ -1234,7 +1241,8 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onJumpToMessage={stableOnJumpToMessage}
                 />
               </div>
-  );
+    );
+  };
   const openingRowHeights = openingMeasure?.listKey === timelineListKey ? openingMeasure.rowHeights : NO_ROW_HEIGHTS;
   const measuredRowHeights = Array.from(openingRowHeights.values());
   // Rows above the tail have no measured height yet; they land on the average.
