@@ -142,3 +142,14 @@ test("a page read is answered to the request's own route, with the owner's token
   assert.equal(calls[0].headers.authorization, "Bearer t");
   assert.deepEqual(calls[0].body, { title: "A", href: "https://a.test/", text: "hello" });
 });
+
+// A question asked in the box on a page carries that page, as a message written in the side panel does.
+test("a message can carry the page it was written on", async () => {
+  const { sendMessage } = await import("../src/hub-client.js");
+  const { calls, deps } = fakeHub({ "POST /api/channels/c1/messages": () => ({ json: { message: { messageId: "m1" } } }) });
+  await sendMessage(deps, "t", { channelId: "c1", body: "is this right?", clientMessageId: "x",
+    metadata: { browserPage: { title: "Home / X", href: "https://x.com/home" } } });
+  assert.deepEqual(calls[0].body.metadata, { browserPage: { title: "Home / X", href: "https://x.com/home" } });
+  await sendMessage(deps, "t", { channelId: "c1", body: "again", clientMessageId: "y" });
+  assert.equal(calls[1].body.metadata, undefined);
+});

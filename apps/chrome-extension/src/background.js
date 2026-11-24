@@ -238,6 +238,9 @@ async function askSend(tab, { body, invocationSelections }) {
     const remembered = (await chrome.storage.local.get("lastSpace")).lastSpace?.id;
     const message = (channelId, inSpace) => sendMessage(scoped, token, { channelId, body: text,
       clientMessageId: crypto.randomUUID(),
+      // The page it was asked on goes with it, as with every message written in the side panel
+      // (packages/protocol browser-page.ts): the conversation shows it, and the Agent is told which page it is.
+      metadata: { browserPage: { title: passage.label, href: passage.href } },
       ...(inSpace === remembered && invocationSelections && typeof invocationSelections === "object"
         ? { invocationSelections } : {}) });
     const thread = await askThread(tab, passage.href, space.id);
