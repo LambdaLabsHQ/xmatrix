@@ -222,6 +222,31 @@ pub(crate) fn read_fixture_http_request(
     (stream, headers)
 }
 
+/// What a credential-file reader returns is the provider's quota answer only:
+/// no token, account id, other field of the login file, the in-memory
+/// fingerprint of its bytes, or the config home it sits in. Every quota fact
+/// the daemon reports to the Hub is copied from this reading, so a value
+/// absent here cannot reach the Hub.
+#[cfg(test)]
+fn assert_reading_holds_nothing_of_the_login(
+    usage: &LlmUsage,
+    home: &std::path::Path,
+    file_values: &[&str],
+) {
+    use sha2::Digest;
+    let raw = std::fs::read_to_string(home.join("auth.json")).unwrap();
+    let fingerprint = crate::host::lowercase_hex(&sha2::Sha256::digest(raw.as_bytes()));
+    let home = home.to_string_lossy();
+    let wire = serde_json::to_string(usage).unwrap();
+    for needle in file_values
+        .iter()
+        .copied()
+        .chain([fingerprint.as_str(), home.as_ref()])
+    {
+        assert!(!wire.contains(needle), "{needle} leaked into {wire}");
+    }
+}
+
 #[cfg(test)]
 fn assert_provider_window_labels(
     usage: LlmUsage,

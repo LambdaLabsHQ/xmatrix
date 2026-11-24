@@ -154,19 +154,52 @@ export function PrivacyPolicyContent() {
           disclosed endpoint. To keep a connected computer stable across reinstalls under your
           account, the daemon derives an owner-scoped <code className="font-mono text-xs">machineId</code>{" "}
           locally by hashing your xMatrix user ID with an OS machine identifier; raw hardware
-          identifiers and unscoped fingerprints are never sent to xMatrix. When local provider quota
-          probing is enabled for a harness you registered, the daemon may read that tool&apos;s
-          local credential store or OS keychain entry solely in local memory to query that
-          provider&apos;s own usage endpoint directly from your machine; those credentials and local
-          cache fingerprints are never sent to xMatrix, and only normalized remaining-quota windows
-          or balances are reported to the Hub for display and routing. You can disable all local
-          quota probes in Desktop Settings → Legal and privacy, via{" "}
-          <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code>, or via{" "}
-          <code className="font-mono text-xs">xmatrix config quotaProbes off</code>. A sandbox can
-          restrict filesystem and long-lived credential access, but current local sandbox support
-          varies by platform and mode and does not enforce network egress. A run configured without a
+          identifiers and unscoped fingerprints are never sent to xMatrix. A sandbox can restrict
+          filesystem and long-lived credential access, but current local sandbox support varies by
+          platform and mode and does not enforce network egress. A run configured without a
           supported sandbox does not receive that sandbox protection.
         </p>
+        <div id="local-quota-probes" className="scroll-mt-8 space-y-3 rounded-md border border-border p-4">
+          <h3 className="font-bold text-foreground">
+            The daemon reads other AI tools&apos; login files to check your remaining quota
+          </h3>
+          <p>
+            <strong className="text-foreground">Which files.</strong> For an AI tool you registered
+            as an Agent on a computer, the xMatrix daemon on that computer may read that tool&apos;s
+            own sign-in: for example Codex&apos;s{" "}
+            <code className="font-mono text-xs">~/.codex/auth.json</code>, Grok&apos;s{" "}
+            <code className="font-mono text-xs">~/.grok/auth.json</code>, Claude Code&apos;s{" "}
+            <code className="font-mono text-xs">~/.claude/.credentials.json</code> or keychain entry,
+            Cursor&apos;s or OpenCode&apos;s <code className="font-mono text-xs">auth.json</code> or
+            keychain entry, or the API key the tool uses. The full list is in the{" "}
+            <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
+              Telemetry and local privacy guide
+            </Link>
+            . It never reads the login of a tool you did not register.
+          </p>
+          <p>
+            <strong className="text-foreground">Why.</strong> To ask that provider how much of your
+            subscription or balance is left, so xMatrix can show it and route work away from an
+            exhausted account without spending a model turn to find out.
+          </p>
+          <p>
+            <strong className="text-foreground">What leaves your computer.</strong> The credential is
+            held in memory and sent only to that provider&apos;s own usage endpoint, the same
+            provider the tool itself signs in to. Nothing read from the file (no token, account id, file
+            contents, or fingerprint of the file) is sent to xMatrix. The Hub receives only the
+            normalized answer: the percentage left in each quota window, when it resets, whether the
+            provider still serves the account, and a prepaid balance where applicable.
+          </p>
+          <p>
+            <strong className="text-foreground">How to turn it off.</strong> One switch stops both the
+            file reads and the provider requests on that computer: Desktop Settings → Legal and
+            privacy → Local provider quota probes, or{" "}
+            <code className="font-mono text-xs">xmatrix config quotaProbes off</code>, or the
+            environment variable{" "}
+            <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code>. With it off,
+            remaining quota shown for that computer&apos;s Agents may be missing or out of date.
+          </p>
+        </div>
         <p>
           Secret injection, privileged host commands, destructive changes, external publication,
           production deployment, security-permission changes, purchases, and other high-risk actions

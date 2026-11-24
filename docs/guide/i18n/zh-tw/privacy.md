@@ -15,6 +15,8 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 
 ## 本地服務商額度探測
 
+**一句話說明：** 為了顯示你已註冊的 AI 工具還剩多少額度，xMatrix daemon 會讀取這些工具在你電腦上的登入檔案（例如 `~/.codex/auth.json`），並直接向對應服務商查詢。從這些檔案讀到的任何內容（權杖、帳號 ID、檔案內容或檔案指紋）都不會傳送給 xMatrix；Hub 只收到正規化後的額度結果。同一個開關可同時停止讀取檔案與向服務商發出請求（見下方「關閉本地額度探測」）。
+
 當你在本機註冊受支援的代理工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）時，xMatrix 可在 `xmatrix agent list` 與 Agents 頁面顯示訂閱剩餘額度，並供 `@auto` 避開已用盡的帳號。
 
 為在不消耗模型對話的前提下查詢剩餘額度，本機 daemon 僅於記憶體內讀取對應已註冊工具的本機憑證並直連原廠端點：

@@ -380,6 +380,59 @@ mod tests {
         std::fs::remove_dir_all(home).unwrap();
     }
 
+    #[tokio::test]
+    async fn the_login_file_reaches_only_the_provider_request() {
+        use std::io::Write;
+        let (token, account, refresh, id_token) = (
+            "sentinel-codex-access",
+            "sentinel-codex-account",
+            "sentinel-codex-refresh",
+            "sentinel-codex-id-token",
+        );
+        let home = unique_temp_home("containment");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("auth.json"),
+            serde_json::json!({"tokens": {"access_token": token, "account_id": account,
+                "refresh_token": refresh, "id_token": id_token}})
+            .to_string(),
+        )
+        .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}/usage", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, headers) =
+                super::super::read_fixture_http_request(&listener, "provider request missing");
+            // The provider's own usage request is the one place the login goes,
+            // and it carries only what that request needs.
+            assert!(headers.contains(&format!("authorization: bearer {token}\r\n")));
+            assert!(headers.contains(&format!("chatgpt-account-id: {account}\r\n")));
+            assert!(!headers.contains(refresh) && !headers.contains(id_token));
+            let body = serde_json::json!({
+                "rate_limit": {"allowed": true, "primary_window": {
+                    "used_percent": 40, "limit_window_seconds": 18000, "reset_at": 1900000000}},
+                "credits": {"has_credits": true, "balance": "12.5"},
+            })
+            .to_string();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let usage = read_codex_usage_from_endpoint(&home, true, &endpoint)
+            .await
+            .expect("reading");
+        server.join().unwrap();
+        assert!(
+            usage.quota_account.is_some(),
+            "the account part is read too"
+        );
+        super::super::assert_reading_holds_nothing_of_the_login(
+            &usage,
+            &home,
+            &[token, account, refresh, id_token],
+        );
+        std::fs::remove_dir_all(home).unwrap();
+    }
+
     fn unique_temp_home(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -836,6 +836,109 @@ mod tests {
         assert_eq!(unavailable["reason"], "timeout");
     }
 
+    /// The probe reads other tools' login files on this machine; the Hub must
+    /// only ever learn the quota answer. Every field of the fullest result a
+    /// Hub can ask for is listed here with what fills it, and none can carry a
+    /// token, account id, login-file fingerprint or path: a new field fails
+    /// this test until its provenance is reviewed. The values themselves come
+    /// from the harness reading, whose readers prove they hold nothing of the
+    /// login file (`the_login_file_reaches_only_the_provider_request`).
+    #[test]
+    fn the_hub_payload_has_no_field_that_can_carry_a_credential() {
+        use xmatrix_cli_core::protocol::{LlmQuotaAccount, LlmQuotaCredits};
+        let reading = LlmUsage {
+            quota_account: Some(LlmQuotaAccount {
+                allowed: Some(true),
+                credits: Some(LlmQuotaCredits {
+                    balance: Some(3.0),
+                    currency: Some("USD".to_string()),
+                    unlimited: true,
+                }),
+            }),
+            ..claude_reading()
+        };
+        let mut results = vec![observed_result(
+            &target("registration:claude", "d"),
+            reading,
+        )];
+        let probe = asking(
+            serde_json::json!({ "windowLabels": true, "quotaAccount": true,
+            "accountBalance": true, "scopedQuotaUsages": true }),
+        );
+        accept_only_what_the_hub_asked(&mut results, &probe);
+        let report = MachineDaemonReport::MachineQuotaProbeResult {
+            request_id: "cmd-1".to_string(),
+            probe: MachineQuotaProbeResultProbe {
+                request_id: probe.request_id,
+                connection_epoch: probe.connection_epoch,
+                results,
+            },
+            relay_lease: None,
+        };
+        fn paths(value: &serde_json::Value, at: String, out: &mut Vec<String>) {
+            match value {
+                serde_json::Value::Object(map) => {
+                    for (key, child) in map {
+                        let path = if at.is_empty() {
+                            key.clone()
+                        } else {
+                            format!("{at}.{key}")
+                        };
+                        out.push(path.clone());
+                        paths(child, path, out);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        paths(item, format!("{at}[]"), out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut fields = Vec::new();
+        paths(
+            &serde_json::to_value(&report).unwrap(),
+            String::new(),
+            &mut fields,
+        );
+        fields.sort_unstable();
+        fields.dedup();
+        assert_eq!(
+            fields,
+            [
+                // Command envelope and the Hub's own request, echoed.
+                "probe",
+                "probe.connectionEpoch",
+                "probe.requestId",
+                "probe.results",
+                // Normalized quota answer from the provider's usage endpoint.
+                "probe.results[].configurationDigest",
+                "probe.results[].quotaAccount",
+                "probe.results[].quotaAccount.allowed",
+                "probe.results[].quotaAccount.credits",
+                "probe.results[].quotaAccount.credits.balance",
+                "probe.results[].quotaAccount.credits.currency",
+                "probe.results[].quotaAccount.credits.unlimited",
+                "probe.results[].quotaObservedAt",
+                "probe.results[].quotaSource",
+                "probe.results[].quotaUsages",
+                "probe.results[].quotaUsages[].label",
+                "probe.results[].quotaUsages[].percent",
+                "probe.results[].quotaUsages[].resetAt",
+                "probe.results[].scopedQuotaUsages",
+                "probe.results[].scopedQuotaUsages[].label",
+                "probe.results[].scopedQuotaUsages[].percent",
+                "probe.results[].scopedQuotaUsages[].resetAt",
+                "probe.results[].scopedQuotaUsages[].scope",
+                "probe.results[].status",
+                "probe.results[].targetId",
+                "requestId",
+                "type",
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn read_with_budget_cancels_a_slow_reader() {
         let deadline = Instant::now() + Duration::from_millis(40);
