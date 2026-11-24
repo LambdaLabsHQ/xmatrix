@@ -103,7 +103,7 @@ xMatrix support" in the conversation's menu and on xMatrix's failure notices).
 Staff and Agents of the support Space read a customer's conversation only this
 way: product analysis uses metadata only. A handoff is the same grant with a
 different grantee, the support Space instead of one Run
-(`data.cross_space_read_grants.grantee = 'space'`, migration `0272`).
+(`data.cross_space_read_grants.grantee = 'space'`, migration `0273`).
 
 1. The person writes one line about what went wrong and ticks what to include.
    Nothing is ticked by default:
