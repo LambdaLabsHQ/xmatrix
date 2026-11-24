@@ -19,6 +19,7 @@ import { HARNESS_ACTION_LABELS, describeHarnessAction } from "./machine-harness-
 import { harnessAutoUpdateSupported, harnessUpdateAvailable, machineHarnessState } from "./machine-harness-state";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 import { Face } from "./face";
+import { HarnessQuotaAccess } from "./harness-quota-access";
 import { HarnessSignInSection } from "./harness-sign-in";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import type { ToolState } from "./tool-split";
@@ -264,6 +265,10 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
   const signIn = signedOut && spaceSwitches.owner && context.token && machine?.machineId && preset.management?.login
     ? { machineName: machine.machineName ?? machine.name, key: { ownerUserId: context.userId, machineId: machine.machineId, harness: preset.id } }
     : null;
+  const quotaAccess = installed && !signedOut && spaceSwitches.owner && context.token && machine?.machineId &&
+    preset.management?.quotaRead === "sign_in_grant"
+    ? { machineName: machine.machineName ?? machine.name, key: { ownerUserId: context.userId, machineId: machine.machineId, harness: preset.id } }
+    : null;
   // Listed in this Space, it is an agent with a page of its own: what it works on, its usage, its settings.
   const opens = Boolean(onOpenAgent && agent);
   const described = operation ? describeHarnessAction(status.data, { displayName: preset.displayName, now: Date.now(),
@@ -317,6 +322,10 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
       </div>}
       {signedOut && !signIn && spaceSwitches.owner && <p className="mt-1 text-xs text-muted-foreground">
         {item?.loginDetail ?? "Sign it in on the machine itself, then refresh."}</p>}
+      {/* Its quota is read only on its owner's word on this machine: unknown until allowed, stoppable here. */}
+      {quotaAccess && (open || item?.quotaAccess !== "granted") && <div className="mt-2" data-testid="harness-row-quota-access">
+        <HarnessQuotaAccess bare hasReading={item?.quotaAccess === "granted"} target={quotaAccess}
+          token={context.token!} userId={context.userId} /></div>}
       {installed && open && <div className="mt-2 space-y-2 text-xs" data-testid="harness-upkeep">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span className="text-muted-foreground">Version</span>

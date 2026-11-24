@@ -78,6 +78,7 @@ import {
 } from "lucide-react";
 import { BrowserPushSetting, browserPushSummary } from "./browser-push-setting";
 import { DiagnosticsSetting } from "./diagnostics-setting";
+import { QuotaAccessSettings } from "./harness-quota-access";
 import { browserPushState, type BrowserPushState } from "@/lib/push-subscription";
 import { SectionedToolView, ToolDetailSection, ToolSettingRow, type ToolSection } from "./tool-split";
 import { spacePlansAbsent } from "./space-plan-mark";
@@ -669,6 +670,7 @@ export function SettingsView({
     { key: "legal", label: "Legal and privacy", icon: Shield, summary: "Diagnostics, terms, privacy", content: (
         <div className="app-settings-section min-w-0 space-y-10">
           <DiagnosticsSetting />
+          {token && <QuotaAccessSettings token={token} userId={user.id} />}
           <div>
             <p className="mb-4 max-w-[60ch] text-sm text-muted-foreground">
               Review the terms that apply to xMatrix and how MadeByRobot handles information.
