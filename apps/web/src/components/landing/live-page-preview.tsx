@@ -173,9 +173,9 @@ async function play(stage: Stage, stopped: () => boolean) {
 }
 
 /** A live page written by a person and three Agents, again and again while it is in view. `room` is the width
- *  beside the text for each Agent's name; with none an Agent is its face at the page's edge, as on a phone, and
- *  the sheet keeps a narrow margin for the faces. `width` narrows the text column. */
-export function LivePagePreview({ room = 230, width }: { room?: number; width?: string }) {
+ *  beside the text for each Agent's name; with none an Agent is its face at the page's edge, as on a phone.
+ *  `width` narrows the text column, and `padding` is the sheet's own where it is not the desktop's. */
+export function LivePagePreview({ room = 230, width, padding }: { room?: number; width?: string; padding?: string }) {
   const stage = useMemo(createStage, []);
   const [tops, setTops] = useState<ReadonlyMap<string, number>>(new Map());
   const [states, setStates] = useState<Map<number, { activity?: string }>>(new Map());
@@ -225,7 +225,7 @@ export function LivePagePreview({ room = 230, width }: { room?: number; width?: 
 
   return (
     <div ref={setHost} className="site-live-page xmatrix-app" inert
-      style={room ? undefined : { "--site-live-page-padding": "1.75rem 2.75rem 2rem 1.25rem" } as CSSProperties}>
+      style={padding ? { "--site-live-page-padding": padding } as CSSProperties : undefined}>
       <div className="site-live-page-column relative" style={width ? { maxWidth: width } : undefined}>
         <PagePens pens={pens} room={room} onJump={() => {}} onOpen={() => {}} />
         <PageEditor session={stage.session} canEdit={false} onAnchorOffsets={setTops} references={REFERENCES} />
