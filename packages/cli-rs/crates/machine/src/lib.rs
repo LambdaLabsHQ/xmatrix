@@ -20,8 +20,8 @@ use xmatrix_cli_args::{
     ForeignWorktreeOrigin, MachineCommand, MachineSupervisorCommand, MachineWorktreesCommand, OnOff,
 };
 use xmatrix_cli_core::error::{self, CliError};
-use xmatrix_cli_core::{config, telemetry_consent};
 use xmatrix_cli_core::quota_access;
+use xmatrix_cli_core::{config, telemetry_consent};
 use xmatrix_repo_pool::machine_worktrees::{self, MachineWorktree, WorktreeOrigin};
 #[cfg(windows)]
 use xmatrix_windows_continuity::{
@@ -161,7 +161,7 @@ pub async fn cmd_config(
 }
 
 /// `{ "<harness>": "granted" | "not_granted" | "probes_off" }` for every harness
-/// whose quota is read only under its owner's grant.
+/// whose quota may be read only under its owner's grant.
 fn quota_access_states() -> serde_json::Value {
     quota_access::quota_access_harnesses()
         .map(|harness| {
@@ -216,6 +216,11 @@ async fn cmd_config_quota_access(
         (false, _) => println!(
             "xMatrix no longer reads {name}'s sign-in on this computer; its quota shows as unknown."
         ),
+    }
+    if on && harness == "opencode" {
+        println!(
+            "OpenCode 2.2.0 and later report their own quota, so this is used only while OpenCode here is older; it never reads the sign-in of a newer OpenCode."
+        );
     }
     report_quota_access_to_hub(hub_url).await;
     Ok(())

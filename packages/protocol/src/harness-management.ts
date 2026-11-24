@@ -77,6 +77,10 @@ export interface HarnessManagement {
    * the machine's owner allows it there (`quota_access_on`), per machine.
    */
   quotaRead?: "sign_in_grant";
+  /** The first release with an official quota interface, when only earlier
+   * releases need `quotaRead` (OpenCode before 2.2.0). The daemon reports
+   * `quotaAccess` only for a release that needs the grant. */
+  quotaReadBefore?: string;
   /** Official registry that publishes this harness; absent means its latest version is not knowable. */
   latest?: { kind: "npm" | "pypi"; package: string };
   sources: string[];
@@ -102,6 +106,9 @@ export interface HarnessInventoryItem {
   /** For a harness whose quota is read only under its owner's grant: whether
    * this machine has one (`probes_off`: every quota probe is off there). */
   quotaAccess?: HarnessQuotaAccess;
+  /** `expired`: the last read under that grant found the harness's sign-in
+   * expired, so its quota is unknown until it signs in again. */
+  quotaSignIn?: "expired";
   /** When this item alone was probed again after the inventory's `capturedAt`, by an action on it
    * such as a sign-in. Absent, the item is as old as the inventory. */
   observedAt?: string;
@@ -166,6 +173,7 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
       ...(item.login === undefined ? {} : { login: item.login as HarnessLoginState }),
       ...(item.loginDetail === undefined || item.login !== "signed_out" ? {} : { loginDetail: item.loginDetail as string }),
       ...(item.quotaAccess === undefined ? {} : { quotaAccess: item.quotaAccess as HarnessQuotaAccess }),
+      ...(item.quotaAccess === "granted" && item.quotaSignIn === "expired" ? { quotaSignIn: "expired" as const } : {}),
       ...(typeof item.observedAt === "string" && TIMESTAMP.test(item.observedAt) && Number.isFinite(Date.parse(item.observedAt))
         ? { observedAt: item.observedAt } : {}),
     });

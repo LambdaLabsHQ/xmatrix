@@ -15,7 +15,7 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 
 ## 本地服務商額度探測
 
-**一句話說明：** 為了顯示你已註冊的 AI 工具還剩多少額度，xMatrix daemon 會讀取這些工具在你電腦上的登入檔案（例如 `~/.grok/auth.json`），並直接向對應服務商查詢。Codex、Claude Code 與 OpenCode 例外：xMatrix 直接詢問工具本身，不開啟它們的任何登入檔案。Codex 透過正在執行的工作階段或短暫啟動的 `codex app-server` 詢問；Claude Code 透過正在執行的工作階段或短暫啟動的 `claude` 詢問（其 `get_usage` 請求，不傳送任何提示詞）；OpenCode 透過短暫啟動的 `opencode serve` 詢問。從這些檔案讀到的任何內容（權杖、帳號 ID、檔案內容或檔案指紋）都不會傳送給 xMatrix；Hub 只收到正規化後的額度結果。同一個開關可同時停止讀取檔案、向 Codex、Claude Code 與 OpenCode 發出請求，以及向服務商發出請求（見下方「關閉本地額度探測」）。沒有官方額度介面的工具（如 Cursor），在你於那台電腦上允許之前完全不會被讀取（見下方「僅在你允許後才讀取的工具」）。
+**一句話說明：** 為了顯示你已註冊的 AI 工具還剩多少額度，xMatrix daemon 會讀取這些工具在你電腦上的登入檔案（例如 `~/.grok/auth.json`），並直接向對應服務商查詢。Codex、Claude Code 與 OpenCode 例外：xMatrix 直接詢問工具本身，不開啟它們的任何登入檔案。Codex 透過正在執行的工作階段或短暫啟動的 `codex app-server` 詢問；Claude Code 透過正在執行的工作階段或短暫啟動的 `claude` 詢問（其 `get_usage` 請求，不傳送任何提示詞）；OpenCode 透過短暫啟動的 `opencode serve` 詢問。從這些檔案讀到的任何內容（權杖、帳號 ID、檔案內容或檔案指紋）都不會傳送給 xMatrix；Hub 只收到正規化後的額度結果。同一個開關可同時停止讀取檔案、向 Codex、Claude Code 與 OpenCode 發出請求，以及向服務商發出請求（見下方「關閉本地額度探測」）。沒有官方額度介面的工具（如 Cursor），在你於那台電腦上允許之前完全不會被讀取（見下方「僅在你允許後才讀取的工具」）。OpenCode 2.2.0 以前的版本沒有官方額度介面，同樣在你於該電腦上授權前完全不讀取。
 
 當你在本機註冊受支援的代理工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）時，xMatrix 可在 `xmatrix agent list` 與 Agents 頁面顯示訂閱剩餘額度，並供 `@auto` 避開已用盡的帳號。
 
@@ -27,7 +27,8 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 | Codex | 不讀取：呼叫 Codex 自己的 app-server 方法 `account/rateLimits/read`（正在執行的工作階段或短暫啟動的 `codex app-server`） | 由 Codex 使用其自身登入處理 |
 | Cursor（僅在你於那台電腦上允許後） | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS 鑰匙圈（`cursor-access-token`）或 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` 或 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
-| OpenCode | 不讀取：向短暫啟動的 `opencode serve` 請求 `GET /api/experimental/usage/limits`（僅監聽本機回送位址，使用一次性密碼）。OpenCode 路由到其他服務商的模型不讀取任何額度 | 由 OpenCode 使用其自身登入處理 |
+| OpenCode 2.2.0 及以上 | 不讀取：向短暫啟動的 `opencode serve` 請求 `GET /api/experimental/usage/limits`（僅監聽本機回送位址，使用一次性密碼）。OpenCode 路由到其他服務商的模型不讀取任何額度 | 由 OpenCode 使用其自身登入處理 |
+| OpenCode 2.2.0 以前（僅在你於該電腦上授權後） | `OPENCODE_API_KEY` 或 OpenCode `auth.json` 中的 `opencode-go` 項目 | `https://opencode.ai/zen/go/v1/usage` |
 | DeepSeek | `DEEPSEEK_API_KEY` 或 `$DSH_HOME` 憑證檔 | `https://api.deepseek.com/user/balance` |
 | Z.ai / Zhipu | `ZAI_API_KEY` / `ZHIPU_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit`（或 `open.bigmodel.cn`） |
 | Antigravity | 直接呼叫未修改的 `agy -p "/usage" --output-format json` | 由 `agy` 自行處理 |
@@ -55,6 +56,8 @@ xmatrix config quotaAccess              # 查看本機已允許的工具
 - 授權綁定首次使用時登入的 Cursor 帳號，依據一個只保存在那台電腦 xMatrix 設定中、從不傳送的指紋。帳號或憑證一旦改變，授權即失效，最近的額度數字也會被刪除。
 - 隨時可以在同一位置、在 **Settings → Legal and privacy → Reading sign-ins for quota**，或用 `xmatrix config quotaAccess cursor off` 停止，下一次讀取即被拒絕。
 - 關閉本地額度探測（見下）優先於授權：即使已授權也什麼都不讀。
+
+OpenCode 2.2.0 以前的版本同樣沒有官方額度介面，處理方式相同。未授權時，xMatrix 既不開啟 OpenCode 的 `auth.json`，也不讀取為它設定的 `OPENCODE_API_KEY`，不請求任何 OpenCode 端點，額度顯示為 **Unknown**。授權後（**Allow reading OpenCode sign-in to show quota**，或 `xmatrix config quotaAccess opencode on`），xMatrix 只讀取 OpenCode 為 OpenCode Go 儲存的金鑰，並只用於一次對 `https://opencode.ai/zen/go/v1/usage` 的請求。xMatrix 絕不代替 OpenCode 重新整理已過期的登入：額度顯示為未知並標示已過期，直到 OpenCode 重新登入。上面的帳號綁定、撤回與總開關同樣適用。從 OpenCode 2.2.0 起，xMatrix 詢問 `opencode serve`，無論是否授權都不讀取任何 OpenCode 憑證。
 
 ### 關閉本地額度探測
 

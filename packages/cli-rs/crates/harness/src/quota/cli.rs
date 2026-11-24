@@ -19,7 +19,7 @@ use tokio::io::AsyncReadExt;
 use crate::host::lowercase_hex;
 
 /// A `major.minor.patch` CLI release.
-pub(crate) type CliVersion = (u64, u64, u64);
+pub type CliVersion = (u64, u64, u64);
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_VERSION_STDOUT_BYTES: usize = 4 * 1024;
@@ -48,7 +48,7 @@ fn binary_fingerprint(program: &Path) -> Option<BinaryFingerprint> {
 
 /// The first `major.minor.patch` in `raw` (`"2.1.331 (Claude Code)"`,
 /// `"opencode v2.4.1"`, `"agy 1.1.11"`).
-pub(crate) fn parse_cli_semver(raw: &str) -> Option<CliVersion> {
+pub fn parse_cli_semver(raw: &str) -> Option<CliVersion> {
     raw.split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
         .find_map(|token| {
             let mut parts = token.split('.');
