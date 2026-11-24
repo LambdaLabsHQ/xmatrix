@@ -96,3 +96,12 @@ test("a prepaid account reads as the money left, not as a window", () => {
     { label: "Balance", value: "¥0.00 left", high: true },
   ]);
 });
+
+// An account the provider refuses (a billing hold) has no used-up window: the
+// row and its card both say the provider refuses, never "Quota 100% used".
+test("a provider refusing the account reads as that, not as a used-up quota", () => {
+  const refused = { remainingPercent: 0, observedAt: at(-1), expiresAt: at(10), account: { allowed: false } };
+  assert.deepEqual(agentUsageReadings(refused, now).map(({ label, value }) => ({ label, value })),
+    [{ label: "Provider", value: "Refusing requests" }]);
+  assert.deepEqual(agentUsageGlance(refused, now), []);
+});

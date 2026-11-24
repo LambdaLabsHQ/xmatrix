@@ -58,6 +58,9 @@ test("a row says what the location is doing, or why it cannot take work", () => 
   assert.deepEqual(activity({ live: live({ balance: balance(0, false) }) }), says("attention", "Out of balance", 2));
   assert.deepEqual(activity({ live: live({ quota: { remainingPercent: 0, observedAt: "", expiresAt: "" } }) }),
     says("attention", "Out of quota · window unavailable", 2));
+  // A billing hold is the provider refusing the account, not a used-up window.
+  assert.deepEqual(activity({ live: live({ quota: { remainingPercent: 0, observedAt: "", expiresAt: "",
+    account: { allowed: false } } }) }), says("attention", "Provider refusing requests", 2));
   assert.deepEqual(activity({ live: live(), routingReady: false, routingBlocker: "owner_environment_missing" }),
     says("attention", "Not set up on its machine", 2));
   assert.deepEqual(activity({ live: { machine: { online: false, lastSeenAt: "2026-09-07T12:00:00Z" }, running: [] } }),

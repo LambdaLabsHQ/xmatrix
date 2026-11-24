@@ -52,6 +52,14 @@ export function isRegistrationBillingRefusalRow(row: Record<string, unknown> | u
   return storedObject(row.account_json).billingRefusal === true;
 }
 
+/** The provider's verdict on the account a pool reading carries. An account
+ * billing hold is the provider refusing every request, so it reads as
+ * `allowed: false`, never as a used-up window. */
+export function registrationQuotaAccount(row: Record<string, unknown> | undefined): LlmQuotaAccount | undefined {
+  if (isRegistrationBillingRefusalRow(row)) return { allowed: false };
+  return parseLlmQuotaAccount(row?.account_json);
+}
+
 /** Active per-scope billing/payment refusal holds stored on `account_json.billingRefusalScopes`. */
 function registrationBillingRefusalScopeEntries(row: Record<string, unknown> | undefined, now = Date.now()):
   Array<{ scope: string; observedAt: number; expiresAt: number }> {
@@ -737,8 +745,10 @@ export async function recordRegistrationQuotaProbeResult(tx: DatabaseTransaction
  * there now: never given, revoked, or voided because its sign-in changed. The
  * last reading taken under that grant goes with it, so its quota shows as
  * unknown. A hold the provider's own refusal caused stays: a billing refusal
- * keeps its scopes, and a usage-limit hold (`source='daemon'`) keeps its row,
- * since both come from the harness's own error, not from reading its sign-in.
+ * keeps its scopes, and a usage-limit or account billing hold
+ * (`source='daemon'`) keeps its row, since both come from the harness's own
+ * error, not from reading its sign-in; any windows read beside such a hold go.
+ * Answers how many pools it changed, so their readers can be told.
  */
 export async function clearUngrantedRegistrationQuota(tx: DatabaseTransaction, input: {
   ownerUserId: string; machineId: string; harnesses: readonly string[];
@@ -765,7 +775,16 @@ export async function clearUngrantedRegistrationQuota(tx: DatabaseTransaction, i
         AND (windows_json IS NOT NULL OR scoped_windows_json IS NOT NULL OR remaining<>100)
       RETURNING 1 AS kept`,
     values: [input.ownerUserId, quotaPoolId], maxRows: 1 });
-    cleared += removed.length + kept.length;
+    // A hold from the harness's own refusal (`source='daemon'`) stays, but
+    // the windows later reads stored beside it were read under the grant.
+    const stripped = await tx.query<QueryResultRow>({ name: "registration_quota_ungranted_strip_hold_v1", text: `UPDATE
+        control.registration_quota_observations SET windows_json=NULL,scoped_windows_json=NULL,
+          scoped_observed_at=NULL,scoped_expires_at=NULL
+      WHERE owner_user_id=$1 AND quota_pool_id=$2 AND source='daemon'
+        AND (windows_json IS NOT NULL OR scoped_windows_json IS NOT NULL)
+      RETURNING 1 AS stripped`,
+    values: [input.ownerUserId, quotaPoolId], maxRows: 1 });
+    cleared += removed.length + kept.length + stripped.length;
   }
   return cleared;
 }
