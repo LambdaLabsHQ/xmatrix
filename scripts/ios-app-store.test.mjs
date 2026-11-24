@@ -56,7 +56,7 @@ function fixture(options = {}) {
       }
       if (path.endsWith("/appStoreReviewDetail")) return { data: review };
       if (path === "/v1/appStoreVersions/version" && method === "PATCH") {
-        assert.equal(data.relationships.build.data.id, "exact-build"); selected = true; return { data: version };
+        assert.equal(data.relationships.build.data.id, "exact-build"); assert.equal(data.attributes.releaseType, "AFTER_APPROVAL"); selected = true; return { data: version };
       }
       if (path.endsWith("/relationships/build")) {
         assert.ok(selected); return { data: { id: options.readbackBuild ?? "exact-build" } };
@@ -302,13 +302,13 @@ test("ready submission with the version already attached is resumed without dupl
   assert.equal(writes.some((row) => row.path === "/v1/reviewSubmissionItems" || row.path === "/v1/reviewSubmissions"), false);
 });
 
-test("new versions inherit only private review fields and use manual release", async () => {
+test("new versions inherit only private review fields and release automatically after approval", async () => {
   const { api, writes } = fixture({ version: { appVersionState: "READY_FOR_DISTRIBUTION" } });
   const original = api.request;
   api.request = async (path, method = "GET", data) => {
     if (path === "/v1/appStoreVersions" && method === "POST") {
       writes.push({ path, method, data });
-      assert.equal(data.attributes.releaseType, "MANUAL");
+      assert.equal(data.attributes.releaseType, "AFTER_APPROVAL");
       return { data: { id: "new-version", attributes: { versionString: "1.0.200" } } };
     }
     if (path === "/v1/appStoreVersions/new-version/appStoreReviewDetail") throw new AppleApiError(404);
