@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Check, ChevronDown, Globe, Smartphone } from "lucide-react";
+import { Check, ChevronDown, Globe, Smartphone, Tablet } from "lucide-react";
 
 import { MachineGlyph } from "@/components/dashboard/machine-glyph";
 import { PaperPopover } from "@/components/ui/material-surfaces";
+import { APP_STORE_URL, GOOGLE_PLAY_URL } from "@/lib/app-stores";
 import type { SiteLocale } from "@/lib/site-locales";
 import { sitePagesCopy, type DownloadPageCopy } from "@/lib/site-pages-copy";
 
 import { DownloadRecommendation, webApp, type Channel } from "./download-recommendation";
 
-type Build = { label: string; href: string };
+// `store` builds are the same in every channel, so they carry no Preview suffix.
+type Build = { label: string; href: string; store?: boolean };
 type PlatformRow = { name: string; icon: ReactNode; note: string; builds: Build[] };
 
 const desktop = (channel: Channel, file: string) => `/api/desktop/releases/${channel}/latest-${file}`;
@@ -34,8 +36,15 @@ function platforms(channel: Channel, copy: DownloadPageCopy): PlatformRow[] {
       builds: [{ label: copy.windowsBuild, href: desktop(channel, "x64.exe") }],
     },
     {
+      name: "iPhone & iPad", icon: <Tablet className="size-5" strokeWidth={1.75} aria-hidden />, note: copy.iosNote,
+      builds: [{ label: "App Store", href: APP_STORE_URL, store: true }],
+    },
+    {
       name: "Android", icon: <Smartphone className="size-5" strokeWidth={1.75} aria-hidden />, note: copy.androidNote,
-      builds: [{ label: "APK", href: `/api/android/releases/${channel}/latest.apk` }],
+      builds: [
+        ...(channel === "stable" ? [{ label: "Google Play", href: GOOGLE_PLAY_URL, store: true }] : []),
+        { label: "APK", href: `/api/android/releases/${channel}/latest.apk` },
+      ],
     },
     {
       name: "Web", icon: <Globe className="size-5" strokeWidth={1.75} aria-hidden />, note: copy.webNote,
@@ -151,7 +160,7 @@ export function DesktopDownload({ locale = "en" }: { locale?: SiteLocale }) {
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-2">
                   {builds.map((build) => (
-                    <a key={build.href} href={build.href} className="download-build" aria-label={`${name} ${build.label}${suffix}`}>{build.label}</a>
+                    <a key={build.href} href={build.href} className="download-build" aria-label={`${name} ${build.label}${build.store ? "" : suffix}`}>{build.label}</a>
                   ))}
                 </div>
               </li>

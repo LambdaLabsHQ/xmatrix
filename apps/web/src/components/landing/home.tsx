@@ -11,6 +11,7 @@ import { Pricing } from "@/components/landing/pricing";
 import { Footer, X_ACCOUNT_URL } from "@/components/landing/footer";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 import { SITE_LOCALES, localizedAlternates } from "@/lib/site-locales";
+import { smartAppBanner } from "@/lib/site-metadata";
 import { shareImage, siteUrl } from "@/lib/site-url";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
@@ -21,6 +22,7 @@ export function homeMetadata(locale: Locale): Metadata {
     title: meta.title,
     description: meta.description,
     alternates: localizedAlternates(locale, "/"),
+    ...smartAppBanner,
     openGraph: {
       title: meta.title,
       description: meta.shareDescription,
