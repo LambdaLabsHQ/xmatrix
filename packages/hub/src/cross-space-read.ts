@@ -15,6 +15,7 @@ import { requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
 import { XMATRIX_SYSTEM_AVATAR_URL } from "./xmatrix-system-identity";
+import { postSupportAccessNote } from "./support-handoff";
 import type { Env } from "./types";
 
 /**
@@ -26,14 +27,19 @@ import type { Env } from "./types";
 
 export const CROSS_SPACE_READ_MESSAGE_KIND = "xmatrix.system.cross-space-read";
 
-function repository(env: Env): PostgresCrossSpaceReadRepository {
-  return new PostgresCrossSpaceReadRepository(createPostgresAuthorityDatabase(env, {
+/** The uncached database every cross-Space read grant, a support handoff's too, is decided on. */
+export function crossSpaceReadDatabase(env: Env) {
+  return createPostgresAuthorityDatabase(env, {
     applicationName: "xmatrix-cross-space-read", statementTimeoutMs: 5_000,
     transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
-  }));
+  });
 }
 
-function runProof(run: AgentRunPrincipal): CrossSpaceRunProof {
+function repository(env: Env): PostgresCrossSpaceReadRepository {
+  return new PostgresCrossSpaceReadRepository(crossSpaceReadDatabase(env));
+}
+
+export function runProof(run: AgentRunPrincipal): CrossSpaceRunProof {
   if (!run.instanceId) throw new CrossSpaceReadError("agent_run_forbidden", 403,
     "This Run credential names no Instance; reads outside its Space need an exact Run");
   return { agentId: run.agentId, runId: run.runId, instanceId: run.instanceId,
@@ -51,16 +57,20 @@ export interface CrossSpaceOwnerRead {
  * a Human, or an Agent reading inside its own Space. Otherwise the target is
  * in another Space and an approved grant covers it, so the read is made as the
  * Run's owner; with no grant this throws a 403 that names the way to ask.
+ * A read of a Channel's messages (`part`) may instead be covered by a support
+ * handoff to the Run's Space, made as the person who handed it over and noted
+ * in their Channel (docs/cross-space-read-grants.md#support-handoffs).
  */
 export async function crossSpaceReadOwner(env: Env, run: AgentRunPrincipal | undefined,
-  target: { channelId: string } | { spaceId: string }): Promise<CrossSpaceOwnerRead | null> {
+  target: { channelId: string } | { spaceId: string }, part?: "messages"): Promise<CrossSpaceOwnerRead | null> {
   if (!run) return null;
   const proof = runProof(run);
   const authorization = await repository(env).authorizeRead({ requestId: crypto.randomUUID(),
-    proof, ...target });
-  return authorization
-    ? { owner: { kind: "user", id: authorization.ownerUserId }, spaceId: authorization.spaceId }
-    : null;
+    proof, ...target, ...(part ? { part } : {}) });
+  if (!authorization) return null;
+  await postSupportAccessNote(env, authorization.accessNote, { grantId: authorization.grantId,
+    spaceId: authorization.spaceId, ownerUserId: authorization.ownerUserId });
+  return { owner: { kind: "user", id: authorization.ownerUserId }, spaceId: authorization.spaceId };
 }
 
 export function crossSpaceReadGrantRef(grant: Pick<CrossSpaceReadGrant, "spaceId" | "id">): string {
@@ -216,14 +226,14 @@ function notifyCrossSpaceRead(env: Env, grant: CrossSpaceReadGrant): Promise<voi
  * anything the owner cannot see keeps the original refusal.
  */
 export async function crossSpaceRetryOwner(env: Env, run: AgentRunPrincipal | undefined,
-  target: { channelId: string } | { spaceId: string }, denied: Response,
+  target: { channelId: string } | { spaceId: string }, denied: Response, part?: "messages",
 ): Promise<CrossSpaceOwnerRead | Response> {
   if (!run || (denied.status !== 403 && denied.status !== 404)) return denied;
   // Grants live only in PostgreSQL; without it there is no grant to find, and
   // the ordinary refusal stands rather than becoming an availability error.
   if (!env.RELAY_POSTGRES?.connectionString || !env.RELAY_POSTGRES_SHARD_ID) return denied;
   try {
-    return await crossSpaceReadOwner(env, run, target) ?? denied;
+    return await crossSpaceReadOwner(env, run, target, part) ?? denied;
   } catch (error) {
     if (error instanceof CrossSpaceReadError && error.code === "cross_space_read_grant_required") {
       return postgresControlErrorResponse(error);
@@ -233,10 +243,10 @@ export async function crossSpaceRetryOwner(env: Env, run: AgentRunPrincipal | un
   }
 }
 
-/** {@link crossSpaceRetryOwner} for a read that answers with a Response. */
+/** {@link crossSpaceRetryOwner} for a read of a Channel's messages that answers with a Response. */
 export async function retryDeniedAgentReadAcrossSpaces(env: Env, run: AgentRunPrincipal | undefined,
-  target: { channelId: string } | { spaceId: string }, denied: Response,
+  target: { channelId: string }, denied: Response,
   retry: (owner: { kind: "user"; id: string }) => Promise<Response>): Promise<Response> {
-  const granted = await crossSpaceRetryOwner(env, run, target, denied);
+  const granted = await crossSpaceRetryOwner(env, run, target, denied, "messages");
   return granted instanceof Response ? granted : retry(granted.owner);
 }

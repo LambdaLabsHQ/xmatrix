@@ -21,6 +21,12 @@ const migratedAuthorities = [
   "apple-commerce-control.ts",
   "trace-access-control.ts",
   "cross-space-read-control.ts",
+  // A handoff reads its Channel's creator only after message_content_read lets
+  // the person read it; support's reads rely on the person's capability.
+  "support-handoff-control.ts",
+  // A support read resolves a thread to its root only inside the granted Space,
+  // and the caller then requires the person's message_content_read.
+  "support-handoff-grants.ts",
   "content-control.ts",
   "machine-control.ts",
   "channel-catalog.ts",
