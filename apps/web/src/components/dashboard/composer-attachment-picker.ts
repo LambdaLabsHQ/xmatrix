@@ -185,6 +185,14 @@ export function openNativeAttachmentPanel(input: {
   if (activeNativePanel) return false;
   const element = ensureSharedNativeFileInput();
   if (!element) return false;
+  const activeElement = typeof document !== "undefined"
+    ? (document.activeElement as { blur?: () => void } | null)
+    : null;
+  if (activeElement && activeElement !== element && typeof activeElement.blur === "function") {
+    // Resign editor focus synchronously before opening iOS's modal picker so
+    // UIKit does not resurrect the soft keyboard over the composer on cancel.
+    activeElement.blur();
+  }
   activeNativePanel = { origin: input.origin, deliver: input.deliver };
   notifyNativePanelListeners();
   element.multiple = input.multiple ?? true;

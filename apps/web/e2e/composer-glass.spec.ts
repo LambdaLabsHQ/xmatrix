@@ -388,10 +388,12 @@ test.describe("mock-auth app fixture", () => {
       expect(interruptCheck.sawClosingPanel).toBe(true);
       await expectSettledAtRestingHeight();
 
-      // A cancelled native panel must release Send and allow the next pick while
-      // preserving the draft. Playwright intercepts the chooser, so dispatch the
-      // event WebKit delivers when the native delegate returns nil.
-      await composerBox.locator(".composer-textarea").fill("pending send");
+      // A cancelled native panel must blur the editor before opening so iOS does
+      // not resurrect the keyboard over the composer on cancel, while preserving
+      // the draft, releasing Send, and allowing the next pick.
+      const editor = composerBox.locator(".composer-textarea");
+      await editor.fill("pending send");
+      await expect(editor).toBeFocused();
       const sendButton = composerBox.locator(".app-composer-send");
       await expect(sendButton).toBeEnabled();
       await attachButton.click();
@@ -399,9 +401,16 @@ test.describe("mock-auth app fixture", () => {
         page.waitForEvent("filechooser"),
         menu.getByRole("menuitem", { name: "Photo Library" }).click(),
       ]);
+      await expect(editor).not.toBeFocused();
       await expect(sendButton).toBeDisabled();
       await cancelledChooser.element().dispatchEvent("cancel");
+      await expect(editor).not.toBeFocused();
+      await expect(editor).toHaveText("pending send");
       await expect(sendButton).toBeEnabled();
+      const boxAfterCancel = await composerBox.boundingBox();
+      expect(boxAfterCancel).toBeTruthy();
+      expect(boxAfterCancel!.y + boxAfterCancel!.height).toBeCloseTo(restingBox!.y + restingBox!.height, 0);
+      expect(boxAfterCancel!.y + boxAfterCancel!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
 
       // Picking Choose Files synchronously arms the source and holds Send until
       // the file input has delivered the selection.
