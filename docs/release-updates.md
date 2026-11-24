@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: homepage copy rewritten around live-document multi-agent collaboration across all six locales
+
+Rewrites the public homepage copy (`apps/web/src/lib/landing-copy.ts`) across all six published locales (`en`, `zh`, `zh-tw`, `ja`, `ko`, `es`) to align with the live-document multi-agent positioning and the "Attention is all you need." / 「拯救你的注意力」 narrative: tightens section headings and descriptions for the live document, parallel conversations, cross-machine agents matrix, comparison table, connectors (highlighting approval boundaries and local credentials), self-serve pricing, FAQ, footer tagline, and SEO metadata (keeping English/Spanish titles ≤ 62 chars and descriptions ≤ 158 chars), and updates `apps/web/e2e/site-home.spec.ts` to match. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the homepage shows the product running and leads to the App on every device
 
 The homepage was a Hero, a marquee of twelve agent chips and separate sections

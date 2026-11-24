@@ -31,7 +31,7 @@ for (const device of devices) {
       }
       await expect(actions.getByRole("link", { name: device.name, exact: true })).toHaveCount(0);
       // The browser is the action itself where there is no App, and the sentence's last link otherwise.
-      await expect(actions.getByRole("link", { name: "use it in your browser", exact: true }))
+      await expect(actions.getByRole("link", { name: "open in browser", exact: true }))
         .toHaveCount(device.name === "Linux" ? 0 : 1);
     }
     await context.close();
@@ -43,7 +43,7 @@ for (const width of [393, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("xMatrix");
-    await expect(page.getByRole("heading", { level: 2, name: "One page for the whole project.", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "Get all your agents on the same page.", exact: true })).toBeVisible();
     // The phone app's two stores, as their own badges.
     await expect(page.getByRole("link", { name: "Download on the App Store", exact: true })).toHaveAttribute("href", appStore);
     await expect(page.getByRole("link", { name: "Get it on Google Play", exact: true })).toHaveAttribute("href", googlePlay);
@@ -65,11 +65,11 @@ for (const width of [393, 1440]) {
     const agents = page.locator("#agents");
     await agents.scrollIntoViewIfNeeded();
     await expect(agents.locator(".site-matrix")).toContainText("Mac Studio");
-    const list = agents.getByRole("list", { name: "Works with the agents you already use", exact: true });
+    const list = agents.getByRole("list", { name: "Supported coding agents", exact: true });
     const marks = list.getByRole("listitem");
     expect(await marks.count()).toBeGreaterThan(30);
     // The sentence over them counts the same registry.
-    await expect(agents.getByText(`${await marks.count()} coding agents run on your own machines`)).toBeVisible();
+    await expect(agents.getByText(`${await marks.count()} coding agents running on your own Mac, Linux, and Windows machines`)).toBeVisible();
     for (const mark of await marks.all()) {
       await expect.poll(() => mark.locator("img").evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
     }
