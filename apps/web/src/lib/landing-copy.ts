@@ -21,16 +21,26 @@ export interface WhyScenes {
   stop: string; again: string; draft: readonly [string, string, string]; edited: string; agentWaits: string;
 }
 
+/**
+ * Section headings in Chinese and Japanese break only at punctuation, at a
+ * space, or where a zero-width space (`\u200b`) marks the end of a phrase
+ * (section-intro.tsx): a heading with no punctuation carries one where it
+ * should wrap on a narrow screen.
+ */
 export interface LandingCopy {
   home: string;
   lang: string;
   meta: { title: string; description: string; shareDescription: string };
   nav: { links: readonly Pair[]; docs: string; openApp: string; download: string; menu: string };
-  hero: { slogan: string; startFree: string; useInBrowser: string; art: string };
-  agentStrip: string;
-  livePage: { title: string; body: string; art: string };
-  quickStart: { title: string; body: string; machinesLabel: string; machines: readonly (readonly [string, number])[];
-    agents: (count: number) => string; working: string };
+  /** `alsoFor`, `everyDevice` and `appsOnly` are one sentence under the Hero's action: `{list}` is the App's other
+      platforms, each a link, and `{browser}` is `inBrowser`, the link to the web app. */
+  hero: { slogan: string; startFree: string; art: string;
+    alsoFor: string; everyDevice: string; appsOnly: string; inBrowser: string };
+  /** What xMatrix is, over a live document; `stores` names the phone app's two badges. */
+  livePage: { title: string; body: string; art: string; stores: string };
+  conversations: { title: string; body: string };
+  /** `body` says how many agents the registry holds. */
+  agents: { title: string; body: (count: number) => string; matrixArt: string; listLabel: string };
   why: { title: string; others: string; rows: readonly Row[]; scenes: WhyScenes };
   connectors: { title: string; body: string; label: string };
   pricing: {
@@ -43,10 +53,10 @@ export interface LandingCopy {
   };
   faq: { title: string; questions: readonly Pair[] };
   footer: {
-    tagline: string; product: string; legal: string; compare: string; agents: string; language: string;
+    tagline: string; product: string; getApp: string; legal: string; compare: string; agents: string; language: string;
     links: Record<"app" | "download" | "pricing" | "docs" | "support" | "console" | "signIn", string>;
     legalLinks: Record<"privacy" | "terms" | "cookies" | "subprocessors", string>;
-    askAi: string; rights: string; motto: string;
+    askAi: string; rights: string;
   };
 }
 
@@ -59,24 +69,27 @@ const en: LandingCopy = {
     shareDescription: "Talk with your team. Your AI agents keep decisions, open work and next steps current in Pages.",
   },
   nav: {
-    links: [["/#connectors", "Connectors"], ["/#pricing", "Pricing"]],
+    links: [["/#agents", "Agents"], ["/#pricing", "Pricing"]],
     docs: "Docs", openApp: "Open App", download: "Download", menu: "Open navigation menu",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "Start Free", useInBrowser: "Or use it in your browser",
-    art: "A modular array of warm wood and liquid-glass blocks engraved with AI marks" },
-  agentStrip: "Works with the agents you already use",
+  hero: { slogan: "Attention is all you need.", startFree: "Start Free",
+    art: "A modular array of warm wood and liquid-glass blocks engraved with AI marks",
+    alsoFor: "Also for {list}, or {browser}.", everyDevice: "For {list}, or {browser}.", appsOnly: "Apps for {list}.", inBrowser: "use it in your browser" },
   livePage: {
     title: "One page for the whole project.",
     body: "Every owner, person or Agent, keeps its own line current, in its own colour. Decisions land once, for everyone. You read where the project stands, not who typed what.",
     art: "A project page where Claude, Codex and Cursor each move their workstream forward while a person records a decision",
+    stores: "Get the phone app",
   },
-  quickStart: {
+  conversations: {
     title: "Behind the page, conversations at work.",
     body: "Mention an agent and it gets to work in a conversation, on whichever of your machines it runs. Dozens run in parallel; each one reports what it finished to the page.",
-    machinesLabel: "Machines in a Space",
-    machines: [["Mac Studio", 7], ["Linux server", 5], ["Windows build", 3], ["MacBook Pro", 8]],
-    agents: (count: number) => `${count} agents`,
-    working: "12 conversations · 23 agents working now",
+  },
+  agents: {
+    title: "Works with the agents you already use",
+    body: (count: number) => `${count} coding agents run on your own machines, on the subscriptions or API keys you already have. When one runs out of quota, another picks up the work.`,
+    matrixArt: "The agents on each machine of a Space, and what each one is doing",
+    listLabel: "Works with the agents you already use",
   },
   why: {
     title: "Why xMatrix", others: "Juggling agent tools",
@@ -126,12 +139,11 @@ const en: LandingCopy = {
   },
   footer: {
     tagline: "Talk with your team and AI agents in one Space. Keep decisions, open work and next steps in living pages as the work changes.",
-    product: "Product", legal: "Legal", compare: "Compare", agents: "Agents", language: "Languages",
+    product: "Product", getApp: "Get the app", legal: "Legal", compare: "Compare", agents: "Agents", language: "Languages",
     links: { app: "Online App", download: "Download", pricing: "Pricing", docs: "Docs", support: "Support", console: "Console", signIn: "Sign In" },
     legalLinks: { privacy: "Privacy Policy", terms: "Terms of Service", cookies: "Cookies and Storage", subprocessors: "Subprocessors" },
     askAi: "See what ChatGPT, Claude, Perplexity, Gemini or Grok say about xMatrix.",
     rights: "xMatrix and its related marks are reserved.",
-    motto: "Built for coordinated agent work",
   },
 };
 
@@ -144,24 +156,27 @@ const zh: LandingCopy = {
     shareDescription: "和团队对话，让 AI 智能体把决定、待办和下一步写进页面并保持最新。",
   },
   nav: {
-    links: [["/zh#connectors", "连接器"], ["/zh#pricing", "价格"]],
+    links: [["/zh#agents", "智能体"], ["/zh#pricing", "价格"]],
     docs: "文档", openApp: "打开应用", download: "下载", menu: "打开导航菜单",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "免费开始", useInBrowser: "或在浏览器中使用",
-    art: "一组刻着 AI 标志的木块和液态玻璃方块" },
-  agentStrip: "支持你已经在用的编程智能体",
+  hero: { slogan: "拯救你的注意力", startFree: "免费开始",
+    art: "一组刻着 AI 标志的木块和液态玻璃方块",
+    alsoFor: "还有 {list} 版，也可以{browser}。", everyDevice: "支持 {list}，也可以{browser}。", appsOnly: "还有 {list} 版 App。", inBrowser: "在浏览器里用" },
   livePage: {
     title: "整个项目，一页看清。",
     body: "每个负责人，不论是人还是 Agent，各自维护自己那一行，各用各的颜色。决定只记一次，所有人都读得到。你看到的是项目现在走到哪了，而不是谁打了哪几个字。",
     art: "一个项目页面：Claude、Codex 和 Cursor 各自推进自己的工作线，同时有人记下一项决定",
+    stores: "下载手机 App",
   },
-  quickStart: {
+  conversations: {
     title: "页面背后，是正在干活的对话。",
     body: "在对话里 @ 一个智能体，它就在你的某台机器上开工。几十个对话可以同时进行，每个都把做完的事写回页面。",
-    machinesLabel: "Space 里的机器",
-    machines: [["Mac Studio", 7], ["Linux 服务器", 5], ["Windows 构建机", 3], ["MacBook Pro", 8]],
-    agents: (count: number) => `${count} 个智能体`,
-    working: "12 个对话 · 23 个智能体正在工作",
+  },
+  agents: {
+    title: "支持你已经在用的\u200b编程智能体",
+    body: (count: number) => `${count} 种编程智能体，跑在你自己的机器上，继续用你已有的订阅或 API key。一个额度用完，另一个接着干。`,
+    matrixArt: "一个 Space 里每台机器上的智能体，以及它们各自在做什么",
+    listLabel: "支持你已经在用的编程智能体",
   },
   why: {
     title: "为什么用 xMatrix", others: "在多个智能体工具之间来回切换",
@@ -184,7 +199,7 @@ const zh: LandingCopy = {
     },
   },
   connectors: {
-    title: "把你的工具带进对话。",
+    title: "把你的工具\u200b带进对话。",
     body: "接入团队已经在用的服务：智能体能读取上下文，经你批准后执行操作，并接收这些服务发来的事件。",
     label: "连接器",
   },
@@ -214,12 +229,11 @@ const zh: LandingCopy = {
   },
   footer: {
     tagline: "在一个 Space 里和团队、AI 智能体对话。决定、待办和下一步写在随工作更新的活页面里。",
-    product: "产品", legal: "法律", compare: "竞品对比", agents: "Agents", language: "语言",
+    product: "产品", getApp: "下载 App", legal: "法律", compare: "竞品对比", agents: "Agents", language: "语言",
     links: { app: "在线应用", download: "下载", pricing: "价格", docs: "文档", support: "支持", console: "控制台", signIn: "登录" },
     legalLinks: { privacy: "隐私政策（英文）", terms: "服务条款（英文）", cookies: "Cookie 与存储（英文）", subprocessors: "子处理方（英文）" },
     askAi: "看看 ChatGPT、Claude、Perplexity、Gemini 或 Grok 怎么介绍 xMatrix。",
     rights: "xMatrix 及相关标识保留所有权利。",
-    motto: "为协同的智能体工作而生",
   },
 };
 
@@ -232,24 +246,27 @@ const zhTw: LandingCopy = {
     shareDescription: "與團隊對話，讓 AI 代理在頁面中持續更新決策、待辦與下一步。",
   },
   nav: {
-    links: [["/zh-tw#connectors", "整合工具"], ["/zh-tw#pricing", "定價"]],
+    links: [["/zh-tw#agents", "代理"], ["/zh-tw#pricing", "定價"]],
     docs: "文件", openApp: "開啟應用", download: "下載", menu: "開啟導覽選單",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "免費開始", useInBrowser: "或在瀏覽器中使用",
-    art: "一組刻有 AI 標誌的溫潤木塊與液態玻璃方塊" },
-  agentStrip: "支援你已經在使用的程式設計代理",
+  hero: { slogan: "拯救你的注意力", startFree: "免費開始",
+    art: "一組刻有 AI 標誌的溫潤木塊與液態玻璃方塊",
+    alsoFor: "另有 {list} 版，也可以{browser}。", everyDevice: "支援 {list}，也可以{browser}。", appsOnly: "另有 {list} 版 App。", inBrowser: "在瀏覽器中使用" },
   livePage: {
     title: "整個專案，一頁看懂。",
     body: "每位負責人——無論是人還是 Agent——各自以專屬顏色維護自己負責的那一行。決策只記錄一次，所有人都讀得到。你看到的是專案最新進度，而不是誰打了哪幾個字。",
     art: "一個專案頁面：Claude、Codex 與 Cursor 各自推進工作線，同時有人記下一項決策",
+    stores: "下載手機 App",
   },
-  quickStart: {
+  conversations: {
     title: "頁面背後，是正在執行的對話。",
     body: "在對話中 @ 一個代理，它就會在你指定的機器上開始工作。數十個對話可同時並行，每個完成後自動把結果回報到頁面。",
-    machinesLabel: "Space 中的機器",
-    machines: [["Mac Studio", 7], ["Linux 伺服器", 5], ["Windows 建置機", 3], ["MacBook Pro", 8]],
-    agents: (count: number) => `${count} 個代理`,
-    working: "12 個對話 · 23 個代理正在執行",
+  },
+  agents: {
+    title: "支援你已經在使用的\u200b程式設計代理",
+    body: (count: number) => `${count} 種程式設計代理，跑在你自己的機器上，繼續使用你已有的訂閱或 API key。一個額度用完，另一個接手。`,
+    matrixArt: "一個 Space 裡每台機器上的代理，以及它們各自在做什麼",
+    listLabel: "支援你已經在使用的程式設計代理",
   },
   why: {
     title: "為什麼選擇 xMatrix", others: "在多個代理工具之間來回切換",
@@ -272,7 +289,7 @@ const zhTw: LandingCopy = {
     },
   },
   connectors: {
-    title: "把你的常用工具帶進對話。",
+    title: "把你的常用工具\u200b帶進對話。",
     body: "連接團隊已經在用的服務，讓代理能讀取上下文、經你批准後執行操作，並即時接收服務事件。",
     label: "整合工具",
   },
@@ -302,12 +319,11 @@ const zhTw: LandingCopy = {
   },
   footer: {
     tagline: "在同一個 Space 裡與團隊和 AI 代理協作。決策、待辦與下一步寫在隨工作更新的即時頁面中。",
-    product: "產品", legal: "法律條款", compare: "競品比較", agents: "Agents", language: "語言",
+    product: "產品", getApp: "下載 App", legal: "法律條款", compare: "競品比較", agents: "Agents", language: "語言",
     links: { app: "線上應用", download: "下載", pricing: "定價", docs: "文件", support: "支援", console: "主控台", signIn: "登入" },
     legalLinks: { privacy: "隱私權政策（英文）", terms: "服務條款（英文）", cookies: "Cookie 與儲存（英文）", subprocessors: "子處理者（英文）" },
     askAi: "看看 ChatGPT、Claude、Perplexity、Gemini 或 Grok 怎麼評價 xMatrix。",
     rights: "xMatrix 與相關標誌保留所有權利。",
-    motto: "為協同代理工作而生",
   },
 };
 
@@ -320,24 +336,27 @@ const ja: LandingCopy = {
     shareDescription: "チームと会話するだけで、AIエージェントが決定事項と進捗をページに最新維持。",
   },
   nav: {
-    links: [["/ja#connectors", "コネクタ"], ["/ja#pricing", "料金"]],
+    links: [["/ja#agents", "エージェント"], ["/ja#pricing", "料金"]],
     docs: "ドキュメント", openApp: "アプリを開く", download: "ダウンロード", menu: "ナビゲーションを開く",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "無料で始める", useInBrowser: "ブラウザで使う",
-    art: "AIの刻印が入った温かみのある木材とリキッドガラスのブロック群" },
-  agentStrip: "お使いのコーディングエージェントとそのまま連携",
+  hero: { slogan: "Attention is all you need.", startFree: "無料で始める",
+    art: "AIの刻印が入った温かみのある木材とリキッドガラスのブロック群",
+    alsoFor: "{list} 版もあります。{browser}。", everyDevice: "{list} に対応。{browser}。", appsOnly: "{list} 版アプリもあります。", inBrowser: "ブラウザでも使えます" },
   livePage: {
     title: "プロジェクト全体を、1ページで把握。",
     body: "担当者（人もエージェントも）がそれぞれの色で自分の担当行を最新に保ちます。決定事項は一度書けば全員に共有され、誰が何を打ったかではなく、今の到達点をすぐ読めます。",
     art: "Claude、Codex、Cursor が各自の作業を進めながら、人間が決定事項を記録しているプロジェクトページ",
+    stores: "モバイルアプリを入手",
   },
-  quickStart: {
-    title: "ページの裏側で、複数の会話が同時進行。",
+  conversations: {
+    title: "ページの裏側で、複数の会話が\u200b同時進行。",
     body: "会話でエージェントにメンションすると、登録した自分のマシン上で作業を開始します。何十もの会話を並列で走らせ、完了した内容だけをページに集約できます。",
-    machinesLabel: "Space 内のマシン",
-    machines: [["Mac Studio", 7], ["Linux サーバー", 5], ["Windows ビルド機", 3], ["MacBook Pro", 8]],
-    agents: (count: number) => `${count} エージェント`,
-    working: "12 会話 · 23 エージェント稼働中",
+  },
+  agents: {
+    title: "お使いの\u200bコーディングエージェントと\u200bそのまま連携",
+    body: (count: number) => `${count} 種類のコーディングエージェントが、あなたのマシン上で、契約済みのサブスクリプションや API キーのまま動きます。ひとつがクォータを使い切れば、別のエージェントが作業を引き継ぎます。`,
+    matrixArt: "Space 内の各マシンにあるエージェントと、それぞれの作業状況",
+    listLabel: "お使いのコーディングエージェントとそのまま連携",
   },
   why: {
     title: "なぜ xMatrix か", others: "エージェントツールを行き来する運用",
@@ -360,7 +379,7 @@ const ja: LandingCopy = {
     },
   },
   connectors: {
-    title: "普段のツールを会話の中へ。",
+    title: "普段のツールを\u200b会話の中へ。",
     body: "チームが使っているサービスを接続すれば、エージェントが文脈を読み、承認つきで操作し、外部イベントを自動で受け取れます。",
     label: "コネクタ",
   },
@@ -390,12 +409,11 @@ const ja: LandingCopy = {
   },
   footer: {
     tagline: "チームと AI エージェントが一つの Space で協働。決定事項、未完了タスク、次のステップをリビングページで常に最新に。",
-    product: "製品", legal: "法務", compare: "他ツール比較", agents: "Agents", language: "言語",
+    product: "製品", getApp: "アプリを入手", legal: "法務", compare: "他ツール比較", agents: "Agents", language: "言語",
     links: { app: "Web アプリ", download: "ダウンロード", pricing: "料金", docs: "ドキュメント", support: "サポート", console: "コンソール", signIn: "ログイン" },
     legalLinks: { privacy: "プライバシーポリシー (EN)", terms: "利用規約 (EN)", cookies: "Cookie とストレージ (EN)", subprocessors: "サブプロセッサ (EN)" },
     askAi: "ChatGPT、Claude、Perplexity、Gemini、Grok に xMatrix について聞いてみる。",
     rights: "xMatrix および関連標章の権利は留保されています。",
-    motto: "協調するエージェント業務のために",
   },
 };
 
@@ -408,24 +426,27 @@ const ko: LandingCopy = {
     shareDescription: "팀과 대화하면 AI 에이전트가 결정사항과 진행 상황을 페이지에 최신으로 유지합니다.",
   },
   nav: {
-    links: [["/ko#connectors", "커넥터"], ["/ko#pricing", "요금제"]],
+    links: [["/ko#agents", "에이전트"], ["/ko#pricing", "요금제"]],
     docs: "문서", openApp: "앱 열기", download: "다운로드", menu: "내비게이션 메뉴 열기",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "무료로 시작", useInBrowser: "브라우저에서 사용하기",
-    art: "AI 마크가 새겨진 따뜻한 우드와 리퀴드 글라스 블록 배열" },
-  agentStrip: "이미 사용 중인 코딩 에이전트와 바로 연결",
+  hero: { slogan: "Attention is all you need.", startFree: "무료로 시작",
+    art: "AI 마크가 새겨진 따뜻한 우드와 리퀴드 글라스 블록 배열",
+    alsoFor: "{list}용도 있습니다. {browser}.", everyDevice: "{list} 지원. {browser}.", appsOnly: "{list}용 앱도 있습니다.", inBrowser: "브라우저에서도 쓸 수 있습니다" },
   livePage: {
     title: "프로젝트 전체를 한 페이지에서.",
     body: "사람이든 에이전트든 각 담당자가 자신의 색으로 담당 줄을 최신 상태로 유지합니다. 결정은 한 번만 기록되어 모두에게 공유되며, 누가 무엇을 쳤는지 대신 현재 상태를 바로 읽습니다.",
     art: "Claude, Codex, Cursor가 각자의 작업을 진행하는 동안 사람이 결정사항을 기록하는 프로젝트 페이지",
+    stores: "모바일 앱 받기",
   },
-  quickStart: {
+  conversations: {
     title: "페이지 뒤에서는 여러 대화가 동시에 일합니다.",
     body: "대화에서 에이전트를 @멘션하면 등록된 내 머신에서 즉시 작업이 시작됩니다. 수십 개의 대화가 병렬로 실행되고 각자 마친 결과를 페이지에 보고합니다.",
-    machinesLabel: "Space에 연결된 머신",
-    machines: [["Mac Studio", 7], ["Linux 서버", 5], ["Windows 빌드 머신", 3], ["MacBook Pro", 8]],
-    agents: (count: number) => `에이전트 ${count}개`,
-    working: "대화 12개 · 에이전트 23개 작업 중",
+  },
+  agents: {
+    title: "이미 사용 중인 코딩 에이전트와 바로 연결",
+    body: (count: number) => `코딩 에이전트 ${count}종이 내 머신에서, 이미 쓰고 있는 구독이나 API 키로 실행됩니다. 하나가 할당량을 다 쓰면 다른 에이전트가 작업을 이어받습니다.`,
+    matrixArt: "Space의 각 머신에 있는 에이전트와 각자 하고 있는 일",
+    listLabel: "이미 사용 중인 코딩 에이전트와 바로 연결",
   },
   why: {
     title: "왜 xMatrix인가", others: "여러 에이전트 도구를 오갈 때",
@@ -478,12 +499,11 @@ const ko: LandingCopy = {
   },
   footer: {
     tagline: "하나의 Space에서 팀과 AI 에이전트가 함께 일하세요. 결정, 남은 작업, 다음 단계가 살아있는 페이지에 계속 반영됩니다.",
-    product: "제품", legal: "법적 고지", compare: "대안 비교", agents: "Agents", language: "언어",
+    product: "제품", getApp: "앱 받기", legal: "법적 고지", compare: "대안 비교", agents: "Agents", language: "언어",
     links: { app: "웹 앱", download: "다운로드", pricing: "요금제", docs: "문서", support: "지원", console: "콘솔", signIn: "로그인" },
     legalLinks: { privacy: "개인정보처리방침 (EN)", terms: "이용약관 (EN)", cookies: "쿠키 및 저장소 (EN)", subprocessors: "하위 처리자 (EN)" },
     askAi: "ChatGPT, Claude, Perplexity, Gemini 또는 Grok에게 xMatrix에 대해 물어보세요.",
     rights: "xMatrix 및 관련 상표권은 보호됩니다.",
-    motto: "협업하는 에이전트 작업을 위해",
   },
 };
 
@@ -496,24 +516,27 @@ const es: LandingCopy = {
     shareDescription: "Habla con tu equipo. Tus agentes de IA mantienen decisiones, pendientes y próximos pasos al día en Pages.",
   },
   nav: {
-    links: [["/es#connectors", "Conectores"], ["/es#pricing", "Precios"]],
+    links: [["/es#agents", "Agentes"], ["/es#pricing", "Precios"]],
     docs: "Documentación", openApp: "Abrir app", download: "Descargar", menu: "Abrir menú de navegación",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "Empezar gratis", useInBrowser: "O úsalo en el navegador",
-    art: "Matriz modular de bloques de madera cálida y vidrio líquido grabados con marcas de IA" },
-  agentStrip: "Funciona con los agentes que ya usas",
+  hero: { slogan: "Attention is all you need.", startFree: "Empezar gratis",
+    art: "Matriz modular de bloques de madera cálida y vidrio líquido grabados con marcas de IA",
+    alsoFor: "También para {list}, o {browser}.", everyDevice: "Para {list}, o {browser}.", appsOnly: "Apps para {list}.", inBrowser: "úsalo en tu navegador" },
   livePage: {
     title: "Una página para todo el proyecto.",
     body: "Cada responsable, persona o agente, mantiene su línea al día en su propio color. Las decisiones se escriben una vez para todos. Lees en qué punto está el proyecto, no quién escribió cada mensaje.",
     art: "Una página de proyecto donde Claude, Codex y Cursor avanzan su trabajo mientras una persona registra una decisión",
+    stores: "Descarga la app móvil",
   },
-  quickStart: {
+  conversations: {
     title: "Detrás de la página, conversaciones trabajando.",
     body: "Menciona a un agente y empieza a trabajar en una conversación, en cualquiera de tus máquinas registradas. Decenas corren en paralelo y cada una reporta lo terminado a la página.",
-    machinesLabel: "Máquinas en un Space",
-    machines: [["Mac Studio", 7], ["Servidor Linux", 5], ["Build Windows", 3], ["MacBook Pro", 8]],
-    agents: (count: number) => `${count} agentes`,
-    working: "12 conversaciones · 23 agentes trabajando",
+  },
+  agents: {
+    title: "Funciona con los agentes que ya usas",
+    body: (count: number) => `${count} agentes de código funcionan en tus propias máquinas, con las suscripciones o claves de API que ya tienes. Cuando uno agota su cuota, otro continúa el trabajo.`,
+    matrixArt: "Los agentes de cada máquina de un Space y lo que hace cada uno",
+    listLabel: "Funciona con los agentes que ya usas",
   },
   why: {
     title: "Por qué xMatrix", others: "Alternar entre herramientas de agentes",
@@ -566,12 +589,11 @@ const es: LandingCopy = {
   },
   footer: {
     tagline: "Habla con tu equipo y agentes de IA en un Space. Mantén decisiones, pendientes y próximos pasos al día en páginas vivas.",
-    product: "Producto", legal: "Legal", compare: "Comparativas", agents: "Agents", language: "Idiomas",
+    product: "Producto", getApp: "Obtén la app", legal: "Legal", compare: "Comparativas", agents: "Agents", language: "Idiomas",
     links: { app: "App web", download: "Descargar", pricing: "Precios", docs: "Documentación", support: "Soporte", console: "Consola", signIn: "Iniciar sesión" },
     legalLinks: { privacy: "Privacidad (EN)", terms: "Términos (EN)", cookies: "Cookies (EN)", subprocessors: "Subprocesadores (EN)" },
     askAi: "Mira qué dicen ChatGPT, Claude, Perplexity, Gemini o Grok sobre xMatrix.",
     rights: "xMatrix y sus marcas asociadas están reservadas.",
-    motto: "Hecho para trabajo coordinado con agentes",
   },
 };
 

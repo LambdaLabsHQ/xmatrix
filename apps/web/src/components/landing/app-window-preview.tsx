@@ -39,7 +39,16 @@ const space: SerializedSpace = {
   updatedAt: "2026-01-05T09:00:00.000Z",
 };
 
-const agentLogos: Record<string, string> = { claude: "/agent-vendors/claude.svg", codex: "/agent-vendors/openai.svg" };
+const agentLogos: Record<string, string> = {
+  claude: "/agent-vendors/claude.svg", codex: "/agent-vendors/openai.svg", cursor: "/agent-vendors/cursor.png",
+};
+
+/**
+ * Which conversation is open: `landing`, a landing page reworked by Claude and
+ * Codex, or `launch`, where the three Agents of the homepage's live page are
+ * asked for the work that page shows them doing.
+ */
+export type PreviewScene = "landing" | "launch";
 
 function sender(label: string, kind: MessageSender["kind"]): MessageSender {
   return kind === "agent"
@@ -54,6 +63,10 @@ function sender(label: string, kind: MessageSender["kind"]): MessageSender {
 const alex = sender(viewer.name, "user");
 const claude = sender("claude", "agent");
 const codex = sender("codex", "agent");
+const cursor = sender("cursor", "agent");
+
+/** Each Agent's Instance number in the open conversation. */
+const INSTANCE: Record<string, string> = { claude: "1", codex: "2", cursor: "3" };
 
 function agentPresence(label: string, iso: (minutesAgo: number) => string, status: "busy" | "online") {
   return {
@@ -62,8 +75,8 @@ function agentPresence(label: string, iso: (minutesAgo: number) => string, statu
     avatarUrl: agentLogos[label],
     instances: [{
       id: `preview-${label}-1`,
-      channelInstanceId: label === "claude" ? "1" : "2",
-      label: `${label}:${label === "claude" ? "1" : "2"}`,
+      channelInstanceId: INSTANCE[label] ?? "1",
+      label: `${label}:${INSTANCE[label] ?? "1"}`,
       connectedAt: iso(30),
       lastSeenAt: iso(0),
       status,
@@ -74,7 +87,7 @@ function agentPresence(label: string, iso: (minutesAgo: number) => string, statu
   };
 }
 
-function sample(now: number) {
+function sample(now: number, scene: PreviewScene) {
   const iso = (minutesAgo: number) => new Date(now - minutesAgo * MINUTE).toISOString();
   // Only the open conversation has an agent at work.
   const channel = (id: string, name: string, from: MessageSender, preview: string, minutesAgo: number): LiveChannel => decodeChannelSnapshot({
@@ -92,6 +105,8 @@ function sample(now: number) {
       ])),
       "agent:claude": agentPresence("claude", iso, "online"),
       "agent:codex": agentPresence("codex", iso, id === "landing" ? "busy" : "online"),
+      // Cursor is in the launch conversation alone, still rendering the video.
+      ...(id === "launch" ? { "agent:cursor": agentPresence("cursor", iso, "busy") } : {}),
     },
     createdBy: viewer.id,
     createdAt: iso(3 * 24 * 60),
@@ -99,6 +114,7 @@ function sample(now: number) {
   });
 
   const channels = [
+    ...(scene === "launch" ? [channel("launch", "Launch", cursor, "Rendering the 1080p cut now.", 1)] : []),
     channel("landing", "Landing page refresh", alex, "Looks great. Ship it.", 1),
     channel("billing", "Billing webhook retries", codex, "Retries now back off exponentially.", 5),
     channel("ios", "iOS 2.4 release", alex, "TestFlight build 2.4 (318) is up.", 17),
@@ -107,15 +123,21 @@ function sample(now: number) {
     channel("api-docs", "API docs for v2", claude, "Drafted the v2 auth section from the spec.", 180),
   ];
 
+  const open = channels[0]!.id;
   const message = (sequence: number, from: MessageSender, minutesAgo: number, body: string): ChannelMessage => ({
-    messageId: `landing:m${sequence}`,
-    channelId: "landing",
+    messageId: `${open}:m${sequence}`,
+    channelId: open,
     sequence,
     from,
     body,
     sentAt: iso(minutesAgo),
   });
-  const history = [
+  const history = scene === "launch" ? [
+    message(1, alex, 9, "@claude ship the web editor fix. @codex get build 2.4 into TestFlight. @cursor cut the launch video."),
+    message(2, claude, 6, "Merged. The web editor fix is live in `v1.0.464`."),
+    message(3, codex, 3, "Build 2.4 is in review, PR #566."),
+    message(4, cursor, 1, "Rendering the 1080p cut now."),
+  ] : [
     message(1, alex, 12, "@claude rework the hero so it shows the product, not a diagram. @codex check the mobile breakpoints once it lands."),
     message(2, claude, 11, "On it. I'll render the conversation view live instead of a screenshot and keep the copy as is."),
     message(3, codex, 4, "Checked 375, 768 and 1280. Below md it shows only the conversation, so nothing is cropped."),
@@ -146,15 +168,15 @@ function previewQueryClient(readerId: string) {
   const client = new QueryClient();
   client.setQueryData(
     xmatrixQueryKeys.domain({ userId: readerId }, "agent-registration-catalog", [space.id]),
-    { capabilities: [], registrations: [registration("claude"), registration("codex")] },
+    { capabilities: [], registrations: [registration("claude"), registration("codex"), registration("cursor")] },
   );
   return client;
 }
 
-export function AppWindowPreview() {
+export function AppWindowPreview({ scene = "landing" }: { scene?: PreviewScene }) {
   const { user } = useAuth();
   const [queryClient] = useState(() => previewQueryClient(user?.id ?? "anonymous"));
-  const { channels, history } = useMemo(() => sample(Date.now()), []);
+  const { channels, history } = useMemo(() => sample(Date.now(), scene), [scene]);
   const selected = channels[0];
   const timeline = useMemo(
     () => buildTimeline(history, selected, channels, { id: viewer.id, email: "alex@acme.dev", name: viewer.name }, {}, undefined, undefined, undefined, space.members),
@@ -272,7 +294,7 @@ export function AppWindowPreview() {
                 token={null}
                 workspaces={[]}
                 isJoined
-                draft="Next up: a dark-mode pass on the same section"
+                draft={scene === "launch" ? "Ship Friday, behind one switch." : "Next up: a dark-mode pass on the same section"}
                 draftSeedRevision={1}
                 selectedWorkspaceId={null}
                 replyTarget={null}

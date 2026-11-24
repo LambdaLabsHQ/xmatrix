@@ -1,5 +1,26 @@
 # Release Updates
 
+## Unreleased: the homepage shows the product running and leads to the App on every device
+
+The homepage was a Hero, a marquee of twelve agent chips and separate sections
+whose headings sat left or centred by turns, a tall gap between each; a phone
+saw the action below its first screen and no picture at all in the live-page
+section. It is now the Hero, sized to its art so what follows shows in the
+first screen, and three stages that are the app's own components fed a sample
+Space: a live page written by three Agents, with the iPhone beside it on a
+desktop in the conversation about the same project and the App Store and Google
+Play badges over it; the Mac window; and the Agents matrix (machines by agents)
+over every agent `agent-presets.json` holds, where the marquee named twelve by
+hand. The comparison, connectors, pricing and questions keep their content on
+one heading scale and one rhythm; the page closes on a wood plank with the
+download for this device, and the footer is paper, with no slab and no rules.
+Under the Hero's action one sentence links the App's other platforms and the
+browser. The Chinese pages carry the slogan in Chinese. The guides for AI
+agents (`download.md`, `index.md`, `llms-full.txt`) name the iPhone and iPad
+app and Google Play. New styling is utility classes on the elements; the
+stylesheets' rule count falls from 2206 to 2191. Web only. Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: iOS composer attachment menu morphs in place and opens native pickers directly
 
 Tapping the paperclip button in the iOS app previously clicked a hidden `<input type="file" multiple>`, triggering WebKit's `WKFileUploadPanel` popover: with the keyboard open it stayed anchored mid-screen after the composer dropped to the bottom, and with the keyboard closed it morphed as a separate circular glass popup overlapping the composer pill. `ComposerInputAuthority` now runs its single-surface glass height morph for external panels (`ComposerAttachmentPanel` and `ComposerInputHistoryPanel`) as well as completion overlays, reads live animated height on mid-flight interruptions, and retains the closing panel inside the shrinking glass while retracting. On iOS shells advertising `nativeAttachmentOpenPanel`, the composer capsule morphs upward to show Photo Library, Take Photo or Video, and Choose Files aligned over the paperclip column; selecting a source coordinates through a page-wide open-panel input (matching WebKit's per-WebView mutex so closing New Conversation mid-fetch still settles `change`/`cancel` and unlocks later composers while holding Send only on the originating draft) and triggers `WKUIDelegate.webView(_:runOpenPanelWith:initiatedByFrame:completionHandler:)` directly via `PHPickerViewController`, `UIImagePickerController(.camera)`, or `UIDocumentPickerViewController`, handing disk-backed `URL`s straight to WebKit with fail-closed staging capacity (256 files, 64 per batch, user-facing alerts on truncation/full storage) and draft-generation/revision checks. Unarmed file inputs (such as profile avatar selection) show a native action sheet; desktop, mobile Safari, and older iOS shells fall back unchanged. Web and iOS. Recovery is a CI-validated beta reverting this change.
