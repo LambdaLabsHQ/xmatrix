@@ -408,6 +408,7 @@
         "controls": [],
         "notes": "No documented disable switch. Current launcher is agent; legacy cursor-agent aliases remain discoverable."
       },
+      "quotaRead": "sign_in_grant",
       "sources": ["https://cursor.com/docs/cli/installation", "https://docs.cursor.com/en/cli/installation", "https://cursor.com/docs/cli/changelog"],
       "checkedAt": "2026-10-17",
       "notes": "Update runs as cursor-agent: every install xMatrix recognizes has it, builds older than the agent name have nothing else, and the daemon resolves either name to the same launcher."

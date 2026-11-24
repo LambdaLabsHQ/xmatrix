@@ -809,6 +809,10 @@ pub enum HarnessAction {
     /// Ask this one preset's program, now, whether it is installed and signed
     /// in, and answer with what it says. Nothing is changed or remembered.
     Check,
+    /// Allow reading this harness's local sign-in on this machine to show its
+    /// quota (a harness with no official quota interface), or stop it.
+    QuotaAccessOn,
+    QuotaAccessOff,
 }
 
 impl HarnessAction {
@@ -817,6 +821,8 @@ impl HarnessAction {
         LoginFinish => "login_finish",
         LoginCancel => "login_cancel",
         Check => "check",
+        QuotaAccessOn => "quota_access_on",
+        QuotaAccessOff => "quota_access_off",
     );
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -4163,6 +4169,8 @@ mod tests {
             HarnessAction::LoginFinish,
             HarnessAction::LoginCancel,
             HarnessAction::Check,
+            HarnessAction::QuotaAccessOn,
+            HarnessAction::QuotaAccessOff,
         ] {
             assert_eq!(HarnessAction::parse(action.as_str()), Some(action));
         }

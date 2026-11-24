@@ -39,6 +39,12 @@ pub(crate) struct InventoryItem {
     /// The harness's own words for why it cannot take work, when it said so.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) login_detail: Option<String>,
+    /// For a harness with no official quota interface: whether its owner
+    /// allowed reading its sign-in on this machine to show its quota
+    /// (`granted`, `not_granted`, or `probes_off`). Only that answer leaves
+    /// the machine, never the grant's binding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) quota_access: Option<&'static str>,
 }
 
 /// A harness process the daemon starts itself: closed stdin, piped output, the
@@ -296,6 +302,8 @@ pub(crate) async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
         auto_update: None,
         login: None,
         login_detail: None,
+        quota_access: xmatrix_cli_core::quota_access::quota_access_provider(&preset.id)
+            .map(|_| xmatrix_cli_core::quota_access::quota_access(&preset.id).as_str()),
         probe_status: if path.is_some() {
             "unsupported"
         } else {

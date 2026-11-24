@@ -448,7 +448,13 @@ fn merge_addressable_channel_peers(
 ) {
     let mut existing: std::collections::HashSet<String> = agents
         .iter()
-        .map(|agent| agent.instance_id.as_deref().unwrap_or(&agent.id).to_string())
+        .map(|agent| {
+            agent
+                .instance_id
+                .as_deref()
+                .unwrap_or(&agent.id)
+                .to_string()
+        })
         .collect();
     let Some(presence) = channel.member_presence.as_ref() else {
         return;
@@ -515,7 +521,9 @@ fn split_instance_id(raw: &str) -> Option<(&str, &str)> {
     Some((channel_id, ordinal))
 }
 
-fn agent_channel_and_ordinal(agent: &protocol::SerializedAgent) -> (Option<String>, Option<String>) {
+fn agent_channel_and_ordinal(
+    agent: &protocol::SerializedAgent,
+) -> (Option<String>, Option<String>) {
     let raw_id = agent.instance_id.as_deref().unwrap_or(&agent.id);
     let parsed = split_instance_id(raw_id);
     let channel_id = agent
@@ -626,11 +634,15 @@ fn format_agent_list_lines(
         return lines;
     };
 
-    let (here, elsewhere): (Vec<_>, Vec<_>) = ordered.into_iter().partition(|agent| {
-        agent_channel_and_ordinal(agent).0.as_deref() == Some(channel_id)
-    });
+    let (here, elsewhere): (Vec<_>, Vec<_>) = ordered
+        .into_iter()
+        .partition(|agent| agent_channel_and_ordinal(agent).0.as_deref() == Some(channel_id));
     let mut lines = Vec::new();
-    lines.push(format!("In this channel ({channel_id}):").bold().to_string());
+    lines.push(
+        format!("In this channel ({channel_id}):")
+            .bold()
+            .to_string(),
+    );
     if here.is_empty() {
         lines.push("  (none)".dimmed().to_string());
     } else {
@@ -743,8 +755,7 @@ fn agent_usage_views_in_channel(
             let address = channel_instance_id
                 .as_deref()
                 .map(|ordinal| format!("@{}:{ordinal}", agent.name.trim()));
-            let in_current_channel =
-                current_channel.map(|ch| channel_id.as_deref() == Some(ch));
+            let in_current_channel = current_channel.map(|ch| channel_id.as_deref() == Some(ch));
             AgentUsageView {
                 id: agent.id.clone(),
                 instance_id: agent.instance_id.clone(),
@@ -1229,7 +1240,10 @@ mod tests {
         assert_eq!(entries[2]["inCurrentChannel"], false);
 
         let rendered = format_agent_list_lines(&agents, now(), Some("ch-here")).join("\n");
-        assert!(rendered.contains("In this channel (ch-here):"), "{rendered}");
+        assert!(
+            rendered.contains("In this channel (ch-here):"),
+            "{rendered}"
+        );
         assert!(rendered.contains("@codex:1"), "{rendered}");
         assert!(rendered.contains("@cursor:2"), "{rendered}");
         assert!(rendered.contains("sleeping"), "{rendered}");

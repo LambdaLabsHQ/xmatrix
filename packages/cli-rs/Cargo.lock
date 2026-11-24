@@ -3286,6 +3286,7 @@ dependencies = [
  "gethostname",
  "serde_json",
  "urlencoding",
+ "xmatrix-cli-agent",
  "xmatrix-cli-args",
  "xmatrix-cli-core",
  "xmatrix-repo-pool",
