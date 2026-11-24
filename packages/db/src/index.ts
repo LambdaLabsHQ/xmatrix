@@ -285,6 +285,7 @@ export { readCliReleaseOwners, requestMachineCliUpdateCheck, recordMachineCliUpd
   type MachineCliUpdateCheckDecision } from "./machine-cli-release.js";
 export { HARNESS_RELEASE_TARGETS_SQL, readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessRelease, type HarnessReleaseTarget } from "./machine-harness-actions.js";
 export { readLatestWorktreeListing, readWorktreeActionStatus } from "./machine-worktree-actions.js";
+export { readLogExcerptStatus } from "./machine-log-excerpts.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 
 export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaUsages,

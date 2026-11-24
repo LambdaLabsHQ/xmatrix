@@ -15,11 +15,13 @@ import type {
   MachineDaemonStopCommand,
   MachineDaemonTextTaskCommand,
   MachineDaemonSleepCommand,
+  MachineDaemonLogExcerptCommand,
   MachineDaemonWorktreeActionCommand,
   MachineDaemonWorktreeCleanupCommand,
 } from "@xmatrix/protocol/connections/machine-daemon";
 import type { SerializedMachineDaemon } from "@xmatrix/protocol";
-import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_SLEEP_CAPABILITY, MACHINE_TEXT_TASK_CAPABILITY,
+import { isAgentStatus, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_LOG_EXCERPT_CAPABILITY, MACHINE_SLEEP_CAPABILITY,
+  MACHINE_TEXT_TASK_CAPABILITY, parseLogExcerptRequest,
   MACHINE_WORKTREE_ACTION_CAPABILITY,
   parseHarnessActionRequest, parseRoutingQuotaProbeRequest, parseTextTaskRequest, parseWorktreeActionRequest,
   type TextTaskResult,
@@ -74,6 +76,7 @@ const COMPLETION_EVENTS = new Set([
   "machine_worktree_action_result",
   "machine_text_task_result",
   "machine_sleep_result",
+  "machine_log_excerpt_result",
 ]);
 // A completed command that names a Run still has a Channel route. Only these
 // reports are Run lifecycle. A sleep or reply-recovery result is not: the
@@ -272,6 +275,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
     }
     if (message.type === "machine_sleep_result" && !session.capabilities.includes(MACHINE_SLEEP_CAPABILITY)) {
       throw new Error("Sleep result does not come from a capable connection");
+    }
+    if (message.type === "machine_log_excerpt_result" && !session.capabilities.includes(MACHINE_LOG_EXCERPT_CAPABILITY)) {
+      throw new Error("Log excerpt result does not come from a capable connection");
     }
     if (message.type === "machine_worktree_action_result" &&
         !session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) {
@@ -557,7 +563,7 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
   async claimCommands(
     session: Readonly<MachineDaemonRuntimeSession>,
     commandTypes: readonly ("spawn" | "stop" | "cleanup" | "request_resolve" | "recover_reply" | "quota_probe" |
-      "harness_action" | "worktree_action" | "text_task" | "sleep")[] = [
+      "harness_action" | "worktree_action" | "text_task" | "sleep" | "log_excerpt")[] = [
       "spawn", "stop", "cleanup", "request_resolve",
     ],
   ): Promise<readonly MachineDaemonServerMessage[]> {
@@ -573,7 +579,8 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
             (type !== "harness_action" || session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY)) &&
             (type !== "worktree_action" || session.capabilities.includes(MACHINE_WORKTREE_ACTION_CAPABILITY)) &&
             (type !== "text_task" || session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) &&
-            (type !== "sleep" || session.capabilities.includes(MACHINE_SLEEP_CAPABILITY))),
+            (type !== "sleep" || session.capabilities.includes(MACHINE_SLEEP_CAPABILITY)) &&
+            (type !== "log_excerpt" || session.capabilities.includes(MACHINE_LOG_EXCERPT_CAPABILITY))),
           ...(session.capabilities.includes("reply_recovery_v1") && !commandTypes.includes("recover_reply") ? ["recover_reply"] : []),
           ...(session.capabilities.includes("machine_quota_probe_v2") && !commandTypes.includes("quota_probe") ? ["quota_probe"] : []),
           ...(session.capabilities.includes(MACHINE_HARNESS_ACTION_CAPABILITY) && !commandTypes.includes("harness_action")
@@ -583,7 +590,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
           ...(session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY) && !commandTypes.includes("text_task")
             ? ["text_task"] : []),
           ...(session.capabilities.includes(MACHINE_SLEEP_CAPABILITY) && !commandTypes.includes("sleep")
-            ? ["sleep"] : [])],
+            ? ["sleep"] : []),
+          ...(session.capabilities.includes(MACHINE_LOG_EXCERPT_CAPABILITY) && !commandTypes.includes("log_excerpt")
+            ? ["log_excerpt"] : [])],
         // Reverse push is primary; lease covers in-flight host execution until
         // complete. Delivery failure must release (see deliverPendingOnce), not rely on
         // shortening this window for bounded HTTP recovery.
@@ -611,6 +620,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       }
       if (command.type === "machine_text_task" && !session.capabilities.includes(MACHINE_TEXT_TASK_CAPABILITY)) {
         throw new Error("Text task command does not match a capable connection");
+      }
+      if (command.type === "machine_log_excerpt" && !session.capabilities.includes(MACHINE_LOG_EXCERPT_CAPABILITY)) {
+        throw new Error("Log excerpt command does not match a capable connection");
       }
       if (command.type === "machine_sleep_agent" && !session.capabilities.includes(MACHINE_SLEEP_CAPABILITY)) {
         throw new Error("Sleep command does not match a capable connection");
@@ -699,6 +711,7 @@ type MachineDaemonLeasedCommand =
   | MachineDaemonWorktreeActionCommand
   | MachineDaemonTextTaskCommand
   | MachineDaemonSleepCommand
+  | MachineDaemonLogExcerptCommand
   | MachineDaemonQuotaProbeCommand
   | MachineDaemonRecoverReplyCommand
   | MachineDaemonSpawnCommand
@@ -891,6 +904,14 @@ function claimedCommand(value: unknown, capabilities: readonly string[]): Machin
     }
     return { type, requestId, presetId: action.presetId, action: action.action,
       ...(action.code === undefined ? {} : { code: action.code }) };
+  }
+  if (type === "machine_log_excerpt") {
+    const request = parseLogExcerptRequest(payload);
+    if (request.requestId !== requestId ||
+        Object.keys(payload).some(key => !["type", "requestId", "relayLease"].includes(key))) {
+      throw new Error("PostgreSQL returned an invalid log excerpt command");
+    }
+    return { type, requestId };
   }
   if (type === "machine_sleep_agent") {
     if (!["runId", "executionKey", "instanceId"].every(key => optionalString(payload[key])) ||

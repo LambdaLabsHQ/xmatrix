@@ -123,6 +123,7 @@ xMatrix 不使用广告 Cookie、跨站追踪、会话录屏，也不集成 Post
 - 勾选要包含的内容。默认什么都不勾：
   - **This conversation's messages**，包括其中的子话题。
   - **Diagnostics for this conversation**：Agent 在这里何时启动、停止或失败，以及失败代码。这些是只含状态、代码、计数和时间的诊断事件：没有消息正文、提示词、错误信息或 ID。
+  - **Daemon logs**：xMatrix 守护进程在你某台在线机器上最近写下的日志末尾。家目录路径、邮箱地址、网址的查询部分以及任何形似令牌或密钥的内容，都会在离开你的机器之前就在本机删除；发送之前，对话框会原样显示将要发送的内容。预览只有你本人可读，保留约一周；你一撤回交接，已发送的日志就会被删除。
 - 勾选 **I agree to let xMatrix support read what I selected**。不勾选就什么都不会发送。
 
 这次交接允许的范围：

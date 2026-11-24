@@ -1,9 +1,9 @@
 import type { Hono } from "hono";
 import { isMachineField, issueToOnlineDaemon, MACHINE_ACTION_DELIVERY, NO_STORE, readActionBody, refuse,
-  type MachineActionDelivery } from "./machine-action-routes";
+  signedInHuman, type MachineActionDelivery } from "./machine-action-routes";
 import { readLatestWorktreeListing, readWorktreeActionStatus } from "@xmatrix/db";
 import { HUB_ROUTES, parseWorktreeActionRequest, type WorktreeActionRequest, type WorktreeActionStatus } from "@xmatrix/protocol";
-import { requireAuth, requireHumanAuth } from "./index-shared";
+import { requireAuth } from "./index-shared";
 import { machineDatabase } from "./machines";
 import { privateRouteResponse } from "./private-route-response";
 import type { Env } from "./types";
@@ -36,10 +36,7 @@ const WORKTREE_ACTION_PORT: WorktreeActionPort = {
 export function registerWorktreeActionRoutes(app: Hono<{ Bindings: Env }>,
   dependencies: Partial<WorktreeActionPort> = {}): void {
   const port = { ...WORKTREE_ACTION_PORT, ...dependencies };
-  const owner = async (request: Request, env: Env) => {
-    const authenticated = await port.authenticate(request, env);
-    return authenticated.agentRun ? undefined : requireHumanAuth(authenticated);
-  };
+  const owner = (request: Request, env: Env) => signedInHuman(port.authenticate, request, env);
 
   app.post(HUB_ROUTES.machine_worktree_actions, (c) => privateRouteResponse(c, async () => {
     const user = await owner(c.req.raw, c.env);

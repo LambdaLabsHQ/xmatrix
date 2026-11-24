@@ -254,7 +254,7 @@ test("Machine list says since when an online daemon left work unanswered", async
 test("Machine claim leases queued PostgreSQL commands with exact epoch evidence", async () => {
   const db = database((query) => query.name.startsWith("machine_control_daemon_lock_")
     ? [daemon]
-    : query.name === "machine_control_claim_candidates_v11"
+    : query.name === "machine_control_claim_candidates_v12"
       ? [{ command_id: "spawn-1", command_type: "spawn", version: 1, lease_generation: null,
           payload_json: { type: "machine_spawn_agent", requestId: "spawn-1",
             spaceId: "space-1", channelId: "channel-1" } }]
@@ -276,7 +276,7 @@ test("Machine claim leases queued PostgreSQL commands with exact epoch evidence"
   });
   assert.equal(value.commands[0].payload.spaceId, "space-1");
   assert.equal(value.commands[0].leaseUntil, "2099-08-30T00:01:00.000Z");
-  const candidates = db.calls.find((call) => call.name === "machine_control_claim_candidates_v11");
+  const candidates = db.calls.find((call) => call.name === "machine_control_claim_candidates_v12");
   assert.equal(candidates.values[13], 1_000);
   assert.equal(candidates.values[14], false, "a daemon that cannot parse `check` is leased none");
   assert.match(candidates.text, /payload_json->>'action'<>'check' OR \$15::boolean/u);
