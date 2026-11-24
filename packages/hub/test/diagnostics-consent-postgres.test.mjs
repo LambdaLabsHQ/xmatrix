@@ -5,6 +5,7 @@ import {
   recordDiagnosticsChoice,
   recordSignupDiagnosticsRegime,
   requestDiagnosticsRegime,
+  requestFromPersonsConnection,
 } from "../src/diagnostics-consent.ts";
 import { integration, isolatedPostgres } from "../../db/test/postgres-database.fixture.mjs";
 
@@ -30,6 +31,10 @@ test("a request's regime comes from the edge's country only, never from a header
   assert.equal(requestDiagnosticsRegime(edgeRequest("DE")), "consent-required");
   assert.equal(requestDiagnosticsRegime(edgeRequest(undefined, { "cf-ipcountry": "US" })), "consent-required");
   assert.equal(requestDiagnosticsRegime(edgeRequest("XX")), "consent-required");
+  // Relayed by a Worker (the Web's proxy): the country is the Worker's, not the person's.
+  assert.equal(requestDiagnosticsRegime(edgeRequest("US", { "cf-worker": "xmatrix.sh" })), "consent-required");
+  assert.equal(requestFromPersonsConnection(edgeRequest("US", { "cf-worker": "xmatrix.sh" })), false);
+  assert.equal(requestFromPersonsConnection(edgeRequest("US")), true);
 });
 
 integration("the signup regime is recorded once and a later request's country never overwrites it", async () => {

@@ -18,6 +18,7 @@ import {
   readDiagnosticsConsent,
   recordDiagnosticsChoice,
   requestDiagnosticsRegime,
+  requestFromPersonsConnection,
 } from "./diagnostics-consent";
 
 export function registerIndexRoutesHumanProfile(app: Hono<{ Bindings: Env }>): void {
@@ -102,7 +103,8 @@ export function registerIndexRoutesHumanProfile(app: Hono<{ Bindings: Env }>): v
     try {
       const authUser = await requireAuth(c.req.raw, c.env);
       const state = await readDiagnosticsConsent(c.env, authUser.id, requestDiagnosticsRegime(c.req.raw), {
-        recordMissingRegime: c.req.query("build") === "beta",
+        // Recorded only from the person's own connection, never a relayed one.
+        recordMissingRegime: c.req.query("build") === "beta" && requestFromPersonsConnection(c.req.raw),
       });
       if (!state) return c.json({ code: "account_not_found", message: "Account not found" }, 404);
       return c.json(state, 200, { "cache-control": "private, no-store" });

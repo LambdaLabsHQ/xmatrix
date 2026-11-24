@@ -16,10 +16,21 @@ import type { Env } from "./types";
  */
 
 /**
+ * Whether the edge saw the person's own connection. A request a Worker made on
+ * their behalf (the Web's proxy routes; Cloudflare marks every Worker
+ * subrequest with `cf-worker`) carries the Worker's location, not theirs.
+ */
+export function requestFromPersonsConnection(request: Request): boolean {
+  return !request.headers.has("cf-worker");
+}
+
+/**
  * The regime of the country Cloudflare's edge placed this request in. Only the
- * edge's own `cf.country` counts: a header could be set by any caller.
+ * edge's own `cf.country` counts: a header could be set by any caller. A
+ * request relayed by a Worker has no country of the person's: consent-required.
  */
 export function requestDiagnosticsRegime(request: Request): DiagnosticsRegime {
+  if (!requestFromPersonsConnection(request)) return diagnosticsRegimeForCountry(null);
   const cf = (request as Request & { cf?: { country?: unknown } }).cf;
   return diagnosticsRegimeForCountry(typeof cf?.country === "string" ? cf.country : null);
 }

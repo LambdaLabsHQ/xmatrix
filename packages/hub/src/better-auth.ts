@@ -25,7 +25,7 @@ import { EmailDeliveryConfigurationError, escapeHtml, sendEmail } from "./email-
 import { passwordResetEmail, VERIFIED_PASSWORD_OPTIONS } from "./auth-password-policy";
 import { runBetterAuthHandlerWithObservedHookFailure } from "./better-auth-request-lifecycle";
 import { mintHandleForNewAccount } from "./human-handle-mint";
-import { recordSignupDiagnosticsRegime, requestDiagnosticsRegime } from "./diagnostics-consent";
+import { recordSignupDiagnosticsRegime, requestDiagnosticsRegime, requestFromPersonsConnection } from "./diagnostics-consent";
 import { mcpOAuthPlugins } from "./mcp-oauth";
 import { oauthStateDiagnostic } from "./oauth-state-diagnostic";
 import { TWO_FACTOR_REQUIRED, twoFactorPlugins } from "./two-factor";
@@ -188,8 +188,13 @@ async function handleProductAuthRequestWithDatabase(
 function productAuthBehavior(env: Env, request: Request): AuthBehaviorHooks {
   return {
     mintHandleForNewAccount: (userId) => mintHandleForNewAccount(env, userId),
-    recordSignupDiagnosticsRegime: (userId) =>
-      recordSignupDiagnosticsRegime(env, userId, requestDiagnosticsRegime(request)),
+    // A signup relayed by the Web (the apps' native sign-in) has no country of
+    // the person's; their first beta read records it from their own connection.
+    recordSignupDiagnosticsRegime: async (userId) => {
+      if (requestFromPersonsConnection(request)) {
+        await recordSignupDiagnosticsRegime(env, userId, requestDiagnosticsRegime(request));
+      }
+    },
     sendLoginCode: (email, otp) => sendLoginCodeEmail(env, email, otp),
     sendPasswordReset: (email, url) => sendEmail(env, email, passwordResetEmail(url)),
   };

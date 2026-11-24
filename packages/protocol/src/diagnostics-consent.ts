@@ -8,7 +8,7 @@
  * settings), so they never derive a regime themselves; every client decides
  * with `diagnosticsDecision` before sending, so nothing leaves the device when
  * it should not. The CLI mirrors this function in Rust
- * (`xmatrix_cli_core::config::telemetry_decision`).
+ * (`xmatrix_cli_core::telemetry_consent::telemetry_decision`).
  */
 
 /** The ePrivacy/GDPR regime of a country: prior consent required, or on by default with notice. */
