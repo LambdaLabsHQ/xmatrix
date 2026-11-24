@@ -54,6 +54,11 @@ test("the package is an extension Chrome loads, with the app built into it", asy
   assert.match(styles, /\b100dvh\b/u);
   // The side panel starts on pure white so it meets Chrome's native white side-panel bar with no border or seam.
   assert.match(page, /background:\s*#ffffff/u);
+  // The on-page selection ask box must override globals.css's :root:not(.dark) .xmatrix-app .app-composer
+  // (position: absolute !important) with an ID selector so the composer stays in normal flow and never collapses.
+  const askPage = fs.readFileSync(path.join(out, "app/ask.html"), "utf8");
+  assert.match(askPage, /<html\s+id="xmatrix-ask-box"/u);
+  assert.match(askPage, /#xmatrix-ask-box\s+\.xmatrix-app\s+\.app-composer\s*\{[^}]*position:\s*relative\s*!important/su);
 });
 
 // The question box a page frames is only as wide as the box: its stylesheet is the App's as a desktop window applies it.

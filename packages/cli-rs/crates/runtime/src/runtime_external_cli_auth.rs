@@ -3692,7 +3692,13 @@ fn opencode_quota_hook(
     force: bool,
     model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
-    gated_quota_future(async move { read_opencode_usage_for_model(force, model.as_deref()).await })
+    // OpenCode before 2.2.0 has no official quota interface: its sign-in is
+    // read only under the owner's grant (`xmatrix config quotaAccess opencode`).
+    Box::pin(async move {
+        xmatrix_cli_core::quota_access::read_granted_quota("opencode", force, model.as_deref())
+            .await
+            .usage()
+    })
 }
 
 fn deepseek_quota_hook(
@@ -3709,7 +3715,7 @@ fn cursor_quota_hook(
     // Cursor has no official quota interface: its sign-in is read only under
     // the owner's grant on this machine (`xmatrix config quotaAccess cursor`).
     Box::pin(async move {
-        xmatrix_cli_core::quota_access::read_granted_quota("cursor", force)
+        xmatrix_cli_core::quota_access::read_granted_quota("cursor", force, None)
             .await
             .usage()
     })

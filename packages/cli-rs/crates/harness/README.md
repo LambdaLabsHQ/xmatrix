@@ -28,8 +28,11 @@ library:
   without a prompt. OpenCode is asked through `opencode serve`'s
   `GET /api/experimental/usage/limits` (OpenCode 2.2.0 or newer), started on a
   loopback port with a one-time password and killed after the answer. Both
-  tools keep their own sign-in; the readers open no Claude or OpenCode
-  credential file or keychain item.
+  tools keep their own sign-in; these readers open no Claude or OpenCode
+  credential file or keychain item. An OpenCode release before 2.2.0 has no
+  such route: there its stored Go key is read, and sent only to
+  `opencode.ai/zen/go/v1/usage`, under the owner's per-machine
+  `SignInReadGrant`, as Cursor's sign-in is (`quota::grant`).
 - **Record stream (planned).** Harness frames will be turned into one
   normalized record stream. See "Not yet extracted" below.
 
@@ -42,7 +45,7 @@ library:
   shape is part of the xMatrix Hub protocol. Any change to their fields or
   serde attributes is a protocol change. `usage::tests` pins the exact JSON.
 - Credentials stay in process memory. A reader that does not ask the tool
-  itself (Cursor, DeepSeek, Grok, Z.ai) picks up a token from the provider
+  itself (Cursor, OpenCode before 2.2.0, DeepSeek, Grok, Z.ai) picks up a token from the provider
   CLI's own store: an environment variable, the macOS keychain via
   `/usr/bin/security`, or the CLI's `auth.json`. The token goes only to that
   provider's own endpoint. Cache keys use one-way SHA-256 fingerprints and are

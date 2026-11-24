@@ -327,9 +327,24 @@ test("the Hub suite is recorded only from a run that passed all of it", () => {
   assert.deepEqual(passedLedgerJobs([job(HUB_SUITE_LEDGER_JOB)]), [], "no job can claim the suite by name");
 });
 
-test("pull request jobs never vouch for the full tier a release reuses", () => {
-  const fast = ["node-tests", "node-tests (duplicates)", "web-unit", "web-build", "web-check", "hub-check", "rust-clippy"];
+test("a pull request's subset jobs never vouch for the full tier a release reuses", () => {
+  const fast = ["web-unit", "web-build", "web-check", "rust-clippy"];
   assert.deepEqual(passedLedgerJobs(fast.map((name) => ({ name, conclusion: "success" }))), []);
+});
+
+test("a pull request vouches for the Node checks and Hub suite it ran in full", () => {
+  const job = (name, conclusion = "success") => ({ name, conclusion });
+  const node = ["node-tests", "node-tests (static)"];
+  const hub = ["hub (static)", ...[1, 2, 3, 4].map((shard) => `hub (${shard}/4)`)];
+  assert.deepEqual(passedLedgerJobs(node.map((name) => job(name))), ["node-checks"]);
+  assert.deepEqual(
+    passedLedgerJobs([...node, ...hub, "web-unit"].map((name) => job(name))).sort(),
+    [HUB_SUITE_LEDGER_JOB, "node-checks"].sort(),
+  );
+  // Either half failing, or a cancelled shard, leaves nothing to reuse.
+  assert.deepEqual(passedLedgerJobs([job("node-tests"), job("node-tests (static)", "failure")]), []);
+  assert.deepEqual(passedLedgerJobs([job("node-tests", "failure"), job("node-tests (static)")]), []);
+  assert.deepEqual(passedLedgerJobs([...hub.slice(0, 4).map((name) => job(name)), job("hub (4/4)", "cancelled")]), []);
 });
 
 test("a job split over a matrix is recorded only when every entry passed", () => {

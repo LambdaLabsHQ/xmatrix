@@ -491,6 +491,8 @@
         "notes": "OpenCode 2 replaces the 1.x line under the same command and data directory; 1.x cannot open a database 2 has migrated, so updates move 1.x to 2 with `upgrade --major`. Package-manager ownership can suppress native updates; autoupdate also accepts notify."
       },
       "latest": { "kind": "npm", "package": "@opencode/cli" },
+      "quotaRead": "sign_in_grant",
+      "quotaReadBefore": "2.2.0",
       "sources": ["https://opencode.ai/v2/docs/", "https://opencode.ai/v2/docs/migrate-v1/", "https://opencode.ai/v2/docs/cli/commands"],
       "checkedAt": "2026-10-31"
     }

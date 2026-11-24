@@ -1,8 +1,9 @@
 //! The owner's per-machine, per-harness permission for xMatrix to read a
 //! harness's local sign-in to show its quota (`xmatrix config quotaAccess`).
 //!
-//! Some harnesses (Cursor) have no official quota interface: the only way to
-//! learn their quota is to read the sign-in they stored for themselves. That
+//! Some harnesses (Cursor, and OpenCode before 2.2.0) have no official quota
+//! interface: the only way to learn their quota is to read the sign-in they
+//! stored for themselves. That
 //! sign-in is the harness's, not a permission for xMatrix, so it is read only
 //! under an explicit grant kept here, in this machine's CLI config. The grant
 //! is off by default and separate from `quotaProbes`: that switch is on by
@@ -14,7 +15,8 @@
 //! fingerprint, see `xmatrix_harness::quota::grant`). Another account or
 //! credential voids it, and with it the last reading.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Mutex;
 
 use serde::Serialize;
 use xmatrix_harness::quota::{self, Account, GrantedRead, Provider, ReadOptions, SignInReadGrant};
@@ -23,24 +25,58 @@ use crate::config::{self, CliConfig};
 use crate::error::{CliError, Result};
 use crate::protocol::LlmUsage;
 
-/// Harnesses whose quota is read only under a grant, by preset id.
-const GRANT_HARNESSES: &[(&str, Provider)] = &[("cursor", Provider::Cursor)];
+/// Harnesses whose quota may be read only under a grant, by preset id:
+/// Cursor always, OpenCode on a release before its usage-limits route.
+const GRANT_HARNESSES: &[(&str, Provider)] = &[
+    ("cursor", Provider::Cursor),
+    ("opencode", Provider::OpenCode),
+];
 
-/// The provider a harness's quota is read from, when it is read only under a grant.
+/// The provider a harness's quota is read from, when it may be read only
+/// under a grant.
 pub fn quota_access_provider(harness: &str) -> Option<Provider> {
     GRANT_HARNESSES
         .iter()
         .find(|(id, _)| *id == harness)
         .map(|(_, provider)| *provider)
-        .filter(|provider| provider.reads_sign_in_only_with_grant())
+        .filter(|provider| provider.takes_sign_in_read_grant())
 }
 
-/// Every harness whose quota is read only under a grant.
+/// Every harness whose quota may be read only under a grant.
 pub fn quota_access_harnesses() -> impl Iterator<Item = &'static str> {
     GRANT_HARNESSES
         .iter()
-        .filter(|(_, provider)| provider.reads_sign_in_only_with_grant())
+        .filter(|(_, provider)| provider.takes_sign_in_read_grant())
         .map(|(id, _)| *id)
+}
+
+/// Whether `harness` at the release its inventory reports (`version`, when
+/// known) is read only under a grant, so its grant state is worth showing.
+pub fn quota_access_applies(harness: &str, version: Option<&str>) -> bool {
+    quota_access_provider(harness).is_some_and(|provider| {
+        provider.needs_sign_in_grant_at(version.and_then(quota::parse_cli_semver))
+    })
+}
+
+/// Harnesses whose last read under a grant found their sign-in expired.
+static SIGN_IN_EXPIRED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+/// Whether the last read of `harness` under a grant in this process found its
+/// sign-in expired: its quota is unknown until the harness signs in again.
+pub fn sign_in_expired(harness: &str) -> bool {
+    SIGN_IN_EXPIRED
+        .lock()
+        .is_ok_and(|expired| expired.contains(harness))
+}
+
+fn note_sign_in_expired(harness: &str, expired: bool) {
+    if let Ok(mut set) = SIGN_IN_EXPIRED.lock() {
+        if expired {
+            set.insert(harness.to_string());
+        } else {
+            set.remove(harness);
+        }
+    }
 }
 
 /// Whether xMatrix may read a harness's sign-in on this machine now. Its
@@ -168,13 +204,17 @@ fn apply_read(
     }
 }
 
-/// A quota read of a harness that is read only under a grant.
+/// A quota read of a harness that may be read only under a grant.
 #[derive(Debug)]
 pub enum GrantedQuota {
-    /// Read under the grant (`None`: Cursor gave no answer, or it is signed out).
+    /// Read (`None`: the provider gave no answer, or the harness is signed out).
     Usage(Option<LlmUsage>),
-    /// No grant, or the sign-in changed and voided it: nothing was asked.
+    /// The harness needs a grant here and has none, or the sign-in changed
+    /// and voided it: nothing was asked.
     NotGranted,
+    /// The sign-in's token has expired: the provider was not asked and the
+    /// token was not refreshed.
+    SignInExpired,
     /// Every quota probe is off on this machine: nothing was read.
     ProbesOff,
 }
@@ -183,47 +223,87 @@ impl GrantedQuota {
     pub fn usage(self) -> Option<LlmUsage> {
         match self {
             Self::Usage(usage) => usage,
-            Self::NotGranted | Self::ProbesOff => None,
+            Self::NotGranted | Self::SignInExpired | Self::ProbesOff => None,
         }
     }
 }
 
-/// Read `harness`'s quota under this machine's grant, binding the grant on
-/// its first read and voiding it when the sign-in changed.
-pub async fn read_granted_quota(harness: &str, force: bool) -> GrantedQuota {
+/// Read `harness`'s quota for the harness running `model` (when known),
+/// under this machine's grant when it has one: the reader decides whether it
+/// needs it. Binds the grant on its first read and voids it when the
+/// sign-in changed.
+pub async fn read_granted_quota(harness: &str, force: bool, model: Option<&str>) -> GrantedQuota {
     let Some(provider) = quota_access_provider(harness) else {
         return GrantedQuota::NotGranted;
     };
     let config = config::load_config_sync();
-    let grant = match usable_grant(&config, |key| std::env::var(key).ok(), harness) {
-        Ok(grant) => grant,
-        Err(QuotaAccess::ProbesOff) => return GrantedQuota::ProbesOff,
-        Err(_) => return GrantedQuota::NotGranted,
-    };
-    let read = quota::read_granted(
-        provider,
-        ReadOptions {
-            account: Account::DefaultLogin,
-            force,
+    let read = read_with(
+        &config,
+        |key| std::env::var(key).ok(),
+        harness,
+        |grant| async move {
+            quota::read_granted(
+                provider,
+                ReadOptions {
+                    account: Account::DefaultLogin,
+                    force,
+                },
+                model,
+                grant.as_ref(),
+            )
+            .await
         },
-        Some(&grant),
     )
     .await;
-    if matches!(
-        read,
-        GrantedRead::SignInChanged | GrantedRead::Read { bound: Some(_), .. }
-    ) {
+    let Some((grant, read)) = read else {
+        return GrantedQuota::ProbesOff;
+    };
+    if let Some(grant) = grant.as_ref()
+        && matches!(
+            read,
+            GrantedRead::SignInChanged | GrantedRead::Read { bound: Some(_), .. }
+        )
+    {
         let mut config = config::load_config().await;
-        if apply_read(&mut config.quota_access, harness, &grant, &read)
+        if apply_read(&mut config.quota_access, harness, grant, &read)
             && let Err(error) = config::write_config(&config).await
         {
             eprintln!("Quota access for {harness} was not saved: {error}");
         }
     }
+    note_sign_in_expired(harness, matches!(read, GrantedRead::SignInExpired));
+    granted_quota(read, grant.is_some())
+}
+
+/// Run `read` with the grant `harness` has here (`None` without one), unless
+/// every quota probe is off, which wins over any grant: then nothing runs.
+async fn read_with<F, Fut>(
+    config: &CliConfig,
+    env: impl Fn(&str) -> Option<String>,
+    harness: &str,
+    read: F,
+) -> Option<(Option<SignInReadGrant>, GrantedRead)>
+where
+    F: FnOnce(Option<SignInReadGrant>) -> Fut,
+    Fut: std::future::Future<Output = GrantedRead>,
+{
+    let grant = match usable_grant(config, env, harness) {
+        Ok(grant) => Some(grant),
+        Err(QuotaAccess::ProbesOff) => return None,
+        Err(_) => None,
+    };
+    let read = read(grant.clone()).await;
+    Some((grant, read))
+}
+
+fn granted_quota(read: GrantedRead, had_grant: bool) -> GrantedQuota {
     match read {
         GrantedRead::Read { usage, .. } => GrantedQuota::Usage(usage),
         GrantedRead::SignInChanged => GrantedQuota::NotGranted,
-        GrantedRead::Closed => GrantedQuota::ProbesOff,
+        GrantedRead::SignInExpired => GrantedQuota::SignInExpired,
+        // A reader closes with a grant in hand only when probes are off.
+        GrantedRead::Closed if had_grant => GrantedQuota::ProbesOff,
+        GrantedRead::Closed => GrantedQuota::NotGranted,
     }
 }
 
@@ -329,6 +409,89 @@ mod tests {
             &GrantedRead::SignInChanged
         ));
         assert!(config.quota_access.contains_key("cursor"));
+    }
+
+    #[test]
+    fn opencode_takes_a_grant_only_before_its_usage_limits_route() {
+        assert_eq!(quota_access_provider("opencode"), Some(Provider::OpenCode));
+        assert!(quota_access_applies("opencode", Some("1.19.6")));
+        assert!(quota_access_applies("opencode", Some("2.1.9")));
+        assert!(!quota_access_applies("opencode", Some("2.2.0")));
+        assert!(!quota_access_applies("opencode", Some("2.4.1")));
+        assert!(!quota_access_applies("opencode", None));
+        assert!(quota_access_applies("cursor", None));
+        assert!(!quota_access_applies("codex", Some("1.0.0")));
+    }
+
+    fn granted_opencode() -> CliConfig {
+        let mut config = CliConfig::default();
+        assert!(set_grant(&mut config.quota_access, "opencode", true));
+        config
+    }
+
+    #[tokio::test]
+    async fn the_global_switch_overrides_an_opencode_grant_and_its_official_read() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = AtomicUsize::new(0);
+        let reader = |_grant: Option<SignInReadGrant>| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async {
+                GrantedRead::Read {
+                    usage: None,
+                    bound: None,
+                }
+            }
+        };
+        let mut off = granted_opencode();
+        off.quota_probes = Some(false);
+        assert!(
+            read_with(&off, |_| None, "opencode", reader)
+                .await
+                .is_none()
+        );
+        let disabled =
+            |key: &str| (key == config::QUOTA_PROBES_DISABLE_ENV).then(|| "1".to_string());
+        assert!(
+            read_with(&CliConfig::default(), disabled, "opencode", reader)
+                .await
+                .is_none()
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn without_a_grant_the_reader_gets_none_and_a_closed_read_is_not_granted() {
+        let (grant, read) = read_with(
+            &CliConfig::default(),
+            |_| None,
+            "opencode",
+            |grant| async move {
+                assert!(grant.is_none());
+                GrantedRead::Closed
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            granted_quota(read, grant.is_some()),
+            GrantedQuota::NotGranted
+        ));
+        let (grant, _) = read_with(
+            &granted_opencode(),
+            |_| None,
+            "opencode",
+            |grant| async move {
+                assert!(grant.is_some());
+                GrantedRead::Closed
+            },
+        )
+        .await
+        .unwrap();
+        assert!(grant.is_some());
+        assert!(matches!(
+            granted_quota(GrantedRead::SignInExpired, true),
+            GrantedQuota::SignInExpired
+        ));
     }
 
     #[test]
