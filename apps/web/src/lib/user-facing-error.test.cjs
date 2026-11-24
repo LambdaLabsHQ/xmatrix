@@ -99,13 +99,17 @@ test("a browser defect report keeps the message shape but not what it quoted", (
 
 /** Runs the test in a page and collects the defect reports it would send. */
 function capturedDefectReports(t, { diagnosticsEnabled = true } = {}) {
+  const { configureDiagnosticsConsent } = require("./diagnostics-preference.ts");
   const previousWindow = global.window;
-  global.window = {
-    localStorage: {
-      getItem: (key) => (diagnosticsEnabled && key === "xmatrix:diagnostics-enabled" ? "true" : null),
-    },
-  };
+  global.window = {};
+  // The Hub's answer: an explicit opt-in, or (stable) no choice, which sends nothing.
+  configureDiagnosticsConsent({
+    read: async () => ({ accountRegime: "default-ok", requestRegime: "default-ok",
+      choice: diagnosticsEnabled ? "opted-in" : null }),
+    write: async () => {},
+  }, { build: "stable", environment: { now: () => 1, storage: null, doNotTrack: null, globalPrivacyControl: false } });
   t.after(() => {
+    configureDiagnosticsConsent(null, { environment: null });
     if (previousWindow === undefined) delete global.window;
     else global.window = previousWindow;
   });
@@ -117,11 +121,14 @@ function capturedDefectReports(t, { diagnosticsEnabled = true } = {}) {
   return sent;
 }
 
+/** Lets the consent read and the report it allows settle. */
+const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+
 test("browser defect forwarding stays silent by default until diagnostics are opted in", async (t) => {
   const { reportClientDefect } = require("./client-defect-report.ts");
   const sent = capturedDefectReports(t, { diagnosticsEnabled: false });
   reportClientDefect("Couldn't load default-off", new Error("Silent when not opted in"));
-  await new Promise(resolve => setImmediate(resolve));
+  await settle();
   assert.equal(sent.length, 0);
 });
 
@@ -137,7 +144,7 @@ test("browser defect forwarding preserves the first Safari and Firefox frame for
     error.stack = stack;
     reportClientDefect("Couldn't load " + engine, error);
   }
-  await new Promise(resolve => setImmediate(resolve));
+  await settle();
   assert.equal(sent.length, 3);
   const reportingRequire = require("node:module").createRequire(require.resolve("@xmatrix/protocol/error-reporting"));
   const { createStackParser } = reportingRequire("@sentry/core");
@@ -160,7 +167,7 @@ test("a specific headline is shown, and only its action from the closed set is r
   assert.equal(userErrorMessage(new TypeError("Cannot read properties of undefined"), "Couldn't connect the app",
     "Couldn't connect private-account"),
   "Couldn't connect private-account. Something went wrong. Try again, and report it if it keeps happening.");
-  await new Promise(resolve => setImmediate(resolve));
+  await settle();
   assert.equal(sent.length, 1);
   assert.equal(sent[0].action, "Couldn't connect the app");
 });
