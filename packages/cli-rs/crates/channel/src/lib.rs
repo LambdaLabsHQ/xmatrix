@@ -2904,6 +2904,16 @@ pub(crate) fn format_history_message_with_local_images(
         }
     }
     if message.recalled_at.is_none() && message.deleted_at.is_none() {
+        if let Some((title, href)) = protocol::browser_page(message.metadata.as_ref()) {
+            let title = if title.is_empty() {
+                href.clone()
+            } else {
+                title
+            };
+            output.push_str(&format!(
+                "  Viewing in Chrome: {title} <{href}> (`xmatrix browse` reads this page from their browser)\n"
+            ));
+        }
         for line in command_result_lines(message.command_result.as_ref()) {
             output.push_str(&format!("  [result] {line}\n"));
         }
@@ -3754,6 +3764,21 @@ mod tests {
         assert!(output.contains("codex"));
         assert!(output.contains("screenshot"));
         assert!(output.contains("[attachment] screen.jpg (42 bytes, image/jpeg, data)"));
+    }
+
+    #[test]
+    fn format_history_message_includes_browser_page_hint() {
+        let mut message = bare_history_message("m-page", 2, "who is this?", "2026-09-18T20:00:00.000Z");
+        message.metadata = Some(serde_json::json!({
+            "browserPage": { "title": "Profile  Page", "href": "https://example.test/profile" }
+        }));
+        let output = format_history_message_at(&message, None);
+        assert!(
+            output.contains(
+                "  Viewing in Chrome: Profile Page <https://example.test/profile> (`xmatrix browse` reads this page from their browser)\n"
+            ),
+            "{output}"
+        );
     }
 
     #[test]
