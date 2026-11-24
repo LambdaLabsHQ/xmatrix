@@ -1,11 +1,14 @@
 // Ask about what you are reading, right on the page. As soon as the person
-// selects text, this script frames the extension's question box under it
-// (app/ask.html, built from apps/web extension-app/ask.tsx): the App's own
-// conversation composer, for the question (the selection is the quote, sent
-// with it). It does not take the focus, so the selection can still be
-// copied; a click goes into it. Enter
-// starts a conversation in the Space the side panel shows, where an Agent
-// picks it up, and the side panel opens on it.
+// selects text, this script frames the extension's surface under it
+// (app/ask.html, built from apps/web extension-app/ask.tsx):
+// - When no side panel is open: the floating question capsule. Pressing Enter
+//   expands it in place into a live inline conversation card (page scrolling
+//   no longer dismisses it). Minimizing or clicking away docks a quiet tab on
+//   the right viewport edge so the person can always open the side panel back
+//   onto that conversation.
+// - When the side panel is already open for this tab: the right-edge dock
+//   hides, and selecting text offers a compact "Quote to side panel" pill so
+//   there are never two competing input boxes.
 //
 // This script draws nothing of its own: it hands the extension the selected
 // text (background.js keeps it for this tab, in this browser), then places,
@@ -35,7 +38,12 @@
   const ORIGIN = new URL(ASK_PAGE).origin;
   let frame = null;
   let frameReady = false;
-  let prepared = false;
+  /** Message queued until the extension frame reports ready. */
+  let pendingMessage = null;
+  /** Current surface mode: hidden | ask | thread | dock | quote. */
+  let mode = "hidden";
+  let panelOpen = false;
+  let hasThread = false;
   let anchor = null;
   let shown = "";
   let layout = { placement: "below", maxPanelHeight: 320 };
@@ -55,8 +63,8 @@
     frame.allow = "clipboard-write";
     // Transparent only when the frame's color scheme is the page's it frames: the App's page is light.
     frame.style.cssText = "all: initial; position: fixed; z-index: 2147483647; border: 0; background: transparent; "
-      // It lays out at a box's size, hidden, until it says how big the composer is.
-      + "color-scheme: light; width: 480px; height: 240px; top: 0; left: 0; visibility: hidden;";
+      // It lays out at a box's size, hidden, until it says how big the surface is.
+      + "color-scheme: light; width: 480px; height: 240px; top: 0; left: 0; right: auto; visibility: hidden;";
     document.documentElement.append(frame);
   }
 
@@ -99,16 +107,12 @@
     };
   }
 
-  /** Tells the box its passage and placement are ready to read, once both it and the passage are. */
+  /** Delivers the latest surface transition once the extension frame is ready. */
   function deliver() {
-    if (!frame || !frameReady || !prepared || !anchor) return;
-    prepared = false;
-    layout = chooseLayout(anchor, innerHeight);
-    frame.contentWindow?.postMessage({
-      xmatrixAsk: "prepared",
-      placement: layout.placement,
-      maxPanelHeight: layout.maxPanelHeight,
-    }, ORIGIN);
+    if (!frame || !frameReady || !pendingMessage) return;
+    const message = pendingMessage;
+    pendingMessage = null;
+    frame.contentWindow?.postMessage(message, ORIGIN);
   }
 
   /** Wakes the extension's service worker (and renews its sign-in if due) while the person is still selecting. */
@@ -119,21 +123,54 @@
     chrome.runtime.sendMessage({ type: "askWarm" }).catch(() => undefined);
   }
 
-  /** Hidden, not removed: the next selection opens it again at once. */
+  /** Fully hidden, not removed: the next selection opens it again at once. */
   function hide() {
     if (frame) frame.style.visibility = "hidden";
     if (frame && document.activeElement === frame) frame.blur();
+    mode = "hidden";
     shown = "";
     lastSize = null;
+    pendingMessage = null;
+  }
+
+  /** Docks a compact tab flush to the right viewport edge when this page already has a thread and the panel is closed. */
+  function showDock() {
+    if (panelOpen || !hasThread) return hide();
+    if (frame && document.activeElement === frame) frame.blur();
+    mode = "dock";
+    shown = "";
+    lastSize = null;
+    ensureFrame();
+    pendingMessage = { xmatrixAsk: "dock" };
+    deliver();
+  }
+
+  /** Closes the active popup: returns to the right-edge dock if this page already has a thread, else hides cleanly. */
+  function dismiss() {
+    if (hasThread && !panelOpen) showDock();
+    else hide();
   }
 
   /**
-   * Anchors the visible capsule on the chosen side of the selection:
-   * - `below`: top edge stays pinned below the selection as the dropdown grows downward.
-   * - `above`: bottom edge stays pinned above the selection as the popup grows upward.
+   * Positions the visible surface inside the viewport:
+   * - `dock`: flush to the right edge at ~42% viewport height so the user knows the right side panel can be opened.
+   * - `ask` / `quote` / `thread`: anchored beside the selection and clamped cleanly inside viewport bounds.
    */
   function place(width, height, insets) {
-    if (!frame || !anchor || !shown) return;
+    if (!frame || mode === "hidden") return;
+    if (mode === "dock") {
+      const frameWidth = Math.min(width, innerWidth);
+      const frameHeight = Math.min(height, innerHeight);
+      const top = Math.max(EDGE_MARGIN, Math.min(innerHeight - EDGE_MARGIN - frameHeight, Math.round(innerHeight * 0.42 - frameHeight / 2)));
+      frame.style.left = "auto";
+      frame.style.right = "0px";
+      frame.style.top = `${top}px`;
+      frame.style.width = `${frameWidth}px`;
+      frame.style.height = `${frameHeight}px`;
+      frame.style.visibility = "visible";
+      return;
+    }
+    if (!anchor || ((mode === "ask" || mode === "quote") && !shown)) return;
     const topInset = Number.isFinite(insets?.topInset) ? insets.topInset : DEFAULT_TOP_INSET;
     const bottomInset = Number.isFinite(insets?.bottomInset) ? insets.bottomInset : DEFAULT_BOTTOM_INSET;
     const leftInset = Number.isFinite(insets?.leftInset) ? insets.leftInset : DEFAULT_SIDE_INSET;
@@ -149,6 +186,7 @@
     const minLeft = EDGE_MARGIN - leftInset;
     const maxLeft = innerWidth - EDGE_MARGIN - (frameWidth - rightInset);
     const left = Math.max(minLeft, Math.min(anchor.left - leftInset, maxLeft));
+    frame.style.right = "auto";
     frame.style.top = `${top}px`;
     frame.style.left = `${left}px`;
     frame.style.width = `${frameWidth}px`;
@@ -169,24 +207,36 @@
     return Boolean(active && active !== frame && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/u.test(active.tagName)));
   }
 
-  /** Opens the box on `text`, under `rect` (or the page's top right for the page itself). */
+  /** Opens the box (or quote pill if the side panel is open) on `text`, under `rect`. */
   async function open(text, rect) {
     anchor = rect;
     shown = text;
+    mode = panelOpen ? "quote" : "ask";
     ensureFrame();
     await chrome.runtime.sendMessage({ type: "askPrepare", text, title: document.title, url: location.href });
-    if (shown !== text) return;
-    prepared = true;
+    if (shown !== text || (mode !== "ask" && mode !== "quote")) return;
+    layout = chooseLayout(anchor, innerHeight);
+    pendingMessage = {
+      xmatrixAsk: "prepared",
+      mode,
+      placement: layout.placement,
+      maxPanelHeight: layout.maxPanelHeight,
+    };
     deliver();
   }
 
   function onSelection() {
     if (document.activeElement === frame) return;
+    // Keep an active inline conversation open while the user reads or highlights text on the page.
+    if (mode === "thread") return;
     const text = String(globalThis.getSelection() ?? "").trim();
     const rect = selectionRect();
-    if (text.length < 2 || !rect || inEditable()) return hide();
-    if (text === shown) return;
-    open(text, rect).catch(() => hide());
+    if (text.length < 2 || !rect || inEditable()) {
+      if (mode === "ask" || mode === "quote") dismiss();
+      return;
+    }
+    if (text === shown && (mode === "ask" || mode === "quote")) return;
+    open(text, rect).catch(() => dismiss());
   }
 
   listen(window, "message", (event) => {
@@ -201,30 +251,51 @@
         lastSize = { width, height, topInset, bottomInset, leftInset, rightInset };
         place(width, height, lastSize);
       }
-    } else if (event.data.type === "close") {
+    } else if (event.data.type === "mode") {
+      if (event.data.mode === "thread") {
+        mode = "thread";
+        hasThread = true;
+        if (!anchor) anchor = { top: 64, bottom: 64, left: Math.max(EDGE_MARGIN, innerWidth - 520) };
+        if (lastSize) place(lastSize.width, lastSize.height, lastSize);
+      } else if (event.data.mode === "dock") {
+        hasThread = true;
+        showDock();
+      }
+    } else if (event.data.type === "docked") {
+      // Side panel opened via ◫ or edge dock: hide the in-page surface cleanly.
+      hasThread = true;
       hide();
+    } else if (event.data.type === "close") {
+      dismiss();
     }
   });
 
-  // Keep the open box adapted if the browser window is resized around it.
+  // Keep the open surface adapted if the browser window is resized around it.
   listen(window, "resize", () => {
-    if (!frame || !anchor || !shown) return;
-    const next = chooseLayout(anchor, innerHeight);
-    if (next.placement !== layout.placement || next.maxPanelHeight !== layout.maxPanelHeight) {
-      layout = next;
-      frame.contentWindow?.postMessage({
-        xmatrixAsk: "layout",
-        placement: layout.placement,
-        maxPanelHeight: layout.maxPanelHeight,
-      }, ORIGIN);
+    if (!frame || mode === "hidden") return;
+    if (mode === "dock") {
+      if (lastSize) place(lastSize.width, lastSize.height, lastSize);
+      return;
+    }
+    if (!anchor) return;
+    if (mode === "ask" || mode === "quote") {
+      const next = chooseLayout(anchor, innerHeight);
+      if (next.placement !== layout.placement || next.maxPanelHeight !== layout.maxPanelHeight) {
+        layout = next;
+        frame.contentWindow?.postMessage({
+          xmatrixAsk: "layout",
+          placement: layout.placement,
+          maxPanelHeight: layout.maxPanelHeight,
+        }, ORIGIN);
+      }
     }
     if (lastSize) place(lastSize.width, lastSize.height, lastSize);
   });
 
-  // A click on the page, away from the box, closes it, as a click away closes the App's popovers;
-  // the selection that click may make opens it again.
+  // A click on the page, away from the popup, closes it (or docks it if a thread is active);
+  // never dismiss the quiet right-edge dock tab on page clicks.
   listen(document, "mousedown", (event) => {
-    if (shown && event.target !== frame) hide();
+    if ((mode === "ask" || mode === "quote" || mode === "thread") && event.target !== frame) dismiss();
   }, true);
   // The person is selecting text (not just clicking): get the box ready while they drag.
   listen(document, "selectionchange", () => {
@@ -238,37 +309,70 @@
     setTimeout(onSelection, 0);
   });
   listen(document, "keyup", (event) => {
-    if (event.key === "Escape") hide();
-    else if (event.shiftKey) setTimeout(onSelection, 0);
+    if (event.key === "Escape") {
+      if (mode === "ask" || mode === "quote" || mode === "thread") dismiss();
+    } else if (event.shiftKey) {
+      setTimeout(onSelection, 0);
+    }
   });
-  // Scrolling moves the passage away from a box no one is writing in.
+  // Scrolling moves the passage away from a selection capsule no one is writing in,
+  // but NEVER closes an active inline conversation or the right-edge dock tab.
   listen(document, "scroll", () => {
-    if (shown && document.activeElement !== frame) hide();
+    if ((mode === "ask" || mode === "quote") && document.activeElement !== frame) dismiss();
   }, { capture: true, passive: true });
 
-  // The context menu's "Ask about…": the extension has the passage already; the box opens on it.
-  const onOpenAsk = (message) => {
-    if (message?.type !== "open-ask") return;
-    anchor = (!message.page && selectionRect()) || { top: 16, bottom: 16, left: innerWidth };
-    shown = String(message.text ?? "");
-    ensureFrame();
-    prepared = true;
-    deliver();
+  // Context menu "Ask about…" and side-panel open/close notifications from background.js.
+  const onExtensionMessage = (message) => {
+    if (message?.type === "open-ask") {
+      anchor = (!message.page && selectionRect()) || { top: 16, bottom: 16, left: innerWidth };
+      shown = String(message.text ?? "");
+      mode = panelOpen ? "quote" : "ask";
+      ensureFrame();
+      layout = chooseLayout(anchor, innerHeight);
+      pendingMessage = {
+        xmatrixAsk: "prepared",
+        mode,
+        placement: layout.placement,
+        maxPanelHeight: layout.maxPanelHeight,
+      };
+      deliver();
+    } else if (message?.type === "panel-state") {
+      panelOpen = Boolean(message.open);
+      if (typeof message.hasThread === "boolean") hasThread = message.hasThread;
+      if (panelOpen) {
+        if (mode !== "quote") hide();
+      } else if (hasThread && mode === "hidden") {
+        showDock();
+      }
+    }
   };
-  chrome.runtime.onMessage.addListener(onOpenAsk);
+  chrome.runtime.onMessage.addListener(onExtensionMessage);
+
+  // Sync initial tab state: if this page already has an active thread and the side panel is closed,
+  // show the right-edge dock tab right away so the user can pick up the conversation.
+  Promise.resolve(chrome.runtime.sendMessage({ type: "askPageState", url: location.href }))
+    .then((res) => {
+      if (!res?.ok || !res.value) return;
+      panelOpen = Boolean(res.value.panelOpen);
+      hasThread = Boolean(res.value.hasThread);
+      if (!panelOpen && hasThread && mode === "hidden") showDock();
+    })
+    .catch(() => undefined);
 
   globalThis.__xmatrixAsk = {
     stop() {
       for (const remove of listeners) remove();
       try {
-        chrome.runtime.onMessage.removeListener(onOpenAsk);
+        chrome.runtime.onMessage.removeListener(onExtensionMessage);
       } catch {
         // Cut off from the extension: nothing more reaches it anyway.
       }
       frame?.remove();
       frame = null;
       frameReady = false;
+      mode = "hidden";
       shown = "";
+      pendingMessage = null;
     },
   };
 })();

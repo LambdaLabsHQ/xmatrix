@@ -51,6 +51,23 @@ function postToApp(message) {
  */
 const PANEL_TAB = Number(new URLSearchParams(location.search).get("tab")) || null;
 
+// Tell background.js while this tab's side panel is open so the page's selection script knows
+// whether to show the inline thread/edge dock or switch to a lightweight quote-to-side-panel pill.
+if (PANEL_TAB) {
+  const connectPanelPort = () => {
+    try {
+      const port = chrome.runtime.connect({ name: `sidepanel:${PANEL_TAB}` });
+      port.onDisconnect.addListener(() => {
+        // Reconnect if the service worker restarted while this panel stayed open.
+        if (document.visibilityState !== "hidden") setTimeout(connectPanelPort, 500);
+      });
+    } catch {
+      // Extension context invalidated during reload.
+    }
+  };
+  connectPanelPort();
+}
+
 /** A question still on its way to the conversation the app opened at, for the app to show as sending. */
 let pendingOnOpen = null;
 
