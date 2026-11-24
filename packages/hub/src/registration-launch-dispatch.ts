@@ -301,6 +301,7 @@ export async function decideFirstMessageLaunch(input: {
  * coordinator carries the prepared wakes from there. */
 export async function wakeRestingInstances(env: Env, input: {
   commandId: string; channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt: string;
+  addressedOnly?: boolean; excludeInstanceId?: string;
 }) {
   const value = await executeRestingInstanceWake({ ...runtimePlacement(env), ...input });
   if (value.woken.length > 0) await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
@@ -576,6 +577,7 @@ export async function executeRegistrationRebornPrepare(input: {
 export async function executeRestingInstanceWake(input: {
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string;
   channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt?: string;
+  addressedOnly?: boolean; excludeInstanceId?: string;
 }) {
   return (await placedRebornRepository(input, "reborn")).wakeResting(input);
 }

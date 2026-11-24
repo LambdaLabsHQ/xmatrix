@@ -584,13 +584,23 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * one whose wake can never succeed is left `wake_failed` with its reason, so
    * its Channel sees why and later messages do not keep retrying it.
    */
-  async wakeResting(raw: { commandId: string; channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt?: string }) {
+  /**
+   * `addressedOnly` limits the wake to Instances the source message names:
+   * its attention rows (an exact `@name:N` mention, a reply to that Instance's
+   * message, a broadcast). An Agent's message wakes only those; everyone else
+   * reads it by catch-up when something else wakes them. `excludeInstanceId`
+   * never wakes the message's own author.
+   */
+  async wakeResting(raw: { commandId: string; channelId: string; sourceMessageId: string; targetInstanceId?: string; prompt?: string;
+    addressedOnly?: boolean; excludeInstanceId?: string }) {
     const channelId = text(raw.channelId), sourceMessageId = text(raw.sourceMessageId);
     const prompt = typeof raw.prompt === "string" ? raw.prompt : "";
     const commandId = text(raw.commandId);
     const targetInstanceId = raw.targetInstanceId === undefined ? null : text(raw.targetInstanceId);
+    const addressedOnly = raw.addressedOnly === true;
+    const excludeInstanceId = raw.excludeInstanceId === undefined ? null : text(raw.excludeInstanceId);
     const candidates = await this.database.transaction({ requestId: commandId, operation: "registration.wake.candidates",
-      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v6", text: `SELECT
+      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v7", text: `SELECT
         i.instance_id,i.run_id,r.owner_user_id,b.machine_id,b.harness,i.presentation_json->>'model' AS model,
         NULLIF(r.metadata_json->>'wakeRuntimeModel','') AS wake_model,
         NULLIF(r.metadata_json->>'wakeRuntimeModelSource','') AS wake_model_source,
@@ -599,12 +609,16 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
         JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
         LEFT JOIN data.run_agent_registrations b ON b.run_id=i.run_id
         WHERE i.channel_id=$1 AND ($2::text IS NULL OR i.instance_id=$2)
+          AND ($5::text IS NULL OR i.instance_id<>$5)
           AND i.status='offline' AND i.rest_state IN ('sleeping','interrupted')
           AND r.status IN (${TERMINAL_RUN_STATUS_SQL})
+          AND (NOT $3::boolean OR EXISTS (SELECT 1 FROM data.channels c
+            JOIN data.message_attention a ON a.space_id=c.space_id AND a.channel_id=c.channel_id
+            WHERE c.channel_id=i.channel_id AND a.message_id=$4 AND a.subject_id='agent:'||i.instance_id))
           AND NOT EXISTS (SELECT 1 FROM data.agent_reborn_intents intent
             WHERE intent.source_instance_id=i.instance_id AND intent.state IN ('waiting','prepared'))
         ORDER BY i.updated_at DESC,i.instance_id LIMIT 16`,
-      values: [channelId, targetInstanceId], maxRows: MAX_WAKES_PER_MESSAGE }));
+      values: [channelId, targetInstanceId, addressedOnly, sourceMessageId, excludeInstanceId], maxRows: MAX_WAKES_PER_MESSAGE }));
     const woken: Array<{ instanceId: string; intentId: string; state: string }> = [];
     const refused: Array<{ instanceId: string; code: string; permanent: boolean }> = [];
     const { usedUp, chosenUsedUp } = await this.usedUpInstances(commandId, candidates);
