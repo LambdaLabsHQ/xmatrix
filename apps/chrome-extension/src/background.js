@@ -19,6 +19,7 @@ import {
   withSession,
 } from "./hub-client.js";
 import { capturableUrl, discussionTitle, pagePassage } from "./passage.js";
+import { isTrustedWebAppOrigin, pageKey, showWebPage } from "./page-tab.js";
 
 const SIGN_IN_ALARM = "sign-in";
 const MENU_ASK = "ask";
@@ -206,17 +207,6 @@ async function askContext(tab) {
  * as it does there (the quoted passage, the question, the Agents picked in
  * it); a message that names nobody lets the Space's routing pick the Agent.
  */
-/** A page as a place to talk about: its address without the fragment. */
-function pageKey(href) {
-  try {
-    const url = new URL(href);
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return href;
-  }
-}
-
 /** The conversations started from the extension, newest first: the panel's Recent. */
 async function rememberRecent({ spaceId, channelId, title, href }) {
   const path = `/app/${encodeURIComponent(spaceId)}/channels/${encodeURIComponent(channelId)}`;
@@ -415,20 +405,51 @@ const panelHandlers = {
   },
   queuePassage: ({ passage }) => queuePassage(pagePassage(passage ?? {})),
   quickSelect: () => chrome.permissions.contains({ origins: WEB_ORIGINS }),
+  /** Brings an open tab showing `href` into view (preferredTabId first), opening one only if closed. */
+  showPage: ({ href, preferredTabId }) => showWebPage(chrome, href, {
+    preferredTabId: Number.isInteger(preferredTabId) ? preferredTabId : null,
+  }),
 };
 
 function isExtensionPage(sender) {
   return sender.id === chrome.runtime.id && Boolean(sender.url?.startsWith(chrome.runtime.getURL("")));
 }
 
+function originOfSender(sender) {
+  if (typeof sender?.origin === "string" && sender.origin) return sender.origin;
+  try {
+    return sender?.url ? new URL(sender.url).origin : "";
+  } catch {
+    return "";
+  }
+}
+
+function replyAsync(work, reply, { includeValue = true } = {}) {
+  Promise.resolve()
+    .then(work)
+    .then((value) => reply(includeValue ? { ok: true, value } : { ok: true }))
+    .catch((error) => reply({ ok: false, error: error instanceof Error ? error.message : String(error),
+      ...(typeof error?.code === "string" ? { code: error.code } : {}) }));
+  return true;
+}
+
+// The xMatrix Web app (xmatrix.sh / beta.xmatrix.sh) asks the installed extension to bring back
+// the tab a conversation's web page is open in, rather than opening a duplicate tab (Daniel 2026-11-24).
+// The answer never reveals whether a tab was already open or newly created.
+chrome.runtime.onMessageExternal.addListener((message, sender, reply) => {
+  if (!isTrustedWebAppOrigin(originOfSender(sender), { allowLocalhost: Boolean(manifest.key) })) return false;
+  if (message?.protocol !== "xmatrix-embed/1" || message?.type !== "show-page") return false;
+  const href = capturableUrl(String(message.href ?? ""));
+  if (!href) {
+    reply({ ok: false, error: "Invalid web page address." });
+    return false;
+  }
+  return replyAsync(() => showWebPage(chrome, href), reply, { includeValue: false });
+});
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== chrome.runtime.id) return false;
-  const answer = (work) => {
-    work.then((value) => reply({ ok: true, value }))
-      .catch((error) => reply({ ok: false, error: error instanceof Error ? error.message : String(error),
-        ...(typeof error?.code === "string" ? { code: error.code } : {}) }));
-    return true;
-  };
+  const answer = (work) => replyAsync(() => work, reply);
   // The selection script runs in web pages: it may only hand over a passage of its own tab.
   // The person started selecting: this wakes the worker, and renews the sign-in now if it is due, off the box's path.
   if (message?.type === "askWarm" && sender.tab && !isExtensionPage(sender)) {
@@ -448,11 +469,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   const handler = isExtensionPage(sender) ? panelHandlers[message?.type] : undefined;
   if (!handler) return false;
-  Promise.resolve()
-    .then(() => handler(message.args ?? {}))
-    .then((value) => reply({ ok: true, value }))
-    .catch((error) => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
-  return true;
+  return replyAsync(() => handler(message.args ?? {}), reply);
 });
 
 // ---- Context menu: "Ask about…" opens the question box right on the page.

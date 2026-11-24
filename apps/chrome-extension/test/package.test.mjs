@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { packageExtension } from "../scripts/package.mjs";
+import { packageExtension, shippedManifest } from "../scripts/package.mjs";
 
 function files(directory, prefix = "") {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory()
@@ -25,6 +25,10 @@ test("the package is an extension Chrome loads, with the app built into it", asy
   const manifest = JSON.parse(fs.readFileSync(path.join(out, "manifest.json"), "utf8"));
   assert.equal(manifest.version, "9.8.7");
   assert.equal(manifest.key, undefined);
+  assert.deepEqual(manifest.externally_connectable?.matches, ["https://xmatrix.sh/*", "https://beta.xmatrix.sh/*"]);
+  const unpacked = shippedManifest(JSON.parse(fs.readFileSync(new URL("../manifest.json", import.meta.url), "utf8")),
+    { release: "9.8.7-beta.1", unpacked: true });
+  assert.ok(unpacked.externally_connectable?.matches.includes("http://localhost/*"));
   for (const named of [manifest.side_panel.default_path, manifest.background.service_worker, ...Object.values(manifest.icons)]) {
     assert.ok(shipped.includes(named), `the manifest names ${named}`);
   }

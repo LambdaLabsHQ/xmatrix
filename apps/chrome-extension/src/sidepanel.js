@@ -9,6 +9,7 @@
 // selection button, this bar) are handed to the app once it says it is ready.
 
 import { capturableUrl, pageTitle } from "./passage.js";
+import { pageKey } from "./page-tab.js";
 
 const PROTOCOL = "xmatrix-embed/1";
 const APP_ORIGIN = window.location.origin;
@@ -122,7 +123,8 @@ window.addEventListener("message", async (event) => {
   } else if (data.type === "open-tab" && typeof data.href === "string" && capturableUrl(data.href)) {
     await chrome.tabs.create({ url: data.href });
   } else if (data.type === "show-page" && typeof data.href === "string" && capturableUrl(data.href)) {
-    await showWebPage(data.href).catch(() => undefined);
+    const preferredTabId = PANEL_TAB ?? (await activeTab())?.id ?? null;
+    await ask("showPage", { href: data.href, preferredTabId }).catch(() => undefined);
   } else if (data.type === "browser-read" && typeof data.requestId === "string") {
     await answerBrowserRead(data).catch(() => undefined);
   } else if (data.type === "browser-read-approval" && typeof data.requestId === "string") {
@@ -149,13 +151,6 @@ async function activeTab() {
   if (PANEL_TAB) return chrome.tabs.get(PANEL_TAB).catch(() => null);
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tab ?? null;
-}
-
-/** A page as a place to talk about: its address without the fragment (background.js pageKey). */
-function pageKey(href) {
-  const url = new URL(href);
-  url.hash = "";
-  return url.toString();
 }
 
 /** The conversation the tab's questions about its page went to, as the service worker keeps it. */
@@ -219,23 +214,6 @@ async function openTabShowing(page) {
     return href && pageKey(href) === page;
   });
   return showing.find((tab) => tab.active) ?? showing[0] ?? null;
-}
-
-/**
- * Brings `href` into view: this panel's own tab when it shows that page, else another open tab showing it, in front
- * and its window focused (Daniel 2026-11-24: back to the person's tab, not a new one). A new tab only when none does.
- */
-async function showWebPage(href) {
-  const page = pageKey(href);
-  const own = await activeTab();
-  const ownHref = capturableUrl(own?.url ?? "");
-  const tab = own && ownHref && pageKey(ownHref) === page ? own : await openTabShowing(page);
-  if (!tab?.id) {
-    await chrome.tabs.create({ url: href });
-    return;
-  }
-  await chrome.tabs.update(tab.id, { active: true });
-  if (tab.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
 }
 
 /** The page a conversation was started from: a tab still asking in it, or where Recent says it began. */

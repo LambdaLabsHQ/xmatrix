@@ -12,6 +12,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 
 import { attachmentKind, playableMediaKind, harnessSignedOutNoticeOf, machineOfflineNoticeOf, nonOperationalMentionRanges, lowercaseHex, messageExternalAppSource, onboardingStageOf } from "@xmatrix/protocol";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { openWebPageLink } from "@/lib/extension-embed";
 import { sameValue, shareByKey } from "../../lib/same-value";
 
 import { MESSAGE_SURFACE_METRICS_EVENT, messageSurfaceOf } from "./message-surface-metrics";
@@ -3060,6 +3061,7 @@ export const MessageRow = memo(function MessageRow({
         )}
         {!recalled && browserPage && (
           <a href={browserPage.href} target="_blank" rel="noreferrer" title={browserPage.href}
+            onClick={(event) => openWebPageLink(event, browserPage.href)}
             className="message-browser-page mt-1 flex w-fit max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
             <Globe aria-hidden="true" className="size-3.5 shrink-0" />
             <span className="truncate">{browserPage.title || new URL(browserPage.href).host}</span>

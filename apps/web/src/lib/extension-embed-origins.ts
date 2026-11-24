@@ -5,6 +5,8 @@
  * behaves as the panel's app (extension-embed.ts) only in a page of this
  * origin that this origin frames.
  */
+export const EXTENSION_ID = "kaickfjmldmlelnfijaahialjpnebnak";
+
 export const EXTENSION_EMBED_ORIGINS: readonly string[] = [
-  "chrome-extension://kaickfjmldmlelnfijaahialjpnebnak",
+  `chrome-extension://${EXTENSION_ID}`,
 ];
