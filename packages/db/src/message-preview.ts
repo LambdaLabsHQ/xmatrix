@@ -1,4 +1,4 @@
-import { utf8ByteLength } from "@xmatrix/protocol";
+import { postgresJsonText, utf8ByteLength } from "@xmatrix/protocol";
 
 import { DatabaseContractError } from "./errors.js";
 
@@ -19,13 +19,29 @@ function plainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function sanitizeJsonValue(value: unknown): unknown {
+  if (typeof value === "string") return postgresJsonText(value);
+  if (Array.isArray(value)) return value.map(sanitizeJsonValue);
+  if (plainObject(value)) {
+    const result: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (entry !== undefined) result[postgresJsonText(key)] = sanitizeJsonValue(entry);
+    }
+    return result;
+  }
+  return value;
+}
+
 /** A preview as it is stored: bounded JSON of exactly its two fields. */
 export function storedMessagePreview(value: MessagePreview): string {
   if (!plainObject(value) || typeof value.bodyPreview !== "string" ||
       value.bodyPreview.length > MAX_BODY_PREVIEW_CHARACTERS || !plainObject(value.senderSnapshot)) {
     throw new DatabaseContractError("message preview is invalid");
   }
-  const stored = JSON.stringify({ bodyPreview: value.bodyPreview, senderSnapshot: value.senderSnapshot });
+  const stored = JSON.stringify({
+    bodyPreview: postgresJsonText(value.bodyPreview),
+    senderSnapshot: sanitizeJsonValue(value.senderSnapshot),
+  });
   if (utf8ByteLength(stored) > MAX_STORED_PREVIEW_BYTES) {
     throw new DatabaseContractError("message preview is too large");
   }

@@ -65,3 +65,12 @@ test("the About's language is the Space's setting, never a guess from the conver
   assert.equal(spaceLanguage({ name: "中文频道" }), "en");
   assert.equal(spaceLanguage(undefined), "en");
 });
+
+test("a reading drops NUL and unpaired surrogates so PostgreSQL jsonb accepts the text task", () => {
+  const reading = channelAboutInput({ name: "Log\u0000", summary: "Sum\ud83d" }, [
+    message(1, "output\u0000with\udc00and 🚀", { from: { label: "Bot\u0000", kind: "agent" } }),
+  ]);
+  assert.ok(reading);
+  assert.doesNotMatch(JSON.stringify(reading.text), /\\u0000|\\u[dD][89a-fA-F][0-9a-fA-F]{2}/u);
+  assert.match(reading.text, /outputwith\uFFFDand 🚀/u);
+});
