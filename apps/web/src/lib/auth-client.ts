@@ -9,6 +9,7 @@ import type { AuthUser } from "@/lib/auth-context";
 import { classifyAuthClientFailure } from "@/lib/auth-error-policy";
 import { isTransientAuthStatus } from "@/lib/auth-session-policy";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { isSiteOnlyOrigin } from "@/lib/site-url";
 import { UserFacingProblem } from "@/lib/user-facing-error";
 import type { SessionReadGap } from "@/lib/session-not-ready";
 
@@ -117,6 +118,9 @@ export async function loadBetterAuthSession(): Promise<{
   user: AuthUser | null;
   gap?: SessionReadGap;
 }> {
+  // At the site's own origin no one is signed in, and the Hub does not answer a page there: the read would fail
+  // on every page of the site, and be tried again for as long as one stays open.
+  if (typeof window !== "undefined" && isSiteOnlyOrigin(window.location.origin)) return { session: null, user: null };
   // The Hub's jwt plugin answers a signed-in get-session with its bearer in
   // `set-auth-jwt` (exposed to this origin), so the session and the token
   // arrive in one round trip instead of a second /token request.
