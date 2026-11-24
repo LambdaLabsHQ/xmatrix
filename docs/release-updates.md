@@ -17,6 +17,17 @@ CLI change; an older CLI keeps subscribing pull requests as before.
 Recovery is a release reverting this change; the migration only widens a
 CHECK.
 
+## Unreleased: the Hub suite runs as eight shards
+
+A pull request that reaches the Hub runs the complete Hub suite (#2079). With
+four shards each took 3 min 35 s to 4 min 38 s, about a minute of it setup
+and build, and was the pull request's longest job by two minutes. The suite's
+459 files are now split by recorded duration into eight shards
+(`XMATRIX_HUB_TEST_SHARD=<n>/8`), which halves each shard's share of the
+tests; release trains use the same layout. Every file still runs exactly once
+and no assertion changes. A Hub pull request or train now holds nine hosted
+jobs instead of five. CI only. Recovery is a CI-validated revert to four.
+
 ## Unreleased: a pull request that reaches the Hub runs the Hub suite before merge
 
 From 2026-11-17 to 11-24, 65 release trains failed their gates, and 53 of them
