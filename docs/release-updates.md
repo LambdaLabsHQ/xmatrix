@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: the homepage's demos mount as they near the screen, and the live page's sheet keeps one height
+
+The homepage's three stages are the app's own components, and all three were
+fetched and run with the page, whether or not a visitor scrolled to them. Each
+now mounts when it comes within one screen of the window, and its frame holds
+its place from the start. On a phone throttled to a quarter of its CPU and
+8 Mbit/s (median of five loads of a local production build) the main thread is
+blocked for 1.7 s before any scrolling where it was 2.4 s, and 774 KB of
+script is fetched where it was 1122 KB; the work for a stage further down is
+done on the way to it. The live page's sheet also grew and shrank as its
+Agents wrote, by 84 px on a phone, moving everything under it on each pass of
+the demo. It now keeps the height of its fullest state at every width (checked
+at sixteen widths from 320 to 1920 px), and the Agents matrix's stage holds
+the height of the matrix it shows. Web only. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: a page of the site at xmatrix.page no longer asks the Hub for a session
 
 Every page of the site mounts the app's auth provider, which reads the session

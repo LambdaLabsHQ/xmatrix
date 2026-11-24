@@ -48,6 +48,10 @@ for (const width of [393, 1440]) {
     await expect(page.getByRole("link", { name: "Download on the App Store", exact: true })).toHaveAttribute("href", appStore);
     await expect(page.getByRole("link", { name: "Get it on Google Play", exact: true })).toHaveAttribute("href", googlePlay);
 
+    // A stage screens away is not run with the page: the matrix mounts on the way to it, further down.
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator("#agents .site-matrix")).toHaveCount(0);
+
     // The live document is the app's own editor, written by its Agents.
     const document = page.locator("#live-page .site-live-page");
     await document.scrollIntoViewIfNeeded();

@@ -3,7 +3,7 @@
 import type { CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import type { PreviewScene } from "@/components/landing/app-window-preview";
-import { useMedia } from "@/components/landing/use-media";
+import { useMedia, useNear } from "@/components/landing/use-media";
 
 // The app's own components measure the window and read browser-only state, so
 // they render on the client.
@@ -16,16 +16,18 @@ const AppWindowPreview = dynamic(
 // the way the iOS app (a web container) shows it.
 const DESKTOP_QUERY = "(min-width: 768px)";
 
-/** The real xMatrix app in a macOS window. */
+/** The real xMatrix app in a macOS window. The frame is drawn at once; the app in it mounts as it nears the screen. */
 function MacWindow() {
+  const [frame, near] = useNear<HTMLDivElement>();
   return (
     <div
+      ref={frame}
       className="site-app-window"
       role="img"
       aria-label="xMatrix showing a Space's conversations beside one where a person, Claude and Codex work on a landing page"
     >
       <div className="site-app-window-content" inert>
-        <AppWindowPreview />
+        {near && <AppWindowPreview />}
       </div>
       <span className="site-app-window-lights" aria-hidden>
         <span />
@@ -51,11 +53,12 @@ export function Phone({ scene = "landing", size, corner = false }: { scene?: Pre
     ...(size ? { "--site-phone-size": size } : {}),
     ...(corner ? { position: "absolute", right: 0, bottom: 0, margin: 0 } : {}),
   } as CSSProperties;
+  const [frame, near] = useNear<HTMLDivElement>();
   return (
-    <div className="site-phone" role="img" aria-label={PHONE_ART[scene]} style={style}>
+    <div ref={frame} className="site-phone" role="img" aria-label={PHONE_ART[scene]} style={style}>
       <div className="site-phone-screen">
         <div className="site-app-window-content" inert>
-          <AppWindowPreview scene={scene} />
+          {near && <AppWindowPreview scene={scene} />}
         </div>
         <span className="site-phone-island" aria-hidden />
       </div>

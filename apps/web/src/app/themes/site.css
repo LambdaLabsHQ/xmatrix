@@ -1048,7 +1048,6 @@ html[data-app-theme] .site-phone .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-ap
 
 /* One project's page, written live, as a sheet of paper on the page. */
 .site-live-page-window {
-  min-height: 33rem;
   overflow: hidden;
   border-radius: 12px;
   background: var(--background);
