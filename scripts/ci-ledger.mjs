@@ -33,10 +33,14 @@ export const HUB_SUITE_LEDGER_JOB = "hub-suite";
  * Pure: the CI job a job result belongs to. A matrix entry is named
  * `<job> (<entry>)` (`hub (2/3)`, `web (1/4)`), a caller of the
  * reusable workflow prefixes its own job (`validate / hub (2/3)`), and the
- * Hub suite covers both retired two-job names.
+ * Hub suite covers both retired two-job names. A pull request's `node-tests`
+ * entries run the `node-checks` and `duplicates` partitions the full tier's
+ * `node-checks` entries run (.github/workflows/ci.yml), so they earn the same
+ * record.
  */
 export function ledgerJobOf(name) {
   const job = name.replace(/^.* \/ /u, "").replace(/ \([^()]*\)$/u, "");
+  if (job === "node-tests") return "node-checks";
   return job === "hub" || job === "hub-2" ? HUB_SUITE_LEDGER_JOB : job;
 }
 
@@ -60,9 +64,12 @@ export function passedLedgerJobs(jobs) {
 /**
  * The CI jobs whose success the ledger records and every lookup names. The
  * `node-checks` job also runs the duplicate scan (on hosted runners as its
- * `node-checks (duplicates)` entry). Pull request CI's fast-tier jobs carry
- * other names (`node-tests`, `web-unit`, `hub-check`, ...), so they never
- * vouch for the full tier that main and release trains reuse.
+ * `node-checks (static)` entry). A job vouches only for what it ran: a pull
+ * request runs the same Node checks and, when its diff reaches the Hub, the
+ * same Hub suite as a release train, so the train of that exact tree reuses
+ * them. Its Web and Rust jobs are subsets of the full tier and carry other
+ * names (`web-unit`, `web-build`, `web-check`, `rust-clippy`), so they never
+ * vouch for the suites main and stable trains reuse.
  */
 export const LEDGER_JOBS = new Set([
   "node-checks", "web", HUB_SUITE_LEDGER_JOB, "desktop", "android", "rust-cli", "rust-cli-windows",

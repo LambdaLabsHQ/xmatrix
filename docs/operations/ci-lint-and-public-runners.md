@@ -60,23 +60,33 @@ jobs each finish in about two minutes including setup:
   build, and the lint and typecheck that build would run (`next typegen`, then
   `tsc`, beside `next lint`); in the full tier the checked build stays the
   authoritative Web lint and typecheck;
-- `hub-check`: the Hub typecheck and its deploy bundle;
+- `hub (static)` and `hub (1/4)`…`hub (4/4)`, only when the diff reaches the
+  Hub (`packages/hub`, `packages/db`, `packages/protocol`, the Agent prompts
+  or a shared root file): the complete Hub suite a Hub train gates on, about
+  four minutes. From 2026-11-17 to 11-24, 53 of 65 failed trains failed on
+  this suite, on changes that had merged without running it, and each held
+  every change riding that train until main was fixed;
 - `rust-clippy`: Clippy on the complete Rust workspace and all targets, for Linux and, cross-checked from Linux, for `x86_64-pc-windows-msvc`, so Windows-only code fails the pull request rather than a beta's cli-build.
 
 A release train runs the full tier for what it ships. Every train runs the
 protocol, billing, PostgreSQL package and script tests and the duplicate-code
-scan again on the merged revision, and a train that ships the Hub runs the Hub
-suite. Pull requests run the Node tests and the duplicate scan too: a change
-that fails them only after merge fails the train for every change riding it.
+scan on the merged revision, and a train that ships the Hub runs the Hub
+suite. Pull requests run the Node tests, the duplicate scan and, when the diff
+reaches the Hub, the Hub suite too: a change that fails them only after merge
+fails the train for every change riding it.
 The Web suites (the checked build, browser shards and performance budget) and
 the Rust, Desktop and Android suites gate the stable train that ships those
 components (`scripts/ci-areas.mjs`, `releaseOutputs`). The iOS simulator suite
 runs on the exact release revision before any train that ships iOS can upload
 to TestFlight or proceed to App Store submission. It shares the simulator
 action used in iOS pull request CI. Merging runs nothing more.
-Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so a release
-reuses only results the full tier earned and still blocks on every gate its
-scope and channel select. The train's jobs belong to Production Release
+A job vouches in the ledger only for what it ran (`scripts/ci-ledger.mjs`). A
+pull request's Node checks and Hub suite are the ones a train runs, so the
+train of the exact tree that pull request tested reuses them; when main moved
+between the pull request's run and its merge the tree differs and the train
+runs them itself. The pull request's Web and Rust jobs are subsets of the full
+tier under other names and vouch for nothing. A release still blocks on every
+gate its scope and channel select. The train's jobs belong to Production Release
 Request, and that run records them: the recorder accepts the request only from
 this repository's default branch, and only for a commit that dispatch SHA may
 ship (itself, its beta stamp, or a stable stamp of a source it contains). It

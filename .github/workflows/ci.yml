@@ -122,25 +122,27 @@ jobs:
         run: node scripts/version.mjs check-release-order --merged-tags-only
 
       # CI has two tiers, chosen here and nowhere else. A pull request runs
-      # the fast tier, each job within about two minutes: the Node checks
-      # with the package, PostgreSQL package and script tests (node-tests)
-      # and, beside them, the duplicate scan with the build-independent static
-      # checks (node-tests (static)), the
+      # the fast tier: the Node checks with the package, PostgreSQL package
+      # and script tests (node-tests) and, beside them, the duplicate scan
+      # with the build-independent static checks (node-tests (static)), the
       # Web unit tests (web-unit), production build (web-build) and its lint
-      # and typecheck (web-check), the Hub typecheck and deploy bundle
-      # (hub-check) and Clippy for Linux and Windows (rust-clippy). The Node tests and the
-      # duplicate scan gate every release train, so a pull request runs them
-      # too: one that fails them after merge fails the train for every change
-      # riding it. A release train runs the full tier for what it ships: the
-      # Node checks and duplicate scan again on the merged revision, and the
-      # Hub suite with its PostgreSQL tests when it ships the Hub. The Web suites
-      # (checked build, browser shards, performance budget) and the client
-      # suites (Rust tests on Linux and Windows, Desktop, Android) gate the
-      # stable train that ships them, not each beta (scripts/ci-areas.mjs,
+      # and typecheck (web-check), Clippy for Linux and Windows (rust-clippy)
+      # and, when its diff reaches the Hub, the complete Hub suite. The Node
+      # tests, the duplicate scan and the Hub suite gate the release trains
+      # every change rides, so a pull request runs them too: one that fails
+      # them after merge fails the train for every change riding it. A
+      # release train runs the full tier for what it ships: the Node checks
+      # and duplicate scan on the merged revision, and the Hub suite with its
+      # PostgreSQL tests when it ships the Hub. The Web suites (checked
+      # build, browser shards, performance budget) and the client suites
+      # (Rust tests on Linux and Windows, Desktop, Android) gate the stable
+      # train that ships them, not each beta (scripts/ci-areas.mjs,
       # releaseOutputs).
       # Merging runs nothing more; Public Snapshot CI runs every partition on
-      # manual dispatch. Only full-tier jobs carry ledgered names, so a
-      # release reuses only results the full tier earned.
+      # manual dispatch. A job vouches in the ledger only for what it ran
+      # (scripts/ci-ledger.mjs): the pull request's Node checks and Hub suite
+      # are the train's own, so a train of the tree the pull request tested
+      # reuses them; its Web and Rust jobs are subsets and vouch for nothing.
       - id: filter
         name: Detect changed areas
         shell: bash
@@ -233,9 +235,10 @@ jobs:
     # build-independent static checks ride with that scan, whose runner has
     # spare cores, so the CPU-saturated test group loses that work. A
     # persistent full-tier runner runs both as one job. A pull request names
-    # them node-tests, which the ledger never records, so only the full tier
-    # vouches for the content a release reuses; it records node-checks only
-    # when every entry passed.
+    # them node-tests; they run these same two partitions, so the ledger
+    # records them as node-checks (scripts/ci-ledger.mjs, ledgerJobOf) and a
+    # release train of the tree the pull request tested does not run them
+    # again. It records node-checks only when every entry passed.
     needs: changes
     name: ${{ matrix.name }}
     strategy:
@@ -364,14 +367,19 @@ jobs:
           key: turbo-${{ runner.os }}-${{ matrix.scope }}-${{ github.sha }}
 
   hub:
-    # The complete Hub suite. Every push runs this exact-SHA deploy gate, so
-    # undeployed main changes remain covered; a pull request runs it when its
-    # diff reaches the Hub. Waiting for the selector costs seconds and keeps
-    # seven hosted jobs free for other runs: the account runs at most 20 at
-    # once. Hosted runners split it into a static job and four
-    # duration-balanced shards of the test files; together they run exactly
-    # the `hub` partition. Four keep a shard (about 190 s of tests) under the
-    # release train's CodeQL scan, the gate it runs beside.
+    # The complete Hub suite, in both tiers. A release train that ships the
+    # Hub gates on it, so a pull request whose diff reaches the Hub runs it
+    # before merge: 53 of the 65 trains that failed from 2026-11-17 to 11-24
+    # failed here, on changes that had merged without it, and each one held
+    # every change riding that train until someone fixed main. Its jobs carry
+    # the ledgered names, so a train whose content is the tree this pull
+    # request tested reuses the result instead of running the suite again.
+    # Waiting for the selector costs seconds and keeps the hosted jobs free
+    # for other runs: the account runs at most 20 at once. Hosted runners
+    # split it into a static job and four duration-balanced shards of the
+    # test files; together they run exactly the `hub` partition. Four keep a
+    # shard (about 190 s of tests) under the release train's CodeQL scan, the
+    # gate it runs beside.
     # A persistent runner's file pool widens with the host's headroom
     # (packages/hub/test/hub-test-pool.mjs).
     needs: changes
@@ -380,7 +388,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"hub-check","partition":"hub-check","shard":""}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"hub (static)","partition":"hub-static","shard":""},{"name":"hub (1/4)","partition":"hub-files","shard":"1/4"},{"name":"hub (2/4)","partition":"hub-files","shard":"2/4"},{"name":"hub (3/4)","partition":"hub-files","shard":"3/4"},{"name":"hub (4/4)","partition":"hub-files","shard":"4/4"}]' || '[{"name":"hub","partition":"hub","shard":""}]') }}
+        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"hub (static)","partition":"hub-static","shard":""},{"name":"hub (1/4)","partition":"hub-files","shard":"1/4"},{"name":"hub (2/4)","partition":"hub-files","shard":"2/4"},{"name":"hub (3/4)","partition":"hub-files","shard":"3/4"},{"name":"hub (4/4)","partition":"hub-files","shard":"4/4"}]' || '[{"name":"hub","partition":"hub","shard":""}]') }}
     runs-on: *linux_runner
     permissions:
       contents: read
@@ -403,15 +411,14 @@ jobs:
           path: ~/.cache/xmatrix/turbo
           key: turbo-${{ runner.os }}-hub-${{ github.sha }}
           restore-keys: turbo-${{ runner.os }}-hub-
-      # The pull request's hub-check runs no PostgreSQL test.
       - name: Restore PostgreSQL 17 test tools on a GitHub-hosted runner
-        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted' && matrix.partition != 'hub-check'
+        if: steps.ledger.outputs.hit != 'true' && runner.environment == 'github-hosted'
         uses: actions/cache@v6
         with:
           path: ~/.cache/xmatrix-test-postgres
           key: test-postgres-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/setup-test-postgres.sh', 'scripts/test-postgres-apt.conf') }}
       - name: Build isolated PostgreSQL 17 test tools
-        if: steps.ledger.outputs.hit != 'true' && matrix.partition != 'hub-check'
+        if: steps.ledger.outputs.hit != 'true'
         timeout-minutes: 15
         run: bash scripts/setup-test-postgres.sh
       - name: Run shared Hub checks
