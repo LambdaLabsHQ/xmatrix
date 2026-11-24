@@ -1,3 +1,5 @@
+import { clientErrorReport } from "@xmatrix/protocol";
+
 import { isDiagnosticsEnabled, subscribeDiagnosticsPreference } from "./lib/diagnostics-preference";
 import { earlyScriptLocation, isBrowserNoticeReport, isStaleBuild } from "./lib/error-noise";
 
@@ -11,9 +13,6 @@ const isSignedInAppRoute = () => {
   const pathname = typeof window === "undefined" ? "" : window.location.pathname;
   return pathname === "/app" || pathname.startsWith("/app/");
 };
-
-/** A URL without its query and fragment, which can carry one-time codes. */
-const pathOnly = (url: string) => url.replace(/[?#].*$/u, "");
 
 /** Uncaught errors and rejections raised before error reporting has loaded. */
 const early: { error: unknown; where: ReturnType<typeof earlyScriptLocation> }[] = [];
@@ -35,22 +34,14 @@ async function startErrorReporting(dsn: string) {
     environment: "production",
     dataCollection: { userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false },
     tracesSampleRate: 0,
-    // Console lines may quote message content, so they never become breadcrumbs.
-    integrations: (defaults) => defaults.filter((integration) => integration.name !== "Console"),
-    beforeBreadcrumb(breadcrumb) {
-      for (const key of ["url", "from", "to"] as const) {
-        const value = breadcrumb.data?.[key];
-        if (typeof value === "string") breadcrumb.data![key] = pathOnly(value);
-      }
-      return breadcrumb;
-    },
+    // A report never carries breadcrumbs (clicks, console lines, URLs), so none are collected.
+    integrations: (defaults) => defaults.filter((integration) => integration.name !== "Breadcrumbs" && integration.name !== "Console"),
     beforeSend(event, hint) {
       if (!isSignedInAppRoute() || !isDiagnosticsEnabled()) return null;
       // A reload fixes a stale build, and the failure screen offers it; neither is a defect to report.
       if (isStaleBuild(hint.originalException) || isBrowserNoticeReport(hint.originalException, event)) return null;
-      if (event.request?.url) event.request = { url: pathOnly(event.request.url) };
-      delete event.user;
-      return event;
+      // The error's class, code and stack locations only: never what it said (protocol error-report-contract).
+      return clientErrorReport(event, hint.originalException);
     },
   });
   removeEventListener("error", holdError);

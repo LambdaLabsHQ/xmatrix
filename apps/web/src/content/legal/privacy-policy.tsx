@@ -89,8 +89,14 @@ export function PrivacyPolicyContent() {
             <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code> or{" "}
             <code className="font-mono text-xs">xmatrix config telemetry on</code> (suppressed
             when <code className="font-mono text-xs">DO_NOT_TRACK=1</code> or{" "}
-            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> is set). Operational
-            diagnostics are designed not to contain message or command bodies; see our{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> is set). Each
+            diagnostic event has a declared set of fields, and each field may hold only a fixed
+            value, a number, true or false, a version, a short code, or an opaque identifier; an event with any
+            other field or value is refused. Client errors are reported by their class, code, and
+            code locations, never by their message. The one exception is the redacted startup
+            output you choose to send from a desktop failure card. Server-side Hub error reports
+            keep the server&apos;s own error message with quoted values, email addresses, URL
+            queries, home-directory paths, and token-shaped strings removed. See our{" "}
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and Local Privacy guide
             </Link>
