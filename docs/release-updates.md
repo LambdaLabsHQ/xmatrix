@@ -23,6 +23,23 @@ Approved by Daniel on 2026-11-24. Expected effect: about three minutes less
 from merge to a live beta Web. CI and release infrastructure only. Recovery is
 a CI-validated revert, after which the `main` rule can be removed from the
 environment.
+## Unreleased: a conversation follows a workflow run, so Agents stop polling GitHub
+
+Every Agent on every machine calls `gh` with one owner's token and shares its
+5,000-an-hour REST quota. `gh run watch` asks every three seconds (about 40
+calls a minute), so a few Agents watching CI and release trains ran the quota
+out within the hour. `xmatrix channel subscribe` now also takes a workflow
+run's URL (`https://github.com/<owner>/<repo>/actions/runs/<id>`): the Hub
+keeps a `workflow_run` source relation (migration 0272 allows the kind), posts
+the run's verdict once when its `workflow_run` webhook completes, wakes the
+conversation's resting Agents and ends the relation. A run that already
+completed is answered with its conclusion and not followed; reading the run
+uses the GitHub App's `actions: read`. The Channel contract now tells Agents
+never to poll GitHub and to subscribe instead. Hub, schema (expand only) and
+CLI change; an older CLI keeps subscribing pull requests as before.
+Recovery is a release reverting this change; the migration only widens a
+CHECK.
+
 ## Unreleased: a pull request that reaches the Hub runs the Hub suite before merge
 
 From 2026-11-17 to 11-24, 65 release trains failed their gates, and 53 of them

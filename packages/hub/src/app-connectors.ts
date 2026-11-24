@@ -980,6 +980,34 @@ export async function readGitHubPullRequestTitle(
 }
 
 /** Whether a pull request is open now. */
+/** A GitHub Actions workflow run as it is now. */
+export interface GitHubWorkflowRunState {
+  status: string;
+  conclusion: string;
+  name: string;
+  runNumber: number;
+  url: string;
+}
+
+export async function readGitHubWorkflowRun(
+  env: AppConnectorEnv,
+  connection: AppConnectorConnectionView,
+  repository: { owner: string; repo: string },
+  runId: number
+): Promise<GitHubWorkflowRunState> {
+  const auth = await githubInstallationAuthWithCapability(env, connection, "github.actions.read", repository);
+  const run = githubObject(await fetchGitHubJson(env,
+    `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.repo)}/actions/runs/${runId}`,
+    auth.token));
+  return {
+    status: githubString(run.status) ?? "",
+    conclusion: githubString(run.conclusion) ?? "",
+    name: githubString(run.display_title) || githubString(run.name) || "",
+    runNumber: Number(run.run_number) || 0,
+    url: githubString(run.html_url) ?? "",
+  };
+}
+
 export async function readGitHubPullRequestOpen(
   ...pull: Parameters<typeof readGitHubPullRequest>
 ): Promise<boolean> {
@@ -2254,6 +2282,7 @@ function githubInstallationCapabilities(payload: unknown): string[] {
   if (githubPermissionAllowsRead(permissions.checks)) capabilities.push("github.checks.read");
   if (githubPermissionAllowsWrite(permissions.checks)) capabilities.push("github.checks.write");
   if (githubPermissionAllowsRead(permissions.security_events)) capabilities.push("github.code_scanning.read");
+  if (githubPermissionAllowsRead(permissions.actions)) capabilities.push("github.actions.read");
   if (githubPermissionAllowsWrite(permissions.actions)) capabilities.push("github.actions.write");
   // GitHub exposes `workflows` as write-only: there is no read level to derive.
   if (githubPermissionAllowsWrite(permissions.workflows)) capabilities.push("github.workflows.write");
