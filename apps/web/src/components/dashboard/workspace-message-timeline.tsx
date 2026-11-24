@@ -2721,8 +2721,9 @@ export const MessageRow = memo(function MessageRow({
       </div>
     </MentionReadMessageScopeProvider>
   );
-  // Written in the Chrome extension's side panel: the page the person was looking at (browser-page.ts).
-  const browserPage = browserPageOf(message.metadata);
+  // Written in the Chrome extension's side panel: the page the person was looking at (browser-page.ts). Theirs
+  // alone to see (Daniel 2026-11-24): the Agent is told the page, the rest of the team is not shown their browsing.
+  const browserPage = message.own ? browserPageOf(message.metadata) : null;
   const underWords = (message.attachments ?? []).filter((_attachment, index) =>
     !richMessage.picturedPlaces.has(index + 1));
   function drawPicture(place: number) {
