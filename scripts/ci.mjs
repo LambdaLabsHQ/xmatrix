@@ -527,8 +527,6 @@ const partitions = {
     },
     hubBundle,
   ],
-  // Pull request CI: the Hub typecheck and deploy bundle, without the suite.
-  "hub-check": [hubWorkspaceBuild, hubRenderConfig, hubTypecheck, hubBundle],
   "hub-files": [
     hubWorkspaceBuild,
     {
