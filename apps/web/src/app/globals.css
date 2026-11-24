@@ -2699,12 +2699,13 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 }
 
 /* While the box grows into the completion panel (composer-input.tsx), its
-   content rides the bottom edge: the box clips the panel's top as it grows,
-   never the input row. */
+   content rides the anchored edge: bottom when the panel opens upward, top
+   when it opens downward, so the box clips the panel as it grows and never
+   the input row. */
 .xmatrix-app .app-composer-box.app-composer-box-morphing {
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: var(--app-composer-morph-justify, flex-end);
 }
 
 .xmatrix-app .app-composer-box.app-composer-box-morphing > * {
@@ -2721,7 +2722,7 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
   left: auto !important;
   margin: 0 !important;
   width: 100% !important;
-  max-height: min(40rem, calc(100dvh - var(--app-safe-area-top, 0px) - var(--app-safe-area-bottom, 0px) - 7rem)) !important;
+  max-height: min(var(--app-composer-panel-max-height, 40rem), 40rem, calc(100dvh - var(--app-safe-area-top, 0px) - var(--app-safe-area-bottom, 0px) - 7rem)) !important;
   overflow-y: auto !important;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;

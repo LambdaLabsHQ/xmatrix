@@ -35,6 +35,7 @@ export function SlashCommandPanel({
   commands,
   targets,
   activeIndex,
+  panelPlacement = "above",
   optionRef,
   listRef,
   onSelectCommand,
@@ -45,6 +46,7 @@ export function SlashCommandPanel({
   commands: SlashCommandCandidate[];
   targets: SlashCommandTarget[];
   activeIndex: number;
+  panelPlacement?: "above" | "below";
   optionRef: (index: number) => (node: HTMLElement | null) => void;
   listRef: (node: HTMLDivElement | null) => void;
   onSelectCommand: (command: SlashCommandCandidate) => void;
@@ -55,7 +57,7 @@ export function SlashCommandPanel({
       ref={listRef}
       role="listbox"
       aria-label={stageLabel}
-      className="app-mention-suggestions w-full overflow-y-auto border-b border-border/60"
+      className={`app-mention-suggestions w-full overflow-y-auto ${panelPlacement === "below" ? "border-t" : "border-b"} border-border/60`}
       onTouchStart={stopTouchPropagation}
       onTouchMove={stopTouchPropagation}
     >

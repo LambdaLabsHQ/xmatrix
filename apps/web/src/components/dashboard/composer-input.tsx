@@ -57,6 +57,8 @@ export type ComposerInputAuthorityProps = ComposerContextFields & {
   panel?: ReactNode;
   /** Stable key naming the active `panel` so switching between panels also triggers a smooth height morph. */
   panelKey?: string;
+  /** Where completion and auxiliary panels expand relative to the input row. Defaults to `"above"` for bottom-docked chat composers. */
+  panelPlacement?: "above" | "below";
   /** Key handling before completion and Enter-to-send, for the `panel`'s own keys; true when it took the key. */
   onKeyDownFirst?: (event: ComposerKeyEvent) => boolean;
   /** Extra key handling after shared completion/enter (e.g. attachment backspace). */
@@ -126,6 +128,7 @@ function ComposerInputSurface({
   afterSend,
   panel,
   panelKey,
+  panelPlacement = "above",
   onKeyDownFirst,
   onKeyDownExtra,
   boxClassName,
@@ -171,6 +174,7 @@ function ComposerInputSurface({
     enabled,
     instanceTargetScope,
     fieldRef,
+    panelPlacement,
     selectedWorkspaceId,
     onWorkspaceSelect,
     onConfigureAppConnector,
@@ -305,6 +309,20 @@ function ComposerInputSurface({
   const compact = density === "compact";
   const appMentions = completion.appMentions;
 
+  const overlayPanel = (
+    <>
+      {completion.isCompletionOpen ? completion.renderOverlays() : panel}
+      {!panelOpen && closingPanel && (
+        <div
+          aria-hidden="true"
+          className="app-composer-panel-closing pointer-events-none [animation:app-composer-attach-out_170ms_cubic-bezier(0.4,0,0.2,1)_forwards] motion-reduce:animate-none [&_.app-composer-attach-menu]:!animate-none"
+        >
+          {closingPanel}
+        </div>
+      )}
+    </>
+  );
+
   const body = (
     <div
       className={cn(
@@ -317,6 +335,8 @@ function ComposerInputSurface({
       <LiquidGlassSurface
         ref={boxRef}
         fill
+        data-panel-placement={panelPlacement}
+        style={panelPlacement === "below" ? { ["--app-composer-morph-justify" as string]: "flex-start" } : undefined}
         className={cn(
           "app-composer-box app-material-liquid-pill relative min-w-0 flex-1 border border-input bg-card shadow-sm transition-colors duration-200 focus-within:border-ring",
           (completion.isCompletionOpen || panel) && "app-composer-box-mentions-open",
@@ -346,18 +366,10 @@ function ComposerInputSurface({
             ))}
           </div>
         )}
-        {completion.isCompletionOpen ? completion.renderOverlays() : panel}
-        {!panelOpen && closingPanel && (
-          <div
-            aria-hidden="true"
-            className="app-composer-panel-closing pointer-events-none [animation:app-composer-attach-out_170ms_cubic-bezier(0.4,0,0.2,1)_forwards] motion-reduce:animate-none [&_.app-composer-attach-menu]:!animate-none"
-          >
-            {closingPanel}
-          </div>
-        )}
+        {panelPlacement === "above" && overlayPanel}
         {/* One capsule: attach, text, actions and send share the glass. When
             the text wraps or a header shows, the same surface grows into a
-            panel and the controls stay on its bottom edge. */}
+            panel and the controls stay on its anchored edge. */}
         <div className="composer-input-row flex min-w-0 items-end gap-2">
           {inputLeading}
           <ComposerEditor
@@ -435,6 +447,7 @@ function ComposerInputSurface({
             )}
           </button>
         </div>
+        {panelPlacement === "below" && overlayPanel}
       </LiquidGlassSurface>
       {afterSend}
     </div>

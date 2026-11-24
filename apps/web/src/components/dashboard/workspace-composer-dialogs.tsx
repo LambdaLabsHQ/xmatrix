@@ -262,6 +262,7 @@ export const Composer = memo(function Composer({
   compact = false,
   channel: catalogChannel,
   attachmentsEnabled = true,
+  panelPlacement = "above",
   draftIdentity,
   startsConversation = false,
   space,
@@ -298,6 +299,8 @@ export const Composer = memo(function Composer({
   compact?: boolean;
   channel: ChannelSnapshot | null;
   attachmentsEnabled?: boolean;
+  /** Where completion and auxiliary panels expand relative to the input row. */
+  panelPlacement?: "above" | "below";
   /** Identifies the draft when `channel` is not its own, e.g. a conversation that does not exist yet. */
   draftIdentity?: string;
   /**
@@ -1626,6 +1629,7 @@ export const Composer = memo(function Composer({
       />
               <ComposerInputAuthority
           density={compact ? "compact" : "default"}
+          panelPlacement={panelPlacement}
           draft={localDraft}
           onDraftChange={setDraftText}
           onInvocationSelect={selectInvocation}

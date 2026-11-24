@@ -38,6 +38,8 @@
   let prepared = false;
   let anchor = null;
   let shown = "";
+  let layout = { placement: "below", maxPanelHeight: 320 };
+  let lastSize = null;
 
   /**
    * The box is made, hidden, as soon as the person starts selecting, so its
@@ -58,11 +60,55 @@
     document.documentElement.append(frame);
   }
 
-  /** Tells the box its passage is ready to read, once both it and the passage are. */
+  /** Visual gap between the selection and the capsule, and between the capsule and the viewport edges. */
+  const GAP = 8;
+  const EDGE_MARGIN = 8;
+  const DEFAULT_TOP_INSET = 12;
+  const DEFAULT_BOTTOM_INSET = 24;
+  const DEFAULT_SIDE_INSET = 12;
+  // Room below the selection where the composer plus an open completion list fit comfortably without flipping up.
+  const PREFERRED_ROOM = 320;
+  // Vertical budget inside the capsule for the input row and chrome before the completion list scrolls.
+  const COMPOSER_CHROME_HEIGHT = 84;
+  const MIN_PANEL_HEIGHT = 120;
+  const MIN_SIDE_ROOM = 80;
+
+  /**
+   * Picks which side of the selection the box opens on and how tall its
+   * completion list may grow there without covering the selection or leaving
+   * the viewport:
+   * - below (dropdown downward) whenever below has comfortable room or at least as much room as above;
+   * - above (popup upward) when below is tight and above has more room;
+   * - pinned near the bottom opening upward if a huge selection leaves neither side with room.
+   */
+  function chooseLayout(rect, viewportHeight) {
+    const spaceBelow = Math.max(0, viewportHeight - EDGE_MARGIN - (rect.bottom + GAP));
+    const spaceAbove = Math.max(0, rect.top - GAP - EDGE_MARGIN);
+    if (Math.max(spaceBelow, spaceAbove) < MIN_SIDE_ROOM) {
+      const available = Math.max(MIN_SIDE_ROOM, viewportHeight - EDGE_MARGIN * 2);
+      return {
+        placement: "above",
+        maxPanelHeight: Math.max(MIN_PANEL_HEIGHT, Math.floor(available - COMPOSER_CHROME_HEIGHT)),
+      };
+    }
+    const placement = spaceBelow < PREFERRED_ROOM && spaceAbove > spaceBelow ? "above" : "below";
+    const available = placement === "above" ? spaceAbove : spaceBelow;
+    return {
+      placement,
+      maxPanelHeight: Math.max(MIN_PANEL_HEIGHT, Math.floor(available - COMPOSER_CHROME_HEIGHT)),
+    };
+  }
+
+  /** Tells the box its passage and placement are ready to read, once both it and the passage are. */
   function deliver() {
-    if (!frame || !frameReady || !prepared) return;
+    if (!frame || !frameReady || !prepared || !anchor) return;
     prepared = false;
-    frame.contentWindow?.postMessage({ xmatrixAsk: "prepared" }, ORIGIN);
+    layout = chooseLayout(anchor, innerHeight);
+    frame.contentWindow?.postMessage({
+      xmatrixAsk: "prepared",
+      placement: layout.placement,
+      maxPanelHeight: layout.maxPanelHeight,
+    }, ORIGIN);
   }
 
   /** Wakes the extension's service worker (and renews its sign-in if due) while the person is still selecting. */
@@ -78,20 +124,35 @@
     if (frame) frame.style.visibility = "hidden";
     if (frame && document.activeElement === frame) frame.blur();
     shown = "";
+    lastSize = null;
   }
 
-  /** The frame's clear margin around the box, for its shadow (ask.tsx): the box, not the frame, is placed. */
-  const INSET = 12;
-
-  /** Under the selection, or above it when there is no room; inside the window. */
-  function place(width, height) {
+  /**
+   * Anchors the visible capsule on the chosen side of the selection:
+   * - `below`: top edge stays pinned below the selection as the dropdown grows downward.
+   * - `above`: bottom edge stays pinned above the selection as the popup grows upward.
+   */
+  function place(width, height, insets) {
     if (!frame || !anchor || !shown) return;
-    const below = anchor.bottom + 8 - INSET;
-    const top = below + height > innerHeight ? Math.max(0, anchor.top - height + INSET) : below;
-    frame.style.top = `${Math.max(0, Math.min(top, innerHeight - height))}px`;
-    frame.style.left = `${Math.max(0, Math.min(anchor.left - INSET, innerWidth - width))}px`;
-    frame.style.width = `${width}px`;
-    frame.style.height = `${height}px`;
+    const topInset = Number.isFinite(insets?.topInset) ? insets.topInset : DEFAULT_TOP_INSET;
+    const bottomInset = Number.isFinite(insets?.bottomInset) ? insets.bottomInset : DEFAULT_BOTTOM_INSET;
+    const leftInset = Number.isFinite(insets?.leftInset) ? insets.leftInset : DEFAULT_SIDE_INSET;
+    const rightInset = Number.isFinite(insets?.rightInset) ? insets.rightInset : DEFAULT_SIDE_INSET;
+    const frameWidth = Math.min(width, innerWidth + leftInset + rightInset);
+    const frameHeight = Math.min(height, innerHeight + topInset + bottomInset);
+    const rawTop = layout.placement === "above"
+      ? anchor.top - GAP - frameHeight + bottomInset
+      : anchor.bottom + GAP - topInset;
+    const minTop = EDGE_MARGIN - topInset;
+    const maxTop = innerHeight - EDGE_MARGIN - (frameHeight - bottomInset);
+    const top = Math.max(minTop, Math.min(rawTop, maxTop));
+    const minLeft = EDGE_MARGIN - leftInset;
+    const maxLeft = innerWidth - EDGE_MARGIN - (frameWidth - rightInset);
+    const left = Math.max(minLeft, Math.min(anchor.left - leftInset, maxLeft));
+    frame.style.top = `${top}px`;
+    frame.style.left = `${left}px`;
+    frame.style.width = `${frameWidth}px`;
+    frame.style.height = `${frameHeight}px`;
     frame.style.visibility = "visible";
   }
 
@@ -135,13 +196,29 @@
       frameReady = true;
       deliver();
     } else if (event.data.type === "size") {
-      const { width, height } = event.data;
+      const { width, height, topInset, bottomInset, leftInset, rightInset } = event.data;
       if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
-        place(Math.min(width, innerWidth - 16), Math.min(height, innerHeight - 16));
+        lastSize = { width, height, topInset, bottomInset, leftInset, rightInset };
+        place(width, height, lastSize);
       }
     } else if (event.data.type === "close") {
       hide();
     }
+  });
+
+  // Keep the open box adapted if the browser window is resized around it.
+  listen(window, "resize", () => {
+    if (!frame || !anchor || !shown) return;
+    const next = chooseLayout(anchor, innerHeight);
+    if (next.placement !== layout.placement || next.maxPanelHeight !== layout.maxPanelHeight) {
+      layout = next;
+      frame.contentWindow?.postMessage({
+        xmatrixAsk: "layout",
+        placement: layout.placement,
+        maxPanelHeight: layout.maxPanelHeight,
+      }, ORIGIN);
+    }
+    if (lastSize) place(lastSize.width, lastSize.height, lastSize);
   });
 
   // A click on the page, away from the box, closes it, as a click away closes the App's popovers;

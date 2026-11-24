@@ -141,6 +141,8 @@ export type ComposerContextFields = {
 
 export type ComposerCompletionInput = ComposerContextFields & {
   fieldRef: RefObject<ComposerField | null>;
+  /** Where the completion list attaches to the input row inside the capsule. */
+  panelPlacement?: "above" | "below";
 };
 
 export type ComposerCompletionApi = {
@@ -198,6 +200,7 @@ export function useComposerCompletion({
   enabled,
   instanceTargetScope = "channel",
   fieldRef,
+  panelPlacement = "above",
   onConfigureAppConnector,
   onEditHarnessProfile,
 }: ComposerCompletionInput): ComposerCompletionApi {
@@ -408,6 +411,11 @@ export function useComposerCompletion({
   // Escape is presentation state, not launch state. A dismissed draft stays
   // closed until the human edits it or explicitly moves the caret again.
   const completionDismissed = dismissedCompletionDraft === draft;
+  useEffect(() => {
+    if (dismissedCompletionDraft !== null && dismissedCompletionDraft !== draft) {
+      setDismissedCompletionDraft(null);
+    }
+  }, [dismissedCompletionDraft, draft]);
   const mentionSuggestions = mentionCompletion.candidates;
   /* Folding is a browsing affordance for the bare `@` listing only. Once the
      human types, the query is already the filter, so a folded section would
@@ -884,6 +892,7 @@ export function useComposerCompletion({
   }
 
   function renderOverlays() {
+    const panelBorderClass = panelPlacement === "below" ? "border-t border-border/60" : "border-b border-border/60";
     return (
       <>
         {showSlashSuggestions && (
@@ -893,6 +902,7 @@ export function useComposerCompletion({
               commands={slashCompletion.commands}
               targets={slashCompletion.targets}
               activeIndex={activeIndex}
+              panelPlacement={panelPlacement}
               optionRef={(index) => (node) => {
                 mentionOptionRefs.current[index] = node;
               }}
@@ -909,7 +919,7 @@ export function useComposerCompletion({
               role="listbox"
               aria-label={activeReference.kind === "channel" ? "Channels" : "Pages"}
               data-testid="composer-reference-suggestions"
-              className="app-mention-suggestions w-full overflow-y-auto border-b border-border/60"
+              className={`app-mention-suggestions w-full overflow-y-auto ${panelBorderClass}`}
               onTouchStart={stopTouchPropagation}
               onTouchMove={stopTouchPropagation}
             >
@@ -947,7 +957,7 @@ export function useComposerCompletion({
             <div
               ref={mentionListRef}
               role="listbox"
-              className="app-mention-suggestions w-full overflow-y-auto border-b border-border/60"
+              className={`app-mention-suggestions w-full overflow-y-auto ${panelBorderClass}`}
               onTouchStart={stopTouchPropagation}
               onTouchMove={stopTouchPropagation}
             >
