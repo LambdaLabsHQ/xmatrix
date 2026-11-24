@@ -411,6 +411,11 @@ export function useComposerCompletion({
   // Escape is presentation state, not launch state. A dismissed draft stays
   // closed until the human edits it or explicitly moves the caret again.
   const completionDismissed = dismissedCompletionDraft === draft;
+  useEffect(() => {
+    if (dismissedCompletionDraft !== null && dismissedCompletionDraft !== draft) {
+      setDismissedCompletionDraft(null);
+    }
+  }, [dismissedCompletionDraft, draft]);
   const mentionSuggestions = mentionCompletion.candidates;
   /* Folding is a browsing affordance for the bare `@` listing only. Once the
      human types, the query is already the filter, so a folded section would
