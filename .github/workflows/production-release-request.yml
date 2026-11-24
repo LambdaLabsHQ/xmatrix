@@ -132,8 +132,8 @@ jobs:
   # commit is keyed by its source's tree (scripts/ci-ledger.mjs), so partitions
   # that already passed identical content are not run again. Client suites
   # gate the stable train that ships a client, not each beta
-  # (scripts/ci-areas.mjs, releaseOutputs); the iOS simulator gate below
-  # follows the same rule.
+  # (scripts/ci-areas.mjs, releaseOutputs). The separate iOS simulator gate
+  # covers native regression checks before both TestFlight and App Store upload.
   ci:
     needs: plan
     if: needs.plan.outputs.scope != ''
@@ -151,7 +151,7 @@ jobs:
 
   ios:
     needs: plan
-    if: contains(format(',{0},', needs.plan.outputs.scope), ',ios,') && needs.plan.outputs.channel == 'stable'
+    if: contains(format(',{0},', needs.plan.outputs.scope), ',ios,')
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-macos-release"]') || 'macos-26' }}
     timeout-minutes: 30
     permissions:
@@ -215,7 +215,7 @@ jobs:
     if: >-
       always() && needs.plan.result == 'success' && needs.ci.result == 'success' &&
       needs.codeql.result == 'success' &&
-      ((contains(format(',{0},', needs.plan.outputs.scope), ',ios,') && needs.plan.outputs.channel == 'stable') == (needs.ios.result == 'success')) &&
+      (contains(format(',{0},', needs.plan.outputs.scope), ',ios,') == (needs.ios.result == 'success')) &&
       (needs.ios.result == 'success' || needs.ios.result == 'skipped')
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["xmatrix-ci-offload"]') || 'ubuntu-24.04' }}
     steps:
