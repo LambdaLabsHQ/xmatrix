@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
+import { isExtensionCompanion } from "@/lib/extension-embed";
 import { useRealtimeChannel } from "./realtime-channels";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { MobileInlineActions } from "./mobile-inline-actions";
@@ -953,6 +954,19 @@ export function StartupShell({
      default and the stored width replaces it before the hydrated paint. */
   const [desktopSidebarWidth, setDesktopSidebarWidth] = useState(DESKTOP_SIDEBAR_DEFAULT_WIDTH_PX);
   useLayoutEffect(() => setDesktopSidebarWidth(readStoredDesktopSidebarWidth()), []);
+  if (isExtensionCompanion()) {
+    return (
+      <div
+        className="xmatrix-app xmatrix-app-shell relative isolate m-0 flex h-dvh w-screen max-w-[100dvw] flex-col overflow-hidden bg-white text-foreground"
+        style={{ "--app-panel-paper": "#ffffff", "--background": "#ffffff", "--card": "#ffffff" } as CSSProperties}
+        aria-busy="true"
+      >
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <StartupStatus />
+        </div>
+      </div>
+    );
+  }
   const inert = () => {};
   const rows = (row: (channel: ChannelSnapshot) => ReactNode) => channels.length > 0
     ? <ChannelSectionRows channels={channels} row={row} />

@@ -18,7 +18,7 @@ import { SpaceAllowanceNotice } from "./space-allowance-notice";
 export function NewConversation({
   space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace,
   onEditHarnessProfile, initialDraft = "",
-  error = null, allowance,
+  error = null, allowance, companion = false,
 }: {
   /** What the composer opens holding, for the person to send (a welcome card's). */
   initialDraft?: string;
@@ -37,6 +37,8 @@ export function NewConversation({
   onEditHarnessProfile?: (harness: string) => void;
   /** Says, under the conversation, how close this Space is to having its writes refused. */
   allowance?: { userId: string; onOpenBilling?: () => void };
+  /** Rendered inside the Chrome extension side panel, which provides its own bar above this surface. */
+  companion?: boolean;
 }) {
   const draftRef = useRef(initialDraft);
   const [attachments, setAttachments] = useState<ChannelAttachment[]>([]);
@@ -63,14 +65,26 @@ export function NewConversation({
 
   return (
     <section className="app-message-surface relative flex min-w-0 flex-1 flex-col overflow-hidden" data-testid="new-conversation">
-      <div className="app-panel-header flex shrink-0 items-center justify-between gap-3 bg-card px-4 py-2">
-        <div className="min-w-0 text-[18px] font-black leading-none">New conversation</div>
-        <button type="button" title="Close" aria-label="Close" onClick={onCancel} disabled={sending}
-          className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
-          <X className="size-4" />
-        </button>
-      </div>
+      {!companion && (
+        <div className="app-panel-header flex shrink-0 items-center justify-between gap-3 bg-card px-4 py-2">
+          <div className="min-w-0 text-[18px] font-black leading-none">New conversation</div>
+          <button type="button" title="Close" aria-label="Close" onClick={onCancel} disabled={sending}
+            className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground">
+            <X className="size-4" />
+          </button>
+        </div>
+      )}
       <div className="flex min-h-0 flex-1 flex-col justify-end">
+        {companion && (
+          <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+            <p className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">
+              Ask about this page
+            </p>
+            <p className="mt-1.5 max-w-[16rem] text-[13px] leading-[1.55] text-muted-foreground">
+              Your Agents read the page as you see it. Select text on it to ask about that part.
+            </p>
+          </div>
+        )}
         {allowance && space && <SpaceAllowanceNotice spaceId={space.id} token={token} userId={allowance.userId}
           onOpenBilling={allowance.onOpenBilling} />}
       </div>

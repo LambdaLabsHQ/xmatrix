@@ -502,6 +502,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   threadRootMessage,
   threadRootChannel,
   inPageMargin = false,
+  compactLayout = false,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -545,6 +546,8 @@ export const MessageTimeline = memo(function MessageTimeline({
    * not (selection-discussion.ts), and a thread that short needs no way back to a person's last message, which
    * would only cover what it says (user 2026-11-06). */
   inPageMargin?: boolean;
+  /** Narrow desktop browser companion (Chrome side panel): avatar sits inline beside the sender name so prose uses the full width. */
+  compactLayout?: boolean;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -1131,6 +1134,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                 onRetryAgentLaunch={retryAgentLaunch}
                 contextOnly
                 initiallyExpanded
+                compactLayout={compactLayout}
                 currentUserIdentityId={currentUserIdentityId}
                 channel={threadRootChannel}
                 token={token}
@@ -1216,6 +1220,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onComposeMention={onComposeMention}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
                   foldsDiscussionHead={inPageMargin}
+                  compactLayout={compactLayout}
                   turnContinued={continuedTurnFailures.has(message.id)}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
@@ -1275,9 +1280,11 @@ export const MessageTimeline = memo(function MessageTimeline({
         );
         if (scrollTop <= 240) requestOlderHistoryIfEligible();
       }}
+      style={compactLayout ? ({ "--app-message-avatar-size": "1.25rem" } as CSSProperties) : undefined}
       className={cn(
         "app-message-timeline min-h-0 flex-1 overflow-y-auto bg-card",
         hasWorkDock && "app-message-timeline-work-dock-offset",
+        compactLayout && "pt-2 [&_.rich-message]:text-[14px] [&_.rich-message]:leading-[1.68] [&_.app-message-meta_.app-shared-chip]:!bg-transparent [&_.app-message-meta_.app-shared-chip]:!px-1 [&_.app-message-meta_.app-shared-chip]:!text-[11px] [&_.app-message-meta_.app-shared-chip]:!shadow-none",
         // The list shows itself once it has landed; the tail is still what
         // the reader sees, and a row the list is measuring moves under it.
         settling && "[&_[data-testid=virtuoso-item-list]]:invisible",
@@ -1289,7 +1296,7 @@ export const MessageTimeline = memo(function MessageTimeline({
       {/* A refresh must not hide already-rendered rows.
           Skeleton only when there is nothing to show yet. */}
       {loading && !hasTimelineContent && (
-        <MessageTimelineSkeleton messageCount={channel?.messageCount} />
+        <MessageTimelineSkeleton messageCount={channel?.messageCount} compactLayout={compactLayout} />
       )}
 
       {!loading && !hasChannels && (
@@ -1638,7 +1645,7 @@ const MESSAGE_SKELETON_ROWS: ReadonlyArray<ReadonlyArray<string>> = [
 
 /** Placeholder messages inside a message row's own boxes (row-frames): only
  *  the name, the time and the text are bars, so nothing moves when history lands. */
-export function MessageTimelineSkeleton({ messageCount }: { messageCount?: number }) {
+export function MessageTimelineSkeleton({ messageCount, compactLayout = false }: { messageCount?: number; compactLayout?: boolean }) {
   const knownMessageCount = Number.isSafeInteger(messageCount) && (messageCount || 0) > 0
     ? messageCount
     : undefined;
@@ -1654,14 +1661,21 @@ export function MessageTimelineSkeleton({ messageCount }: { messageCount?: numbe
         : "Loading messages"}
     >
       {rows.map((lines, index) => (
-        <div key={index} className={cn(MESSAGE_ROW_CLASS_NAME, MESSAGE_ROW_HEADED_CLASS_NAME, "app-message-skeleton-row")}
+        <div key={index} className={cn(
+          compactLayout ? "app-message-row group relative block px-4" : MESSAGE_ROW_CLASS_NAME,
+          MESSAGE_ROW_HEADED_CLASS_NAME,
+          "app-message-skeleton-row",
+        )}
           aria-hidden="true">
-          <div className={MESSAGE_AVATAR_SLOT_CLASS_NAME}>
-            <span className={cn(MESSAGE_AVATAR_CLASS_NAME, "app-message-skeleton-avatar")} />
-          </div>
+          {!compactLayout && (
+            <div className={MESSAGE_AVATAR_SLOT_CLASS_NAME}>
+              <span className={cn(MESSAGE_AVATAR_CLASS_NAME, "app-message-skeleton-avatar")} />
+            </div>
+          )}
           <div className={MESSAGE_COLUMN_CLASS_NAME}>
             <div className={MESSAGE_HEAD_CLASS_NAME}>
               <div className={MESSAGE_META_CLASS_NAME}>
+                {compactLayout && <span className="app-message-skeleton-avatar inline-block size-5 shrink-0 rounded-full" />}
                 <span className={MESSAGE_AUTHOR_NAME_CLASS_NAME}>
                   <span className="app-skeleton-bar app-message-skeleton-line" style={{ width: "5rem" }} />
                 </span>
@@ -1799,6 +1813,7 @@ export const MessageRow = memo(function MessageRow({
   contextOnly = false,
   initiallyExpanded = false,
   foldsDiscussionHead = false,
+  compactLayout = false,
   turnContinued = false,
   currentUserIdentityId,
   channel,
@@ -1859,6 +1874,8 @@ export const MessageRow = memo(function MessageRow({
   initiallyExpanded?: boolean;
   /** Its thread's head already shows a page discussion's passage. */
   foldsDiscussionHead?: boolean;
+  /** Narrow desktop browser companion: inline small avatar, full-width message body, desktop hover actions. */
+  compactLayout?: boolean;
   /** This row's turn-failure notice was followed by that Agent's own later message. */
   turnContinued?: boolean;
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
@@ -2372,7 +2389,7 @@ export const MessageRow = memo(function MessageRow({
      (links, buttons, mention chips, attachments) keep their meaning, and a
      finished text selection is left alone so long-press still selects text. */
   function handleRowClick(event: ReactMouseEvent<HTMLDivElement>) {
-    if (recalled || isOutboundPending || editing || window.innerWidth >= 768) return;
+    if (compactLayout || recalled || isOutboundPending || editing || window.innerWidth >= 768) return;
     if (isMessageActionBypassTarget(event.target)) return;
     if (event.target instanceof Element && event.target.closest("[data-mobile-inline-actions='true'], summary, label, img, video")) return;
     if (window.getSelection()?.isCollapsed === false) return;
@@ -2380,7 +2397,7 @@ export const MessageRow = memo(function MessageRow({
   }
 
   function handleAvatarPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!canMentionMessageSender(message) || event.pointerType === "mouse" || window.innerWidth >= 768) {
+    if (compactLayout || !canMentionMessageSender(message) || event.pointerType === "mouse" || window.innerWidth >= 768) {
       return;
     }
     event.stopPropagation();
@@ -2736,7 +2753,7 @@ export const MessageRow = memo(function MessageRow({
     const Icon = message.eventType ? EVENT_ICONS[message.eventType] || Hash : Hash;
 
     return (
-      <div className="app-message-row group flex items-center gap-2 px-5 py-1.5 text-xs text-muted-foreground hover:bg-muted/30">
+      <div className={cn("app-message-row group flex items-center gap-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/30", compactLayout ? "px-4" : "px-5")}>
         <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted">
           <Icon className="size-3.5" />
         </div>
@@ -2749,53 +2766,11 @@ export const MessageRow = memo(function MessageRow({
     );
   }
 
-  return (
-    <div
-      ref={actionsRef}
-      onClick={handleRowClick}
-      data-actions-open={actionsOpen || undefined}
-      className={cn(
-        MESSAGE_ROW_CLASS_NAME,
-        // Every message sits on the same paper: whose it is reads from the
-        // header, not from a tinted row. An open action row or the row under
-        // the pointer is a state, not an author, so it keeps its tone; the
-        // hover tone says which message the bar above it acts on.
-        // Only a header row opens with extra room, which sets one sender's
-        // run apart from the last; every row closes alike, so the lines of a
-        // run sit at one even pitch.
-        message.continuation ? "py-0.5" : MESSAGE_ROW_HEADED_CLASS_NAME,
-        "md:hover:bg-foreground/[0.035]",
-        actionsOpen && "bg-muted"
-      )}
-    >
-      {!recalled && !isOutboundPending && !editing && (
-        <MessageHoverToolbar
-          copied={copied}
-          onCopy={() => void copyMessage()}
-          onReply={() => onReply(message)}
-          onReact={(emoji) => onReact(message, emoji)}
-          onEdit={canEditMessage ? requestEdit : undefined}
-          onRecall={canEditMessage ? requestRecall : undefined}
-        />
-      )}
-      {message.continuation ? (
-        // Same sender, moments later, same tags: the header above still says who.
-        // The hidden time is one body line tall and never wraps: wrapped, it
-        // stood two lines high and spread one-line messages apart (user 2026-10-06).
-        <div className="app-message-continuation-gutter mt-0.5 flex h-5 w-(--app-message-avatar-size) shrink-0 items-center justify-end self-start">
-          {message.sendStatus === "pending" ? (
-            // The row has no header to say it is still on its way.
-            <MessageSendingMark />
-          ) : (
-          <MessageTimestamp value={message.sentAt} clock
-            className="invisible whitespace-nowrap text-[10px] text-muted-foreground group-hover:visible" />
-          )}
-        </div>
-      ) : (
+  const avatarNode = (
       <div
         ref={messageAvatarRef}
         className={cn(
-          MESSAGE_AVATAR_SLOT_CLASS_NAME,
+          compactLayout ? "app-message-author-avatar relative inline-flex shrink-0 items-center" : MESSAGE_AVATAR_SLOT_CLASS_NAME,
           canRebornSender && (rebornControlVisible || reborningSender) && "app-message-author-reborn-open"
         )}
         onPointerDown={handleAvatarPointerDown}
@@ -2822,7 +2797,7 @@ export const MessageRow = memo(function MessageRow({
           event.stopPropagation();
         }}
         onContextMenu={(event) => {
-          if (canMentionMessageSender(message) && window.innerWidth < 768) {
+          if (!compactLayout && canMentionMessageSender(message) && window.innerWidth < 768) {
             event.preventDefault();
             event.stopPropagation();
           }
@@ -2834,10 +2809,10 @@ export const MessageRow = memo(function MessageRow({
           instanceId={message.senderKind === "agent" ? message.senderInstanceId : undefined}
           senderId={message.linkOrigin?.kind === "reply" ? undefined : message.senderId}
           status={senderStatus}
-          size="md"
+          size={compactLayout ? "xs" : "md"}
           showKindBadge={false}
           glass={false}
-          className={MESSAGE_AVATAR_CLASS_NAME}
+          className={compactLayout ? "message-author-avatar size-5 min-h-5 min-w-5 max-h-5 max-w-5 p-0" : MESSAGE_AVATAR_CLASS_NAME}
           onClick={
             message.senderKind === "agent" && !message.reservedSystemAgent
               ? () => onOpenAgentTrace({
@@ -2898,8 +2873,56 @@ export const MessageRow = memo(function MessageRow({
           </div>
         ) : null}
       </div>
+  );
+
+  return (
+    <div
+      ref={actionsRef}
+      onClick={handleRowClick}
+      data-actions-open={actionsOpen || undefined}
+      className={cn(
+        compactLayout ? "app-message-row group relative block px-4" : MESSAGE_ROW_CLASS_NAME,
+        // Every message sits on the same paper: whose it is reads from the
+        // header, not from a tinted row. An open action row or the row under
+        // the pointer is a state, not an author, so it keeps its tone; the
+        // hover tone says which message the bar above it acts on.
+        // Only a header row opens with extra room, which sets one sender's
+        // run apart from the last; every row closes alike, so the lines of a
+        // run sit at one even pitch.
+        message.continuation ? "py-0.5" : MESSAGE_ROW_HEADED_CLASS_NAME,
+        "md:hover:bg-foreground/[0.035]",
+        actionsOpen && "bg-muted"
       )}
+    >
+      {!recalled && !isOutboundPending && !editing && (
+        <MessageHoverToolbar
+          copied={copied}
+          onCopy={() => void copyMessage()}
+          onReply={() => onReply(message)}
+          onReact={(emoji) => onReact(message, emoji)}
+          onEdit={canEditMessage ? requestEdit : undefined}
+          onRecall={canEditMessage ? requestRecall : undefined}
+          compactLayout={compactLayout}
+        />
+      )}
+      {!compactLayout && (message.continuation ? (
+        // Same sender, moments later, same tags: the header above still says who.
+        // The hidden time is one body line tall and never wraps: wrapped, it
+        // stood two lines high and spread one-line messages apart (user 2026-10-06).
+        <div className="app-message-continuation-gutter mt-0.5 flex h-5 w-(--app-message-avatar-size) shrink-0 items-center justify-end self-start">
+          {message.sendStatus === "pending" ? (
+            // The row has no header to say it is still on its way.
+            <MessageSendingMark />
+          ) : (
+          <MessageTimestamp value={message.sentAt} clock
+            className="invisible whitespace-nowrap text-[10px] text-muted-foreground group-hover:visible" />
+          )}
+        </div>
+      ) : avatarNode)}
       <div className={MESSAGE_COLUMN_CLASS_NAME}>
+        {compactLayout && message.continuation && message.sendStatus === "pending" && (
+          <div className="mb-0.5"><MessageSendingMark label /></div>
+        )}
         {!message.continuation && (
         <div className={MESSAGE_HEAD_CLASS_NAME}>
           {/* Sender, then the time, then every tag. The time is a property of the
@@ -2908,8 +2931,9 @@ export const MessageRow = memo(function MessageRow({
               Tags that do not fit wrap whole onto the next line: every tag says
               something about the sender, so none is hidden or cut at the edge
               (user 2026-09-27, a phone showed half a Goal pill). */}
-          <div className={MESSAGE_META_CLASS_NAME}>
-          <span className={MESSAGE_AUTHOR_NAME_CLASS_NAME}>{message.author}</span>
+          <div className={cn(MESSAGE_META_CLASS_NAME, compactLayout && "gap-x-1.5")}>
+          {compactLayout && avatarNode}
+          <span className={cn(MESSAGE_AUTHOR_NAME_CLASS_NAME, compactLayout && "text-[13.5px] font-bold")}>{message.author}</span>
           {sourceApplication && (
             <span className="text-xs text-muted-foreground" title="OAuth application name supplied by its registration">
               via {sourceApplication.name}
@@ -3505,6 +3529,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   onOpenAgentTrace,
   traceAnchor = null,
   inPageMargin = false,
+  compactLayout = false,
 }: {
   approvals?: ReactNode;
   /** The dock item whose trace panel is open, if one is. */
@@ -3512,6 +3537,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   /** A comment thread in a page's margin: the dock stands in flow above its reply box instead of floating over
    * the thread's last lines, so it covers nothing and the timeline keeps no room for it. */
   inPageMargin?: boolean;
+  compactLayout?: boolean;
   channel: ChannelSnapshot | null;
   token: string | null;
   timeline: TimelineItem[];
@@ -3669,7 +3695,8 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
     <div
       ref={dockRef}
       className={cn(
-        "app-agent-work-dock pointer-events-none absolute inset-x-0 z-10 px-5 py-2 transition-opacity duration-150 ease-out motion-reduce:transition-none",
+        "app-agent-work-dock pointer-events-none absolute inset-x-0 z-10 py-2 transition-opacity duration-150 ease-out motion-reduce:transition-none",
+        compactLayout ? "px-3" : "px-5",
         !inPageMargin && "[[data-composer-panel-open=true]_&]:invisible [[data-composer-panel-open=true]_&]:opacity-0 [[data-composer-panel-open=true]_&]:duration-0 [[data-composer-panel-open=true]_&_*]:!pointer-events-none"
       )}
     >

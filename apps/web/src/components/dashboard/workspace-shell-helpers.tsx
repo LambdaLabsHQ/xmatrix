@@ -1,5 +1,6 @@
 "use client";
 import { attachmentKind, channelPresenceInstances, decodeChannelSnapshot, extensionForMediaType, mediaTypeForName, type LiveChannel } from "@xmatrix/protocol";
+import { isExtensionCompanion } from "@/lib/extension-embed";
 import type { UnsentMessageAction } from "./message-unsent-notice";
 import { loadImage as loadImageForClipboard, canvasToBlob as canvasToBlobForClipboard } from "./image-canvas";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, glideTimelineLanding, timelineLayoutMoved } from "./timeline-send-rise";
@@ -658,6 +659,10 @@ export function useIsMobileViewport() {
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
+    if (isExtensionCompanion()) {
+      setIsMobile(false);
+      return;
+    }
     const query = window.matchMedia("(max-width: 767px)");
     const update = () => setIsMobile(query.matches);
     update();

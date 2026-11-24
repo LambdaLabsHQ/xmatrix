@@ -17,7 +17,7 @@
  * to hide it.
  */
 import { createRoot } from "react-dom/client";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { WEB_PROXY_ROUTES, type AuthUser, type ChannelSnapshot, type SerializedSpace } from "@xmatrix/protocol";
 import { API_ROUTES } from "xmatrix-extension:api-routes";
 import { Composer } from "@/components/dashboard/workspace-composer-dialogs";
@@ -87,34 +87,6 @@ function tellFrame(
     | { type: "close" },
 ) {
   window.parent.postMessage({ xmatrixAsk: true, ...message }, "*");
-}
-
-/**
- * Where the composer sits: in a conversation it floats on the bottom edge of
- * the message list (absolutely placed), so its box here is as tall as it is.
- */
-function ComposerStage({ children }: { children: ReactNode }) {
-  const stage = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(0);
-  useLayoutEffect(() => {
-    const element = stage.current;
-    if (!element) return;
-    const resize = new ResizeObserver(() => measure());
-    const measure = () => {
-      const composer = element.querySelector<HTMLElement>(".app-composer");
-      if (!composer) return;
-      resize.observe(composer);
-      setHeight(composer.offsetHeight);
-    };
-    measure();
-    const mutations = new MutationObserver(measure);
-    mutations.observe(element, { childList: true, subtree: true });
-    return () => {
-      resize.disconnect();
-      mutations.disconnect();
-    };
-  }, []);
-  return <div ref={stage} className="relative" style={{ height }}>{children}</div>;
 }
 
 function Surface() {
@@ -200,7 +172,8 @@ function Surface() {
   const referenceCatalog = useMemo<MessageReferenceCatalog | null>(() => channels.length
     ? { channels, channelActivityMs: () => 0, onOpenChannel: () => undefined } : null, [channels]);
 
-  // The frame is as big as what it shows, wherever the App positions it.
+  // The frame is as big as its own box (the composer stays in normal flow inside it, so scrolled
+  // completion rows inside overflow-y:auto containers never distort the reported frame height).
   useLayoutEffect(() => {
     const element = frame.current;
     if (!element) return;
@@ -211,25 +184,16 @@ function Surface() {
     const measure = () => {
       scheduled = false;
       if (!live) return;
+      const rect = element.getBoundingClientRect();
       const box = element.querySelector<HTMLElement>(".app-composer-box")?.getBoundingClientRect();
-      // While the composer grows before ComposerStage updates its height, the absolutely positioned
-      // composer can momentarily rise above y=0; wait for the stage to catch up before reporting size.
-      if (box && box.top < 0) return;
-      let bottom = 0, right = 0;
-      for (const node of [element, ...element.querySelectorAll("*")]) {
-        const rect = node.getBoundingClientRect();
-        if (!rect.width && !rect.height) continue;
-        bottom = Math.max(bottom, rect.bottom);
-        right = Math.max(right, rect.right);
-      }
-      const width = Math.ceil(right);
-      const height = Math.ceil(bottom);
+      const width = Math.ceil(rect.right);
+      const height = Math.ceil(rect.bottom);
       const topInset = box ? Math.max(0, Math.round(box.top)) : 12;
       const bottomInset = box ? Math.max(0, Math.round(height - box.bottom)) : 24;
       const leftInset = box ? Math.max(0, Math.round(box.left)) : 12;
       const rightInset = box ? Math.max(0, Math.round(width - box.right)) : 12;
       const size = `${width}x${height}:${topInset},${bottomInset},${leftInset},${rightInset}`;
-      if (bottom <= 0 || size === toldSize.current) return;
+      if (height <= 0 || size === toldSize.current) return;
       toldSize.current = size;
       tellFrame({ type: "size", width, height, topInset, bottomInset, leftInset, rightInset });
     };
@@ -242,12 +206,9 @@ function Surface() {
     measure();
     const observer = new ResizeObserver(report);
     observer.observe(element);
-    const mutations = new MutationObserver(report);
-    mutations.observe(element, { childList: true, subtree: true, attributes: true });
     return () => {
       live = false;
       observer.disconnect();
-      mutations.disconnect();
     };
   }, []);
 
@@ -282,11 +243,10 @@ function Surface() {
   return (
     // Room around the capsule for its shadow (0 10px 30px): the frame clips what falls outside it.
     // selection.js places the frame using the capsule's measured insets so the capsule hugs the selection.
-    <div ref={frame} className="xmatrix-app box-content w-[30rem]" style={frameStyle}>
+    <div ref={frame} data-ask-surface="true" className="xmatrix-app box-content w-[30rem]" style={frameStyle}>
       {context && passage ? (
         <GrantedAuthProvider token={context.token} user={context.user}>
           <MessageReferenceCatalogProvider catalog={referenceCatalog}>
-          <ComposerStage>
             <Composer
               channel={null}
               draftIdentity="extension-ask"
@@ -317,7 +277,6 @@ function Surface() {
               onEscape={() => tellFrame({ type: "close" })}
               onSend={send}
             />
-          </ComposerStage>
           </MessageReferenceCatalogProvider>
         </GrantedAuthProvider>
       ) : problem && <p role="alert" className="text-sm font-medium text-destructive">{problem}</p>}

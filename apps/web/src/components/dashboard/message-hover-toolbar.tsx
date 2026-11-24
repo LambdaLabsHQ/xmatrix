@@ -48,6 +48,7 @@ export function MessageHoverToolbar({
   onReact,
   onEdit,
   onRecall,
+  compactLayout = false,
 }: {
   copied: boolean;
   onCopy: () => void;
@@ -55,6 +56,7 @@ export function MessageHoverToolbar({
   onReact: (emoji: string) => void;
   onEdit?: () => void;
   onRecall?: () => void;
+  compactLayout?: boolean;
 }) {
   const [open, setOpen] = useState<"reactions" | "menu" | null>(null);
   // Riding the edge would put it past the top of the timeline, which clips it.
@@ -116,7 +118,8 @@ export function MessageHoverToolbar({
       className={cn(
         // Hidden means untouchable too: the bar hangs over the row above, whose
         // pointer must not wake this row's bar.
-        "app-message-hover-toolbar pointer-events-none absolute right-5 z-10 hidden opacity-0 transition-opacity md:block",
+        "app-message-hover-toolbar pointer-events-none absolute z-10 hidden opacity-0 transition-opacity md:block",
+        compactLayout ? "right-3" : "right-5",
         "group-hover:pointer-events-auto group-hover:opacity-100 has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100",
         inside ? "top-1" : "-top-8",
         open && "pointer-events-auto opacity-100",

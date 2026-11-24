@@ -16,8 +16,8 @@
 
 :root {
   color-scheme: light;
-  --paper: oklch(0.976 0.005 85);
-  --paper-soft: oklch(0.941 0.007 82);
+  --paper: #ffffff;
+  --paper-soft: oklch(0.96 0.005 82);
   --ink: oklch(0.255 0.025 58);
   --ink-muted: oklch(0.49 0.03 62);
   --wood-deep: oklch(0.46 0.065 58);

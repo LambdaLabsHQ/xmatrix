@@ -48,6 +48,12 @@ test("the package is an extension Chrome loads, with the app built into it", asy
   // The styles name fonts and the wood by the Web's public paths, which the package carries at its root.
   const styles = fs.readFileSync(path.join(out, "app/app.css"), "utf8");
   for (const [, file] of styles.matchAll(/url\(["']?\/([^"')]+)["']?\)/gu)) assert.ok(shipped.includes(file), `the styles load /${file}`);
+  // The side panel settles width breakpoints at desktop width (so it never renders mobile chrome or sheets)
+  // while preserving viewport-height units (dvh) so the panel fills Chrome's side panel height.
+  assert.doesNotMatch(styles, /@media\s*\(\s*max-width\s*:\s*767px\s*\)/u);
+  assert.match(styles, /\b100dvh\b/u);
+  // The side panel starts on pure white so it meets Chrome's native white side-panel bar with no border or seam.
+  assert.match(page, /background:\s*#ffffff/u);
 });
 
 // The question box a page frames is only as wide as the box: its stylesheet is the App's as a desktop window applies it.
@@ -60,4 +66,8 @@ test("the question box's stylesheet settles width queries and viewport units at 
     + "@media(hover:hover)and (min-width:640px){.c{x:3}}@media(prefers-reduced-motion:reduce){.d{x:4}}"),
   ".a{x:1}@media(hover:hover){.c{x:3}}@media(prefers-reduced-motion:reduce){.d{x:4}}");
   assert.equal(desktopStylesheet(".f{max-height:min(9rem,34dvh)}"), ".f{max-height:min(9rem,272px)}");
+  assert.equal(
+    desktopStylesheet("@media(width>=48rem){.a{height:100dvh}}@media(max-width:767px){.b{height:50dvh}}", 1280, 800, { viewportUnits: false }),
+    ".a{height:100dvh}",
+  );
 });
