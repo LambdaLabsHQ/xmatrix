@@ -5,6 +5,7 @@ import { LifeBuoy } from "lucide-react";
 import { SUPPORT_HANDOFF_DAYS, SUPPORT_HANDOFF_LINE_MAX, type SupportHandoff, type SupportHandoffPart } from "@xmatrix/protocol";
 
 import { Input } from "@/components/ui/input";
+import { GlassSelect } from "@/components/ui/glass-select";
 import {
   closeSupportHandoff, emptySupportHandoffDraft, readSupportLogExcerpt, sendSupportHandoff, supportHandoffRequestOf,
   supportLogMachines, useSupportHandoffTarget, type SupportHandoffDraft, type SupportLogMachine,
@@ -148,16 +149,11 @@ export function SupportHandoffDialog({ token }: { token: string | null | undefin
               </label>
             ))}
             {draft.parts.logs && logs.machines.length > 1 && (
-              <label className="ml-6 flex items-center gap-2 text-xs">
-                From
-                <select value={logs.machineId ?? ""} disabled={busy} data-support-log-machine
-                  className="rounded border bg-background px-1.5 py-1"
-                  onChange={(event) => void previewLogs(event.target.value)}>
-                  {logs.machines.map((machine) => (
-                    <option key={machine.machineId} value={machine.machineId}>{machine.label}</option>
-                  ))}
-                </select>
-              </label>
+              <div className="ml-6 text-xs" data-support-log-machine>
+                <GlassSelect value={logs.machineId ?? ""} aria-label="Read the daemon logs from" disabled={busy}
+                  onChange={(machineId) => void previewLogs(machineId)}
+                  options={logs.machines.map((machine) => ({ value: machine.machineId, label: machine.label }))} />
+              </div>
             )}
             {draft.parts.logs && logs.reading && (
               <p className="ml-6 text-xs text-muted-foreground" role="status">
