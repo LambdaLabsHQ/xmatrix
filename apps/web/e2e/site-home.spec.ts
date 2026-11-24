@@ -106,15 +106,21 @@ test("the comparison stage advances on vertical scroll and switches tabs without
   await expect(why.getByRole("tabpanel")).toBeVisible();
   const stickyState = await why.evaluate((section) => {
     const sticky = section.querySelector<HTMLElement>(".sticky")!;
+    const title = section.querySelector<HTMLElement>("#why-title")!;
     const tablist = section.querySelector<HTMLElement>('[role="tablist"]')!;
     return {
       top: Math.round(sticky.getBoundingClientRect().top),
+      titleTop: Math.round(title.getBoundingClientRect().top),
+      stageBottom: Math.round(sticky.getBoundingClientRect().bottom),
       tabScrollLeft: Math.round(tablist.scrollLeft),
       overflow: document.documentElement.scrollWidth > window.innerWidth,
     };
   });
   expect(stickyState.top).toBeGreaterThanOrEqual(48);
   expect(stickyState.top).toBeLessThanOrEqual(120);
+  expect(stickyState.titleTop).toBeGreaterThanOrEqual(48);
+  expect(stickyState.titleTop).toBeLessThanOrEqual(120);
+  expect(stickyState.stageBottom).toBeLessThanOrEqual(844);
   expect(stickyState.tabScrollLeft).toBeGreaterThan(0);
   expect(stickyState.overflow).toBe(false);
 
