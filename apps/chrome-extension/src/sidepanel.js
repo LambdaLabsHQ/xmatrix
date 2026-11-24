@@ -121,6 +121,8 @@ window.addEventListener("message", async (event) => {
     if (tab?.id !== undefined) await ask("rememberPageThread", { tabId: tab.id, path: data.path, title: data.title, href: data.href });
   } else if (data.type === "open-tab" && typeof data.href === "string" && capturableUrl(data.href)) {
     await chrome.tabs.create({ url: data.href });
+  } else if (data.type === "show-page" && typeof data.href === "string" && capturableUrl(data.href)) {
+    await showWebPage(data.href).catch(() => undefined);
   } else if (data.type === "browser-read" && typeof data.requestId === "string") {
     await answerBrowserRead(data).catch(() => undefined);
   } else if (data.type === "browser-read-approval" && typeof data.requestId === "string") {
@@ -217,6 +219,23 @@ async function openTabShowing(page) {
     return href && pageKey(href) === page;
   });
   return showing.find((tab) => tab.active) ?? showing[0] ?? null;
+}
+
+/**
+ * Brings `href` into view: this panel's own tab when it shows that page, else another open tab showing it, in front
+ * and its window focused (Daniel 2026-11-24: back to the person's tab, not a new one). A new tab only when none does.
+ */
+async function showWebPage(href) {
+  const page = pageKey(href);
+  const own = await activeTab();
+  const ownHref = capturableUrl(own?.url ?? "");
+  const tab = own && ownHref && pageKey(ownHref) === page ? own : await openTabShowing(page);
+  if (!tab?.id) {
+    await chrome.tabs.create({ url: href });
+    return;
+  }
+  await chrome.tabs.update(tab.id, { active: true });
+  if (tab.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
 }
 
 /** The page a conversation was started from: a tab still asking in it, or where Recent says it began. */
