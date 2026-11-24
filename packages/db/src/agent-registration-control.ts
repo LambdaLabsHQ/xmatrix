@@ -11,6 +11,7 @@ import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
+import { DatabaseContractError } from "./errors.js";
 import { enrollGlobalRegistration } from "./agent-registration-enrollment.js";
 import { currentRegistrationQuotaJoin, registrationLiveQuota, registrationQuotaColumns, registrationQuotaWindows,
   registrationShownQuotaReading } from "./agent-registration-quota-probe.js";
@@ -351,15 +352,49 @@ export class PostgresAgentRegistrationRepository {
       // partial index keeps this to what is running now), bound to this
       // registration in this Space, in Channels the reader may read.
       // A catalog observed in the last 24 hours was written to its Instance
-      // row then, and that write stamps updated_at: the 48-hour bound on it
-      // (a day of reporter clock skew to spare) bounds the candidates. Both
-      // catalogs select independently from the same recent Instance rows.
+      // row then, and that write stamps updated_at: scanning only Instances
+      // updated in the last 48 hours once per page (via instances_updated_at_idx)
+      // avoids probing every historical run_agent_registrations row per
+      // registration, and jsonb_to_record detoasts each presentation once.
+      // Identical model/parameter catalogs across registrations on the page
+      // ship once by digest and are restored below.
       // Membership and visibility share the read's snapshot. The outer row
       // distinguishes a member's empty page from a nonmember without a lock.
       // The catalog lists model choices, not the workspace and capability
       // grants or the instructions used to launch a Run.
-      const result = await tx.query({ name: "registration_catalog_page_v9", text: `SELECT
-        reader.role AS reader_role,page.* FROM
+      const result = await tx.query({ name: "registration_catalog_page_v10", text: `WITH recent AS MATERIALIZED (
+        SELECT binding.owner_user_id,binding.machine_id,binding.harness,i.instance_id,
+          CASE WHEN jsonb_typeof(p.models)='array' AND pg_input_is_valid(p."modelsObservedAt",'timestamp with time zone')
+            THEN CASE WHEN p."modelsObservedAt"::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
+              THEN p."modelsObservedAt"::timestamptz END END AS models_ts,
+          p."modelsObservedAt" AS models_observed_at,
+          CASE WHEN jsonb_typeof(p.parameters)='array' AND pg_input_is_valid(p."parametersObservedAt",'timestamp with time zone')
+            THEN CASE WHEN p."parametersObservedAt"::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
+              THEN p."parametersObservedAt"::timestamptz END END AS parameters_ts,
+          p."parametersObservedAt" AS parameters_observed_at,
+          p.model AS parameter_model
+        FROM data.instances i
+        JOIN data.run_agent_registrations binding ON binding.run_id=i.run_id
+        CROSS JOIN LATERAL jsonb_to_record(i.presentation_json) AS p(
+          models jsonb,"modelsObservedAt" text,
+          parameters jsonb,"parametersObservedAt" text,model text
+        )
+        WHERE binding.space_id=$1 AND i.updated_at>=statement_timestamp()-interval '48 hours'
+      ),
+      latest_models AS (
+        SELECT DISTINCT ON (owner_user_id,machine_id,harness)
+          owner_user_id,machine_id,harness,instance_id,models_observed_at
+        FROM recent WHERE models_ts IS NOT NULL
+        ORDER BY owner_user_id,machine_id,harness,models_ts DESC,instance_id
+      ),
+      latest_params AS (
+        SELECT DISTINCT ON (owner_user_id,machine_id,harness)
+          owner_user_id,machine_id,harness,instance_id,parameters_observed_at,parameter_model
+        FROM recent WHERE parameters_ts IS NOT NULL
+        ORDER BY owner_user_id,machine_id,harness,parameters_ts DESC,instance_id
+      ),
+      listed AS (
+        SELECT reader.role AS reader_role,page.* FROM
         (SELECT role FROM data.space_members WHERE space_id=$1 AND user_id=$2) reader
         LEFT JOIN LATERAL (SELECT
         r.owner_user_id,r.machine_id,r.harness,r.display_name,r.version,
@@ -371,45 +406,20 @@ export class PostgresAgentRegistrationRepository {
         m.user_id AS current_owner,m.display_name AS owner_name,a.grant_state,a.policy_state,
         CASE WHEN a.grant_limits IS NOT NULL AND a.policy_limits IS NOT NULL
           THEN jsonb_build_array(a.grant_limits->'models',a.policy_limits->'models') END AS model_limits,
-        catalog.models AS catalog_models,catalog.observed_at AS catalog_observed_at,
-        catalog.parameters AS catalog_parameters,catalog.parameter_model,catalog.parameters_observed_at,
+        lm.instance_id AS models_instance_id,lm.models_observed_at AS catalog_observed_at,
+        encode(sha256(convert_to((mi.presentation_json->'models')::text,'UTF8')),'hex') AS catalog_models_digest,
+        lp.instance_id AS params_instance_id,lp.parameter_model,lp.parameters_observed_at,
+        encode(sha256(convert_to((pi.presentation_json->'parameters')::text,'UTF8')),'hex') AS catalog_parameters_digest,
         running.instances AS running
         FROM data.space_agent_registrations r
         LEFT JOIN data.space_members m ON m.space_id=r.space_id AND m.user_id=r.owner_user_id
         LEFT JOIN data.space_agent_registration_access a ON a.space_id=r.space_id AND a.owner_user_id=r.owner_user_id
           AND a.machine_id=r.machine_id AND a.harness=r.harness
         LEFT JOIN data.space_harness_profiles profile ON profile.space_id=r.space_id AND profile.harness=r.harness
-        LEFT JOIN LATERAL (
-          WITH recent AS MATERIALIZED (
-            SELECT i.instance_id,i.presentation_json
-            FROM data.run_agent_registrations binding JOIN data.instances i ON i.run_id=binding.run_id
-            WHERE binding.space_id=r.space_id AND binding.owner_user_id=r.owner_user_id
-              AND binding.machine_id=r.machine_id AND binding.harness=r.harness
-              AND i.updated_at>=statement_timestamp()-interval '48 hours'
-          )
-          SELECT model_catalog.models,model_catalog.observed_at,
-            parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at
-          FROM (SELECT 1) registration
-          LEFT JOIN LATERAL (
-            SELECT i.presentation_json->'models' AS models,i.presentation_json->>'modelsObservedAt' AS observed_at
-            FROM recent i
-            WHERE jsonb_typeof(i.presentation_json->'models')='array'
-              AND CASE WHEN pg_input_is_valid(i.presentation_json->>'modelsObservedAt','timestamp with time zone')
-                THEN (i.presentation_json->>'modelsObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
-                ELSE FALSE END
-            ORDER BY (i.presentation_json->>'modelsObservedAt')::timestamptz DESC,i.instance_id LIMIT 1
-          ) model_catalog ON TRUE
-          LEFT JOIN LATERAL (
-            SELECT i.presentation_json->'parameters' AS parameters,i.presentation_json->>'model' AS parameter_model,
-              i.presentation_json->>'parametersObservedAt' AS parameters_observed_at
-            FROM recent i
-            WHERE jsonb_typeof(i.presentation_json->'parameters')='array'
-              AND CASE WHEN pg_input_is_valid(i.presentation_json->>'parametersObservedAt','timestamp with time zone')
-                THEN (i.presentation_json->>'parametersObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
-                ELSE FALSE END
-            ORDER BY (i.presentation_json->>'parametersObservedAt')::timestamptz DESC,i.instance_id LIMIT 1
-          ) parameter_catalog ON TRUE
-        ) catalog ON TRUE
+        LEFT JOIN latest_models lm ON lm.owner_user_id=r.owner_user_id AND lm.machine_id=r.machine_id AND lm.harness=r.harness
+        LEFT JOIN data.instances mi ON mi.instance_id=lm.instance_id
+        LEFT JOIN latest_params lp ON lp.owner_user_id=r.owner_user_id AND lp.machine_id=r.machine_id AND lp.harness=r.harness
+        LEFT JOIN data.instances pi ON pi.instance_id=lp.instance_id
         LEFT JOIN LATERAL (SELECT jsonb_agg(jsonb_build_object('instanceId',live.instance_id,'channelId',live.channel_id,
             'channelInstanceId',live.channel_instance_id::text,'since',live.created_at)
             ORDER BY live.created_at,live.instance_id) AS instances
@@ -428,12 +438,38 @@ export class PostgresAgentRegistrationRepository {
         WHERE r.space_id=$1 AND (reader.role IN ('owner','admin') OR r.owner_user_id=$2 OR (m.user_id IS NOT NULL AND a.grant_state='active'))
           AND ($3::text IS NULL OR (r.owner_user_id,r.machine_id,r.harness)>($3,$4,$5))
         ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT $6) page ON TRUE
-        ORDER BY page.owner_user_id,page.machine_id,page.harness`,
+      )
+      SELECT listed.*,
+        CASE WHEN listed.catalog_models_digest IS NOT NULL AND row_number() OVER (
+          PARTITION BY listed.catalog_models_digest ORDER BY listed.owner_user_id,listed.machine_id,listed.harness)=1
+          THEN (SELECT shown.presentation_json->'models' FROM data.instances shown WHERE shown.instance_id=listed.models_instance_id)
+        END AS catalog_models,
+        CASE WHEN listed.catalog_parameters_digest IS NOT NULL AND row_number() OVER (
+          PARTITION BY listed.catalog_parameters_digest ORDER BY listed.owner_user_id,listed.machine_id,listed.harness)=1
+          THEN (SELECT shown.presentation_json->'parameters' FROM data.instances shown WHERE shown.instance_id=listed.params_instance_id)
+        END AS catalog_parameters
+      FROM listed
+      ORDER BY listed.owner_user_id,listed.machine_id,listed.harness`,
       values: [input.spaceId, input.actorUserId, ...(cursor ?? [null, null, null]), limit + 1], maxRows: limit + 1 });
       if (!result[0]) throw new RegistrationAccessError("registration_not_found", 404);
       const admin = ["owner", "admin"].includes(String(result[0].reader_role));
       const rows = result.filter(row => row.owner_user_id !== null);
       const current = rows.slice(0, limit), last = current.at(-1);
+      const sharedCatalog = (digestColumn: string, valueColumn: string) => {
+        const values = new Map<string, unknown>();
+        for (const row of current) {
+          const digest = row[digestColumn], value = row[valueColumn];
+          if (typeof digest === "string" && value !== null && value !== undefined) values.set(digest, value);
+        }
+        return (row: QueryResultRow) => {
+          const digest = row[digestColumn];
+          if (typeof digest !== "string") return null;
+          if (!values.has(digest)) throw new DatabaseContractError("Registration catalog payload is missing from its read");
+          return values.get(digest);
+        };
+      };
+      const catalogModels = sharedCatalog("catalog_models_digest", "catalog_models");
+      const catalogParameters = sharedCatalog("catalog_parameters_digest", "catalog_parameters");
       const registrations: AgentRegistrationSummary[] = current.map(row => {
         const key = parseSpaceAgentRegistrationKey({ spaceId: input.spaceId, ownerUserId: row.owner_user_id,
           machineId: row.machine_id, harness: row.harness });
@@ -445,12 +481,12 @@ export class PostgresAgentRegistrationRepository {
         // An empty model list allows the runtime default; the environment pass
         // below offers the runtime's whole catalog where its daemon applies one.
         // No fresh observation stays absent.
-        const parameterObservation = harnessParameterObservation(row.catalog_parameters, row.parameters_observed_at,
+        const parameterObservation = harnessParameterObservation(catalogParameters(row), row.parameters_observed_at,
           row.parameter_model, models, Date.now());
         return { ...parameterObservation,
           key, displayName: String(row.display_name), version: Number(row.version),
           // With no declared models the runtime's catalog stays whole; the environment pass below narrows it.
-          modelCatalog: routingModelCatalogObservation(row.catalog_models, row.catalog_observed_at, Date.now())?.value
+          modelCatalog: routingModelCatalogObservation(catalogModels(row), row.catalog_observed_at, Date.now())?.value
             .filter(model => !models.length || models.includes(model.model)),
           ownerName: String(row.owner_name || "Space member"), machineName: "Registered machine", models,
           routingReady: row.current_owner !== null && row.grant_state === "active" && row.policy_state === "enabled" &&
