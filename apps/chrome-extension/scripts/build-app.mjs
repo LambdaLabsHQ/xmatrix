@@ -377,6 +377,68 @@ const ASK_PAGE = `<!doctype html>
       --app-liquid-surface-bg: var(--background) !important;
       --app-liquid-shared-surface-bg: var(--background) !important;
     }
+    /* Follow-up composer inside the expanded inline thread card: borderless warm paper flush to bottom,
+       matching the redesigned side panel with zero borders or dividing lines. */
+    #xmatrix-ask-box .ask-thread-composer .app-composer-shell {
+      padding: 0 !important;
+      gap: 0 !important;
+    }
+    #xmatrix-ask-box .ask-thread-composer .app-composer-box:not(.app-agent-work-card) {
+      --app-liquid-rim-layers: 0 0 transparent !important;
+      --app-liquid-edge-meniscus: 0 0 transparent !important;
+      --app-glass-edge: none !important;
+      --app-liquid-backdrop-filter: none !important;
+      --app-liquid-surface-bg: oklch(0.958 0.011 80) !important;
+      border: 0 !important;
+      border-radius: 0 !important;
+      background: oklch(0.958 0.011 80) !important;
+      background-color: oklch(0.958 0.011 80) !important;
+      background-image: none !important;
+      box-shadow: none !important;
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+    }
+    #xmatrix-ask-box .ask-thread-composer .app-composer-box:not(.app-agent-work-card):focus-within {
+      background: oklch(0.948 0.013 79) !important;
+      background-color: oklch(0.948 0.013 79) !important;
+      box-shadow: none !important;
+    }
+    #xmatrix-ask-box .ask-thread-composer .app-composer-box::before,
+    #xmatrix-ask-box .ask-thread-composer .app-composer-box::after {
+      display: none !important;
+      content: none !important;
+    }
+    #xmatrix-ask-box .ask-thread-composer .composer-input-row {
+      padding: 0.45rem 0.75rem 0.55rem !important;
+      min-height: 0 !important;
+    }
+    #xmatrix-ask-box .ask-thread-composer .composer-attach {
+      display: none !important;
+    }
+    #xmatrix-ask-box .ask-thread-composer .composer-textarea {
+      min-height: 1.75rem !important;
+      font-size: 0.84375rem !important;
+      line-height: 1.45 !important;
+    }
+    #xmatrix-ask-box .ask-thread-composer :is(.app-composer-send, .app-composer-send-ready) {
+      width: 1.875rem !important;
+      height: 1.875rem !important;
+      border-radius: 999px !important;
+      background: oklch(0.24 0.03 60 / 0.11) !important;
+      box-shadow: none !important;
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+      color: var(--muted-foreground) !important;
+    }
+    #xmatrix-ask-box .ask-thread-composer .app-composer-send-ready {
+      background: var(--foreground) !important;
+      color: #ffffff !important;
+    }
+    #xmatrix-ask-box .ask-thread-card .rich-message :is(pre, code) {
+      border: 0 !important;
+      box-shadow: none !important;
+      background: oklch(0.958 0.006 82) !important;
+    }
   </style>
 </head>
 <body class="site-canvas antialiased" style="margin: 0; background: transparent; overflow: hidden">

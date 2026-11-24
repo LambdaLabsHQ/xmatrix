@@ -19,7 +19,7 @@ import {
   withSession,
 } from "./hub-client.js";
 import { capturableUrl, discussionTitle, pagePassage } from "./passage.js";
-import { isTrustedWebAppOrigin, pageKey, showWebPage } from "./page-tab.js";
+import { isTrustedWebAppOrigin, pageKey, readTabSnapshot, showWebPage, tabPageThread } from "./page-tab.js";
 
 const SIGN_IN_ALARM = "sign-in";
 const MENU_ASK = "ask";
@@ -145,6 +145,34 @@ function enablePanel(tabId) {
   return chrome.sidePanel.setOptions({ tabId, path: `src/sidepanel.html?tab=${tabId}`, enabled: true });
 }
 
+/** Tabs whose side panel page currently holds an open port to this service worker. */
+const openPanels = new Set();
+
+async function notifyTabPanelState(tabId, open) {
+  if (!Number.isInteger(tabId)) return;
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const thread = tab ? await tabPageThread(chrome, tabId, tab.url) : null;
+  if (!open && thread) await enablePanel(tabId).catch(() => undefined);
+  await chrome.tabs.sendMessage(tabId, {
+    type: "panel-state",
+    open,
+    hasThread: Boolean(thread),
+    ...(thread ? { thread: { spaceId: thread.spaceId, channelId: thread.channelId } } : {}),
+  }).catch(() => undefined);
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  const match = /^sidepanel:(\d+)$/u.exec(port.name);
+  if (!match) return;
+  const tabId = Number(match[1]);
+  openPanels.add(tabId);
+  notifyTabPanelState(tabId, true).catch(() => undefined);
+  port.onDisconnect.addListener(() => {
+    openPanels.delete(tabId);
+    notifyTabPanelState(tabId, false).catch(() => undefined);
+  });
+});
+
 /** Opens a tab's own panel. Not awaited between the two: Chrome opens a panel only within the person's gesture. */
 function openPanel(tab) {
   if (tab?.id === undefined) return;
@@ -190,15 +218,69 @@ async function pendingAsk(tabId) {
 }
 
 /** The box's session and target, as the side panel's app gets its own: a current access token, never the refresh token. */
-async function askContext(tab) {
-  const passage = await pendingAsk(tab.id);
+async function askContext(tab, { optionalPassage = false } = {}) {
+  const passage = optionalPassage
+    ? await pendingAsk(tab.id).catch(() => {
+      const href = capturableUrl(tab.url ?? "");
+      return href ? { text: "", label: tab.title || new URL(href).host, href } : null;
+    })
+    : await pendingAsk(tab.id);
   // The box shows at once with the stored session; a renewal, when one is due, follows (the box asks for "session").
   const stored = await store.get();
   const session = stored ? { token: stored.token, user: stored.user ?? null } : null;
   if (!session?.user) throw Object.assign(new Error("Sign in to xMatrix in the side panel first."), { code: "signed_out" });
   const { lastSpace } = await chrome.storage.local.get("lastSpace");
-  return { token: session.token, user: session.user, spaceId: lastSpace?.id ?? null,
-    passage: { text: passage.text, label: passage.label, href: passage.href }, tabId: tab.id };
+  const thread = passage ? await tabPageThread(chrome, tab.id, passage.href) : null;
+  if (thread) await enablePanel(tab.id).catch(() => undefined);
+  return {
+    token: session.token,
+    user: session.user,
+    spaceId: thread?.spaceId ?? lastSpace?.id ?? null,
+    passage: passage ? { text: passage.text, label: passage.label, href: passage.href } : null,
+    thread: thread ? { spaceId: thread.spaceId, channelId: thread.channelId, title: thread.title ?? passage?.label ?? "" } : null,
+    panelOpen: openPanels.has(tab.id),
+    tabId: tab.id,
+  };
+}
+
+async function askBrowserRead(tab, { requestId, target }) {
+  if (typeof requestId !== "string" || !requestId || !panelHandlers.claimBrowserRead({ requestId })) return;
+  let answer;
+  try {
+    if (target === "current" || target === "conversation") {
+      const freshTab = await chrome.tabs.get(tab.id).catch(() => tab);
+      const href = capturableUrl(freshTab?.url ?? "");
+      if (!freshTab?.id || !href) {
+        answer = { refusal: "no-page" };
+      } else {
+        const text = await readTabSnapshot(chrome, freshTab.id);
+        answer = text ? { title: freshTab.title || "", href, text } : { refusal: "unreadable" };
+      }
+    } else {
+      answer = { refusal: "panel-closed" };
+    }
+  } catch {
+    answer = { refusal: "unreadable" };
+  }
+  await panelHandlers.browserReadAnswer({ requestId, answer });
+}
+
+/** Prepares this tab's side panel to open straight onto the inline conversation (called on ◫ or edge dock click). */
+async function askDock(tab, { spaceId, channelId } = {}) {
+  const existing = await tabPageThread(chrome, tab.id, tab.url);
+  const resolvedSpaceId = typeof spaceId === "string" && spaceId ? spaceId : existing?.spaceId;
+  const resolvedChannelId = typeof channelId === "string" && channelId ? channelId : existing?.channelId;
+  await enablePanel(tab.id).catch(() => undefined);
+  if (resolvedSpaceId && resolvedChannelId) {
+    await chrome.storage.session.set({
+      [`openPath:${tab.id}`]: {
+        channel: existing?.snapshot ?? null,
+        path: `/app/${encodeURIComponent(resolvedSpaceId)}/channels/${encodeURIComponent(resolvedChannelId)}`,
+        at: Date.now(),
+      },
+    });
+  }
+  return { ok: true };
 }
 
 /**
@@ -227,46 +309,45 @@ async function askThread(tab, href, spaceId) {
   return thread && thread.page === pageKey(href) && thread.spaceId === spaceId ? thread : null;
 }
 
-async function askSend(tab, { body, invocationSelections }) {
-  const passage = await pendingAsk(tab.id);
+async function askSend(tab, { body, invocationSelections, channelId: explicitChannelId, spaceId: explicitSpaceId, page: explicitPage }) {
+  const passage = await pendingAsk(tab.id).catch(() => {
+    const href = capturableUrl(explicitPage?.href ?? tab.url ?? "");
+    if (!href) throw new Error("Select some text on the page first.");
+    return { text: "", label: explicitPage?.label || tab.title || new URL(href).host, href };
+  });
   const text = typeof body === "string" ? body.slice(0, 64 * 1024) : "";
   if (!text.trim()) throw new Error("Write a question first.");
   const session = await store.get();
   if (!session) throw new Error("Sign in to xMatrix in the side panel first.");
-  // The conversation is shown the moment it exists (Daniel 2026-11-24: from selecting to the new conversation took
-  // too long): the side panel opens on it while its first message is still on the way, and that message arrives
-  // there live. Before, the panel waited for the conversation to be made, then the message (and the Agent it
-  // starts) to be sent: two round trips and the Hub's launch work, each over a second on a slow network.
-  // One id for the question, wherever it is sent: the side panel shows it as sending under this id, and the Hub
-  // appends it at most once however often it is sent.
   const clientMessageId = crypto.randomUUID();
   const metadata = { browserPage: { title: passage.label, href: passage.href } };
+  const threadTitle = discussionTitle(passage.text || passage.label);
   const show = async (space, channel) => {
     await chrome.storage.session.set({ [`askThread:${tab.id}`]: { page: pageKey(passage.href), spaceId: space.id,
-      channelId: channel.id, snapshot: channel.snapshot ?? null } });
+      channelId: channel.id, title: channel.snapshot?.name || threadTitle, snapshot: channel.snapshot ?? null } });
     await chrome.storage.local.set({ lastSpace: { id: space.id, name: space.name } });
-    // For the panel of the tab the question was asked in, and no other. The conversation goes as the Hub answered
-    // it: the panel's app may not list it yet (it lists a window of a large catalog, and a new conversation reaches
-    // it only with the next refresh).
     await chrome.storage.session.set({ [`openPath:${tab.id}`]: { channel: channel.snapshot ?? null,
       path: `/app/${encodeURIComponent(space.id)}/channels/${encodeURIComponent(channel.id)}`, at: Date.now(),
-      // The question, shown in the panel as sending while it is on its way (the App's pending row).
       pending: { clientMessageId, body: text, metadata } } });
     void rememberRecent({ spaceId: space.id, channelId: channel.id, title: passage.label, href: passage.href });
   };
   const result = await authed(async (scoped, token) => {
     const create = (space) => createConversation(scoped, token, {
-      spaceId: space.id, name: discussionTitle(passage.text || passage.label), memberName: session.user?.name || "Human" });
+      spaceId: space.id, name: threadTitle, memberName: session.user?.name || "Human" });
     let space = await quickAskSpace(token);
     if (!space) throw new Error("You are not in any Space yet.");
-    // Picks were made against the remembered Space; in another one they do not apply.
     const remembered = (await chrome.storage.local.get("lastSpace")).lastSpace?.id;
     const message = (channelId, inSpace) => sendMessage(scoped, token, { channelId, body: text, clientMessageId,
-      // The page it was asked on goes with it, as with every message written in the side panel
-      // (packages/protocol browser-page.ts): the conversation shows it, and the Agent is told which page it is.
       metadata,
       ...(inSpace === remembered && invocationSelections && typeof invocationSelections === "object"
         ? { invocationSelections } : {}) });
+    if (typeof explicitChannelId === "string" && explicitChannelId) {
+      const targetSpace = typeof explicitSpaceId === "string" && explicitSpaceId ? { id: explicitSpaceId, name: space.name } : space;
+      const channel = { id: explicitChannelId, snapshot: null };
+      await show(targetSpace, channel);
+      await message(explicitChannelId, targetSpace.id);
+      return { space: targetSpace, channel };
+    }
     const thread = await askThread(tab, passage.href, space.id);
     if (thread) {
       const channel = { id: thread.channelId, snapshot: thread.snapshot ?? null };
@@ -295,7 +376,13 @@ async function askSend(tab, { body, invocationSelections }) {
     return { space, channel };
   });
   await chrome.storage.session.remove(`ask:${tab.id}`);
-  return { spaceName: result.space.name };
+  return {
+    spaceName: result.space.name,
+    spaceId: result.space.id,
+    channelId: result.channel.id,
+    title: result.channel.snapshot?.name || threadTitle,
+    clientMessageId,
+  };
 }
 
 // ---- Quick select: a small button beside selected text, on pages the person allowed.
@@ -462,10 +549,27 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       { title: typeof message.title === "string" ? message.title : undefined,
         url: typeof message.url === "string" ? message.url : undefined }));
   }
+  if (message?.type === "askPageState" && sender.tab && !isExtensionPage(sender)) {
+    return answer((async () => {
+      const thread = await tabPageThread(chrome, sender.tab.id, typeof message.url === "string" ? message.url : sender.tab.url);
+      if (thread && !openPanels.has(sender.tab.id)) await enablePanel(sender.tab.id).catch(() => undefined);
+      return { panelOpen: openPanels.has(sender.tab.id), hasThread: Boolean(thread) };
+    })());
+  }
   // The question box is this extension's page, framed in that tab: it reads and sends that tab's ask only.
   if (isExtensionPage(sender) && sender.tab?.id !== undefined) {
-    if (message?.type === "askContext") return answer(askContext(sender.tab));
+    if (message?.type === "askContext") return answer(askContext(sender.tab, message.args ?? {}));
     if (message?.type === "askSend") return answer(askSend(sender.tab, message.args ?? {}));
+    if (message?.type === "askDock") return answer(askDock(sender.tab, message.args ?? {}));
+    if (message?.type === "askBrowserRead") return answer(askBrowserRead(sender.tab, message.args ?? {}));
+    if (message?.type === "askQuoteToPanel") {
+      return answer(queuePassage(pagePassage({
+        text: String(message.args?.text ?? ""),
+        title: typeof message.args?.label === "string" ? message.args.label : sender.tab.title,
+        url: typeof message.args?.href === "string" ? message.args.href : sender.tab.url,
+        target: "current",
+      })));
+    }
   }
   const handler = isExtensionPage(sender) ? panelHandlers[message?.type] : undefined;
   if (!handler) return false;
@@ -504,6 +608,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // A closed tab's passage and conversation go with it.
 chrome.tabs.onRemoved.addListener((tabId) => {
+  openPanels.delete(tabId);
   chrome.storage.session.remove([`ask:${tabId}`, `askThread:${tabId}`, `openPath:${tabId}`]).catch(() => undefined);
 });
 
