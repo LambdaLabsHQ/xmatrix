@@ -131,6 +131,9 @@ pub async fn read_deepseek_balance_for_model(force: bool, model: Option<&str>) -
 
 /// The prepaid balance behind the DeepSeek API key `dsh` holds.
 pub async fn read_deepseek_balance(force: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     if let Some(cached) = DEEPSEEK_BALANCE.hit_unless_forced(force) {
         return cached;
     }

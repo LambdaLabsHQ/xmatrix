@@ -77,6 +77,7 @@ import {
   Bell,
 } from "lucide-react";
 import { BrowserPushSetting, browserPushSummary } from "./browser-push-setting";
+import { DiagnosticsSetting } from "./diagnostics-setting";
 import { browserPushState, type BrowserPushState } from "@/lib/push-subscription";
 import { SectionedToolView, ToolDetailSection, ToolSettingRow, type ToolSection } from "./tool-split";
 import { spacePlansAbsent } from "./space-plan-mark";
@@ -665,32 +666,36 @@ export function SettingsView({
           </ToolDetailSection>
         </div>
       ) },
-    { key: "legal", label: "Legal and privacy", icon: Shield, summary: "Terms, privacy, cookies", content: (
-        <div className="app-settings-section min-w-0">
-          <p className="mb-4 max-w-[60ch] text-sm text-muted-foreground">
-            Review the terms that apply to xMatrix and how MadeByRobot handles information.
-          </p>
-          <ToolDetailSection title="Documents">
-            {([
-              ["/privacy", "Privacy Policy"],
-              ["/terms", "Terms of Service"],
-              ["/cookies", "Cookies and Local Storage"],
-              ["/subprocessors", "Subprocessors"],
-            ] as const).map(([href, label]) => (
-              <a key={href} href={href}
-                className="flex items-center justify-between py-2.5 text-sm font-semibold hover:text-foreground/80">
-                {label}
-                <ChevronRight className="size-4 text-muted-foreground" />
+    { key: "legal", label: "Legal and privacy", icon: Shield, summary: "Diagnostics, terms, privacy", content: (
+        <div className="app-settings-section min-w-0 space-y-10">
+          <DiagnosticsSetting />
+          <div>
+            <p className="mb-4 max-w-[60ch] text-sm text-muted-foreground">
+              Review the terms that apply to xMatrix and how MadeByRobot handles information.
+            </p>
+            <ToolDetailSection title="Documents">
+              {([
+                ["/docs/privacy", "Telemetry and Local Privacy"],
+                ["/privacy", "Privacy Policy"],
+                ["/terms", "Terms of Service"],
+                ["/cookies", "Cookies and Local Storage"],
+                ["/subprocessors", "Subprocessors"],
+              ] as const).map(([href, label]) => (
+                <a key={href} href={href}
+                  className="flex items-center justify-between py-2.5 text-sm font-semibold hover:text-foreground/80">
+                  {label}
+                  <ChevronRight className="size-4 text-muted-foreground" />
+                </a>
+              ))}
+            </ToolDetailSection>
+            <p className="mt-4 text-xs leading-5 text-muted-foreground">
+              Privacy, access, correction, and deletion requests can be sent to{" "}
+              <a className="font-medium text-foreground underline underline-offset-4" href="mailto:contact@madebyrobot.net?subject=xMatrix%20privacy%20request">
+                contact@madebyrobot.net
               </a>
-            ))}
-          </ToolDetailSection>
-          <p className="mt-4 text-xs leading-5 text-muted-foreground">
-            Privacy, access, correction, and deletion requests can be sent to{" "}
-            <a className="font-medium text-foreground underline underline-offset-4" href="mailto:contact@madebyrobot.net?subject=xMatrix%20privacy%20request">
-              contact@madebyrobot.net
-            </a>
-            .
-          </p>
+              .
+            </p>
+          </div>
         </div>
       ) },
     { key: "session", label: "Session", icon: LogOut, summary: "Where you're signed in", content: (

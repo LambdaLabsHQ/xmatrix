@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { WEB_PROXY_ROUTES, type DesktopDaemonFailure } from "@xmatrix/protocol";
+import { isDiagnosticsEnabled } from "@/lib/diagnostics-preference";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 
 const reported = new Set<string>();
@@ -23,7 +24,7 @@ export function reportDesktopDaemonFailure(
   app: { platform: string; version: string },
 ): void {
   const key = failureKey(failure);
-  if (!token || reported.has(key)) return;
+  if (!token || !isDiagnosticsEnabled() || reported.has(key)) return;
   reported.add(key);
   void xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_desktop_daemon_failure, token, method: "POST",
     body: { ...failure, platform: app.platform, appVersion: app.version } })

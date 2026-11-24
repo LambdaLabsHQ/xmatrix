@@ -79,8 +79,12 @@ export function CookieNoticeContent() {
       <LegalSection id="no-advertising" title="5. No advertising or cross-site tracking">
         <p>
           xMatrix does not currently use advertising cookies, cross-site behavioral tracking,
-          marketing-attribution cookies, session-replay tools, or non-essential client analytics SDKs.
-          We therefore do not display a consent banner that would imply those tools are active.
+          marketing-attribution cookies, session-replay tools, or third-party behavioral analytics
+          SDKs. Optional first-party startup timing, onboarding step counts, client network samples,
+          and scrubbed Sentry crash reports can be turned off anytime in Settings → Legal and privacy
+          (and automatically honor browser Do Not Track and Global Privacy Control signals). We
+          therefore do not display an advertising consent banner that would imply ad trackers are
+          active.
         </p>
         <p>
           Before activating a non-essential client-side technology, we will update this notice and our

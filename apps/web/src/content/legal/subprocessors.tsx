@@ -139,6 +139,13 @@ export function SubprocessorsContent() {
             the purchase.
           </li>
           <li>
+            <strong className="text-foreground">Mobile push notification services (Apple APNs and Google FCM):</strong>{" "}
+            if you enable push notifications on iOS or Android, device push tokens and notification
+            payloads are delivered through Apple Push Notification service or Google Firebase Cloud
+            Messaging. The Android app uses Firebase Cloud Messaging solely for push delivery and does
+            not include Firebase Analytics or Crashlytics.
+          </li>
+          <li>
             <strong className="text-foreground">Customer-selected providers:</strong> model providers,
             source-control hosts, repositories, connectors, runtimes, and third-party Agents selected or
             operated by a Customer are not MadeByRobot subprocessors merely because xMatrix connects to

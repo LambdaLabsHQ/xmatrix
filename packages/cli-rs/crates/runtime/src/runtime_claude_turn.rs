@@ -80,7 +80,11 @@ pub(crate) async fn run_claude_stream_turn(
         None => prompt,
     };
     crate::write_current_run_status("turn_running", false, None);
-    let mut latest_usage = read_claude_oauth_rate_limit_usage(false).await;
+    let mut latest_usage = if xmatrix_cli_core::config::quota_probes_disabled() {
+        None
+    } else {
+        read_claude_oauth_rate_limit_usage(false).await
+    };
     // Caller-provided paths are borrowed: the caller owns those files and
     // keeps them past this turn, because the prompt text cites them. Only
     // files materialized here are owned, and removed when the turn ends.
@@ -278,6 +282,7 @@ pub(crate) async fn run_claude_stream_turn(
     // Force a refresh after the turn so presence reflects post-turn windows when available.
     let post_turn = match limit_reading {
         Some(reading) => Some(reading),
+        None if xmatrix_cli_core::config::quota_probes_disabled() => None,
         None => read_claude_oauth_rate_limit_usage(true).await,
     };
     latest_usage = merge_llm_usage(latest_usage, post_turn);

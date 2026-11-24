@@ -113,17 +113,13 @@ enum AgyEnvMode {
 
 /// Whether `value` turns on a boolean disable flag (`1`, `true`, `yes`, `on`).
 pub fn is_quota_probe_disabled_value(value: Option<&str>) -> bool {
-    value.is_some_and(|raw| {
-        matches!(
-            raw.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    })
+    super::is_flag_enabled_value(value)
 }
 
 /// Whether Antigravity quota probing is disabled in the given environment view.
 pub fn is_quota_probe_disabled_in(env: impl Fn(&str) -> Option<String>) -> bool {
-    is_quota_probe_disabled_value(env(ANTIGRAVITY_QUOTA_DISABLE_ENV).as_deref())
+    super::quota_probes_disabled_in(&env)
+        || is_quota_probe_disabled_value(env(ANTIGRAVITY_QUOTA_DISABLE_ENV).as_deref())
 }
 
 /// Whether Antigravity quota probing is disabled in the current process

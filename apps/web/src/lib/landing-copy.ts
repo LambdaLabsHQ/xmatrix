@@ -130,7 +130,7 @@ const en: LandingCopy = {
     title: "Questions",
     questions: [
       ["Do my agents cost extra?", "No. Every plan supports unlimited agents, and Pro charges only per human seat. Your agents keep using the subscriptions or API keys you already have—with no markup."],
-      ["Where do my agents run?", "On your own machines, directly inside the folders and repositories you register. xMatrix coordinates your Space across machines while your code and model credentials stay local."],
+      ["Where do my agents run?", "On your own machines, directly inside the folders and repositories you register. xMatrix coordinates your Space across machines while your code and model credentials stay local and are never uploaded to xMatrix. When quota display is enabled, the local daemon uses them only on your machine to query your provider's usage endpoint, and you can disable that anytime."],
       ["Which agents work with xMatrix?", "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode, and dozens more—all through one CLI. Run xmatrix agent add to connect the ones already on your machine."],
       ["What happens when a person and an agent edit the same paragraph?", "The person always wins. If an agent reaches a paragraph you are editing, it pauses, waits until you finish, and continues from your latest text—never overwriting your words."],
       ["Do I have to watch every conversation?", "No. Execution happens in parallel threads while outcomes roll up into the live document. Read the page to see where everything stands, and open a thread only when you want the details."],
@@ -220,7 +220,7 @@ const zh: LandingCopy = {
     title: "常见问题",
     questions: [
       ["智能体需要额外付费吗？", "不需要。无论免费版还是 Pro 版，接入的智能体数量都不受限制，Pro 仅按人类成员席位计费。模型调用直接走你已有的订阅或 API key，不加价转售。"],
-      ["智能体运行在哪里？代码会上传吗？", "所有智能体都运行在你自己的电脑或服务器上，直接在你授权的本地目录和仓库里工作。xMatrix 只负责跨机器协作与状态同步，代码和本地模型凭据留在原处。"],
+      ["智能体运行在哪里？代码会上传吗？", "所有智能体都运行在你自己的电脑或服务器上，直接在你授权的本地目录和仓库里工作。xMatrix 只负责跨机器协作与状态同步，代码和本地模型凭据留在原处、绝不上传至 xMatrix；开启配额显示时，本机 daemon 仅在本地用它们直连原厂查询剩余额度，且可随时关闭。"],
       ["支持哪些编程智能体？", "支持 Claude Code、Codex、Cursor、Gemini、Grok、Kimi、Copilot、OpenCode 等 35 种主流编程智能体，全部通过同一套命令行接入。运行 xmatrix agent add 即可把本机工具加入 Space。"],
       ["我和智能体同时编辑同一段文档会冲突吗？", "不会，人永远优先。只要检测到你正在编辑某一段，智能体会主动暂停等待，等你写完再顺着你的最新内容继续，绝不覆盖你的文字。"],
       ["需要一直盯着每个对话窗口吗？", "不需要。具体执行在后台对话里并行推进，重要结论与现状自动汇总到实时文档。平时只看文档掌握全局，想查细节或亲自介入时再点开对应对话即可。"],
@@ -310,7 +310,7 @@ const zhTw: LandingCopy = {
     title: "常見問題",
     questions: [
       ["代理需要額外付費嗎？", "不需要。無論免費版還是 Pro 版，接入的代理數量都不受限制，Pro 僅按人類成員席位計費。模型呼叫直接走你既有的訂閱或 API key，不加價轉售。"],
-      ["代理運行在哪裡？程式碼會上傳嗎？", "所有代理都運行在你自己的電腦或伺服器上，直接在你授權的本地資料夾與儲存庫裡工作。xMatrix 只負責跨機器協作與狀態同步，程式碼與本地模型憑證留在原處。"],
+      ["代理運行在哪裡？程式碼會上傳嗎？", "所有代理都運行在你自己的電腦或伺服器上，直接在你授權的本地資料夾與儲存庫裡工作。xMatrix 只負責跨機器協作與狀態同步，程式碼與本地模型憑證留在原處、絕不上傳至 xMatrix；啟用額度顯示時，本機 daemon 僅在本地用它們直連原廠查詢剩餘額度，且可隨時關閉。"],
       ["支援哪些程式設計代理？", "支援 Claude Code、Codex、Cursor、Gemini、Grok、Kimi、Copilot、OpenCode 等 35 種主流程式設計代理，全部透過同一套命令列接入。執行 xmatrix agent add 即可把本機工具加入 Space。"],
       ["我和代理同時編輯同一段文件會衝突嗎？", "不會，人永遠優先。只要偵測到你正在編輯某一段，代理會主動暫停等待，等你寫完再順著你的最新內容繼續，絕不覆蓋你的文字。"],
       ["需要一直盯著每個對話視窗嗎？", "不需要。具體執行在背景對話裡並行推進，重要結論與現況自動彙整到即時文件。平時只看文件掌握全局，想查細節或親自介入時再點開對應對話即可。"],
@@ -400,7 +400,7 @@ const ja: LandingCopy = {
     title: "よくある質問",
     questions: [
       ["エージェントに追加料金はかかりますか？", "かかりません。Free でも Pro でも接続するエージェント数は無制限で、Pro は人間メンバーのシート数のみ課金されます。モデル呼び出しは既存のサブスクリプションや API キーを直接使うため、上乗せ料金もありません。"],
-      ["エージェントはどこで動きますか？コードはアップロードされますか？", "すべてのエージェントはご自身の PC やサーバー上で、許可したローカルフォルダやリポジトリの中で動きます。xMatrix はマシン間の協調と状態同期だけを担い、コードとモデルの認証情報はローカルに残ります。"],
+      ["エージェントはどこで動きますか？コードはアップロードされますか？", "すべてのエージェントはご自身の PC やサーバー上で、許可したローカルフォルダやリポジトリの中で動きます。xMatrix はマシン間の協調と状態同期だけを担い、コードとモデルの認証情報はローカルに残り xMatrix へ送信されません。クォータ表示を有効にしている場合のみ、ローカルデーモンが端末内から各プロバイダへ残量を直接照会し、いつでも無効化できます。"],
       ["どのコーディングエージェントに対応していますか？", "Claude Code、Codex、Cursor、Gemini、Grok、Kimi、Copilot、OpenCode など 35 種類の主要コーディングエージェントに同一 CLI で対応しています。xmatrix agent add を実行するだけで Space に接続できます。"],
       ["人間とエージェントが同じ段落を同時編集すると競合しますか？", "しません。常に人間が優先されます。あなたが編集中の段落にエージェントが差し掛かると自動で待機し、書き終えた最新の内容を引き継いで続けるため、あなたの文章を上書きすることはありません。"],
       ["すべての会話ウィンドウを監視し続ける必要がありますか？", "不要です。実作業はバックグラウンドのスレッドで並列に進み、重要な結論と現状がライブドキュメントにまとまります。普段はドキュメントで全体を見て、詳細を確認・介入したいときだけ会話を開けば十分です。"],
@@ -490,7 +490,7 @@ const ko: LandingCopy = {
     title: "자주 묻는 질문",
     questions: [
       ["에이전트에 추가 비용이 드나요?", "아니요. 무료와 Pro 모두 연결하는 에이전트 수에 제한이 없으며 Pro는 사람 시트당 과금됩니다. 모델 호출은 기존 구독이나 API 키를 그대로 사용하며 추가 마진이 없습니다."],
-      ["에이전트는 어디서 실행되나요? 코드가 업로드되나요?", "모든 에이전트는 사용자 본인의 컴퓨터나 서버에서, 권한을 부여한 로컬 폴더와 저장소 안에서 실행됩니다. xMatrix는 머신 간 협업과 상태 동기화만 담당하며 코드와 모델 자격 증명은 로컬에 그대로 남습니다."],
+      ["에이전트는 어디서 실행되나요? 코드가 업로드되나요?", "모든 에이전트는 사용자 본인의 컴퓨터나 서버에서, 권한을 부여한 로컬 폴더와 저장소 안에서 실행됩니다. xMatrix는 머신 간 협업과 상태 동기화만 담당하며 코드와 모델 자격 증명은 로컬에 남아 xMatrix로 전송되지 않습니다. 할당량 표시를 켠 경우에만 로컬 데몬이 기기 내에서 공급자에 잔여 할당량을 직접 조회하며 언제든 끌 수 있습니다."],
       ["어떤 코딩 에이전트를 지원하나요?", "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode 등 35종의 주요 코딩 에이전트를 하나의 CLI로 지원합니다. xmatrix agent add를 실행해 내 머신의 도구를 Space에 연결하세요."],
       ["사람과 에이전트가 같은 문단을 동시에 편집하면 충돌하나요?", "아니요, 항상 사람이 우선합니다. 편집 중인 문단에 에이전트가 도달하면 자동으로 멈춰 기다렸다가 작성 완료된 최신 내용에 이어서 진행하므로 절대 덮어쓰지 않습니다."],
       ["모든 대화 창을 계속 지켜봐야 하나요?", "그럴 필요 없습니다. 실제 실행은 백그라운드 스레드에서 병렬로 진행되고 핵심 결론과 현황이 실시간 문서에 모입니다. 평소엔 문서로 전체를 보고, 세부 확인이나 개입이 필요할 때만 대화를 열면 됩니다."],
@@ -580,7 +580,7 @@ const es: LandingCopy = {
     title: "Preguntas frecuentes",
     questions: [
       ["¿Los agentes cuestan extra?", "No. Todos los planes admiten agentes ilimitados y Pro cobra solo por asiento humano. Tus agentes siguen usando las suscripciones o claves API que ya tienes, sin recargos."],
-      ["¿Dónde corren mis agentes?", "En tus propias máquinas, directamente dentro de las carpetas y repositorios que registres. xMatrix coordina tu Space entre máquinas mientras tu código y credenciales permanecen en local."],
+      ["¿Dónde corren mis agentes?", "En tus propias máquinas, directamente dentro de las carpetas y repositorios que registres. xMatrix coordina tu Space entre máquinas mientras tu código y credenciales permanecen en local y nunca se suben a xMatrix. Si activas el indicador de cuota, el daemon local solo las usa en tu equipo para consultar el saldo con tu proveedor, y puedes desactivarlo en cualquier momento."],
       ["¿Qué agentes funcionan con xMatrix?", "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode y decenas más, todos desde la misma CLI. Ejecuta xmatrix agent add para conectar los que ya tienes en tu máquina."],
       ["¿Qué pasa si una persona y un agente editan el mismo párrafo?", "Siempre gana la persona. Si un agente llega a un párrafo que estás editando, se detiene, espera a que termines y continúa desde tu último texto sin sobrescribir tus palabras."],
       ["¿Tengo que vigilar cada conversación?", "No. La ejecución ocurre en hilos paralelos mientras los resultados se resumen en el documento vivo. Lee la página para ver el estado general y abre un hilo solo cuando quieras los detalles."],

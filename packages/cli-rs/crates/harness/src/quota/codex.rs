@@ -84,6 +84,9 @@ pub(crate) async fn read_codex_chatgpt_usage_for_home(
     home: &Path,
     force: bool,
 ) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     read_codex_usage_from_endpoint(home, force, CODEX_CHATGPT_USAGE_URL).await
 }
 
@@ -170,6 +173,9 @@ pub(crate) async fn read_chatgpt_wham_usage_with_token(
     force: bool,
     endpoint: &str,
 ) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     if let Some(cached) = CODEX_CHATGPT_USAGE.hit_unless_forced(cache_key, force) {
         return cached;
     }
@@ -181,6 +187,9 @@ pub(crate) async fn read_chatgpt_wham_usage_with_token(
 /// Backwards-compatible entry point used by the Codex runtime: resolve the
 /// process `CODEX_HOME` (or `~/.codex`) exactly as before, then read that home.
 pub async fn read_codex_chatgpt_usage(force: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     let home = codex_home_dir()?;
     read_codex_chatgpt_usage_for_home(&home, force).await
 }

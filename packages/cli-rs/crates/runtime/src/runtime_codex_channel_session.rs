@@ -51,7 +51,13 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
     // usage source. After this the quota is read when a turn ends, not on a
     // timer.
     let (latest_usage, app) = tokio::join!(
-        read_codex_chatgpt_usage(false),
+        async {
+            if xmatrix_cli_core::config::quota_probes_disabled() {
+                None
+            } else {
+                read_codex_chatgpt_usage(false).await
+            }
+        },
         spawn_initialized_codex_app(
             cmd,
             cwd,
@@ -513,6 +519,9 @@ impl CodexRun<'_> {
     }
 
     async fn refresh_usage(&mut self) {
+        if xmatrix_cli_core::config::quota_probes_disabled() {
+            return;
+        }
         if let Some(usage) = read_codex_chatgpt_usage(true).await {
             self.latest_usage = Some(usage);
         }

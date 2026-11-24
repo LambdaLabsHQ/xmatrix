@@ -96,6 +96,9 @@ fn now_unix_ms() -> i64 {
 
 /// ChatGPT subscription windows for OpenCode's stored `openai` OAuth login.
 pub async fn read_opencode_chatgpt_usage(force: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     let auth = opencode_auth_file()?;
     read_opencode_chatgpt_usage_from(&auth, force, super::codex::CODEX_CHATGPT_USAGE_URL).await
 }
@@ -191,6 +194,9 @@ fn opencode_usage_key() -> Option<String> {
 
 /// OpenCode Go subscription windows from the usage endpoint.
 pub async fn read_opencode_zen_usage(force: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     let cache = super::cache::account_meter_cache(super::cache::AccountMeter::OpenCode);
     if let Some(cached) = cache.hit_unless_forced(force) {
         return cached;

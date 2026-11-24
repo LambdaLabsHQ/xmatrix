@@ -40,9 +40,14 @@ pub(crate) async fn execute_machine_quota_probe(
     relay_lease: Option<MachineDaemonCommandLease>,
 ) -> MachineDaemonReport {
     let deadline = Instant::now() + PROBE_TOTAL_BUDGET;
+    let disabled = xmatrix_cli_core::config::quota_probes_disabled();
     let mut results = Vec::with_capacity(probe.targets.len().min(MAX_PROBE_TARGETS));
     for target in probe.targets.iter().take(MAX_PROBE_TARGETS) {
-        results.push(probe_one_target(target, deadline, probe.fresh).await);
+        if disabled {
+            results.push(unavailable(target, "configuration_unavailable"));
+        } else {
+            results.push(probe_one_target(target, deadline, probe.fresh).await);
+        }
     }
     accept_only_what_the_hub_asked(&mut results, &probe);
     MachineDaemonReport::MachineQuotaProbeResult {
@@ -210,6 +215,9 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
     let spawn = SpawnEnv {
         inherited: host.inherited,
     };
+    if quota::quota_probes_disabled_in(|key| spawn.effective(key)) {
+        return Resolution::ConfigurationUnavailable;
+    }
     let account = match preset.id.as_str() {
         // Every spawn removes the daemon's own CODEX_HOME.
         "codex" => match host.home.as_ref() {
@@ -990,6 +998,25 @@ mod tests {
             )),
             QuotaAccount::AntigravityDefault
         );
+    }
+
+    #[test]
+    fn global_quota_probe_disable_opt_out_blocks_every_harness() {
+        for target in [
+            "registration:claude",
+            "registration:codex",
+            "registration:cursor",
+            "registration:grok",
+            "registration:opencode",
+            "registration:deepseek",
+            "registration:antigravity",
+        ] {
+            assert_eq!(
+                resolve_fixture(target, &[("XMATRIX_DISABLE_QUOTA_PROBES", "1")]),
+                Resolution::ConfigurationUnavailable,
+                "{target}"
+            );
+        }
     }
 
     #[test]

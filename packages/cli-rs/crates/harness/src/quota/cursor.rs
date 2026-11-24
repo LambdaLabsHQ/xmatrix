@@ -104,6 +104,9 @@ fn cursor_cli_user_agent() -> String {
 
 /// Cursor billing-cycle and Auto/API bucket quotas from GetCurrentPeriodUsage.
 pub async fn read_cursor_period_usage(force: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     let cache = super::cache::account_meter_cache(super::cache::AccountMeter::Cursor);
     if let Some(cached) = cache.hit_unless_forced(force) {
         return cached;

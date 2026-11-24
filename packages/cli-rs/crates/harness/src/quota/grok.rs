@@ -126,6 +126,9 @@ fn grok_cli_user_agent_in(grok_home: &Path) -> String {
 /// Legacy monthly-credit accounts still send
 /// `{ config: { monthlyLimit: {val}, used: {val}, billingPeriodEnd } }`.
 pub async fn read_grok_build_billing_usage(force: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     if let Some(cached) = GROK_BILLING.hit_unless_forced(force) {
         return cached;
     }
@@ -219,6 +222,9 @@ pub(crate) async fn read_grok_build_billing_usage_for_home(
     grok_home: &Path,
     force: bool,
 ) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     read_grok_usage_from_endpoint(grok_home, force, GROK_BUILD_BILLING_URL).await
 }
 
