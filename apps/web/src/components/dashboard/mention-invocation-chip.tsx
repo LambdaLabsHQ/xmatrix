@@ -16,7 +16,7 @@ import { formatZonedDateTime } from "./time-display";
 import { JevDecisionFiles, JevDecisionSection, useJevDecisions } from "./summon-decision-records";
 import { MentionReplyRecovery } from "./mention-reply-recovery";
 import { parsePresentedRoutingDecision, RoutingDecisionBoard, routingSelectionNote } from "./routing-decision-board";
-import { HandoffArrowLabel } from "./handoff-arrow";
+import { HandoffArrowLabel, writtenHandoffSuccessor } from "./handoff-arrow";
 import { useAppPortalContainer } from "./app-portal-container";
 import { useNow } from "./agent-work-intent";
 import { useReaderLocale } from "@/lib/onboarding-locale";
@@ -60,16 +60,21 @@ function RepositoryBaselineDetails({ baseline }: { baseline: NonNullable<AgentLa
   </div>;
 }
 
-export function MentionContinuationChip({ record, unavailable }: { record: SerializedAgentContinuation; unavailable?: boolean }) {
+export function MentionContinuationChip({ record, unavailable, launch }: {
+  record: SerializedAgentContinuation; unavailable?: boolean;
+  /** The successor's launch on a handoff, whose picks the card keeps showing. */
+  launch?: SerializedAgentLaunch;
+}) {
   const view = continuationView(record, unavailable);
   const label = record.sourceName + record.sourceMention.slice(record.sourceName.length + 1);
   const handoff = record.kind === "handoff";
   const faces = continuationFaces(record);
+  const written = handoff ? writtenHandoffSuccessor(record.sourceMention, launch) : {};
   return <InvocationChip label={label} name={record.sourceName}
     variant={handoff ? "handoff" : undefined}
     labelContent={handoff ? <HandoffArrowLabel sourceName={record.sourceName} sourceOrdinal={record.sourceOrdinal}
-      sourceFace={faces.source} successorName={record.targetName} successorFace={faces.successor}
-      view={handoffView(record, { auto: false, fresh: false, unavailable })} /> : undefined}
+      sourceFace={faces.source} successorName={record.targetName} successorLabel={written.label} successorFace={faces.successor}
+      view={handoffView(record, { auto: false, fresh: false, unavailable })} filled={written.filled} /> : undefined}
     destinationName={record.kind === "handoff" ? record.targetName : undefined}
     face={faces.successor}
     sourceAddress={record.sourceMention} view={view}

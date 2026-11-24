@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Sparkles } from "lucide-react";
-import { parsePresentedRoutingDecision, type AutoLaunchCondition, type AutoLaunchTags, type FaceOf, type SerializedAgentLaunch } from "@xmatrix/protocol";
+import { parseHandoffInstanceMentions, parsePresentedRoutingDecision, type AutoLaunchCondition, type AutoLaunchTags, type FaceOf, type SerializedAgentLaunch } from "@xmatrix/protocol";
 import { JevFilledTagSpans } from "./jev-filled-tag-spans";
 import { jevFilledAnnouncement, jevFilledTagsForHandoff, launchMachineLabel, noteJevReading, type JevFilledTag } from "./jev-filled-tags";
 import { MentionChipFace } from "./mention-chip-face";
@@ -45,6 +45,25 @@ function WrittenSuccessorLabel({ text, conditions }: { text: string; conditions:
   }
   if (cursor < text.length) parts.push(<Fragment key="tail">{text.slice(cursor)}</Fragment>);
   return <>{parts}</>;
+}
+
+/** What a handoff's author wrote for its successor, read back from the stored
+ *  mention: the label with each condition marked, plus the picks its launch
+ *  added. A recorded handoff keeps drawing what was asked for after the
+ *  successor took over, as the unrecorded card does while it is in flight. */
+export function writtenHandoffSuccessor(mention: string, launch?: SerializedAgentLaunch) {
+  const written = parseHandoffInstanceMentions(mention)[0];
+  if (!written) return {};
+  const text = mention.slice(written.successorStart, written.end);
+  const conditions = written.conditions.map(condition => ({ ...condition,
+    start: condition.start - written.successorStart, end: condition.end - written.successorStart,
+    valueStart: condition.valueStart - written.successorStart }));
+  const decision = parsePresentedRoutingDecision(launch?.routingDecision);
+  return {
+    label: conditions.length ? <WrittenSuccessorLabel text={text} conditions={conditions} /> : undefined,
+    filled: launch ? jevFilledTagsForHandoff(written.successorName, decision?.parameters,
+      launchMachineLabel(decision, written.tags.machine), written.tags) : undefined,
+  };
 }
 
 /** `@source:n:handoff:@successor [conditions]` drawn as what it does: the work leaves
