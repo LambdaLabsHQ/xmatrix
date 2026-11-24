@@ -745,9 +745,9 @@ integration("a section's last change reads the same once its revisions' changes 
       WHERE space_id=$1 AND page_id=$2 ORDER BY revision`, [ids.space, page.pageId])).rows
       .map((row) => [Number(row.revision), row.changed_blocks]);
     const expected = { order: ["launch", "secret-plan", "notes"], updated: { "notes": 4, "secret-plan": 2, "launch": 1 } };
-    assert.deepEqual(await read(), expected, "derived from the bodies");
     assert.deepEqual(await kept(), [[1, null], [2, ["secret-plan"]], [3, []], [4, ["notes"]]],
-      "what each revision changed against the one before it is kept");
+      "each edited revision precomputes its changed sections at write time");
+    assert.deepEqual(await read(), expected, "first awareness read uses precomputed changes");
     assert.deepEqual(await read(), expected, "read again from what was kept");
 
     await pages.purge({ requestId: r(), ...base, pageId: page.pageId, needle: "Secret plan", replacement: "Plan" });
@@ -768,6 +768,9 @@ integration("a section change derived from a body that changed before it was kep
   try {
     const r = () => crypto.randomUUID();
     const page = await writtenPage(fixture, ["# Launch\n\n## Plan\n\nShip in May.\n", "# Launch\n\n## Plan\n\nShip in June.\n"]);
+    // Simulate a revision whose precomputed changed_blocks was cleared (e.g. after purge).
+    await client.query(`UPDATE data.page_revisions SET changed_blocks=NULL WHERE space_id=$1 AND page_id=$2`,
+      [ids.space, page.pageId]);
     const rows = [{ revision: 2, changed_blocks: null }, { revision: 1, changed_blocks: null }];
     const bodies = new Map();
     const { derived } = await walkSectionChanges(rows, ["launch", "plan"], async (revisions) => {

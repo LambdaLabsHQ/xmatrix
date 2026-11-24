@@ -2941,62 +2941,90 @@ export class PostgresMessageRepository {
   }): Promise<Record<string, unknown>> {
     const { requestId, spaceId, channelId, principal, messageId } = messageIdentity(input);
     const attachmentId = bounded(input.attachmentId, "attachmentId");
-    return this.inSpace(requestId, "message.attachment-authority", spaceId, async (transaction) => {
-      const accessChannel = await messageChannelCapability(
-        transaction, { spaceId, channelId, principal }, "message_content_read",
-      );
-      const rows = await transaction.query<QueryResultRow & {
-        source_channel_id: string; source_mode: string; object_key: string; content_hash: string;
-        encoded_bytes: string | number; mime_type: string; name: string;
-        presentation_residual_json: Record<string, unknown> | null; version: string | number;
-      }>({
-        name: "message_attachment_authority_v1",
-        text: `SELECT a.channel_id AS source_channel_id, c.mode AS source_mode, a.object_key,
+    const { shardId, placementEpoch } = await this.placement(
+      requestId, "message.attachment-authority", spaceId, input.placement,
+    );
+    const rows = await this.database.transaction({
+      requestId, operation: "message.attachment-authority", statement: "single_read",
+      placement: { spaceId, shardId, placementEpoch },
+    }, (transaction) => transaction.query<QueryResultRow & {
+      channel_authorized: boolean;
+      channel_metadata_json: Record<string, unknown> | null;
+      source_channel_id: string | null;
+      source_mode: string | null;
+      object_key: string | null;
+      content_hash: string | null;
+      encoded_bytes: string | number | null;
+      mime_type: string | null;
+      name: string | null;
+      presentation_residual_json: Record<string, unknown> | null;
+      version: string | number | null;
+    }>({
+      name: "message_attachment_authority_v2",
+      text: `WITH authority_input AS (
+          SELECT $1::text AS space_id, $2::text AS channel_id,
+            $5::text AS principal_kind, $6::text AS principal_id
+        ), ${channelCapabilityCte({ capability: "message_content_read", inputCte: "authority_input" })},
+        attachment_row AS (
+          SELECT a.channel_id AS source_channel_id, c.mode AS source_mode, a.object_key,
             a.content_hash, a.encoded_bytes, a.mime_type, a.name,
             a.presentation_residual_json, a.version
           FROM data.message_attachment_refs a JOIN data.messages m
             ON m.space_id = a.space_id AND m.message_id = a.message_id
           JOIN data.channels c ON c.space_id = a.space_id AND c.channel_id = a.channel_id
-          WHERE a.space_id = $1 AND a.message_id = $2 AND a.attachment_id = $3
-            AND m.deleted_at IS NULL AND m.recalled_at IS NULL LIMIT 1`,
-        values: [spaceId, messageId, attachmentId], maxRows: 1,
-      });
-      const row = rows[0];
-      if (!row) throw new MessageAuthorityError(
+          WHERE EXISTS (SELECT 1 FROM authorized_channel)
+            AND a.space_id = $1 AND a.message_id = $3 AND a.attachment_id = $4
+            AND m.deleted_at IS NULL AND m.recalled_at IS NULL LIMIT 1
+        )
+        SELECT COALESCE(granted.authorized, FALSE) AS channel_authorized,
+          granted.metadata_json AS channel_metadata_json,
+          att.source_channel_id, att.source_mode, att.object_key, att.content_hash,
+          att.encoded_bytes, att.mime_type, att.name, att.presentation_residual_json, att.version
+        FROM (SELECT 1) one
+        LEFT JOIN authorized_channel granted ON TRUE
+        LEFT JOIN attachment_row att ON TRUE`,
+      values: [spaceId, channelId, messageId, attachmentId, principal.kind, principal.id],
+      maxRows: 1,
+    }));
+    const row = rows[0];
+    requireAuthorizedChannel(row?.channel_authorized, messageCapabilityError);
+    if (!row?.source_channel_id || !row.source_mode || !row.object_key || !row.content_hash
+        || row.encoded_bytes === null || !row.mime_type || !row.name || row.version === null) {
+      throw new MessageAuthorityError(
         "message_attachment_not_found", 404, "Message attachment is not available",
       );
-      if (row.source_channel_id !== channelId) {
-        const metadata = accessChannel.metadata ?? {};
-        if (metadata.kind !== "thread" || metadata.threadRootMessageId !== messageId ||
-            metadata.threadRootChannelId !== row.source_channel_id) {
-          throw new MessageAuthorityError(
-            "message_attachment_not_found", 404, "Message attachment is not available",
-          );
-        }
-      }
-      const encodedBytes = Number(row.encoded_bytes);
-      const version = Number(row.version);
-      if (row.object_key !== `objects/${row.content_hash}` ||
-          !/^[a-f0-9]{64}$/u.test(row.content_hash) || !Number.isSafeInteger(encodedBytes) ||
-          encodedBytes < 1 || !Number.isSafeInteger(version) || version < 1) {
+    }
+    if (row.source_channel_id !== channelId) {
+      const metadata = row.channel_metadata_json ?? {};
+      if (metadata.kind !== "thread" || metadata.threadRootMessageId !== messageId ||
+          metadata.threadRootChannelId !== row.source_channel_id) {
         throw new MessageAuthorityError(
-          "postgres_fact_invalid", 500, "Message attachment authority is corrupt",
+          "message_attachment_not_found", 404, "Message attachment is not available",
         );
       }
-      return {
-        channelId,
-        messageId,
-        visibilityScopeId: channelVisibilityScope({ mode: row.source_mode, channelId: row.source_channel_id, spaceId: spaceId }),
-        attachment: {
-          id: attachmentId, name: row.name, mimeType: row.mime_type,
-          size: encodedBytes, version, ...row.presentation_residual_json,
-        },
-        object: {
-          objectKey: row.object_key, contentHash: row.content_hash,
-          encodedBytes, checksum: row.content_hash,
-        },
-      };
-    }, input.placement);
+    }
+    const encodedBytes = Number(row.encoded_bytes);
+    const version = Number(row.version);
+    if (row.object_key !== `objects/${row.content_hash}` ||
+        !/^[a-f0-9]{64}$/u.test(row.content_hash) || !Number.isSafeInteger(encodedBytes) ||
+        encodedBytes < 1 || !Number.isSafeInteger(version) || version < 1) {
+      throw new MessageAuthorityError(
+        "postgres_fact_invalid", 500, "Message attachment authority is corrupt",
+      );
+    }
+    return {
+      channelId,
+      messageId,
+      visibilityScopeId: channelVisibilityScope({ mode: row.source_mode, channelId: row.source_channel_id, spaceId }),
+      attachment: {
+        id: attachmentId, name: row.name, mimeType: row.mime_type,
+        size: encodedBytes, version, ...row.presentation_residual_json,
+      },
+      object: {
+        objectKey: row.object_key, contentHash: row.content_hash,
+        encodedBytes, checksum: row.content_hash,
+      },
+    };
   }
 
   async liveDeliveryRouting(input: {

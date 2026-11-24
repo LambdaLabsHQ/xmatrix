@@ -29,3 +29,48 @@ pub(crate) fn content_length(headers: &str) -> Option<usize> {
             .and_then(|value| value.trim().parse::<usize>().ok())
     })
 }
+
+/// Accept `count` simultaneous HTTP requests, synchronize all of them on a
+/// barrier so serial callers time out, and reply with each handler's bytes.
+#[allow(dead_code)]
+pub(crate) fn spawn_barrier_server<F>(
+    count: usize,
+    content_type: &'static str,
+    respond: F,
+) -> (String, std::thread::JoinHandle<()>)
+where
+    F: Fn(&str, &[u8]) -> Vec<u8> + Send + Sync + 'static,
+{
+    use std::io::Write;
+    use std::net::TcpListener;
+    use std::sync::{Arc, Barrier};
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let barrier = Arc::new(Barrier::new(count));
+    let respond = Arc::new(respond);
+    let handle = std::thread::spawn(move || {
+        let mut workers = Vec::with_capacity(count);
+        for _ in 0..count {
+            let (mut socket, _) = listener.accept().unwrap();
+            let barrier = Arc::clone(&barrier);
+            let respond = Arc::clone(&respond);
+            workers.push(std::thread::spawn(move || {
+                let (headers, body) = read_request(&mut socket);
+                let payload = respond(&headers, &body);
+                barrier.wait();
+                write!(
+                    socket,
+                    "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    payload.len()
+                )
+                .unwrap();
+                socket.write_all(&payload).unwrap();
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+    });
+    (base_url, handle)
+}

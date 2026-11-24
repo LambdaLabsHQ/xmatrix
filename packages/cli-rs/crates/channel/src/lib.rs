@@ -6,6 +6,9 @@ mod invocation_diagnostics;
 pub use invocation_diagnostics::{cmd_decision_evidence, cmd_diagnose};
 mod message_receipt;
 pub use message_receipt::cmd_message_receipt;
+#[cfg(test)]
+#[path = "../../core/tests/support/http_fixture.rs"]
+mod http_fixture;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -13,13 +16,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use colored::Colorize;
+use futures_util::future::join;
+use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use xmatrix_cli_args::{ChannelCommand, ChannelVisibilityState, SpaceCommand, WorktreeState};
 use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_marker};
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::human_connection::{HumanConnectionClient, HumanConnectionEvent};
-use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy};
+use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy, MEDIA_FETCH_CONCURRENCY};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
 use xmatrix_cli_core::route_key;
 use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
@@ -37,6 +42,9 @@ const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::private_upload:
 // Fetching history is still unbounded from the CLI's perspective, but it must
 // advance through this bounded Authority window using its sequence cursor.
 const CHANNEL_HISTORY_PAGE_SIZE: usize = 200;
+// Cap eager uncached downloads during `channel history` so reading a long
+// screenshot-heavy channel does not pull dozens of historical images at once.
+const HISTORY_EAGER_ATTACHMENT_LIMIT: usize = 8;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1710,9 +1718,9 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
             cmd_channel_worktree(hub_url, token, &channel_id, state).await
         }
         ChannelCommand::Send(args) => cmd_send_args(hub_url, token, args).await,
-        ChannelCommand::History { channel_id } => {
+        ChannelCommand::History { channel_id, limit } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_history(hub_url, token, &channel_id).await
+            cmd_channel_history(hub_url, token, &channel_id, limit.map(|n| n as usize)).await
         }
         ChannelCommand::Chat { channel_id, limit } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
@@ -2265,6 +2273,15 @@ pub async fn load_full_channel_history(
     token: &str,
     channel_id: &str,
 ) -> error::Result<Vec<protocol::ChannelMessage>> {
+    load_channel_history_bounded(hub_url, token, channel_id, None).await
+}
+
+async fn load_channel_history_bounded(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    limit: Option<usize>,
+) -> error::Result<Vec<protocol::ChannelMessage>> {
     // The machine daemon holds a shared validated history cache; when this
     // process was spawned with request-broker access, one broker call replaces
     // the whole walk. Any failure degrades to the direct walk below.
@@ -2273,16 +2290,22 @@ pub async fn load_full_channel_history(
     {
         report_repaired_history(hub_url, &repairs, unreadable).await;
         sort_channel_history(&mut messages);
+        if let Some(limit) = limit
+            && messages.len() > limit
+        {
+            messages.drain(..messages.len() - limit);
+        }
         return Ok(messages);
     }
-    load_hub_channel_history(hub_url, token, channel_id).await
+    load_hub_channel_history_bounded(hub_url, token, channel_id, limit).await
 }
 
-/// Every page of a Channel's history, read from the Hub.
-async fn load_hub_channel_history(
+/// Every page (or the newest `limit` messages) of a Channel's history, read from the Hub.
+async fn load_hub_channel_history_bounded(
     hub_url: &str,
     token: &str,
     channel_id: &str,
+    limit: Option<usize>,
 ) -> error::Result<Vec<protocol::ChannelMessage>> {
     let mut before_sequence: Option<u64> = None;
     let mut messages = Vec::new();
@@ -2292,10 +2315,16 @@ async fn load_hub_channel_history(
     let mut first_unreadable: Option<String> = None;
 
     loop {
+        let page_limit = match limit {
+            Some(max_total) => max_total
+                .saturating_sub(messages.len())
+                .clamp(1, CHANNEL_HISTORY_PAGE_SIZE),
+            None => CHANNEL_HISTORY_PAGE_SIZE,
+        };
         let mut route = format!(
             "/api/channels/{}/history?limit={}",
             urlencoding::encode(channel_id),
-            CHANNEL_HISTORY_PAGE_SIZE
+            page_limit
         );
         if let Some(cursor) = before_sequence {
             route.push_str("&beforeSequence=");
@@ -2336,6 +2365,11 @@ async fn load_hub_channel_history(
             page.into_iter()
                 .filter(|message| seen_message_ids.insert(message.message_id.clone())),
         );
+        if let Some(max_total) = limit
+            && messages.len() >= max_total
+        {
+            break;
+        }
 
         let Some(next_before_sequence) = next_before_sequence else {
             break;
@@ -2351,6 +2385,11 @@ async fn load_hub_channel_history(
     report_repaired_history(hub_url, &page_repairs, unreadable_rows).await;
 
     sort_channel_history(&mut messages);
+    if let Some(max_total) = limit
+        && messages.len() > max_total
+    {
+        messages.drain(..messages.len() - max_total);
+    }
 
     Ok(messages)
 }
@@ -2465,9 +2504,19 @@ async fn daemon_cached_channel_history(
     Some((messages, repairs, unreadable.len()))
 }
 
-async fn cmd_channel_history(hub_url: &str, token: &str, channel_id: &str) -> error::Result<()> {
-    let messages = load_full_channel_history(hub_url, token, channel_id).await?;
-    let threads = match load_channel_read_context(hub_url, token, channel_id).await {
+async fn cmd_channel_history(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    limit: Option<usize>,
+) -> error::Result<()> {
+    let (messages_result, context_result) = join(
+        load_channel_history_bounded(hub_url, token, channel_id, limit),
+        load_channel_read_context(hub_url, token, channel_id),
+    )
+    .await;
+    let messages = messages_result?;
+    let threads = match context_result {
         Ok(context) => {
             println!("{}", context.text);
             context.threads
@@ -3018,26 +3067,29 @@ fn command_result_lines(result: Option<&serde_json::Value>) -> Vec<String> {
     lines
 }
 
-/// Download identity-backed image attachments via the product-media read path
-/// so history output can point at real local files instead of "missing data".
+/// Materialize identity-backed image attachments via the product-media read path
+/// so recent history entries point at real local files without eagerly pulling
+/// dozens of older uncached attachments across long conversations.
 async fn materialize_history_image_attachments(
     hub_url: &str,
     token: &str,
     messages: &[protocol::ChannelMessage],
 ) -> HashMap<(String, String), PathBuf> {
-    let mut local = HashMap::new();
-    for message in messages {
+    let mut seen = HashSet::new();
+    let mut targets = Vec::new();
+    let mut uncached_selected = 0usize;
+    // Walk newest-first so recent attachments get the eager download budget while
+    // already-cached older attachments still resolve locally with zero network I/O.
+    for message in messages.iter().rev() {
         let Some(attachments) = message.attachments.as_deref() else {
             continue;
         };
-        for attachment in attachments {
-            if !attachment.data_url.is_empty() {
-                continue;
-            }
-            if attachment
-                .url
-                .as_deref()
-                .is_some_and(|value| !value.is_empty())
+        for attachment in attachments.iter().rev() {
+            if !attachment.data_url.is_empty()
+                || attachment
+                    .url
+                    .as_deref()
+                    .is_some_and(|value| !value.is_empty())
             {
                 continue;
             }
@@ -3054,7 +3106,33 @@ async fn materialize_history_image_attachments(
             if channel_id.is_empty() || message_id.is_empty() || attachment.id.is_empty() {
                 continue;
             }
-            match download_message_attachment_product_media(
+            let key = (message.message_id.clone(), attachment.id.clone());
+            if !seen.insert(key.clone()) {
+                continue;
+            }
+            let stem = xmatrix_cli_core::attachment_cache::cache_stem_for_identity(
+                channel_id,
+                message_id,
+                &attachment.id,
+                attachment.size,
+            );
+            let cached_path = xmatrix_cli_core::attachment_cache::cached_attachment_path(&stem);
+            let is_cached = std::fs::metadata(&cached_path).is_ok_and(|meta| {
+                meta.is_file() && meta.len() > 0 && meta.len() == attachment.size
+            });
+            if !is_cached {
+                if uncached_selected >= HISTORY_EAGER_ATTACHMENT_LIMIT {
+                    continue;
+                }
+                uncached_selected += 1;
+            }
+            targets.push((key, channel_id, message_id, attachment));
+        }
+    }
+    let mut local = HashMap::with_capacity(targets.len());
+    let mut downloads = stream::iter(targets)
+        .map(|(key, channel_id, message_id, attachment)| async move {
+            let result = download_message_attachment_product_media(
                 hub_url,
                 token,
                 channel_id,
@@ -3064,19 +3142,22 @@ async fn materialize_history_image_attachments(
                 &attachment.mime_type,
                 &attachment.name,
             )
-            .await
-            {
-                Ok(path) => {
-                    local.insert((message.message_id.clone(), attachment.id.clone()), path);
-                }
-                Err(err) => {
-                    eprintln!(
-                        "{} failed to materialize attachment {} ({}): {err}",
-                        "⚠".yellow().bold(),
-                        attachment.name,
-                        attachment.id
-                    );
-                }
+            .await;
+            (key, attachment, result)
+        })
+        .buffer_unordered(MEDIA_FETCH_CONCURRENCY);
+    while let Some((key, attachment, result)) = downloads.next().await {
+        match result {
+            Ok(path) => {
+                local.insert(key, path);
+            }
+            Err(err) => {
+                eprintln!(
+                    "{} failed to materialize attachment {} ({}): {err}",
+                    "⚠".yellow().bold(),
+                    attachment.name,
+                    attachment.id
+                );
             }
         }
     }
@@ -4141,5 +4222,80 @@ mod tests {
             super::shell_quote("https://example.com/attachment?token=one'two"),
             "'https://example.com/attachment?token=one'\\''two'"
         );
+    }
+
+    #[tokio::test]
+    async fn materialize_history_image_attachments_downloads_concurrently() {
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let cache_root = std::env::temp_dir().join(format!(
+            "xmatrix-history-parallel-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let previous_config = std::env::var_os("XMATRIX_CONFIG_DIR");
+        unsafe {
+            std::env::set_var("XMATRIX_CONFIG_DIR", &cache_root);
+        }
+
+        let (hub, server) = super::http_fixture::spawn_barrier_server(2, "image/png", |_headers, body| {
+            let payload: serde_json::Value = serde_json::from_slice(body).unwrap();
+            match payload["attachmentId"].as_str().unwrap() {
+                "att-a" => b"png-bytes-a!".to_vec(),
+                "att-b" => b"png-bytes-b!".to_vec(),
+                other => panic!("unexpected attachment {other}"),
+            }
+        });
+
+        let messages = vec![
+            history_message(
+                "msg-a",
+                "ch-par",
+                1,
+                String::new(),
+                ChannelAttachment {
+                    channel_id: Some("ch-par".into()),
+                    message_id: Some("msg-a".into()),
+                    ..attachment_fixture::image_attachment("att-a", "a.png", "image/png", 12)
+                },
+                "2026-11-24T20:00:00Z",
+            ),
+            history_message(
+                "msg-b",
+                "ch-par",
+                2,
+                String::new(),
+                ChannelAttachment {
+                    channel_id: Some("ch-par".into()),
+                    message_id: Some("msg-b".into()),
+                    ..attachment_fixture::image_attachment("att-b", "b.png", "image/png", 12)
+                },
+                "2026-11-24T20:00:01Z",
+            ),
+        ];
+
+        let local = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::materialize_history_image_attachments(&hub, "test-token", &messages),
+        )
+        .await
+        .expect("concurrent attachment downloads must not deadlock on the 2-way barrier");
+        server.join().unwrap();
+
+        assert_eq!(
+            std::fs::read(&local[&("msg-a".into(), "att-a".into())]).unwrap(),
+            b"png-bytes-a!"
+        );
+        assert_eq!(
+            std::fs::read(&local[&("msg-b".into(), "att-b".into())]).unwrap(),
+            b"png-bytes-b!"
+        );
+
+        unsafe {
+            match previous_config {
+                Some(value) => std::env::set_var("XMATRIX_CONFIG_DIR", value),
+                None => std::env::remove_var("XMATRIX_CONFIG_DIR"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&cache_root);
     }
 }

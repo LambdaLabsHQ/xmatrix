@@ -19,6 +19,29 @@ export interface DerivedSectionChange { revision: number; previous: number; chan
 
 /** At most this many sections are kept for one revision; one that changed more is derived again when read. */
 const MAX_KEPT_SECTIONS = 2_000;
+/** Combined markdown byte cap for write-time precomputation; larger edits fall back to lazy derivation. */
+const MAX_PRECOMPUTE_BODY_CHARS = 256_000;
+
+/**
+ * Precompute the sections changed by a new revision at write time so steady-state
+ * `/awareness` reads never have to re-fetch revision bodies or write back derivations.
+ */
+export async function deriveChangedBlocksForWrite(
+  previousBody: string,
+  nextBody: string,
+): Promise<string[] | null> {
+  if (previousBody.length + nextBody.length > MAX_PRECOMPUTE_BODY_CHARS) return null;
+  const canonicalSections = new Map<string, string>();
+  const changed = await pageChangedDocBlocksAsync(previousBody, nextBody, async (section) => {
+    let form = canonicalSections.get(section);
+    if (form === undefined) {
+      form = canonicalPageMarkdown(section);
+      canonicalSections.set(section, form);
+    }
+    return form;
+  });
+  return changed.length <= MAX_KEPT_SECTIONS ? changed : null;
+}
 
 /**
  * Each of `order`'s sections, with the newest revision in `rows` that changed it. A revision in reach with no

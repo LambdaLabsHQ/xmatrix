@@ -7,13 +7,15 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use colored::Colorize;
+use futures_util::future::join3;
+use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 use serde_json::json;
 use xmatrix_cli_args::{PageCommand, PageMigrationCommand};
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::hex::sha256_hex;
 use xmatrix_cli_core::http;
-use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy};
+use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy, MEDIA_FETCH_CONCURRENCY};
 use xmatrix_cli_core::page_media;
 use xmatrix_cli_core::protocol::{channel_pages_route, with_route};
 use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
@@ -697,43 +699,52 @@ pub(crate) fn render_page_document_with(
 /// into the page is saved on this machine, as Channel images are, and named
 /// by its local path where it stands. A video, or an image that could not be
 /// saved, keeps the page's reference.
-async fn page_text_for_agent(
+pub(crate) async fn page_text_for_agent(
     hub_url: &str,
     token: &str,
     space: &str,
     page: &str,
     body: &str,
 ) -> String {
-    let mut saved = HashMap::new();
-    for file in page_media::page_media_images(body) {
-        let Some(mime_type) = file
-            .rsplit_once('.')
-            .and_then(|(_, extension)| page_media::page_media_type(extension))
-            .filter(|mime_type| mime_type.starts_with("image/"))
-        else {
-            continue;
-        };
-        let url = with_route(
-            hub_url,
-            &format!("{}/media/{file}", page_route(space, page)),
-        );
-        let media = CachedMedia {
-            stem: sha256_hex(format!("page-media\0{space}\0{page}\0{file}").as_bytes()),
-            expected_size: None,
-            content_hash: Some(&file[..64]),
-            mime_type,
-            copy: LocalCopy::At(page_media::local_page_media_path(&file)),
-        };
-        let fetched = media
-            .fetch(|| async {
-                http::client()?
-                    .get(&url)
-                    .bearer_auth(token)
-                    .send()
-                    .await
-                    .map_err(|err| CliError::Http(format!("page image request failed: {err}")))
-            })
-            .await;
+    let mut seen = HashSet::new();
+    let targets: Vec<(String, &'static str)> = page_media::page_media_images(body)
+        .into_iter()
+        .filter_map(|file| {
+            let mime_type = file
+                .rsplit_once('.')
+                .and_then(|(_, extension)| page_media::page_media_type(extension))
+                .filter(|mime_type| mime_type.starts_with("image/"))?;
+            seen.insert(file.clone()).then_some((file, mime_type))
+        })
+        .collect();
+    let mut saved = HashMap::with_capacity(targets.len());
+    let mut downloads = stream::iter(targets)
+        .map(|(file, mime_type)| async move {
+            let url = with_route(
+                hub_url,
+                &format!("{}/media/{file}", page_route(space, page)),
+            );
+            let media = CachedMedia {
+                stem: sha256_hex(format!("page-media\0{space}\0{page}\0{file}").as_bytes()),
+                expected_size: None,
+                content_hash: Some(&file[..64]),
+                mime_type,
+                copy: LocalCopy::At(page_media::local_page_media_path(&file)),
+            };
+            let fetched = media
+                .fetch(|| async {
+                    http::client()?
+                        .get(&url)
+                        .bearer_auth(token)
+                        .send()
+                        .await
+                        .map_err(|err| CliError::Http(format!("page image request failed: {err}")))
+                })
+                .await;
+            (file, fetched)
+        })
+        .buffer_unordered(MEDIA_FETCH_CONCURRENCY);
+    while let Some((file, fetched)) = downloads.next().await {
         match fetched {
             Ok(path) => {
                 saved.insert(file, path);
@@ -1062,27 +1073,38 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             }
             let url = with_route(hub_url, &route);
             let response: PageResponse = http::request_json(&url, "GET", Some(token), None).await?;
-            // The head is read with who is on what; an older revision stands alone.
-            let (awareness, programs): (Option<PageAwareness>, _) = if revision.is_none() {
-                let route = format!("{}/awareness", page_route(&space, &page));
-                (
-                    http::request_json(&with_route(hub_url, &route), "GET", Some(token), None)
-                        .await
-                        .ok(),
-                    crate::page_program::page_programs(hub_url, token, &space, &page).await,
-                )
-            } else {
-                (None, Vec::new())
-            };
             let mut page_read = response.page;
-            page_read.body = page_text_for_agent(
-                hub_url,
-                token,
-                &space,
-                &page_read.summary.page_id,
-                &page_read.body,
+            // The head is read with who is on what; an older revision stands alone.
+            // Awareness, program status, and embedded page images are independent
+            // reads and run concurrently once the page read itself has linked this Run.
+            let awareness_route = format!("{}/awareness", page_route(&space, &page));
+            let (awareness, programs, rendered_body): (Option<PageAwareness>, _, String) = join3(
+                async {
+                    if revision.is_none() {
+                        http::request_json(&with_route(hub_url, &awareness_route), "GET", Some(token), None)
+                            .await
+                            .ok()
+                    } else {
+                        None
+                    }
+                },
+                async {
+                    if revision.is_none() {
+                        crate::page_program::page_programs(hub_url, token, &space, &page).await
+                    } else {
+                        Vec::new()
+                    }
+                },
+                page_text_for_agent(
+                    hub_url,
+                    token,
+                    &space,
+                    &page_read.summary.page_id,
+                    &page_read.body,
+                ),
             )
             .await;
+            page_read.body = rendered_body;
             let response = PageResponse { page: page_read };
             // A page's Norn programs run from its text: the header says how each one stands.
             let mut header = crate::page_program::render_page_programs_header(&programs);

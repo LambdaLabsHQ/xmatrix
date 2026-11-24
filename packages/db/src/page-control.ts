@@ -12,7 +12,7 @@ import { channelCapabilityPredicate, requireChannelCapability } from "./channel-
 import { loadPageLiveAgents } from "./channel-agent-presence.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
-import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
+import { deriveChangedBlocksForWrite, keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
 import { keepBlames, walkBlame, type BlameRevisionRow } from "./page-blame.js";
 import type {
   PageAuthor, PageBlame, PageBlockAwareness, PageDocument, PageLink, PageLinkAnchor, PageMessageEdit, PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
@@ -807,13 +807,16 @@ export class PostgresPageRepository {
 
   private async insertRevision(tx: DatabaseTransaction, spaceId: string, pageId: string, revision: number,
     text: string, authors: PageAuthor[], conversationIds: string[], kind: PageRevision["kind"],
-    basedOn: number | null, now: string): Promise<void> {
+    basedOn: number | null, now: string, changedBlocks: string[] | null = null): Promise<void> {
     await tx.query({
-      name: "page_revision_insert_v1",
+      name: "page_revision_insert_v2",
       text: `INSERT INTO data.page_revisions (space_id,page_id,revision,body,authors_json,
-          conversation_ids,kind,based_on_revision,created_at)
-        VALUES ($1,$2,$3,$4,$5::jsonb,$6::text[],$7,$8,$9)`,
-      values: [spaceId, pageId, revision, text, JSON.stringify(authors), conversationIds, kind, basedOn, now],
+          conversation_ids,kind,based_on_revision,created_at,changed_blocks)
+        VALUES ($1,$2,$3,$4,$5::jsonb,$6::text[],$7,$8,$9,$10::text[])`,
+      values: [
+        spaceId, pageId, revision, text, JSON.stringify(authors), conversationIds, kind, basedOn,
+        now, changedBlocks,
+      ],
       maxRows: 0,
     });
   }
@@ -854,12 +857,17 @@ export class PostgresPageRepository {
       throw new PageControlError("invalid_request", 400, "baseRevision is invalid");
     }
     const row = await this.page(tx, spaceId, actor, pageId, "edit");
-    const locked = (await tx.query<QueryResultRow & { head_revision: string | number }>({
-      name: "page_head_lock_v1",
-      text: "SELECT head_revision FROM data.pages WHERE space_id=$1 AND page_id=$2 FOR UPDATE",
+    const locked = (await tx.query<QueryResultRow & { head_revision: string | number; head_body: string | null }>({
+      name: "page_head_lock_v2",
+      text: `SELECT p.head_revision, r.body AS head_body
+        FROM data.pages p
+        LEFT JOIN data.page_revisions r
+          ON r.space_id = p.space_id AND r.page_id = p.page_id AND r.revision = p.head_revision
+        WHERE p.space_id=$1 AND p.page_id=$2 FOR UPDATE OF p`,
       values: [spaceId, pageId], maxRows: 1,
     }))[0];
     const head = Number(locked?.head_revision ?? row.head_revision);
+    const headBody = locked?.head_body ?? null;
     const next = (await tx.query<QueryResultRow & { next: string }>({
       name: "page_revision_next_v1",
       text: "SELECT (COALESCE(MAX(revision),0)+1)::text AS next FROM data.page_revisions WHERE space_id=$1 AND page_id=$2",
@@ -870,19 +878,16 @@ export class PostgresPageRepository {
     const authors = dedupeAuthors([actor.author, ...input.coAuthors.map(validAuthor)]);
     const suggestion = input.kind === "edit" && actor.isAgent && row.agent_suggest_only;
     if (!suggestion && input.baseRevision !== head) {
-      const current = (await tx.query<RevisionRow>({
-        name: "page_revision_head_v1",
-        text: `SELECT revision,kind,body,authors_json,conversation_ids,based_on_revision,created_at
-          FROM data.page_revisions WHERE space_id=$1 AND page_id=$2 AND revision=$3`,
-        values: [spaceId, pageId, head], maxRows: 1,
-      }))[0];
       throw new PageControlError("page_revision_conflict", 409,
         "The page changed since you read it; merge your edit into the current revision and retry",
-        { headRevision: head, body: current?.body ?? "" });
+        { headRevision: head, body: headBody ?? "" });
     }
+    const changedBlocks = !suggestion && headBody !== null
+      ? await deriveChangedBlocksForWrite(headBody, text)
+      : null;
     await this.chargeRevision(tx, spaceId, actor, now);
     await this.insertRevision(tx, spaceId, pageId, revision, text, authors, conversationIds,
-      suggestion ? "suggestion" : input.kind, input.baseRevision, now);
+      suggestion ? "suggestion" : input.kind, input.baseRevision, now, changedBlocks);
     if (!suggestion) {
       await tx.query({
         name: "page_head_advance_v1",
