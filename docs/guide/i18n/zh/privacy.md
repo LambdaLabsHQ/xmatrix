@@ -15,7 +15,7 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 
 ## 本地服务商额度探测
 
-**一句话说明：** 为了显示你已注册的 AI 工具还剩多少额度，xMatrix daemon 会读取这些工具在你电脑上的登录文件（例如 `~/.codex/auth.json`），并直接向对应服务商查询。从这些文件读到的任何内容（令牌、账号 ID、文件内容或文件指纹）都不会发送给 xMatrix；Hub 只收到归一化后的额度结果。同一个开关可同时停止读取文件和向服务商发请求（见下方「如何关闭本地额度探测」）。
+**一句话说明：** 为了显示你已注册的 AI 工具还剩多少额度，xMatrix daemon 会读取这些工具在你电脑上的登录文件（例如 `~/.grok/auth.json`），并直接向对应服务商查询。Codex 例外：xMatrix 直接询问 Codex 本身（正在运行的 Codex 会话，或短暂启动的 `codex app-server`），不打开任何 Codex 登录文件。从这些文件读到的任何内容（令牌、账号 ID、文件内容或文件指纹）都不会发送给 xMatrix；Hub 只收到归一化后的额度结果。同一个开关可同时停止读取文件、向 Codex app-server 发请求和向服务商发请求（见下方「如何关闭本地额度探测」）。
 
 当你在本机注册了受支持的智能体工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）时，xMatrix 可在 `xmatrix agent list` 与 Agents 页面展示订阅剩余额度，并供 `@auto` 自动避开已用尽的账号。
 
@@ -24,7 +24,7 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 | 工具 | 仅在本地内存读取的存储位置 | 由你本机直连的原厂接口 |
 | --- | --- | --- |
 | Claude Code | macOS 钥匙串（`Claude Code-credentials`）或 `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
-| Codex | `$CODEX_HOME/auth.json` 或 `~/.codex/auth.json` | `https://chatgpt.com/backend-api/wham/usage` |
+| Codex | 不读取：调用 Codex 自己的 app-server 方法 `account/rateLimits/read`（正在运行的会话或短暂启动的 `codex app-server`） | 由 Codex 使用其自身登录处理 |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS 钥匙串（`cursor-access-token`）或 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` 或 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` 或 OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` 或 ChatGPT `wham/usage` |
@@ -50,7 +50,7 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-如仅关闭 Antigravity 额度探测，可设 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。关闭后，xMatrix 在预检、启动/重连与限额恢复等所有路径下均不再读取任何本地服务商凭据或查询原厂额度接口。
+如仅关闭 Antigravity 额度探测，可设 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。关闭后，xMatrix 在预检、启动/重连与限额恢复等所有路径下均不再读取任何本地服务商凭据、启动 `codex app-server` 或询问 Codex 会话，也不查询原厂额度接口。
 
 ## 客户端诊断与崩溃报告
 

@@ -655,8 +655,6 @@ done
                 log.contains(r#""method":"account/rateLimits/read","params":{"excludeResetCreditDetails":true}"#),
                 "{log}"
             );
-            assert!(!home.join("auth.json").exists());
-
             // A cached reading answers without starting the app-server again.
             std::fs::remove_file(dir.join("received")).unwrap();
             assert!(
@@ -670,6 +668,43 @@ done
                 .is_some()
             );
             assert_eq!(received(&dir), "");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn the_reader_opens_no_codex_login_file() {
+            let dir = unique_temp_dir("no-login-file");
+            let home = dir.join("home");
+            std::fs::create_dir_all(&home).unwrap();
+            // Codex's login file is a FIFO with no writer: opening it for
+            // reading blocks forever, so a reader that touched it never
+            // returns. The stand-in app-server does not open it either.
+            let status = std::process::Command::new("mkfifo")
+                .arg(home.join("auth.json"))
+                .status()
+                .expect("mkfifo");
+            assert!(status.success());
+            let program = fake_codex(&dir, "0.172.0", &sample_response());
+
+            let (done, finished) = std::sync::mpsc::channel();
+            let (thread_home, thread_program) = (home.clone(), program.clone());
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime");
+                let usage = rt.block_on(read_codex_account_usage_with_program(
+                    &thread_program,
+                    Some(&thread_home),
+                    true,
+                    Duration::from_secs(10),
+                ));
+                let _ = done.send(usage);
+            });
+            let usage = finished
+                .recv_timeout(Duration::from_secs(20))
+                .expect("the reader blocked: it opened the Codex login file");
+            assert!(usage.is_some());
             std::fs::remove_dir_all(&dir).ok();
         }
 

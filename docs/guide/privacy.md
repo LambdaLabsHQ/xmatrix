@@ -15,7 +15,7 @@ To keep a connected computer stable across reinstalls under your account, the da
 
 ## Local provider quota probes
 
-**In short:** to show how much quota your registered AI tools have left, the xMatrix daemon reads those tools' own login files on your computer (for example `~/.codex/auth.json`) and asks each provider directly. Nothing read from those files — no token, account id, file contents or fingerprint — is sent to xMatrix; the Hub receives only the normalized quota answer. One switch stops both the file reads and the provider requests (see [Turning off local quota probes](#turning-off-local-quota-probes)).
+**In short:** to show how much quota your registered AI tools have left, the xMatrix daemon reads those tools' own login files on your computer (for example `~/.grok/auth.json`) and asks each provider directly. Codex is the exception: xMatrix asks Codex itself, through the running Codex session or a briefly started `codex app-server`, and opens no Codex login file. Nothing read from those files — no token, account id, file contents or fingerprint — is sent to xMatrix; the Hub receives only the normalized quota answer. One switch stops the file reads, the Codex app-server requests and the provider requests (see [Turning off local quota probes](#turning-off-local-quota-probes)).
 
 When you register a supported harness (such as Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai, or Antigravity), xMatrix can show remaining subscription quota in `xmatrix agent list` and the Agents view, and let `@auto` route around exhausted accounts.
 
@@ -24,7 +24,7 @@ To read remaining quota directly from each provider without running an LLM turn,
 | Harness | Local store read (in memory only) | Direct provider endpoint queried from your machine |
 | --- | --- | --- |
 | Claude Code | macOS login keychain (`Claude Code-credentials`) or `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
-| Codex | `$CODEX_HOME/auth.json` or `~/.codex/auth.json` | `https://chatgpt.com/backend-api/wham/usage` |
+| Codex | None: Codex's own app-server method `account/rateLimits/read`, asked of the running session or a briefly started `codex app-server` | Handled by Codex with its own sign-in |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, macOS keychain (`cursor-access-token`), or Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` or `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` or OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` or ChatGPT `wham/usage` |
@@ -50,7 +50,7 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-To disable only Antigravity quota probing, set `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. When disabled, xMatrix does not read local provider credential stores or query provider usage endpoints—including pre-launch probes, startup/reconnect reads, and rate-limit recovery.
+To disable only Antigravity quota probing, set `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. When disabled, xMatrix does not read local provider credential stores, start `codex app-server` or ask a Codex session, or query provider usage endpoints—including pre-launch probes, startup/reconnect reads, and rate-limit recovery.
 
 ## Client diagnostics and crash reporting
 
