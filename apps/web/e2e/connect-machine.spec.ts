@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import {
-  E2E_DESKTOP_CONTEXT, E2E_SPACE, fixtureRequestBodies, fixtureRequests, fixtureRule, installWorkspaceStubs,
+  E2E_DESKTOP_CONTEXT, E2E_SPACE, fixtureJson, fixtureRequestBodies, fixtureRequests, fixtureRule, installWorkspaceStubs,
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -13,7 +13,9 @@ type Rule = Parameters<typeof fixtureRule>[1];
 
 async function openWithIntent(page: import("@playwright/test").Page, state: Record<string, unknown>, rules: Rule[] = []) {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE] });
-  await page.addInitScript(() => window.localStorage.setItem("xmatrix:diagnostics-enabled", "true"));
+  // An explicit opt-in on the account, answered by the Hub.
+  await fixtureJson(page, "diagnostics-consent", /\/me\/diagnostics(?:\?|$)/u,
+    { accountRegime: "consent-required", requestRegime: "consent-required", choice: "opted-in" }, { method: "GET" });
   await fixtureRule(page, { id: "intent-create", pattern: "**/api/xmatrix/setup-intents",
     responder: { kind: "static", json: { ...base, phase: "waiting" } } });
   await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`,

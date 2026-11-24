@@ -52,10 +52,10 @@ Antigravity のみ無効にする場合は `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PR
 
 xMatrix は広告 Cookie、クロスサイト追跡、セッションリプレイ、PostHog・Google Analytics・Cloudflare Web Analytics 等のサードパーティ行動分析 SDK を使用していません。
 
-**すべての地域で、任意のクライアント診断およびブラウザのクラッシュレポートはデフォルトでオフ（明示的なオプトイン）です。** 未ログインのマーケティング／ドキュメント／法的ページでは Sentry を読み込みません。明示的に有効化した場合（またはデスクトップ起動失敗カードで手動送信を選んだ場合）にのみ送信されます：
+任意のクライアント診断とブラウザのクラッシュレポートは、**安定版のアプリと CLI ではデフォルトでオフ**です。ベータ版のデフォルトは下の表のとおりです。未ログインのマーケティング、ドキュメント、法的文書のページは Sentry を読み込みません。診断がオンのときに送信されるもの：
 
-- **エラー・クラッシュレポート（Sentry）**：ログイン済みアプリでオプトインした場合のみ、エラーのクラス、エラー自身のコード（ある場合）、スタックのコード位置だけを送信します。エラーメッセージ、パンくず、URL、Cookie、HTTP ヘッダー、リクエストボディ、ユーザー情報は送信しません。DSN のないローカル／セルフホストビルドでは送信しません。（Hub サーバー側のエラーはホスティングサービス運用のためサーバー側で報告されます。下記参照。）
-- **ファーストパーティ診断（xMatrix Hub → Cloudflare Analytics Engine）**：オプトイン時のみ起動時間（`/api/observable/startup-timing`）、初期設定ステップ数（`/api/observable/onboarding-step`）、デスクトップデーモン起動失敗情報（`/api/observable/desktop-daemon-failure`）、CLI 再接続サンプル（`/api/observable/client-metrics`）を送信します。識別子はサーバー側の鍵付き HMAC-SHA-256 で仮名化されます。
+- **エラー・クラッシュレポート（Sentry）**：ログイン済みアプリ内でのみ、エラーのクラス、エラー自身のコード（ある場合）、スタックのコード位置だけを送信します。エラーメッセージ、パンくず、URL、Cookie、HTTP ヘッダー、リクエストボディ、ユーザー情報は送信しません。DSN のないローカル／セルフホストビルドでは送信しません。（Hub サーバー側のエラーはホスティングサービス運用のためサーバー側で報告されます。下記参照。）
+- **ファーストパーティ診断（xMatrix Hub → Cloudflare Analytics Engine）**：起動時間（`/api/observable/startup-timing`）、初期設定ステップ数（`/api/observable/onboarding-step`）、デスクトップデーモン起動失敗情報（`/api/observable/desktop-daemon-failure`）、CLI 再接続サンプル（`/api/observable/client-metrics`）を送信します。識別子はサーバー側の鍵付き HMAC-SHA-256 で仮名化されます。
 
 ### 診断イベントに含められるもの
 
@@ -66,10 +66,27 @@ xMatrix は広告 Cookie、クロスサイト追跡、セッションリプレ�
 - **デスクトップ起動失敗カードの「失敗レポートを送信」**：CLI の最後の数行。デスクトップアプリがあなたのマシン上で先にマスクします（ホームディレクトリ、メールアドレス、URL クエリ、トークンや鍵のように見える文字列を置換）。カードは送信前にその内容を表示し、ボタンを押したときだけ送信します。診断がオンのときの自動レポートには、失敗した段階、終了コード、プラットフォーム、アプリのバージョンだけが含まれます。
 - **Hub サーバー側のエラーレポート**：サーバー自身のエラーメッセージ。引用された値、メールアドレス、URL クエリ、ホームディレクトリのパス、トークン状の文字列は取り除かれます。ログに添えられた項目は、数値、true/false、不透明な識別子の場合だけ報告されます。
 
+### ベータ版と安定版のデフォルト
+
+| | 安定版アプリと CLI | ベータ版アプリと CLI |
+| --- | --- | --- |
+| 自分でオンにした | 送信 | 送信 |
+| 自分でオフにした、または Do Not Track、Global Privacy Control、`XMATRIX_TELEMETRY=0` | 送信しない | 送信しない |
+| 選択なし。登録時の国**と**現在の国がどちらも EU、EEA、英国、スイスの外 | 送信しない | 送信（オフにするリンク付きの 1 行の通知を表示） |
+| 選択なし。どちらかの国が EU、EEA、英国、スイス、または不明 | 送信しない | 送信しない。チェックの入っていない「Send diagnostics to help improve the beta」を表示 |
+
+行は上から順に適用されます。明示的にオンにした場合は、Do Not Track や Global Privacy Control が有効でも尊重されます。そのチェックボックスにチェックを入れるか、設定のスイッチを切り替える（または `xmatrix config telemetry on|off`）ことだけが選択として扱われます。通知を閉じても選択にはならず、xMatrix が設定を勝手に変えることはありません。
+
+**地域の判定方法。** クライアントには信頼できる位置情報がない（タイムゾーンと言語はユーザー設定）ため、Hub が伝えます：
+
+- **登録時の地域。** アカウント作成時、Hub は Cloudflare が報告するそのリクエストの国から、事前同意が必要な国かどうかだけを記録します。国や IP アドレスは保存せず、後のリクエストで書き換えることもありません。既存のアカウントは、初めてベータ版を使ったときに記録されます。アカウント削除時に一緒に削除されます。
+- **現在の地域。** 送信のたびに、クライアントは現在の接続について Hub が返した 10 分以内の答えを使います。古い場合は、診断データを含まない小さなリクエストで Hub に問い合わせ直します。問い合わせが失敗・タイムアウトした場合や国が不明な場合は送信しません。そのため、同意が必要な国に移動すると、デフォルトの送信は 10 分以内に止まります。
+
 ### 診断とクラッシュレポートの有効化・無効化
 
-- **Web・Desktop・iOS・Android**：**Settings → Legal and privacy** で **Send diagnostics and crash reports** を切り替えます（デフォルトはオフ）。デスクトップではローカルデーモンの `telemetry` 設定にも連動します。
+- **Web、デスクトップ、iOS、Android**：**Settings → Legal and privacy** で **Send diagnostics and crash reports** を切り替えます。選択はアカウントに保存され、すべてのクライアントが従います。デスクトップでは、このスイッチがローカル daemon の `telemetry` 設定も更新します。
 - **CLI とデーモン**：デフォルトはオフです。有効にするには `xmatrix config telemetry on` または `XMATRIX_TELEMETRY=1`、無効にするには `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0`、または `DO_NOT_TRACK=1` を設定してください。
+- **CLI と daemon**：`xmatrix config telemetry on` または `XMATRIX_TELEMETRY=1` でオン、`xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0`、`DO_NOT_TRACK=1` でオフ。`xmatrix config telemetry on|off` は選択をアカウントにも保存します。
 
 ## 法的文書
 
