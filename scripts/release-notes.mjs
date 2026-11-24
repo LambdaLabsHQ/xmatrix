@@ -118,8 +118,24 @@ export function composeReleaseNotes({ notes, receipt }) {
 }
 
 /** Apple's What's New field is plain text, bounded to 4,000 characters. */
+/**
+ * App Store "What's New" is plain text: Apple refuses the whole version write
+ * with HTTP 409 when it sees anything shaped like markup, such as `<words>` in
+ * a command example. Headings, emphasis, code spans and links become their
+ * text, and angle brackets become single guillemets.
+ */
+export function plainStoreText(markdown) {
+  return markdown
+    .replace(/^#{1,6}\s+/gmu, "")
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/gu, "$1 ($2)")
+    .replace(/(\*\*|__)(.+?)\1/gu, "$2")
+    .replace(/`([^`]+)`/gu, "$1")
+    .replace(/</gu, "‹")
+    .replace(/>/gu, "›");
+}
+
 export function appStoreReleaseNotes(root, version) {
-  const notes = authoredReleaseNotes(root, version).replace(/^#{1,6}\s+/gmu, "");
+  const notes = plainStoreText(authoredReleaseNotes(root, version));
   const link = `\n\nFull release notes: https://xmatrix.sh/releases/${version}`;
   const characters = [...notes];
   const available = 4_000 - [...link].length;

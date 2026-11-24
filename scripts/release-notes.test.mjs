@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { appStoreReleaseNotes, authoredReleaseNotes, composeReleaseNotes, generatedBetaReleaseNotes, githubRetryDelayMs } from "./release-notes.mjs";
+import { appStoreReleaseNotes, authoredReleaseNotes, plainStoreText, composeReleaseNotes, generatedBetaReleaseNotes, githubRetryDelayMs } from "./release-notes.mjs";
 
 // These protect publication content and its transaction boundary. The train's
 // repository test separately proves that notes must be in the candidate tree.
@@ -22,6 +22,11 @@ test("stable notes are version-specific, nonempty and cannot carry transaction m
   writeFileSync(file, "# xMatrix 1.2.0\n\n## Improvements\n\nRead release notes before updating.\n");
   assert.equal(authoredReleaseNotes(root, "1.2.0"), "## Improvements\n\nRead release notes before updating.");
   assert.match(appStoreReleaseNotes(root, "1.2.0"), /^Improvements\n\nRead release notes before updating\./u);
+  writeFileSync(file, "# xMatrix 1.2.0\n\n- **Search.** `xmatrix channels --find <words>` matches [titles](https://xmatrix.sh/docs).\n");
+  const plain = appStoreReleaseNotes(root, "1.2.0");
+  assert.doesNotMatch(plain, /[<>`]|\*\*/u);
+  assert.match(plain, /^- Search\. xmatrix channels --find ‹words› matches titles \(https:\/\/xmatrix\.sh\/docs\)\./u);
+  assert.equal(plainStoreText("Keep a - list, 2 * 3 and a_b."), "Keep a - list, 2 * 3 and a_b.");
   writeFileSync(file, `# xMatrix 1.2.0\n\n${"界".repeat(5000)}`);
   const storeNotes = appStoreReleaseNotes(root, "1.2.0");
   assert.equal([...storeNotes].length, 4000);
