@@ -19,6 +19,14 @@ on:
         description: Scope bound to the successful request marker
         required: true
         type: string
+      release_tag:
+        description: >-
+          The version tag a release train claimed, for a Web build it makes
+          beside its gates (web-prebuild) before that tag exists. A tagged
+          run reads its own ref instead.
+        required: false
+        type: string
+        default: ''
 
 # Runtime cell location (a Durable Object location hint) for the rendered profile.
 env:
@@ -601,18 +609,28 @@ jobs:
       - name: Verify HTTP redirects to HTTPS
         run: node scripts/https-postdeploy-smoke.mjs "$XMATRIX_HUB_ORIGIN"
 
+  # The production Web build. Building mutates nothing users can reach, so a
+  # release train on main also runs it beside its gates (web-prebuild): the
+  # tagged release then picks that bundle up instead of spending three and a
+  # half minutes building after the gates passed. The bundle is bound to the
+  # exact release commit; a tagged build that finds none, or one that does not
+  # verify, builds here as before. Only the tagged deploy job deploys.
   build:
-    name: ${{ inputs.target == 'web-build' && 'build' || 'inactive-build' }}
-    if: startsWith(github.ref, 'refs/tags/xmatrix-v') && inputs.target == 'web-build'
+    name: ${{ (inputs.target == 'web-build' || inputs.target == 'web-prebuild') && 'build' || 'inactive-build' }}
+    if: >-
+      (startsWith(github.ref, 'refs/tags/xmatrix-v') && inputs.target == 'web-build') ||
+      (github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.target == 'web-prebuild')
     permissions:
       contents: read
     environment: production
     runs-on: *server_release_runner
+    timeout-minutes: 30
     env: &web_build_environment
       XMATRIX_DEPLOY_SHA: ${{ inputs.deploy_sha }}
       NEXT_PUBLIC_XMATRIX_WEB_BUILD_ID: ${{ inputs.deploy_sha }}
       NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_WEB }}
-      NEXT_PUBLIC_SENTRY_RELEASE: ${{ github.ref_name }}
+      NEXT_PUBLIC_SENTRY_RELEASE: ${{ inputs.release_tag || github.ref_name }}
+      XMATRIX_SERVER_RELEASE_TARGET: ${{ inputs.target }}
       NEXT_PUBLIC_BETTER_AUTH_GOOGLE_ENABLED: ${{ vars.NEXT_PUBLIC_BETTER_AUTH_GOOGLE_ENABLED }}
     steps:
       - *server_checkout
@@ -642,11 +660,45 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$XMATRIX_DEPLOY_SHA"
-          test "$(git rev-parse "$GITHUB_REF^{commit}")" = "$XMATRIX_DEPLOY_SHA"
+          if [ "$XMATRIX_SERVER_RELEASE_TARGET" = web-prebuild ]; then
+            # No tag yet: the commit must be the release this train's main
+            # revision may ship (itself, its beta stamp, or a stable stamp).
+            node scripts/release-commit.mjs verify-release "$XMATRIX_DEPLOY_SHA" "$GITHUB_SHA"
+          else
+            test "$(git rev-parse "$GITHUB_REF^{commit}")" = "$XMATRIX_DEPLOY_SHA"
+          fi
           test -z "$(git status --porcelain)"
           node scripts/version.mjs check
 
+      # A bundle the train built beside its gates, for this exact commit.
+      # Missing, incomplete or unverifiable all mean the same: build it here.
+      - name: Look for the Web build the train made beside its gates
+        id: prebuilt
+        if: inputs.target == 'web-build'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/xmatrix-web-handoff"
+          if node scripts/r2-release-store.mjs download-latest-attempt \
+              --bucket xmatrix-release-assets \
+              --prefix "handoffs/web-prebuilt/$XMATRIX_DEPLOY_SHA" \
+              --suffix bundle \
+              --attempt 3 \
+              --directory "$directory" \
+              --exclude-manifest &&
+            node scripts/web-release-handoff.mjs verify "$directory" apps/web "$XMATRIX_DEPLOY_SHA"; then
+            echo "hit=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Reusing the Web bundle the train built for $XMATRIX_DEPLOY_SHA"
+          else
+            rm -rf "$directory"
+            echo "hit=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No verified prebuilt Web bundle for $XMATRIX_DEPLOY_SHA; building it here"
+          fi
+
       - name: Typecheck and build production Web
+        if: steps.prebuilt.outputs.hit != 'true'
         env:
           NEXT_TEST_WASM: "1"
           XMATRIX_WEB_SOURCE_MAPS: ${{ secrets.SENTRY_AUTH_TOKEN != '' && '1' || '' }}
@@ -657,6 +709,7 @@ jobs:
       # Browser stack traces resolve against maps held by error reporting; the
       # deployed assets never serve them.
       - name: Upload browser source maps to error reporting
+        if: steps.prebuilt.outputs.hit != 'true'
         working-directory: apps/web
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
@@ -669,12 +722,13 @@ jobs:
           pnpm exec sentry-cli sourcemaps inject "$assets"
           # Error reporting never blocks shipping: a rejected upload only
           # leaves this release's browser stacks unresolved.
-          if ! pnpm exec sentry-cli sourcemaps upload --release "$GITHUB_REF_NAME" "$assets"; then
+          if ! pnpm exec sentry-cli sourcemaps upload --release "$NEXT_PUBLIC_SENTRY_RELEASE" "$assets"; then
             echo "::warning::Browser source maps were not uploaded to error reporting"
           fi
           find .open-next/assets -name '*.map' -delete
 
       - name: Prepare verified Web build handoff
+        if: steps.prebuilt.outputs.hit != 'true'
         run: |
           set -euo pipefail
           test -z "$(git status --porcelain)"
@@ -692,7 +746,7 @@ jobs:
         run: >-
           node scripts/r2-release-store.mjs upload-directory
           --bucket xmatrix-release-assets
-          --prefix handoffs/web/${{ github.run_id }}/${{ github.run_attempt }}/bundle
+          --prefix ${{ inputs.target == 'web-prebuild' && format('handoffs/web-prebuilt/{0}', inputs.deploy_sha) || format('handoffs/web/{0}', github.run_id) }}/${{ github.run_attempt }}/bundle
           --directory "${{ runner.temp }}/xmatrix-web-handoff"
 
   web:
