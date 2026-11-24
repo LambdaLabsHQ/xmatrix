@@ -1,7 +1,7 @@
 //! Reading a harness's local sign-in only on its owner's word.
 //!
-//! Some harnesses (Cursor) offer no official way to ask for their quota: the
-//! only answer is to read the sign-in that harness stored for itself and call
+//! Some harnesses (Cursor, and OpenCode before 2.2.0) offer no official way
+//! to ask for their quota: the only answer is to read the sign-in that harness stored for itself and call
 //! the provider's dashboard with it. That sign-in exists for the harness, not
 //! as permission for xMatrix to use it, so its reader takes a
 //! [`SignInReadGrant`] — a person's explicit, per-machine permission — and
@@ -49,6 +49,10 @@ pub enum GrantedRead {
     /// The sign-in differs from the one the grant is bound to. The provider
     /// was not asked; the grant is void and its last reading must be dropped.
     SignInChanged,
+    /// The sign-in's token has expired. The provider was not asked and the
+    /// token was not refreshed on the harness's behalf; its last reading is
+    /// dropped until the harness signs in again.
+    SignInExpired,
     /// Read under the grant. `bound` is the fingerprint this read bound an
     /// unbound grant to, for the caller to keep with the grant.
     Read {

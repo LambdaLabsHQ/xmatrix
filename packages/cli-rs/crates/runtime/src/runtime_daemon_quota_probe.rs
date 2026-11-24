@@ -259,8 +259,9 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
             // without the owner's grant on this machine (`read_account`).
             QuotaAccount::CursorDefault
         }
-        // OpenCode is asked through `opencode serve`, which reads its own
-        // sign-in exactly as a spawn of it would.
+        // OpenCode 2.2.0 and later is asked through `opencode serve`, which
+        // reads its own sign-in exactly as a spawn of it would; an earlier
+        // release's stored Go key is read only under the owner's grant.
         "opencode" => QuotaAccount::OpenCodeDefault,
         // The reader resolves the key DeepSeek Harness would: its stored
         // credential file first, then the environment the spawn inherits.
@@ -297,15 +298,10 @@ async fn read_account(account: QuotaAccount, fresh: bool) -> Result<Option<LlmUs
         QuotaAccount::Codex(home) => (Provider::Codex, Account::Home(home)),
         QuotaAccount::Grok(home) => (Provider::Grok, Account::Home(home)),
         QuotaAccount::ClaudeDefault => (Provider::Claude, Account::DefaultLogin),
-        QuotaAccount::CursorDefault => {
-            // No official quota interface: read only under the owner's grant.
-            return match xmatrix_cli_core::quota_access::read_granted_quota("cursor", fresh).await {
-                xmatrix_cli_core::quota_access::GrantedQuota::Usage(usage) => Ok(usage),
-                xmatrix_cli_core::quota_access::GrantedQuota::ProbesOff => Ok(None),
-                xmatrix_cli_core::quota_access::GrantedQuota::NotGranted => Err(NotGranted),
-            };
-        }
-        QuotaAccount::OpenCodeDefault => (Provider::OpenCode, Account::Process),
+        // Cursor has no official quota interface, and OpenCode before 2.2.0
+        // none either: read under the owner's grant where one is needed.
+        QuotaAccount::CursorDefault => return read_under_grant("cursor", fresh).await,
+        QuotaAccount::OpenCodeDefault => return read_under_grant("opencode", fresh).await,
         QuotaAccount::DeepSeekDefault => (Provider::DeepSeek, Account::Process),
         QuotaAccount::AntigravityDefault => (Provider::Antigravity, Account::DefaultLogin),
     };
@@ -317,6 +313,17 @@ async fn read_account(account: QuotaAccount, fresh: bool) -> Result<Option<LlmUs
         },
     )
     .await)
+}
+
+async fn read_under_grant(harness: &str, fresh: bool) -> Result<Option<LlmUsage>, NotGranted> {
+    use xmatrix_cli_core::quota_access::{GrantedQuota, read_granted_quota};
+    match read_granted_quota(harness, fresh, None).await {
+        GrantedQuota::Usage(usage) => Ok(usage),
+        GrantedQuota::ProbesOff => Ok(None),
+        // An expired sign-in is not refreshed and nothing is asked: to the
+        // Hub that is a read without a grant, so the last reading goes too.
+        GrantedQuota::NotGranted | GrantedQuota::SignInExpired => Err(NotGranted),
+    }
 }
 
 async fn probe_one_target(

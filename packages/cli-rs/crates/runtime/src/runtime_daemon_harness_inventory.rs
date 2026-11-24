@@ -39,12 +39,17 @@ pub(crate) struct InventoryItem {
     /// The harness's own words for why it cannot take work, when it said so.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) login_detail: Option<String>,
-    /// For a harness with no official quota interface: whether its owner
-    /// allowed reading its sign-in on this machine to show its quota
-    /// (`granted`, `not_granted`, or `probes_off`). Only that answer leaves
-    /// the machine, never the grant's binding.
+    /// For a harness with no official quota interface at its installed
+    /// release (Cursor, OpenCode before 2.2.0): whether its owner allowed
+    /// reading its sign-in on this machine to show its quota (`granted`,
+    /// `not_granted`, or `probes_off`). Only that answer leaves the machine,
+    /// never the grant's binding.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) quota_access: Option<&'static str>,
+    /// `expired` when the last read under that grant found the harness's
+    /// sign-in expired: its quota is unknown until it signs in again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) quota_sign_in: Option<&'static str>,
 }
 
 /// A harness process the daemon starts itself: closed stdin, piped output, the
@@ -287,6 +292,21 @@ pub(crate) async fn refresh_readiness_of(preset: &AgentPreset) -> bool {
 }
 
 pub(crate) async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
+    use xmatrix_cli_core::quota_access;
+    let mut item = probe_launcher_release(preset).await;
+    // OpenCode needs the grant only on a release before its usage-limits
+    // route, so the release just read decides whether there is one to show.
+    if quota_access::quota_access_applies(&preset.id, item.version.as_deref()) {
+        let state = quota_access::quota_access(&preset.id);
+        item.quota_access = Some(state.as_str());
+        item.quota_sign_in = (state == quota_access::QuotaAccess::Granted
+            && quota_access::sign_in_expired(&preset.id))
+        .then_some("expired");
+    }
+    item
+}
+
+async fn probe_launcher_release(preset: &AgentPreset) -> InventoryItem {
     let path = resolve_launcher(preset);
     let mut item = InventoryItem {
         id: preset.id.clone(),
@@ -302,8 +322,8 @@ pub(crate) async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
         auto_update: None,
         login: None,
         login_detail: None,
-        quota_access: xmatrix_cli_core::quota_access::quota_access_provider(&preset.id)
-            .map(|_| xmatrix_cli_core::quota_access::quota_access(&preset.id).as_str()),
+        quota_access: None,
+        quota_sign_in: None,
         probe_status: if path.is_some() {
             "unsupported"
         } else {

@@ -731,7 +731,7 @@ async fn set_quota_access(
         }
         Ok(state) => {
             if state == quota_access::QuotaAccess::Granted {
-                quota_access::read_granted_quota(preset_id, true).await;
+                quota_access::read_granted_quota(preset_id, true, None).await;
             }
             result(preset_id, action, HarnessActionStatus::Succeeded)
         }
@@ -853,7 +853,36 @@ mod tests {
             .collect();
         let gated: BTreeSet<&str> = quota_access::quota_access_harnesses().collect();
         assert_eq!(offered, gated);
-        assert!(gated.contains("cursor"));
+        assert!(gated.contains("cursor") && gated.contains("opencode"));
+    }
+
+    /// The Web offers OpenCode's grant only where the daemon reports one, and
+    /// says which releases need it: the registry's `quotaReadBefore` is the
+    /// release whose usage-limits route the reader asks instead.
+    #[test]
+    fn opencode_needs_the_grant_exactly_before_its_usage_limits_release() {
+        let before = agent_presets()
+            .iter()
+            .find(|preset| preset.id == "opencode")
+            .and_then(|preset| preset.management.as_ref()?.quota_read_before.clone())
+            .expect("opencode names the release that reports its own quota");
+        assert_eq!(
+            xmatrix_harness::quota::parse_cli_semver(&before),
+            Some(xmatrix_harness::quota::opencode::MIN_USAGE_LIMITS_CLI_VERSION)
+        );
+        for preset in agent_presets()
+            .iter()
+            .filter(|preset| preset.id != "opencode")
+        {
+            assert!(
+                preset
+                    .management
+                    .as_ref()
+                    .is_none_or(|management| management.quota_read_before.is_none()),
+                "{}",
+                preset.id
+            );
+        }
     }
 
     #[tokio::test]

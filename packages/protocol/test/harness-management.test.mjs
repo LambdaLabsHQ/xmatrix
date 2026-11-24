@@ -25,7 +25,18 @@ test("a harness read only under its owner's grant reports that grant, and only i
   }
   assert.equal(parseHarnessInventory({ ...inventory, items: [{ ...item, quotaAccess: "fingerprint" }] }), undefined);
   const grantable = AGENT_PRESETS.filter(preset => harnessActionAvailable(preset.management, "quota_access_on")).map(preset => preset.id);
-  assert.deepEqual(grantable, ["cursor"]);
+  assert.deepEqual(grantable, ["cursor", "opencode"]);
+  // OpenCode needs the grant only before the release that reports its own quota.
+  assert.deepEqual(AGENT_PRESETS.filter(preset => preset.management?.quotaReadBefore)
+    .map(preset => [preset.id, preset.management.quotaReadBefore]), [["opencode", "2.2.0"]]);
+  // An expired sign-in is said only beside a grant, and an unknown word is dropped, not the inventory.
+  const opencode = { ...inventory.items[0], id: "opencode" };
+  assert.equal(parseHarnessInventory({ ...inventory, items: [{ ...opencode, quotaAccess: "granted", quotaSignIn: "expired" }] })
+    .items[0].quotaSignIn, "expired");
+  assert.equal(parseHarnessInventory({ ...inventory, items: [{ ...opencode, quotaAccess: "not_granted", quotaSignIn: "expired" }] })
+    .items[0].quotaSignIn, undefined);
+  assert.equal(parseHarnessInventory({ ...inventory, items: [{ ...opencode, quotaAccess: "granted", quotaSignIn: "later" }] })
+    .items[0].quotaSignIn, undefined);
   for (const preset of AGENT_PRESETS) {
     assert.equal(harnessActionAvailable(preset.management, "quota_access_off"),
       harnessActionAvailable(preset.management, "quota_access_on"), preset.id);

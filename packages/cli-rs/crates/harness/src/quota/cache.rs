@@ -54,12 +54,17 @@ pub(crate) struct ProviderUsageCache {
 /// Distinct provider-owned account meters never reuse one another's observation.
 pub(crate) enum AccountMeter {
     Cursor,
+    /// OpenCode Go, read under a grant on an OpenCode release without the
+    /// usage-limits route.
+    OpenCode,
 }
 
 pub(crate) fn account_meter_cache(provider: AccountMeter) -> &'static ProviderUsageCache {
     static CURSOR: ProviderUsageCache = ProviderUsageCache::account_meter();
+    static OPENCODE: ProviderUsageCache = ProviderUsageCache::account_meter();
     match provider {
         AccountMeter::Cursor => &CURSOR,
+        AccountMeter::OpenCode => &OPENCODE,
     }
 }
 
