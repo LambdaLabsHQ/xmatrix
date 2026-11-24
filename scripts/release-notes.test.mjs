@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { appStoreReleaseNotes, authoredReleaseNotes, composeReleaseNotes, generatedBetaReleaseNotes, githubRetryDelayMs } from "./release-notes.mjs";
+import { appleTextLength, appStoreReleaseNotes, authoredReleaseNotes, composeReleaseNotes, generatedBetaReleaseNotes, githubRetryDelayMs } from "./release-notes.mjs";
 
 // These protect publication content and its transaction boundary. The train's
 // repository test separately proves that notes must be in the candidate tree.
@@ -24,8 +24,13 @@ test("stable notes are version-specific, nonempty and cannot carry transaction m
   assert.match(appStoreReleaseNotes(root, "1.2.0"), /^Improvements\n\nRead release notes before updating\./u);
   writeFileSync(file, `# xMatrix 1.2.0\n\n${"界".repeat(5000)}`);
   const storeNotes = appStoreReleaseNotes(root, "1.2.0");
-  assert.equal([...storeNotes].length, 4000);
+  assert.equal(appleTextLength(storeNotes), 4000);
   assert.ok(storeNotes.endsWith("…\n\nFull release notes: https://xmatrix.sh/releases/1.2.0"));
+  // Multi-line notes must still fit Apple's 4,000-char limit after LF->CRLF normalization and strip angle brackets.
+  writeFileSync(file, `# xMatrix 1.2.0\n\n${Array.from({ length: 40 }, () => `Use <account> ${"a".repeat(86)}`).join("\n")}`);
+  const multilineNotes = appStoreReleaseNotes(root, "1.2.0");
+  assert.ok(appleTextLength(multilineNotes) <= 4000, `appleTextLength=${appleTextLength(multilineNotes)}`);
+  assert.equal(/[<>]/u.test(multilineNotes), false);
   assert.throws(() => authoredReleaseNotes(root, "../../outside"), /version/iu);
 });
 

@@ -2,7 +2,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { appleClientFromEnv, AppleApiError } from "./app-store-connect.mjs";
 import { runCliMain } from "./cli-entrypoint.mjs";
 import { releaseChannel, releaseCore } from "./release-version-order.mjs";
-import { appStoreReleaseNotes } from "./release-notes.mjs";
+import { appleTextLength, appStoreReleaseNotes } from "./release-notes.mjs";
 import { fileURLToPath } from "node:url";
 
 const EDITABLE = new Set(["PREPARE_FOR_SUBMISSION", "REJECTED", "METADATA_REJECTED", "DEVELOPER_REJECTED", "READY_FOR_REVIEW"]);
@@ -187,7 +187,7 @@ async function withdrawQueuedReview(api, appId, versionId, waitFor, attempts = 2
 
 export async function submitRelease(api, { appId, version, buildNumber, metadata, releaseNotes, privateNotes = "", waitFor = wait, attempts = 60 }) {
   validateMetadata(metadata);
-  if (releaseNotes !== undefined && (typeof releaseNotes !== "string" || !releaseNotes.trim() || [...releaseNotes].length > 4_000)) {
+  if (releaseNotes !== undefined && (typeof releaseNotes !== "string" || !releaseNotes.trim() || appleTextLength(releaseNotes) > 4_000 || /[<>]/u.test(releaseNotes))) {
     throw new Error("App Store release notes must contain at most 4,000 characters.");
   }
   const build = await waitForValidBuild(api, { appId, version, buildNumber, waitFor, attempts });
