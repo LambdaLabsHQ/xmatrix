@@ -2,7 +2,7 @@
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Loader2 } from "lucide-react";
 import {
   MACHINE_HARNESS_QUOTA_ACCESS_CAPABILITY, agentPresetById, parseHarnessInventory,
@@ -17,7 +17,7 @@ import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 import { CenteredDialogShell, DialogButton, DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 import { queueHarnessAction, readHarnessAction } from "./machine-harness-api";
 import { ToolDetailSection } from "./tool-split";
-import { fetchMachineDaemons } from "./workspace-admin-views";
+import { useOwnerDaemons } from "./harness-sign-in";
 
 /* Some harnesses (Cursor) have no official way to ask for their quota: the
    only way is to read the sign-in the harness stored for itself on its
@@ -100,11 +100,6 @@ function QuotaAccessConsent({ program, machineName, busy, onAnswer }: {
       </DialogPanelFooter>
     </CenteredDialogShell>
   );
-}
-
-function useOwnerDaemons(token: string, userId: string) {
-  return useQuery({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons", []),
-    queryFn: ({ signal }) => fetchMachineDaemons(token, signal), staleTime: 15_000 });
 }
 
 function useQuotaAccessChange(token: string, userId: string, onChanged?: () => void) {

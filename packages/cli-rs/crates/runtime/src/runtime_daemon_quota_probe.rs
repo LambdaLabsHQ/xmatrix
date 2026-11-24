@@ -254,7 +254,8 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
             // The reader prefers CURSOR_API_KEY / CURSOR_AUTH_TOKEN, then the
             // macOS login keychain item `cursor-access-token`, then CLI
             // auth.json under APPDATA/Cursor or ~/.cursor. Those are the
-            // account a default registered spawn bills.
+            // account a default registered spawn bills. It opens none of them
+            // without the owner's grant on this machine (`read_account`).
             QuotaAccount::CursorDefault
         }
         // Both readers resolve the key their CLI would: its stored credential
