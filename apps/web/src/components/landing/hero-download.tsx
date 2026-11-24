@@ -60,16 +60,17 @@ export function HeroDownload({ locale, surface = "paper" }: { locale: Locale; su
   const copy = sitePagesCopy[locale].download;
   const { platform, download: native } = useDeviceDownload(copy);
   const pill = "inline-flex h-12 w-full items-center justify-center gap-2 px-7 text-sm sm:w-auto";
-  const action = (href: string, internal: boolean, children: ReactNode) => surface === "wood"
-    ? <LiquidGlassPill as={internal ? Link : "a"} href={href} className={pill}>{children}</LiquidGlassPill>
-    : <WoodPanel as={internal ? Link : "a"} href={href} className={`site-wood-pill ${pill}`}>{children}</WoodPanel>;
+  // One anchor whatever the device turns out to be: finding it out changes the link's address and words, not the element.
+  const action = (href: string, children: ReactNode) => surface === "wood"
+    ? <LiquidGlassPill as="a" href={href} className={pill}>{children}</LiquidGlassPill>
+    : <WoodPanel as="a" href={href} className={`site-wood-pill ${pill}`}>{children}</WoodPanel>;
 
   return (
     <div className={`flex flex-col items-stretch gap-[1.125rem] sm:items-start ${surface === "wood" ? "" : "mt-10"}`}
       data-testid={surface === "wood" ? "closing-download" : "hero-download"}>
       {platform === "Linux"
-        ? action(appHref("/login"), true, <>{hero.startFree}<ArrowRight className="size-5" /></>)
-        : action(native?.href ?? localizedPath(locale, "/download"), false,
+        ? action(appHref("/login"), <>{hero.startFree}<ArrowRight className="size-5" /></>)
+        : action(native?.href ?? localizedPath(locale, "/download"),
           <><Download className="size-4" />{native?.label ?? landingCopy[locale].nav.download}</>)}
       <OtherPlatforms locale={locale} platform={platform} surface={surface} />
     </div>
