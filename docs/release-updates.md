@@ -1,5 +1,29 @@
 # Release Updates
 
+## Unreleased: a pull request that reaches the Hub runs the Hub suite before merge
+
+From 2026-11-17 to 11-24, 65 release trains failed their gates, and 53 of them
+(82%) failed on the Hub suite: the one train gate a pull request never ran.
+A change that broke it merged green, failed the next train after seven to
+twelve minutes, and held every change riding that train until someone fixed
+main; on 2026-11-24 eight trains in a row failed that way between 20:15 and
+21:05 UTC. A pull request whose diff reaches the Hub (`packages/hub`,
+`packages/db`, `packages/protocol`, the Agent prompts or a shared root file)
+now runs the complete Hub suite, the static job and four shards, in place of
+`hub-check`; its typecheck and deploy bundle are part of the static job. Such
+a pull request takes about four to five minutes instead of three; one that
+does not reach the Hub is unchanged.
+
+The CI ledger now records what a pull request ran in full. Its `node-tests`
+entries run the same two partitions as a train's `node-checks`, and its Hub
+jobs are the train's own, so a train of the exact tree that pull request
+tested reuses both instead of running them again. When main moved between the
+pull request's run and its merge the tree differs and the train runs them
+itself. The Web and Rust jobs of a pull request remain subsets under other
+names and vouch for nothing. No gate or assertion is removed. CI only; no
+product, schema or client change. Recovery is a CI-validated revert restoring
+`hub-check` and the unledgered names.
+
 ## Unreleased: a message sent to a working Antigravity joins its turn instead of cancelling it
 
 Claude's turns took a Channel message that arrived mid-turn as more input to
