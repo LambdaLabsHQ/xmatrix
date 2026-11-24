@@ -1,6 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
+import { SPLIT, SectionIntro } from "@/components/landing/section-intro";
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 import { appHref } from "@/lib/site-url";
@@ -13,17 +14,16 @@ export function Pricing({ locale = "en" }: { locale?: Locale }) {
   ];
   return (
     <section id="pricing" className="x-section">
-      <div className="x-container">
-        <div className="mx-auto max-w-3xl text-center">
-          <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl">
-            {copy.title}
-          </h2>
-          <p className="mt-5 text-lg leading-8 text-muted-foreground">
-            {copy.body}
+      <div className={`x-container ${SPLIT}`}>
+        <div>
+          <SectionIntro title={copy.title} body={copy.body} />
+          <p className="mt-6 max-w-[34rem] text-xs leading-[1.65] text-[var(--site-ink-muted)]">
+            {copy.terms}{" "}
+            <a className="underline underline-offset-4" href={copy.xCreditsLink.href}>{copy.xCreditsLink.label}</a>
           </p>
         </div>
 
-        <div className="x-mobile-card-scroller mx-auto mt-14 grid min-w-0 max-w-3xl gap-4 md:grid-cols-2">
+        <div className="x-mobile-card-scroller grid min-w-0 gap-4 md:grid-cols-2">
           {plans.map(({ name, price, period, description, features, href, highlighted }) => {
             // The plan most teams pick is the one wood plank; the others are paper.
             const Surface = highlighted ? WoodPanel : "div";
@@ -84,12 +84,6 @@ export function Pricing({ locale = "en" }: { locale?: Locale }) {
             );
           })}
         </div>
-        <p className="mt-6 text-center text-xs leading-5 text-muted-foreground">
-          {copy.terms}
-        </p>
-        <p className="mt-2 text-center text-xs leading-5 text-muted-foreground">
-          <a className="underline" href={copy.xCreditsLink.href}>{copy.xCreditsLink.label}</a>
-        </p>
       </div>
     </section>
   );

@@ -1,0 +1,67 @@
+---
+title: "遙測、診斷與本地隱私 — xMatrix 文件"
+description: "哪些資料留在本機、可選的本地額度探測與用戶端診斷如何運作，以及如何隨時關閉。"
+---
+
+# 遙測與本地隱私
+
+xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon 組成。本頁公開列出用戶端與 daemon 的所有診斷回報與本機檔案讀取行為，以及關閉方式。
+
+## 哪些資料留在本機
+
+你的原始碼、Git 歷史、工作目錄、模型工具紀錄與本機模型憑證皆留在你自己控制的電腦上。xMatrix 絕不將本機模型 API Key 或 OAuth token 上傳至 Hub，也不會讀取第三方憑證檔來做跨機器身分歸因或指紋關聯。
+
+## 本地服務商額度探測
+
+當你在本機註冊受支援的代理工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）時，xMatrix 可在 `xmatrix agent list` 與 Agents 頁面顯示訂閱剩餘額度，並供 `@auto` 避開已用盡的帳號。
+
+為在不消耗模型對話的前提下查詢剩餘額度，本機 daemon 僅於記憶體內讀取對應已註冊工具的本機憑證並直連原廠端點：
+
+| 工具 | 僅於本機記憶體讀取的位置 | 由本機直連的原廠端點 |
+| --- | --- | --- |
+| Claude Code | macOS 鑰匙圈（`Claude Code-credentials`）或 `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
+| Codex | `$CODEX_HOME/auth.json` 或 `~/.codex/auth.json` | `https://chatgpt.com/backend-api/wham/usage` |
+| Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS 鑰匙圈（`cursor-access-token`）或 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
+| Grok Build | `GROK_CLI_OAUTH_TOKEN` 或 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
+| OpenCode | `OPENCODE_API_KEY` 或 OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` 或 ChatGPT `wham/usage` |
+| DeepSeek | `DEEPSEEK_API_KEY` 或 `$DSH_HOME` 憑證檔 | `https://api.deepseek.com/user/balance` |
+| Z.ai / Zhipu | `ZAI_API_KEY` / `ZHIPU_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit`（或 `open.bigmodel.cn`） |
+| Antigravity | 直接呼叫未修改的 `agy -p "/usage" --output-format json` | 由 `agy` 自行處理 |
+
+**嚴格邊界：**
+
+- 憑證僅留在本機行程記憶體中，**只傳送給對應服務商自己的額度端點**。
+- 本機 SHA-256 雜湊僅作記憶體快取鍵用來偵測帳號切換，**永不記錄於日誌，也永不上傳至 xMatrix**。
+- 傳送給 xMatrix Hub 的僅為正規化後的剩餘額度資訊（百分比、重設時間、帳號可用狀態與預付餘額）。
+
+### 關閉本地額度探測
+
+```sh
+xmatrix config quotaProbes off
+# 或設定環境變數（優先度更高）
+export XMATRIX_DISABLE_QUOTA_PROBES=1
+```
+
+若僅關閉 Antigravity 探測，可設定 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。關閉後，xMatrix 不會讀取任何本機服務商憑證或查詢原廠額度端點。
+
+## 用戶端診斷與當機回報
+
+xMatrix 不使用廣告 Cookie、跨站追蹤、工作階段錄影，也未整合 PostHog、Google Analytics 或 Cloudflare Web Analytics 等第三方行為分析 SDK。
+
+預設情況下，登入用戶端會回報受限的維運診斷資訊以協助除錯與效能改善：
+
+- **錯誤與當機回報（Sentry）**：停用使用者資訊、Cookie、HTTP 標頭/內容、URL 查詢參數與主控台麵包屑，並遮蔽錯誤訊息中引用的內容；未設定 DSN 的本機或自託管建置不送出任何回報。
+- **第一方診斷指標（xMatrix Hub → Cloudflare Analytics Engine）**：啟動耗時（`/api/observable/startup-timing`）、新手引導步驟計數（`/api/observable/onboarding-step`）、桌面端 daemon 啟動失敗資訊（`/api/observable/desktop-daemon-failure`）與 CLI 網路重連樣本（`/api/observable/client-metrics`）。識別碼於伺服器端以金鑰 HMAC-SHA-256 假名化，不含訊息或命令內容。
+
+### 關閉診斷與當機回報
+
+- **Web、桌面端、iOS 與 Android**：前往 **Settings → Legal and privacy** 關閉 **Send diagnostics and crash reports**。
+- **瀏覽器隱私訊號**：除非於設定中明確重新開啟，xMatrix 自動遵循 **Do Not Track（DNT）** 與 **Global Privacy Control（GPC）**。
+- **CLI 與 daemon**：執行 `xmatrix config telemetry off`，或設定 `XMATRIX_TELEMETRY=0` / `DO_NOT_TRACK=1`。
+
+## 法律文件
+
+- [隱私權政策（EN）](/privacy)
+- [Cookie 與本機儲存聲明（EN）](/cookies)
+- [子處理商清單（EN）](/subprocessors)
+- [服務條款（EN）](/terms)

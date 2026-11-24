@@ -17,7 +17,7 @@
  * reading (a passage, or the page itself), to quote in the open conversation
  * or to start a new one with.
  */
-import { CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AuthUser, type SerializedChannel } from "@xmatrix/protocol";
+import { browserPageMetadata, browserPageOf, CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AuthUser, type SerializedChannel } from "@xmatrix/protocol";
 import canonicalVersion from "../../../../version.json" with { type: "json" };
 import { EXTENSION_EMBED_ORIGINS } from "./extension-embed-origins";
 
@@ -195,7 +195,23 @@ const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-
  * answered its creation, when the extension just started it: the open app may
  * not list it yet.
  */
-type AddressOpener = (path: string, channel?: SerializedChannel) => boolean;
+/**
+ * A question the extension is sending to the conversation it opens (asked in the box on a page): the panel shows it
+ * as sending at once, under the id the extension sends it with, instead of waiting for the Hub to have it.
+ */
+export type EmbedPendingMessage = { clientMessageId: string; body: string; metadata?: Record<string, unknown> };
+
+type AddressOpener = (path: string, channel?: SerializedChannel, pending?: EmbedPendingMessage) => boolean;
+
+/** A pending question the extension hands over: its id, bounded text, and the page it was asked on. */
+export function parseEmbedPendingMessage(value: unknown): EmbedPendingMessage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { clientMessageId, body, metadata } = value as Record<string, unknown>;
+  if (typeof clientMessageId !== "string" || !/^[A-Za-z0-9_-]{8,128}$/u.test(clientMessageId)) return undefined;
+  if (typeof body !== "string" || !body.trim() || body.length > 64 * 1024) return undefined;
+  const page = browserPageOf(metadata);
+  return { clientMessageId, body, ...(page ? { metadata: browserPageMetadata(page) } : {}) };
+}
 
 /** A conversation the extension hands over with an address: the one at that address, and bounded. */
 function parseOpenedChannel(value: unknown, path: string): SerializedChannel | undefined {
@@ -216,7 +232,7 @@ export function subscribeEmbedOpen(onOpen: AddressOpener): () => void {
   addressOpeners.add(onOpen);
   const stop = subscribeParent("open", (data) => {
     if (typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path)) {
-      onOpen(data.path, parseOpenedChannel(data.channel, data.path));
+      onOpen(data.path, parseOpenedChannel(data.channel, data.path), parseEmbedPendingMessage(data.pending));
     }
   });
   return () => {
@@ -233,16 +249,15 @@ export function openEmbedAddress(path: string): boolean {
 
 /**
  * The page beside the side panel, as the extension tells it: the panel is a
- * companion to that page (Daniel 2026-11-23), not a whole workspace. `text`
- * is the page's readable text, which "Ask about this page" carries as an
- * attachment; `path` is the conversation already started from this page.
+ * companion to that page (Daniel 2026-11-23), not a whole workspace. `path`
+ * is the conversation already started from this page. The page's content is
+ * not handed over here: an Agent reads it, as its accessibility snapshot, with
+ * `xmatrix browse` (Daniel 2026-11-24: a web page is not a file).
  */
-export type EmbedPage = { title: string; href: string; text?: string; path?: string };
+export type EmbedPage = { title: string; href: string; path?: string };
 
 /** One conversation started from the extension, for the panel's Recent list. */
 export type EmbedRecent = { path: string; title: string; href: string };
-
-const MAX_PAGE_TEXT_CHARS = 200_000;
 
 function webAddress(value: unknown): string | null {
   if (typeof value !== "string" || value.length > MAX_HREF_CHARS) return null;
@@ -258,14 +273,13 @@ function boundedText(value: unknown, max: number): string | null {
   return typeof value === "string" && value.length <= max ? value : null;
 }
 
-/** Validates a page message: a web address, bounded title and text, an app conversation path. */
+/** Validates a page message: a web address, a bounded title, an app conversation path. */
 export function parseEmbedPage(data: Record<string, unknown>): EmbedPage | null {
   const href = webAddress(data.href);
   const title = boundedText(data.title, MAX_LABEL_CHARS);
   if (!href || title === null) return null;
-  const text = boundedText(data.text, MAX_PAGE_TEXT_CHARS);
   const path = typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path) ? data.path : undefined;
-  return { title, href, ...(text ? { text } : {}), ...(path ? { path } : {}) };
+  return { title, href, ...(path ? { path } : {}) };
 }
 
 /** Validates the Recent list: at most a few conversations, each an app path with a web page. */
@@ -294,21 +308,45 @@ export function subscribeEmbedPage(onPage: (page: EmbedPage) => void): () => voi
   return subscribeParent("page", (data) => {
     const page = parseEmbedPage(data);
     if (!page) return;
-    pageBesidePanel = { title: page.title, href: page.href };
+    if (pageBesidePanel?.href !== page.href || pageBesidePanel.title !== page.title) {
+      pageBesidePanel = { title: page.title, href: page.href };
+      notifyBrowserPage();
+    }
     onPage(page);
   });
 }
 
 /** The page beside the side panel, as it last said (subscribeEmbedPage). */
 let pageBesidePanel: { title: string; href: string } | null = null;
+/** A page the person took off what they write, by its address: another page goes with their messages again. */
+let leftOutPage: string | null = null;
+const browserPageListeners = new Set<() => void>();
+function notifyBrowserPage() {
+  for (const listener of browserPageListeners) listener();
+}
 
 /**
  * The page the person is looking at while they write in the side panel: each
  * message sent there carries it (browserPageMetadata), so the conversation and
- * its Agents know which page it is about. Null outside the side panel.
+ * its Agents know which page it is about, and the composer shows it. Null
+ * outside the side panel, or once the person took this page off.
  */
 export function embedBrowserPage(): { title: string; href: string } | null {
-  return extensionEmbedParent() ? pageBesidePanel : null;
+  if (!extensionEmbedParent() || !pageBesidePanel || pageBesidePanel.href === leftOutPage) return null;
+  return pageBesidePanel;
+}
+
+/** Takes the page beside the panel off what the person writes (the composer's page chip, ×), until they move on. */
+export function leaveOutEmbedBrowserPage() {
+  if (!pageBesidePanel) return;
+  leftOutPage = pageBesidePanel.href;
+  notifyBrowserPage();
+}
+
+/** Each time the page that goes with what is written changes: another page, or the person took it off. */
+export function subscribeEmbedBrowserPage(onChange: () => void): () => void {
+  browserPageListeners.add(onChange);
+  return () => browserPageListeners.delete(onChange);
 }
 
 /** The conversations started from the extension, newest first, each time the list changes. */
@@ -320,12 +358,6 @@ export function subscribeEmbedRecent(onRecent: (recent: EmbedRecent[]) => void):
 export function announceEmbedPageThread(thread: { path: string; title: string; href: string }) {
   const parent = extensionEmbedParent();
   if (parent && APP_CONVERSATION_PATH.test(thread.path)) postToParent(parent, { type: "page-thread", ...thread });
-}
-
-/** Asks the extension to read the page beside the panel (the person asked about it); it answers with a "page" message. */
-export function requestEmbedPageText() {
-  const parent = extensionEmbedParent();
-  if (parent) postToParent(parent, { type: "page-text" });
 }
 
 /**
@@ -357,6 +389,19 @@ export function subscribeEmbedBrowserReadApprovals(onApproval: (approval: EmbedB
 export function answerEmbedBrowserReadApproval(requestId: string, allow: boolean) {
   const parent = extensionEmbedParent();
   if (parent) postToParent(parent, { type: "browser-read-approval", requestId, allow });
+}
+
+/**
+ * Brings a web page the person wrote from back into view, from the panel: the
+ * tab already showing it (this panel's own tab first), not a new one (Daniel
+ * 2026-11-24). The extension opens a tab only when no tab shows it any more.
+ * False outside the side panel, where the caller opens it as a link.
+ */
+export function showEmbedWebPage(href: string): boolean {
+  const parent = extensionEmbedParent();
+  if (!parent || !webAddress(href)) return false;
+  postToParent(parent, { type: "show-page", href });
+  return true;
 }
 
 /** Opens an address in a browser tab of its own, from the panel. */

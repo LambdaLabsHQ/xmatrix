@@ -120,6 +120,9 @@ fn fresh_claude_rate_limit_verdict() -> Option<LlmUsage> {
 /// Read Claude.ai subscription quota: Claude Code's own verdict from a recent
 /// request, else the same OAuth usage endpoint Claude Code uses.
 pub async fn read_claude_oauth_rate_limit_usage(force: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     if let Some(verdict) = fresh_claude_rate_limit_verdict() {
         return Some(verdict);
     }
@@ -170,6 +173,9 @@ static CLAUDE_OAUTH_USAGE_BY_ACCOUNT: KeyedProviderUsageCache =
 /// The caller must first prove a spawn of its target resolves this same login
 /// (none of [`CLAUDE_LOGIN_OVERRIDE_KEYS`], no HOME override).
 pub(crate) async fn read_claude_oauth_usage_for_default_account(force: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     let credential = claude_default_account_credential().await?;
     let key = credential.cache_key.as_str();
     if let Some(cached) = CLAUDE_OAUTH_USAGE_BY_ACCOUNT.hit_unless_forced(key, force) {

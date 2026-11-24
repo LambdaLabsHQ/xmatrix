@@ -71,18 +71,22 @@ test("PR CI exercises the same simulator gate and production keeps its exact rev
   assert.equal(checkout.with.ref, "${{ needs.plan.outputs.deploy_sha }}");
   const gates = request.jobs.gates;
   assert.ok(gates.needs.includes("ios"));
-  const permits = new Function("needs", "always", "contains", "format", `return (${gates.if});`);
-  const needs = { plan: { result: "success", outputs: { scope: "ios", channel: "stable" } }, ci: { result: "success" }, ios: { result: "success" }, codeql: { result: "success" } };
-  const evaluate = () => permits(needs, () => true, (value, part) => value.includes(part), (_, scope) => `,${scope},`);
-  assert.equal(evaluate(), true);
-  for (const result of ["failure", "skipped", "cancelled"]) {
-    needs.ios.result = result;
-    assert.equal(evaluate(), false, result);
+  const needs = { plan: { result: "success", outputs: { scope: "web,ios", channel: "beta" } }, ci: { result: "success" }, ios: { result: "success" }, codeql: { result: "success" } };
+  const evaluate = (expression) => new Function("needs", "always", "contains", "format", `return (${expression});`)(
+    needs, () => true, (value, part) => value.includes(part), (_, scope) => `,${scope},`,
+  );
+  for (const channel of ["beta", "stable"]) {
+    needs.plan.outputs.channel = channel;
+    assert.equal(evaluate(request.jobs.ios.if), true, channel);
+    needs.ios.result = "success";
+    assert.equal(evaluate(gates.if), true, channel);
+    for (const result of ["failure", "skipped", "cancelled"]) {
+      needs.ios.result = result;
+      assert.equal(evaluate(gates.if), false, `${channel}: ${result}`);
+    }
   }
-  // A beta reaches TestFlight only; the simulator gate waits for the stable.
-  needs.plan.outputs.channel = "beta";
+  needs.plan.outputs.scope = "web";
   needs.ios.result = "skipped";
-  assert.equal(evaluate(), true);
-  needs.ios.result = "failure";
-  assert.equal(evaluate(), false);
+  assert.equal(evaluate(request.jobs.ios.if), false);
+  assert.equal(evaluate(gates.if), true);
 });

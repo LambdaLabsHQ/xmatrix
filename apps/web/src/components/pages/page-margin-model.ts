@@ -179,6 +179,21 @@ export function anchorTop(tops: ReadonlyMap<string, number>, conversation: Pick<
 }
 
 /**
+ * Where an open thread stands while a comment box is written in the margin, and the room it has: both stay in
+ * view, and neither lies over the other. The box keeps its place level with its passage. A thread whose passage
+ * is above it keeps its own place and ends over the box, its messages scrolling inside; with less than `minRoom`
+ * there, or with its passage below, it stands under the box, as tall as the room left down to the page's end.
+ * A null room is no limit.
+ */
+export function openBesideDraft(openTop: number, draft: { top: number; height: number }, end: number | null,
+  minRoom: number): { top: number; room: number | null } {
+  const above = draft.top - MARGIN_GAP - openTop;
+  if (above >= minRoom) return { top: openTop, room: above };
+  const top = Math.max(openTop, draft.top + draft.height + MARGIN_GAP);
+  return { top, room: end === null ? null : Math.max(minRoom, end - top) };
+}
+
+/**
  * Card positions in the margin, as comments in Google Docs: each card as close
  * to its anchor as the cards before it allow. A focused card sits exactly at
  * its anchor, and the cards before it move up to make room.

@@ -78,9 +78,20 @@ export function PrivacyPolicyContent() {
           <li>
             <strong className="text-foreground">Service and diagnostic information:</strong> IP
             address, browser and device type, operating system, application version, request time,
-            route or event category, response status, duration, counts, capacity, crash and error
-            information, and pseudonymized identifiers used to operate, secure, and troubleshoot the
+            route or event category, response status, duration, counts, capacity, startup timing,
+            first-party onboarding step progress, client network reconnect samples, desktop daemon
+            startup failure details, crash and error information (including reports sent to Sentry),
+            and keyed-HMAC pseudonymized identifiers used to operate, secure, and troubleshoot the
             Services. Operational diagnostics are designed not to contain message or command bodies.
+            You can turn off client diagnostics and crash reporting in Settings → Legal and privacy,
+            via browser Do Not Track / Global Privacy Control, or in the CLI via{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code>,{" "}
+            <code className="font-mono text-xs">DO_NOT_TRACK=1</code>, or{" "}
+            <code className="font-mono text-xs">xmatrix config telemetry off</code>; see our{" "}
+            <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
+              Telemetry and Local Privacy guide
+            </Link>
+            .
           </li>
           <li>
             <strong className="text-foreground">Support and communications:</strong> information you
@@ -137,9 +148,17 @@ export function PrivacyPolicyContent() {
           Local source files, raw terminal output, provider history, and working context remain on the
           connected computer unless a person, Agent, tool, connector, or requested feature sends them
           to a Channel, attachment, task, trace event, support request, model provider, or another
-          disclosed endpoint. A sandbox can restrict filesystem and long-lived credential access, but
-          current local sandbox support varies by platform and mode and does not enforce network egress.
-          A run configured without a supported sandbox does not receive that sandbox protection.
+          disclosed endpoint. When local provider quota probing is enabled for a harness you registered,
+          the daemon may read that tool&apos;s local credential store or OS keychain entry solely in
+          local memory to query that provider&apos;s own usage endpoint directly from your machine;
+          those credentials and local cache fingerprints are never sent to xMatrix, and only
+          normalized remaining-quota windows or balances are reported to the Hub for display and
+          routing. You can disable all local quota probes via{" "}
+          <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code> or{" "}
+          <code className="font-mono text-xs">xmatrix config quotaProbes off</code>. A sandbox can
+          restrict filesystem and long-lived credential access, but current local sandbox support
+          varies by platform and mode and does not enforce network egress. A run configured without a
+          supported sandbox does not receive that sandbox protection.
         </p>
         <p>
           Secret injection, privileged host commands, destructive changes, external publication,
@@ -253,8 +272,9 @@ export function PrivacyPolicyContent() {
             and grant rules;
           </li>
           <li>
-            to our service providers, including Cloudflare for infrastructure and Anthropic for the
-            MadeByRobot-selected management extraction that an authorized user invokes;
+            to our service providers, including Cloudflare for infrastructure, Sentry for scrubbed
+            error and crash reporting, and Anthropic for the MadeByRobot-selected management
+            extraction that an authorized user invokes;
           </li>
           <li>
             to Google or Stripe when you choose their authentication or payment flow, and to a model,
@@ -368,14 +388,14 @@ export function PrivacyPolicyContent() {
           question box, which asks for access to web pages first, it reads the text you select on a
           page to show it in the box under the selection; that text stays in your browser. Only when
           you send a question does it pass the page title, address, and selected text to xMatrix with
-          it. When you ask about a whole page (its side panel&apos;s + , or opening the panel on a page
-          without a conversation), it reads that page&apos;s main text and attaches it to the new
-          conversation as a file you can remove before sending. Each message you write in its side
-          panel carries the title and address of the page beside it. While the side panel is open, an
-          Agent in your conversation may read that page, or the page the conversation was started
-          from if it is still open in a tab. An Agent may also ask to read another page you have
-          open; the panel asks you first and reads it only if you allow it. Page text
-          read this way goes to that Agent only, and xMatrix does not store it. The extension never
+          it. Each message you write in its side panel carries the title and address of the page
+          beside it, shown above what you write; you can take the page off before sending. While the
+          side panel is open, an Agent in your conversation may read that page, or the page the
+          conversation was started from if it is still open in a tab: the extension reads what the
+          browser exposes to assistive technology (headings, text, links, form fields and their
+          values as shown), not hidden content or the page&apos;s code. An Agent may also ask to read
+          another page you have open; the panel asks you first and reads it only if you allow it. A
+          page read this way goes to that Agent only, and xMatrix does not store it. The extension never
           opens a page for an Agent, does not read pages in the background, record your browsing
           history, or contact any server other than xMatrix. It keeps your sign-in session, and text you picked until the
           panel takes it, in the browser&apos;s extension storage on that device; signing out ends the

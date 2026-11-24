@@ -44,12 +44,14 @@ function postToApp(message) {
   appWindow()?.postMessage({ protocol: PROTOCOL, ...message }, APP_ORIGIN);
 }
 
-/** The window this panel is beside: a conversation started from a page in it opens here. */
-let windowIdPromise = null;
-function panelWindow() {
-  windowIdPromise ??= chrome.windows.getCurrent().then((window) => window.id).catch(() => undefined);
-  return windowIdPromise;
-}
+/**
+ * The tab this panel belongs to (Daniel 2026-11-24: one panel per page, each its own thread): background.js opens
+ * it as `sidepanel.html?tab=<id>`. It shows that tab's page and conversation, whichever tab is in front.
+ */
+const PANEL_TAB = Number(new URLSearchParams(location.search).get("tab")) || null;
+
+/** A question still on its way to the conversation the app opened at, for the app to show as sending. */
+let pendingOnOpen = null;
 
 /** Loads the app, straight onto a conversation the extension just started when there is one. */
 let opening = false;
@@ -57,7 +59,10 @@ async function openApp() {
   if (opening || $("app").getAttribute("src")) return;
   opening = true;
   appReady = false;
-  const path = (await ask("takeOpenPath", { windowId: await panelWindow() }).catch(() => null))?.path;
+  const opened = await ask("takeOpenPath", { tabId: PANEL_TAB }).catch(() => null);
+  const path = opened?.path;
+  // The app opens at the conversation; the question on its way is shown there once the app is ready.
+  pendingOnOpen = opened?.pending ? opened : null;
   $("app").src = path ? `${APP_PAGE}?at=${encodeURIComponent(path)}` : APP_PAGE;
   opening = false;
 }
@@ -66,8 +71,9 @@ async function openApp() {
 async function showOpenPath() {
   if (!$("app").getAttribute("src")) return openApp();
   if (!appReady) return;
-  const opened = await ask("takeOpenPath", { windowId: await panelWindow() });
-  if (opened) postToApp({ type: "open", path: opened.path, ...(opened.channel ? { channel: opened.channel } : {}) });
+  const opened = await ask("takeOpenPath", { tabId: PANEL_TAB });
+  if (opened) postToApp({ type: "open", path: opened.path, ...(opened.channel ? { channel: opened.channel } : {}),
+    ...(opened.pending ? { pending: opened.pending } : {}) });
 }
 
 function closeApp() {
@@ -101,17 +107,22 @@ window.addEventListener("message", async (event) => {
     await render();
   } else if (data.type === "ready") {
     appReady = true;
+    if (pendingOnOpen) {
+      postToApp({ type: "open", path: pendingOnOpen.path, ...(pendingOnOpen.channel ? { channel: pendingOnOpen.channel } : {}),
+        pending: pendingOnOpen.pending });
+      pendingOnOpen = null;
+    }
     await deliverPassages();
     await showOpenPath();
     await showRecent();
     await showPage();
-  } else if (data.type === "page-text") {
-    await showPage({ text: await readPage() });
   } else if (data.type === "page-thread" && typeof data.path === "string") {
     const tab = await activeTab();
     if (tab?.id !== undefined) await ask("rememberPageThread", { tabId: tab.id, path: data.path, title: data.title, href: data.href });
   } else if (data.type === "open-tab" && typeof data.href === "string" && capturableUrl(data.href)) {
     await chrome.tabs.create({ url: data.href });
+  } else if (data.type === "show-page" && typeof data.href === "string" && capturableUrl(data.href)) {
+    await showWebPage(data.href).catch(() => undefined);
   } else if (data.type === "browser-read" && typeof data.requestId === "string") {
     await answerBrowserRead(data).catch(() => undefined);
   } else if (data.type === "browser-read-approval" && typeof data.requestId === "string") {
@@ -124,16 +135,18 @@ window.addEventListener("message", async (event) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "session" && changes.passages?.newValue?.length) deliverPassages().catch(() => undefined);
-  if (area === "session" && changes.openPath?.newValue && !$("view-app").hidden) showOpenPath().catch(() => undefined);
+  if (area === "session" && changes[`openPath:${PANEL_TAB}`]?.newValue && !$("view-app").hidden) showOpenPath().catch(() => undefined);
   if (area === "local" && changes.recentThreads) showRecent().catch(() => undefined);
   // A question asked on the page gave it a conversation: the bar knows it now.
-  if (area === "session" && Object.keys(changes).some((key) => key.startsWith("askThread:"))) showPage().catch(() => undefined);
+  if (area === "session" && changes[`askThread:${PANEL_TAB}`]) showPage().catch(() => undefined);
   if ((area === "local" && changes.session) || (area === "session" && changes.signIn)) render().catch(() => undefined);
 });
 
 // ---- The page beside the panel. The panel is its companion: the conversation started from it, or one about it.
 
+/** This panel's tab (named activeTab for what it was: the panel once followed whichever tab was in front). */
 async function activeTab() {
+  if (PANEL_TAB) return chrome.tabs.get(PANEL_TAB).catch(() => null);
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tab ?? null;
 }
@@ -158,7 +171,7 @@ async function pageThread(tab, href) {
  * where it is, and the app offers to ask about this page (Daniel 2026-11-23).
  */
 let shownPage = "";
-async function showPage({ text } = {}) {
+async function showPage() {
   if (!appReady) return;
   const tab = await activeTab();
   const href = capturableUrl(tab?.url ?? "");
@@ -166,34 +179,30 @@ async function showPage({ text } = {}) {
   const thread = await pageThread(tab, href);
   const path = thread ? `/app/${encodeURIComponent(thread.spaceId)}/channels/${encodeURIComponent(thread.channelId)}` : undefined;
   postToApp({ type: "page", title: pageTitle(tab.title) || new URL(href).host, href,
-    ...(path ? { path } : {}), ...(text ? { text } : {}) });
+    ...(path ? { path } : {}) });
   const key = `${tab.id} ${pageKey(href)}`;
   if (path && key !== shownPage) postToApp({ type: "open", path, ...(thread.snapshot ? { channel: thread.snapshot } : {}) });
   shownPage = key;
 }
 
-/** A tab's readable text: its main article, or the whole body, at most 200,000 characters; empty where it cannot be read. */
+/**
+ * A tab as an Agent reads it: its accessibility snapshot, as Playwright's `ariaSnapshot()` writes it (the
+ * extension's src/page-snapshot.js, built from snapshot/page-snapshot.ts), at most 200,000 characters; empty
+ * where it cannot be read.
+ */
 async function readTab(tabId) {
   try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["src/page-snapshot.js"] });
     const [result] = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => {
-        const root = document.querySelector("article, main, [role='main']") ?? document.body;
-        return String(root?.innerText ?? "").replace(/\n{3,}/gu, "\n\n").trim().slice(0, 200_000);
-      },
+      func: (maxChars) => globalThis.__xmatrixPageSnapshot?.(maxChars) ?? "",
+      args: [200_000],
     });
     return typeof result?.result === "string" ? result.result : "";
   } catch {
     // A page this extension may not read (no access to it, or the browser's own pages).
     return "";
   }
-}
-
-/** The readable text of the page beside the panel: read only because the person asked about this page. */
-async function readPage() {
-  const tab = await activeTab();
-  if (!tab?.id || !capturableUrl(tab.url ?? "")) return "";
-  return readTab(tab.id);
 }
 
 // ---- Agents reading a page through this browser (`xmatrix browse`, packages/hub src/browser-read.ts).
@@ -210,6 +219,23 @@ async function openTabShowing(page) {
     return href && pageKey(href) === page;
   });
   return showing.find((tab) => tab.active) ?? showing[0] ?? null;
+}
+
+/**
+ * Brings `href` into view: this panel's own tab when it shows that page, else another open tab showing it, in front
+ * and its window focused (Daniel 2026-11-24: back to the person's tab, not a new one). A new tab only when none does.
+ */
+async function showWebPage(href) {
+  const page = pageKey(href);
+  const own = await activeTab();
+  const ownHref = capturableUrl(own?.url ?? "");
+  const tab = own && ownHref && pageKey(ownHref) === page ? own : await openTabShowing(page);
+  if (!tab?.id) {
+    await chrome.tabs.create({ url: href });
+    return;
+  }
+  await chrome.tabs.update(tab.id, { active: true });
+  if (tab.windowId !== undefined) await chrome.windows.update(tab.windowId, { focused: true }).catch(() => undefined);
 }
 
 /** The page a conversation was started from: a tab still asking in it, or where Recent says it began. */
@@ -247,7 +273,7 @@ function approve(requestId, agentName, tab, href) {
 async function readForAgent({ channelId, target, agentName, requestId }) {
   // The page beside this panel: the person shows it by chatting here (Daniel 2026-11-23: no prompt for it).
   if (target === "current") {
-    const [tab] = await chrome.tabs.query({ active: true, windowId: await panelWindow() }).catch(() => []);
+    const tab = await activeTab();
     const href = capturableUrl(tab?.url ?? "");
     if (!tab?.id || !href) return { refusal: "no-page" };
     const text = await readTab(tab.id);
@@ -299,10 +325,11 @@ $("quick-select-skip").addEventListener("click", async () => {
   await render();
 });
 
-chrome.tabs.onActivated.addListener(() => showPage().catch(() => undefined));
-chrome.tabs.onUpdated.addListener((_id, change, tab) => {
-  if (tab.active && (change.title || change.url)) showPage().catch(() => undefined);
+// The panel follows its own tab to each page it shows; another tab in front changes nothing here.
+chrome.tabs.onUpdated.addListener((id, change, tab) => {
+  if ((PANEL_TAB ? id === PANEL_TAB : tab.active) && (change.title || change.url)) showPage().catch(() => undefined);
 });
+if (!PANEL_TAB) chrome.tabs.onActivated.addListener(() => showPage().catch(() => undefined));
 
 // ---- Signing in.
 

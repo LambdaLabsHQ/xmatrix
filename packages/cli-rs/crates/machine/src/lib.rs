@@ -37,27 +37,76 @@ pub async fn cmd_config(
     key: Option<String>,
     value: Option<String>,
 ) -> error::Result<()> {
-    match (key, value) {
+    let normalized_key = key.as_deref().map(str::trim);
+    match (normalized_key, value.as_deref()) {
+        (Some(k @ ("quotaProbes" | "quota-probes")), Some(raw)) => {
+            let enabled = config::parse_bool_setting(raw).ok_or_else(|| {
+                CliError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Invalid value '{raw}' for {k}. Use on/off or true/false."),
+                ))
+            })?;
+            config::set_quota_probes_enabled(enabled).await?;
+            if enabled {
+                println!(
+                    "Local provider quota probes enabled (unless XMATRIX_DISABLE_QUOTA_PROBES=1 is set)."
+                );
+            } else {
+                println!(
+                    "Local provider quota probes disabled. Restart the daemon for running sessions to pick up the change, or set XMATRIX_DISABLE_QUOTA_PROBES=1."
+                );
+            }
+            return Ok(());
+        }
+        (Some("telemetry"), Some(raw)) => {
+            let enabled = config::parse_bool_setting(raw).ok_or_else(|| {
+                CliError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Invalid value '{raw}' for telemetry. Use on/off or true/false."),
+                ))
+            })?;
+            config::set_telemetry_enabled(enabled).await?;
+            if enabled {
+                println!(
+                    "CLI network diagnostics enabled (unless XMATRIX_TELEMETRY=0 or DO_NOT_TRACK=1 is set)."
+                );
+            } else {
+                println!("CLI network diagnostics disabled.");
+            }
+            return Ok(());
+        }
+        (Some("quotaProbes" | "quota-probes"), None) => {
+            println!("{}", !config::quota_probes_disabled());
+            return Ok(());
+        }
+        (Some("telemetry"), None) => {
+            println!("{}", !config::telemetry_disabled());
+            return Ok(());
+        }
         (None, _) => {
             let session = config::load_session_for_hub(hub_url).await;
-            match session {
-                Some(s) => {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&session_diagnostics(s)?)?
-                    );
-                }
-                None => {
-                    println!("No config found. Run: xmatrix login");
-                }
+            let mut output = match session {
+                Some(s) => session_diagnostics(s)?,
+                None => serde_json::json!({}),
+            };
+            if let Some(map) = output.as_object_mut() {
+                map.insert(
+                    "quotaProbes".into(),
+                    serde_json::Value::Bool(!config::quota_probes_disabled()),
+                );
+                map.insert(
+                    "telemetry".into(),
+                    serde_json::Value::Bool(!config::telemetry_disabled()),
+                );
             }
+            println!("{}", serde_json::to_string_pretty(&output)?);
         }
         (Some(k), _) => {
             let session = config::load_session_for_hub(hub_url).await;
             match session {
                 Some(s) => {
                     let val = session_diagnostics(s)?;
-                    if let Some(v) = val.get(&k) {
+                    if let Some(v) = val.get(k) {
                         println!("{v}");
                     } else {
                         println!("Key '{k}' not found");

@@ -11,6 +11,7 @@ import conceptsEn from "../../../../../docs/guide/concepts.md";
 import connectorsEn from "../../../../../docs/guide/connectors.md";
 import indexEn from "../../../../../docs/guide/index.md";
 import pagesEn from "../../../../../docs/guide/pages.md";
+import privacyEn from "../../../../../docs/guide/privacy.md";
 import programsEn from "../../../../../docs/guide/programs.md";
 import projectWikiEn from "../../../../../docs/guide/project-wiki.md";
 import syntaxEn from "../../../../../docs/guide/syntax.md";
@@ -22,6 +23,7 @@ import conceptsZh from "../../../../../docs/guide/i18n/zh/concepts.md";
 import connectorsZh from "../../../../../docs/guide/i18n/zh/connectors.md";
 import indexZh from "../../../../../docs/guide/i18n/zh/index.md";
 import pagesZh from "../../../../../docs/guide/i18n/zh/pages.md";
+import privacyZh from "../../../../../docs/guide/i18n/zh/privacy.md";
 import programsZh from "../../../../../docs/guide/i18n/zh/programs.md";
 import projectWikiZh from "../../../../../docs/guide/i18n/zh/project-wiki.md";
 import syntaxZh from "../../../../../docs/guide/i18n/zh/syntax.md";
@@ -33,6 +35,7 @@ import conceptsZhTw from "../../../../../docs/guide/i18n/zh-tw/concepts.md";
 import connectorsZhTw from "../../../../../docs/guide/i18n/zh-tw/connectors.md";
 import indexZhTw from "../../../../../docs/guide/i18n/zh-tw/index.md";
 import pagesZhTw from "../../../../../docs/guide/i18n/zh-tw/pages.md";
+import privacyZhTw from "../../../../../docs/guide/i18n/zh-tw/privacy.md";
 import programsZhTw from "../../../../../docs/guide/i18n/zh-tw/programs.md";
 import projectWikiZhTw from "../../../../../docs/guide/i18n/zh-tw/project-wiki.md";
 import syntaxZhTw from "../../../../../docs/guide/i18n/zh-tw/syntax.md";
@@ -44,6 +47,7 @@ import conceptsJa from "../../../../../docs/guide/i18n/ja/concepts.md";
 import connectorsJa from "../../../../../docs/guide/i18n/ja/connectors.md";
 import indexJa from "../../../../../docs/guide/i18n/ja/index.md";
 import pagesJa from "../../../../../docs/guide/i18n/ja/pages.md";
+import privacyJa from "../../../../../docs/guide/i18n/ja/privacy.md";
 import programsJa from "../../../../../docs/guide/i18n/ja/programs.md";
 import projectWikiJa from "../../../../../docs/guide/i18n/ja/project-wiki.md";
 import syntaxJa from "../../../../../docs/guide/i18n/ja/syntax.md";
@@ -55,6 +59,7 @@ import conceptsKo from "../../../../../docs/guide/i18n/ko/concepts.md";
 import connectorsKo from "../../../../../docs/guide/i18n/ko/connectors.md";
 import indexKo from "../../../../../docs/guide/i18n/ko/index.md";
 import pagesKo from "../../../../../docs/guide/i18n/ko/pages.md";
+import privacyKo from "../../../../../docs/guide/i18n/ko/privacy.md";
 import programsKo from "../../../../../docs/guide/i18n/ko/programs.md";
 import projectWikiKo from "../../../../../docs/guide/i18n/ko/project-wiki.md";
 import syntaxKo from "../../../../../docs/guide/i18n/ko/syntax.md";
@@ -66,6 +71,7 @@ import conceptsEs from "../../../../../docs/guide/i18n/es/concepts.md";
 import connectorsEs from "../../../../../docs/guide/i18n/es/connectors.md";
 import indexEs from "../../../../../docs/guide/i18n/es/index.md";
 import pagesEs from "../../../../../docs/guide/i18n/es/pages.md";
+import privacyEs from "../../../../../docs/guide/i18n/es/privacy.md";
 import programsEs from "../../../../../docs/guide/i18n/es/programs.md";
 import projectWikiEs from "../../../../../docs/guide/i18n/es/project-wiki.md";
 import syntaxEs from "../../../../../docs/guide/i18n/es/syntax.md";
@@ -84,6 +90,7 @@ const sourcesByLocale: Readonly<Record<SiteLocale, readonly GuideSourceEntry[]>>
     ["connectors", connectorsEn],
     ["ai-apps", aiAppsEn],
     ["cli", cliEn],
+    ["privacy", privacyEn],
   ],
   zh: [
     ["index", indexZh],
@@ -96,6 +103,7 @@ const sourcesByLocale: Readonly<Record<SiteLocale, readonly GuideSourceEntry[]>>
     ["connectors", connectorsZh],
     ["ai-apps", aiAppsZh],
     ["cli", cliZh],
+    ["privacy", privacyZh],
   ],
   "zh-tw": [
     ["index", indexZhTw],
@@ -108,6 +116,7 @@ const sourcesByLocale: Readonly<Record<SiteLocale, readonly GuideSourceEntry[]>>
     ["connectors", connectorsZhTw],
     ["ai-apps", aiAppsZhTw],
     ["cli", cliZhTw],
+    ["privacy", privacyZhTw],
   ],
   ja: [
     ["index", indexJa],
@@ -120,6 +129,7 @@ const sourcesByLocale: Readonly<Record<SiteLocale, readonly GuideSourceEntry[]>>
     ["connectors", connectorsJa],
     ["ai-apps", aiAppsJa],
     ["cli", cliJa],
+    ["privacy", privacyJa],
   ],
   ko: [
     ["index", indexKo],
@@ -132,6 +142,7 @@ const sourcesByLocale: Readonly<Record<SiteLocale, readonly GuideSourceEntry[]>>
     ["connectors", connectorsKo],
     ["ai-apps", aiAppsKo],
     ["cli", cliKo],
+    ["privacy", privacyKo],
   ],
   es: [
     ["index", indexEs],
@@ -144,6 +155,7 @@ const sourcesByLocale: Readonly<Record<SiteLocale, readonly GuideSourceEntry[]>>
     ["connectors", connectorsEs],
     ["ai-apps", aiAppsEs],
     ["cli", cliEs],
+    ["privacy", privacyEs],
   ],
 };
 

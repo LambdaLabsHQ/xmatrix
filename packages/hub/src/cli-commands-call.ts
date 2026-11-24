@@ -25,7 +25,7 @@ export const CONNECTOR_CALL_COMMAND: CliCommand = {
  * they have open, once they allow it. The browser never opens a page for it.
  */
 export const BROWSE_COMMAND: CliCommand = {
-  path: ["browse"], about: "Read the page your owner is looking at in Chrome, beside the xMatrix side panel",
+  path: ["browse"], about: "Read the page your owner is looking at in Chrome: its accessibility snapshot, as Playwright's browser_snapshot gives it",
   options: [{ name: "tab", kind: "string", help: "The address of another page your owner has open; they are asked to allow it" },
     { name: "conversation", kind: "flag", help: "The page this conversation was started from, if it is still open" },
     { name: "json", kind: "flag", help: "Print {title, href, text} as JSON" }],

@@ -3,7 +3,8 @@ export const appUrl = new URL(process.env.NEXT_PUBLIC_APP_URL || "https://xmatri
 
 /**
  * Public origin of the marketing site; metadata, canonical URLs, robots and sitemap resolve against it. A deployment
- * can serve the site at its own origin too (`web.siteOrigin` in the deploy profile); it is then this one on either.
+ * can serve the site at its own origin too (`web.siteOrigin` in the deploy profile, `web.beta.siteOrigin` for the
+ * beta Web); it is then this one on either.
  */
 export const siteUrl = new URL(process.env.NEXT_PUBLIC_SITE_URL || appUrl.href);
 
@@ -15,13 +16,24 @@ export function appHref(path: `/${string}`): string {
   return siteUrl.origin === appUrl.origin ? path : new URL(path, appUrl).href;
 }
 
-/** The beta Web, which every beta deploys; search engines index only the stable one. */
-/** The card a link to the site shows when it is shared: 1200×630, the size every network renders large. */
+/**
+ * Whether `origin` is the site's own, where the deployment gives the site one apart from the app's. The session's
+ * cookie does not reach that origin and the Hub does not answer it, so no one is signed in on a page open there.
+ */
+export function isSiteOnlyOrigin(origin: string): boolean {
+  return siteUrl.origin !== appUrl.origin && origin === siteUrl.origin;
+}
+
+/**
+ * The card a link to the site shows when it is shared: 1200×630, the size every network renders large.
+ * scripts/share-card.mjs draws it from the English page title and the site's address; `alt` reads what it shows.
+ */
 export const shareImage = {
   url: "/brand/xmatrix-share-card.jpg",
   width: 1200,
   height: 630,
-  alt: "xMatrix — Living pages maintained by your AI agents",
+  alt: "xMatrix — Multi-agent collaboration around live documents",
 };
 
+/** The beta Web, which every beta deploys; search engines index only the stable one. */
 export const isBetaWeb = process.env.NEXT_PUBLIC_XMATRIX_WEB_CHANNEL === "beta";

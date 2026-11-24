@@ -17,6 +17,7 @@ This guide covers everything you type and run as a user:
 - [Programs](programs.md): coordinate agents and people with a Norn program on a page.
 - [Connected apps](connectors.md): GitHub, Sentry, Linear and the rest, from a message.
 - [CLI reference](cli.md): the `xmatrix` command.
+- [Telemetry and local privacy](privacy.md): what stays local, optional quota probes and diagnostics, and how to turn either off.
 
 ## Install
 

@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Download } from "lucide-react";
 import Image from "next/image";
 import { WoodPanel } from "@/components/ui/material-surfaces";
+import { APP_STORE_URL, GOOGLE_PLAY_URL } from "@/lib/app-stores";
 import { type SiteLocale } from "@/lib/site-locales";
 import { sitePagesCopy, type DownloadPageCopy } from "@/lib/site-pages-copy";
 
@@ -50,8 +51,36 @@ export const downloads = (copy: DownloadLinksCopy, channel: Channel = "stable") 
   Android: { href: `/api/android/releases/${channel}/latest.apk`, label: copy.downloadFor("Android"), detail: copy.androidDetail },
 });
 
+/** Phones install from their store; only Preview, which the stores do not carry, falls back to the Android APK. */
+export const phoneDownloads = (copy: DownloadPageCopy, channel: Channel = "stable") => ({
+  iOS: { href: APP_STORE_URL, label: copy.downloadFor("iPhone"), detail: copy.iosDetail },
+  Android: channel === "stable"
+    ? { href: GOOGLE_PLAY_URL, label: copy.downloadFor("Android"), detail: copy.androidDetail }
+    : { href: `/api/android/releases/${channel}/latest.apk`, label: copy.downloadFor("Android"), detail: copy.androidApkDetail },
+});
+
 /** Where the web app of a channel lives: Preview is the beta Web. */
 export const webApp = (channel: Channel) => channel === "stable" ? "/app" : "https://beta.xmatrix.sh/app";
+
+/**
+ * The App build for this device, once it is known: `platform` stays "unknown"
+ * until the browser has been asked, and `download` is null where there is no
+ * native App (Linux, unknown).
+ */
+export function useDeviceDownload(copy: DownloadPageCopy, channel: Channel = "stable") {
+  const [platform, setPlatform] = useState<Platform>("unknown");
+  const [intelMac, setIntelMac] = useState(false);
+  useEffect(() => {
+    const detected = detectPlatform();
+    setPlatform(detected);
+    if (detected === "macOS") detectIntelMac().then(setIntelMac).catch(() => {});
+  }, []);
+  const download = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "x64" : "arm64"]
+    : platform === "Windows" ? downloads(copy, channel).Windows
+    : platform === "iOS" || platform === "Android" ? phoneDownloads(copy, channel)[platform] : null;
+  const otherMac = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "arm64" : "x64"] : null;
+  return { platform, download, otherMac };
+}
 
 /** The page's one action. `channelSwitch` sits beside the button it decides. */
 export function DownloadRecommendation({
@@ -63,17 +92,8 @@ export function DownloadRecommendation({
   channelSwitch?: ReactNode;
   locale?: SiteLocale;
 }) {
-  const [platform, setPlatform] = useState<Platform>("unknown");
-  const [intelMac, setIntelMac] = useState(false);
   const copy = sitePagesCopy[locale].download;
-  useEffect(() => {
-    const detected = detectPlatform();
-    setPlatform(detected);
-    if (detected === "macOS") detectIntelMac().then(setIntelMac).catch(() => {});
-  }, []);
-  const download = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "x64" : "arm64"]
-    : platform === "Windows" || platform === "Android" ? downloads(copy, channel)[platform] : null;
-  const otherMac = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "arm64" : "x64"] : null;
+  const { platform, download, otherMac } = useDeviceDownload(copy, channel);
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center text-center" data-testid="download-recommendation">

@@ -94,6 +94,91 @@ pub struct CliConfig {
         default
     )]
     pub machine_seed: Option<String>,
+    /// Whether the local CLI/daemon may read provider credential stores to probe remaining quota.
+    #[serde(
+        rename = "quotaProbes",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub quota_probes: Option<bool>,
+    /// Whether the local CLI/daemon may send anonymized client network diagnostics.
+    #[serde(
+        rename = "telemetry",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub telemetry: Option<bool>,
+}
+
+pub const QUOTA_PROBES_DISABLE_ENV: &str = "XMATRIX_DISABLE_QUOTA_PROBES";
+pub const TELEMETRY_ENV: &str = "XMATRIX_TELEMETRY";
+pub const DO_NOT_TRACK_ENV: &str = "DO_NOT_TRACK";
+
+pub fn parse_bool_setting(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+pub fn quota_probes_disabled_with(
+    config: &CliConfig,
+    env: impl Fn(&str) -> Option<String>,
+) -> bool {
+    if let Some(raw) = env(QUOTA_PROBES_DISABLE_ENV)
+        && let Some(disabled) = parse_bool_setting(&raw)
+    {
+        return disabled;
+    }
+    config.quota_probes == Some(false)
+}
+
+pub fn telemetry_disabled_with(
+    config: &CliConfig,
+    env: impl Fn(&str) -> Option<String>,
+) -> bool {
+    if let Some(raw) = env(TELEMETRY_ENV)
+        && let Some(enabled) = parse_bool_setting(&raw)
+    {
+        return !enabled;
+    }
+    if let Some(raw) = env(DO_NOT_TRACK_ENV)
+        && parse_bool_setting(&raw) == Some(true)
+    {
+        return true;
+    }
+    config.telemetry == Some(false)
+}
+
+pub fn load_config_sync() -> CliConfig {
+    let path = config_path();
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| parse_config(&raw).ok())
+        .unwrap_or_default()
+}
+
+pub fn quota_probes_disabled() -> bool {
+    let config = load_config_sync();
+    quota_probes_disabled_with(&config, |key| std::env::var(key).ok())
+}
+
+pub fn telemetry_disabled() -> bool {
+    let config = load_config_sync();
+    telemetry_disabled_with(&config, |key| std::env::var(key).ok())
+}
+
+pub async fn set_quota_probes_enabled(enabled: bool) -> Result<()> {
+    let mut config = load_config().await;
+    config.quota_probes = Some(enabled);
+    write_config(&config).await
+}
+
+pub async fn set_telemetry_enabled(enabled: bool) -> Result<()> {
+    let mut config = load_config().await;
+    config.telemetry = Some(enabled);
+    write_config(&config).await
 }
 
 pub fn config_dir() -> PathBuf {
@@ -1429,5 +1514,47 @@ mod tests {
     async fn an_untracked_profile_task_still_spawns() {
         let handle = spawn_profile_task(async { 7 });
         assert_eq!(handle.await.unwrap(), 7);
+    }
+
+    #[test]
+    fn privacy_preferences_respect_env_do_not_track_and_saved_config() {
+        use super::{
+            CliConfig, DO_NOT_TRACK_ENV, QUOTA_PROBES_DISABLE_ENV, TELEMETRY_ENV,
+            quota_probes_disabled_with, telemetry_disabled_with,
+        };
+        let default_cfg = CliConfig::default();
+        assert!(!quota_probes_disabled_with(&default_cfg, |_| None));
+        assert!(!telemetry_disabled_with(&default_cfg, |_| None));
+
+        assert!(quota_probes_disabled_with(&default_cfg, |k| {
+            (k == QUOTA_PROBES_DISABLE_ENV).then(|| "1".to_string())
+        }));
+        assert!(telemetry_disabled_with(&default_cfg, |k| {
+            (k == TELEMETRY_ENV).then(|| "0".to_string())
+        }));
+        assert!(telemetry_disabled_with(&default_cfg, |k| {
+            (k == DO_NOT_TRACK_ENV).then(|| "1".to_string())
+        }));
+        // Explicit XMATRIX_TELEMETRY=1 overrides DO_NOT_TRACK=1.
+        assert!(!telemetry_disabled_with(&default_cfg, |k| match k {
+            TELEMETRY_ENV => Some("1".to_string()),
+            DO_NOT_TRACK_ENV => Some("1".to_string()),
+            _ => None,
+        }));
+
+        let opt_out_cfg = CliConfig {
+            quota_probes: Some(false),
+            telemetry: Some(false),
+            ..CliConfig::default()
+        };
+        assert!(quota_probes_disabled_with(&opt_out_cfg, |_| None));
+        assert!(telemetry_disabled_with(&opt_out_cfg, |_| None));
+        // Explicit env re-enable overrides saved config.
+        assert!(!quota_probes_disabled_with(&opt_out_cfg, |k| {
+            (k == QUOTA_PROBES_DISABLE_ENV).then(|| "0".to_string())
+        }));
+        assert!(!telemetry_disabled_with(&opt_out_cfg, |k| {
+            (k == TELEMETRY_ENV).then(|| "true".to_string())
+        }));
     }
 }

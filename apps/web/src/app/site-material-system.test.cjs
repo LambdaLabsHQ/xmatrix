@@ -10,6 +10,7 @@ const siteCss = source("themes/site.css");
 const tokensCss = source("tokens.css");
 const navbarSource = source("../components/shared/navbar.tsx");
 const heroSource = source("../components/landing/hero.tsx");
+const heroDownloadSource = source("../components/landing/hero-download.tsx");
 
 test("public routes share one warm material layer", () => {
   assert.match(layoutSource, /import "@\/app\/themes\/wood\.css";\s*import "@\/app\/themes\/site\.css";/);
@@ -29,17 +30,14 @@ test("public routes share one warm material layer", () => {
   }
 });
 
-test("hero image can extend under the fixed public navbar", () => {
-  assert.match(heroSource, /min-h-svh/);
-  assert.match(heroSource, /pt-20/);
-  assert.match(heroSource, /md:absolute md:inset-0/);
-});
-
-test("Get started renders the product live instead of a screenshot", () => {
-  const quickStartSource = source("../components/landing/quick-start.tsx");
-  assert.match(quickStartSource, /<AppWindow \/>/);
+test("the homepage shows the product live instead of a screenshot", () => {
+  const conversationsSource = source("../components/landing/conversations.tsx");
+  assert.match(conversationsSource, /<AppWindow \/>/);
   assert.match(source("../components/landing/app-window-preview.tsx"), /MessageTimeline[\s\S]*ChannelSidebar|ChannelSidebar[\s\S]*MessageTimeline/);
-  assert.doesNotMatch(quickStartSource, /next\/image|\.png|\.webp/);
+  assert.doesNotMatch(conversationsSource, /next\/image|\.png|\.webp/);
+  // The matrix and the live page are the app's own table and editor, fed a sample Space.
+  assert.match(source("../components/landing/fleet-preview.tsx"), /from "@\/components\/dashboard\/fleet-matrix"/);
+  assert.match(source("../components/landing/live-page-preview.tsx"), /from "@\/components\/pages\/page-editor"/);
 });
 
 test("public site labels carry no decorative eyebrow bar", () => {
@@ -51,7 +49,10 @@ test("public actions use shared materials and the Hero has one wood CTA", () => 
   assert.match(navbarSource, /LiquidGlassPill/);
   assert.doesNotMatch(navbarSource, /x-glass-button/);
   assert.doesNotMatch(navbarSource, /bg-\[#68462f\]|bg-\[#513522\]/);
-  assert.match(heroSource, /WoodPanel[\s\S]*as=\{Link\}[\s\S]*href=\{appHref\("\/login"\)\}/);
+  assert.match(heroSource, /<HeroDownload locale=\{locale\} \/>/);
+  // On paper the action is the wood pill; on the closing wood plank it is glass, never wood on wood.
+  assert.match(heroDownloadSource, /surface === "wood"\s*\? <LiquidGlassPill[\s\S]*?: <WoodPanel[^>]*site-wood-pill/);
+  assert.match(source("../components/landing/closing.tsx"), /<WoodPanel className="site-closing [^"]*">[\s\S]*<HeroDownload locale=\{locale\} surface="wood" \/>/);
   assert.match(siteCss, /\.site-page \.app-material-wood-panel\.site-wood-pill \{\s*border-radius: 999px;/);
   assert.doesNotMatch(heroSource, /landing-liquid-button/);
   assert.doesNotMatch(heroSource, /Set up with your agent|See How It Works|Shared space|clear handoffs/);
@@ -74,7 +75,7 @@ test("navbar is one glass bar with no wood slab, and woods the mobile sheet", ()
   assert.doesNotMatch(navbarSource, /<WoodPanel/);
   assert.doesNotMatch(siteCss, /site-navbar-inner|navbar-wood-reveal/);
   assert.match(navbarSource, /<span aria-hidden className="site-navbar-glass">\s*<LiquidGlassPill className="size-full">/);
-  assert.match(navbarSource, /<Link\s+href=\{appHref\("\/login"\)\}\s+className="site-navbar-cta[\s\S]*?\{copy\.startFree\}\s*<ArrowRight/, "Start Free is text with an arrow on the bar glass, not a second pill");
+  assert.match(navbarSource, /<Link\s+href=\{downloadHref\}\s+className="site-navbar-cta[\s\S]*?\{copy\.download\}\s*<ArrowRight/, "Download is text with an arrow on the bar glass, not a second pill");
   assert.match(navbarSource, /site-nav-sheet app-material-wood-panel/);
 });
 

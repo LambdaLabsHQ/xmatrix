@@ -16,6 +16,7 @@ const subprocessorsPageSource = read("app/(en)/subprocessors/page.tsx");
 const footerSource = read("components/landing/footer.tsx");
 const loginSource = read("components/auth/auth-shell.tsx");
 const settingsSource = read("components/dashboard/workspace-settings-team-views.tsx");
+const nextConfigSource = read("../next.config.ts");
 
 test("legal pages render repository-owned policy sources", () => {
   const pages = [
@@ -148,6 +149,18 @@ test("legal documents stay discoverable before and after sign-in", () => {
   assert.match(loginSource, /href="\/privacy"/);
   assert.match(loginSource, /href="\/terms"/);
   assert.match(settingsSource, /contact@madebyrobot\.net/);
+});
+
+test("privacy policy discloses local quota probes, client diagnostics opt-out, and Sentry", () => {
+  assert.match(privacySource, /XMATRIX_DISABLE_QUOTA_PROBES=1/);
+  assert.match(privacySource, /xmatrix config quotaProbes off/);
+  assert.match(privacySource, /never sent to xMatrix/);
+  assert.match(privacySource, /XMATRIX_TELEMETRY=0/);
+  assert.match(privacySource, /DO_NOT_TRACK=1/);
+  assert.match(privacySource, /Sentry/);
+  assert.match(subprocessorsSource, /Apple Push Notification service/);
+  assert.match(subprocessorsSource, /Firebase Cloud Messaging/);
+  assert.doesNotMatch(nextConfigSource, /cloudflareinsights\.com/);
 });
 
 test("legal surfaces contain no template markers or nested glass treatment", () => {

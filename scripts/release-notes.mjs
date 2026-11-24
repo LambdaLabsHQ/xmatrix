@@ -117,13 +117,42 @@ export function composeReleaseNotes({ notes, receipt }) {
   return `${NOTES_MARKER}\n${notes.trim()}\n\n## Deployment receipt\n\n${receipt.trim()}`;
 }
 
-/** Apple's What's New field is plain text, bounded to 4,000 characters. */
+/** Apple normalizes LF to CRLF when checking the 4,000-character What's New limit. */
+export function appleTextLength(text) {
+  return [...text].length + (text.match(/\n/gu)?.length ?? 0);
+}
+
+/**
+ * App Store "What's New" is plain text: Apple refuses the whole version write
+ * with HTTP 409 when it sees anything shaped like markup, such as `<words>` in
+ * a command example. Headings, emphasis, code spans and links become their
+ * text, and angle brackets become single guillemets.
+ */
+export function plainStoreText(markdown) {
+  return markdown
+    .replace(/^#{1,6}\s+/gmu, "")
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/gu, "$1 ($2)")
+    .replace(/(\*\*|__)(.+?)\1/gu, "$2")
+    .replace(/`([^`]+)`/gu, "$1")
+    .replace(/</gu, "‹")
+    .replace(/>/gu, "›");
+}
+
+/** Apple's What's New field is plain text, bounded to 4,000 CRLF characters. */
 export function appStoreReleaseNotes(root, version) {
-  const notes = authoredReleaseNotes(root, version).replace(/^#{1,6}\s+/gmu, "");
+  const notes = plainStoreText(authoredReleaseNotes(root, version));
   const link = `\n\nFull release notes: https://xmatrix.sh/releases/${version}`;
-  const characters = [...notes];
-  const available = 4_000 - [...link].length;
-  return (characters.length > available ? `${characters.slice(0, available - 1).join("")}…` : notes) + link;
+  const available = 4_000 - appleTextLength(link);
+  if (appleTextLength(notes) <= available) return notes + link;
+  let used = 0;
+  let out = "";
+  for (const ch of notes) {
+    const cost = ch === "\n" ? 2 : 1;
+    if (used + cost > available - 1) break;
+    out += ch;
+    used += cost;
+  }
+  return `${out}…${link}`;
 }
 
 async function publish(root) {

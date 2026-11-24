@@ -3,6 +3,114 @@
 ## Unreleased: a handoff that took over still shows the successor its author wrote
 
 A handoff written with conditions, such as `@grok:1:handoff:@model:claude-fable-5-2`, showed the written model on its card only while it was in flight. Once the successor's record arrived the card redrew the successor as its bare name (`@claude · Took over`), so the model the author asked for and the parameters xMatrix picked disappeared from the conversation. The recorded card now reads the stored mention back and keeps drawing the successor as written, each condition marked, followed by the picks of the successor's launch, the same way the in-flight card does. Web only. Recovery is a CI-validated beta reverting this change.
+## Unreleased: the card a shared link shows carries the site's title and its own address
+
+The card a link to the site shows when it is shared still read "Living pages
+maintained by your AI agents" and "xmatrix.sh": a line the site dropped, and
+the app's domain where the site's is xmatrix.page. It was an image drawn once
+by hand, so nothing redrew it when the words changed. `node
+scripts/share-card.mjs` (apps/web) now draws it from where the words are
+decided, the English page title and the production site origin, and the image
+carries the words it was drawn with; a test fails when they are no longer the
+site's, or when the card's alt text says something else. The card now reads
+"xMatrix", "Multi-agent collaboration around live documents" and
+"xmatrix.page" over the same block art. Networks that have cached the old card
+keep it until they fetch the page again. Web only. Recovery is a CI-validated
+beta reverting this change.
+
+## Unreleased: the comparison's panels stay inside a phone's screen
+
+On a phone each row of the homepage's comparison is one column, and that
+column took its width from what its scenes held. A scene's widest line changes
+as it plays, so for most of each eight-second loop a row's two panels were
+wider than the screen: 116 px past their row at 393 px wide and 189 px at 320,
+the paper cut at the screen's edge with no margin on its right. Each time the
+width changed, the captions under the scenes wrapped differently and
+everything below moved by a line or more. The row's column is now as wide as
+the row whatever its scenes hold: panels end inside their row at every width,
+the section keeps one height while its scenes play, and scrolling the page on
+a phone no longer shifts its layout (0.06 before, by Chrome's layout-shift
+measure). 600 px and wider are unchanged. Web only. Recovery is a
+CI-validated beta reverting this change.
+
+## Unreleased: the homepage's demos mount as they near the screen, and the live page's sheet keeps one height
+
+The homepage's three stages are the app's own components, and all three were
+fetched and run with the page, whether or not a visitor scrolled to them. Each
+now mounts when it comes within one screen of the window, and its frame holds
+its place from the start. On a phone throttled to a quarter of its CPU and
+8 Mbit/s (median of five loads of a local production build) the main thread is
+blocked for 1.7 s before any scrolling where it was 2.4 s, and 774 KB of
+script is fetched where it was 1122 KB; the work for a stage further down is
+done on the way to it. The live page's sheet also grew and shrank as its
+Agents wrote, by 84 px on a phone, moving everything under it on each pass of
+the demo. It now keeps the height of its fullest state at every width (checked
+at sixteen widths from 320 to 1920 px), and the Agents matrix's stage holds
+the height of the matrix it shows. Web only. Recovery is a CI-validated beta
+reverting this change.
+
+## Unreleased: Chinese homepage slogan updated to 「注意力就是一切」
+
+Updates the Simplified and Traditional Chinese homepage slogan (`hero.slogan`, shared by the hero and closing plank) and OpenGraph/Twitter `shareDescription` in `apps/web/src/lib/landing-copy.ts` from 「拯救你的注意力」 to 「注意力就是一切」. Web only; recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a page of the site at xmatrix.page no longer asks the Hub for a session
+
+Every page of the site mounts the app's auth provider, which reads the session
+from the Hub. At the site's own origin that read cannot succeed: the session's
+cookie does not reach xmatrix.page and the Hub does not answer it, so the
+browser blocked each reply. The provider took the blocked read for a passing
+failure and tried again for as long as the page stayed open, backing off to
+once every 30 seconds, so every page of the site logged CORS errors and kept
+sending the Hub requests it refuses. A page at the site's own origin is now
+signed out without asking; xmatrix.sh, and a deployment whose site and app
+share one origin, read the session as before. Web only, no API or schema
+change; recovery is a CI-validated beta reverting this change.
+
+## Unreleased: the site's beta answers at beta.xmatrix.page
+
+The site lives at xmatrix.page, but a beta of it could only be read at
+beta.xmatrix.sh, the beta app's address, so a change to the site was reviewed
+under a domain that is not the site's. The beta Web now also serves the
+marketing site at beta.xmatrix.page (`web.beta.siteOrigin`), arranged as
+xmatrix.page is beside xmatrix.sh: the site's pages answer there, the beta
+build's canonical URLs name it, and any other path, the app and sign-in among
+them, goes to beta.xmatrix.sh with a temporary redirect. Like every beta origin
+it stays out of search: its robots disallows everything and its pages answer
+`noindex`. The Hub does not trust it; the stable Web, xmatrix.page and the
+session cookie are unchanged. Beta Web only, no API or schema change; recovery
+is a CI-validated beta without `web.beta.siteOrigin`.
+
+## Unreleased: revised homepage copy across all six published locales
+
+Rewrote the homepage copy in `apps/web/src/lib/landing-copy.ts` across all six
+published locales (`en`, `zh`, `zh-tw`, `ja`, `ko`, `es`) to align with the
+live-document multi-agent collaboration positioning: updated hero sub-links,
+live-document and conversations sections, multi-machine agents matrix framing,
+comparison table rows, connectors, pricing copy, FAQ answers, footer tagline,
+and SEO/share metadata (keeping English title <= 62 chars and description <=
+158 chars), plus updated `apps/web/e2e/site-home.spec.ts` and `shareImage.alt`.
+Web only. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: the homepage shows the product running and leads to the App on every device
+
+The homepage was a Hero, a marquee of twelve agent chips and separate sections
+whose headings sat left or centred by turns, a tall gap between each; a phone
+saw the action below its first screen and no picture at all in the live-page
+section. It is now the Hero, sized to its art so what follows shows in the
+first screen, and three stages that are the app's own components fed a sample
+Space: a live page written by three Agents, with the iPhone beside it on a
+desktop in the conversation about the same project and the App Store and Google
+Play badges over it; the Mac window; and the Agents matrix (machines by agents)
+over every agent `agent-presets.json` holds, where the marquee named twelve by
+hand. The comparison, connectors, pricing and questions keep their content on
+one heading scale and one rhythm; the page closes on a wood plank with the
+download for this device, and the footer is paper, with no slab and no rules.
+Under the Hero's action one sentence links the App's other platforms and the
+browser. The Chinese pages carry the slogan in Chinese. The guides for AI
+agents (`download.md`, `index.md`, `llms-full.txt`) name the iPhone and iPad
+app and Google Play. New styling is utility classes on the elements; the
+stylesheets' rule count falls from 2206 to 2191. Web only. Recovery is a
+CI-validated beta reverting this change.
 
 ## Unreleased: iOS composer attachment menu morphs in place and opens native pickers directly
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as Y from "yjs";
 import { PAGE_DOCUMENT_FRAGMENT } from "@xmatrix/protocol";
@@ -16,7 +16,7 @@ import { pageMentions, type PageReferenceTargets } from "@/components/pages/page
 
 interface Writer { id: number; name: string; color: string; harness?: string; kind: "agent" | "user"; block: string }
 
-const PERSON: Writer = { id: 41_001, name: "Daniel", color: "#4b6382", kind: "user", block: "decided" };
+const PERSON: Writer = { id: 41_001, name: "Alex", color: "#4b6382", kind: "user", block: "decided" };
 const AGENTS: Writer[] = [
   { id: 41_101, name: "claude:1", color: "#b85a3b", harness: "claude", kind: "agent", block: "where-it-stands" },
   { id: 41_202, name: "codex:1", color: "#2f6f5e", harness: "codex", kind: "agent", block: "workstreams" },
@@ -30,7 +30,7 @@ const START = {
   stands: "> Kick-off done. Four workstreams, one owner each.",
   decided: "- Ship to every Space on Friday, behind one switch.",
   web: "- [ ] **Web editor** · @claude — login fix, checks 3/5", mobile: "- [ ] **Mobile app** · @codex — build 2.4 at 60%",
-  video: "- [ ] **Launch video** · @cursor — not started", docs: "- [ ] **Docs** · Daniel — drafting 2 of 5 pages",
+  video: "- [ ] **Launch video** · @cursor — not started", docs: "- [ ] **Docs** · Alex — drafting 2 of 5 pages",
 };
 type Slots = typeof START;
 // Where a pass ends, which is all a reader who asks for less motion sees.
@@ -117,6 +117,8 @@ function createStage() {
       awarenessProtocol.applyAwarenessUpdate(awareness, awarenessProtocol.encodeAwarenessUpdate(own, [id]), "session");
     }
   };
+  // The page holds its opening lines from the start, so it is never seen empty before it comes into view.
+  reset(START);
   return { session, say, write, reset, leave };
 }
 
@@ -170,8 +172,10 @@ async function play(stage: Stage, stopped: () => boolean) {
   await sleep(7000);
 }
 
-/** A live page written by a person and three Agents, again and again while it is in view. */
-export function LivePagePreview() {
+/** A live page written by a person and three Agents, again and again while it is in view. `room` is the width
+ *  beside the text for each Agent's name; with none an Agent is its face at the page's edge, as on a phone.
+ *  `width` narrows the text column, and `padding` is the sheet's own where it is not the desktop's. */
+export function LivePagePreview({ room = 230, width, padding }: { room?: number; width?: string; padding?: string }) {
   const stage = useMemo(createStage, []);
   const [tops, setTops] = useState<ReadonlyMap<string, number>>(new Map());
   const [states, setStates] = useState<Map<number, { activity?: string }>>(new Map());
@@ -220,9 +224,10 @@ export function LivePagePreview() {
   });
 
   return (
-    <div ref={setHost} className="site-live-page xmatrix-app" inert>
-      <div className="site-live-page-column relative">
-        <PagePens pens={pens} room={230} onJump={() => {}} onOpen={() => {}} />
+    <div ref={setHost} className="site-live-page xmatrix-app" inert
+      style={padding ? { "--site-live-page-padding": padding } as CSSProperties : undefined}>
+      <div className="site-live-page-column relative" style={width ? { maxWidth: width } : undefined}>
+        <PagePens pens={pens} room={room} onJump={() => {}} onOpen={() => {}} />
         <PageEditor session={stage.session} canEdit={false} onAnchorOffsets={setTops} references={REFERENCES} />
       </div>
     </div>

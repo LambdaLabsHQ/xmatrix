@@ -8,6 +8,7 @@ import { registrationMachineBusy, registrationMachineName } from "./machine-name
 import { ImageGalleryLightbox } from "./attachment-lightbox";
 import { useSystemBackHandler } from "./use-system-back";
 import { useComposerHint } from "./composer-hints";
+import { useMessageReferenceCatalog } from "./message-reference-catalog";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   invocationSelectionsEnvelope, isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
@@ -111,11 +112,14 @@ import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 import {
   ChevronLeft,
   FileText,
+  Globe,
   Paperclip,
   RefreshCw,
   Video,
   X,
 } from "lucide-react";
+import { leaveOutEmbedBrowserPage, showEmbedWebPage } from "@/lib/extension-embed";
+import { useEmbedBrowserPage } from "./use-extension-companion";
 
 import { Face } from "@/components/dashboard/face";
 
@@ -290,7 +294,6 @@ export const Composer = memo(function Composer({
   sendTitle,
   inlineActions,
   afterSend,
-  initialFiles,
 }: {
   compact?: boolean;
   channel: ChannelSnapshot | null;
@@ -346,8 +349,6 @@ export const Composer = memo(function Composer({
   /** Extra controls inside the input box, before Send. */
   inlineActions?: ReactNode;
   afterSend?: ReactNode;
-  /** Files the composer opens holding, attached as if dropped on it (the side panel's page text). */
-  initialFiles?: readonly File[];
 }) {
   const channel = useRealtimeChannel(catalogChannel);
   const quoteIsHere = useCallback((href: string) => Boolean(channel && messageHere(href, channel)), [channel]);
@@ -491,7 +492,12 @@ export const Composer = memo(function Composer({
     !preparingSend &&
     !sending;
   const paneActive = useAnimationActivity();
-  const composerHint = useComposerHint(paneActive && writable && !placeholder && localDraft.length === 0);
+  // In the Chrome extension's side panel, what is written here goes with the page beside it (browser-page.ts).
+  const browserPage = useEmbedBrowserPage();
+  // Each hint the empty composer shows is one it completes here (composer-hints.ts).
+  const referenceCatalog = useMessageReferenceCatalog();
+  const composerHint = useComposerHint(paneActive && writable && !placeholder && localDraft.length === 0,
+    { commands: Boolean(channel), channels: Boolean(referenceCatalog?.channels.length) });
   const completionApiRef = useRef<ComposerCompletionApi | null>(null);
   const setCursor = useCallback((value: number) => {
     completionApiRef.current?.setCursor(value);
@@ -1217,14 +1223,6 @@ export const Composer = memo(function Composer({
     return Array.from(files).map((file) => ({ file }));
   }
 
-  // The files it opens with go through the same intake as a drop, once.
-  const takenInitialFilesRef = useRef<readonly File[] | undefined>(undefined);
-  useEffect(() => {
-    if (!initialFiles?.length || !attachmentsEnabled || takenInitialFilesRef.current === initialFiles) return;
-    takenInitialFilesRef.current = initialFiles;
-    void beginAttachmentIntake(() => fileCandidates(initialFiles));
-  });
-
   async function clipboardImageCandidates(
     images: DesktopClipboardImage[]
   ): Promise<AttachmentDropCandidate[]> {
@@ -1780,6 +1778,28 @@ export const Composer = memo(function Composer({
                   </div>
                 </div>
               )}
+              {browserPage && (
+                /* The page this message goes with: not a file, a page the Agent reads (`xmatrix browse`). It is
+                   drawn as the conversation's page bookmarks are (conversation-page-cards.tsx). */
+                <div className="px-2 pt-2">
+                  <div className="conversation-page-bookmark composer-browser-page cursor-default" title={browserPage.href}>
+                    <span className="app-page-reference-chip-icon" aria-hidden="true"><Globe /></span>
+                    <span className="app-page-reference-chip-label">
+                      <span className="conversation-page-bookmark-head">
+                        <span className="conversation-page-bookmark-title">
+                          {browserPage.title || new URL(browserPage.href).host}
+                        </span>
+                      </span>
+                      <span className="conversation-page-bookmark-detail">{new URL(browserPage.href).host}</span>
+                    </span>
+                    <button type="button" title="Don't send this page" aria-label="Don't send this page"
+                      onClick={leaveOutEmbedBrowserPage}
+                      className="composer-quote-block-remove shrink-0 self-center">
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
               {(attachments.some((attachment) => !inlinedPictures.has(attachment.id))
                 || pendingAttachments.some((attachment) => !attachment.replacesId && !inlinedPictures.has(attachment.id))) && (
                 <div ref={attachmentStripRef} className="flex gap-2 overflow-x-auto px-3 py-3">
@@ -1877,7 +1897,14 @@ export const ChannelDetails = memo(function ChannelDetails({
   wideOnly = false,
   mobileOverlayOpen = false,
   onCloseMobileOverlay,
+  webPages = [],
 }: {
+  /**
+   * The web pages this reader was on when they wrote here (the Chrome side panel's browserPage), latest first:
+   * a way back to the page the conversation is about. The reader's own only (Daniel 2026-11-24): someone else's
+   * browsing is not shown to them here.
+   */
+  webPages?: readonly { title: string; href: string }[];
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
   /** Registered working directories, the only record that knows a repository. */
@@ -1994,6 +2021,31 @@ export const ChannelDetails = memo(function ChannelDetails({
             {aboutSummaryError && (
               <p role="alert" className="mt-1 text-xs text-destructive">{aboutSummaryError}</p>
             )}
+          </DetailBlock>
+          )}
+
+          {webPages.length > 0 && (
+          <DetailBlock title={webPages.length > 1 ? "Web pages" : "Web page"}>
+            <div className="space-y-1">
+              {webPages.map((page) => (
+                <a key={page.href} href={page.href} target="_blank" rel="noreferrer" title={page.href}
+                  // In the side panel, back to the tab showing the page, not a new tab.
+                  onClick={(event) => {
+                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    if (showEmbedWebPage(page.href)) event.preventDefault();
+                  }}
+                  className="flex min-w-0 items-start gap-2 rounded-md px-1 py-1 hover:bg-foreground/5">
+                  <Globe aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-foreground">
+                      {page.title || new URL(page.href).host}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">{new URL(page.href).host}</span>
+                  </span>
+                </a>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Only you see this.</p>
           </DetailBlock>
           )}
 

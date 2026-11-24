@@ -1,4 +1,5 @@
 import XCTest
+import PhotosUI
 import WebKit
 import StoreKit
 import AuthenticationServices
@@ -639,6 +640,102 @@ final class WebContainerTests: XCTestCase {
         )
         let expired = try await webView.evaluateJavaScript(NativeAttachmentPicker.readArmedSourceScript)
         XCTAssertNil(NativeAttachmentPicker.parseArmedSource(expired))
+    }
+
+    private final class RecordingPickerPresenter: UIViewController {
+        var presentedPanel: UIViewController?
+
+        override func present(
+            _ viewControllerToPresent: UIViewController,
+            animated flag: Bool,
+            completion: (() -> Void)? = nil
+        ) {
+            presentedPanel = viewControllerToPresent
+            completion?()
+        }
+    }
+
+    func testNativeFilePickerCanSelectAgainAfterCancellation() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xmatrix-file-picker-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let payload = Data("Simulator document".utf8)
+        let source = directory.appendingPathComponent("note.txt")
+        try payload.write(to: source)
+
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let presenter = RecordingPickerPresenter()
+        window.rootViewController = presenter
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        let picker = NativeAttachmentPicker(
+            store: AttachmentStagingStore(rootDirectory: directory.appendingPathComponent("staging"))
+        )
+        picker.anchorView = presenter.view
+
+        var cancelled = false
+        picker.presentOpenPanel(source: .files, allowsMultipleSelection: true) { urls in
+            XCTAssertNil(urls)
+            cancelled = true
+        }
+        let firstPanel = try XCTUnwrap(presenter.presentedPanel as? UIDocumentPickerViewController)
+        XCTAssertTrue(firstPanel.allowsMultipleSelection)
+        firstPanel.delegate?.documentPickerWasCancelled?(firstPanel)
+        XCTAssertTrue(cancelled)
+
+        var result: [URL]?
+        picker.presentOpenPanel(source: .files, allowsMultipleSelection: false) { urls in
+            result = urls
+        }
+        let secondPanel = try XCTUnwrap(presenter.presentedPanel as? UIDocumentPickerViewController)
+        XCTAssertFalse(secondPanel.allowsMultipleSelection)
+        secondPanel.delegate?.documentPicker?(secondPanel, didPickDocumentsAt: [source])
+        let selected = try XCTUnwrap(result)
+        XCTAssertEqual(selected.count, 1)
+        let staged = try XCTUnwrap(selected.first)
+        XCTAssertNotEqual(staged, source)
+        XCTAssertEqual(staged.lastPathComponent, "note.txt")
+        XCTAssertEqual(try Data(contentsOf: staged), payload)
+    }
+
+    func testNativePickerResignsFirstResponderBeforePresentingAndAllowsRepickAfterCancel() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let presenter = RecordingPickerPresenter()
+        let textField = UITextField(frame: CGRect(x: 16, y: 740, width: 320, height: 44))
+        presenter.view.addSubview(textField)
+        window.rootViewController = presenter
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        XCTAssertTrue(textField.becomeFirstResponder())
+        XCTAssertTrue(textField.isFirstResponder)
+
+        let picker = NativeAttachmentPicker()
+        picker.anchorView = presenter.view
+
+        var cancelCompleted = false
+        picker.presentOpenPanel(source: .photos, allowsMultipleSelection: true) { urls in
+            XCTAssertNil(urls)
+            cancelCompleted = true
+        }
+        XCTAssertFalse(textField.isFirstResponder)
+        let photoPicker = try XCTUnwrap(presenter.presentedPanel as? PHPickerViewController)
+        photoPicker.presentationController?.delegate?.presentationControllerDidDismiss?(
+            try XCTUnwrap(photoPicker.presentationController)
+        )
+        XCTAssertTrue(cancelCompleted)
+        XCTAssertFalse(textField.isFirstResponder)
+
+        var repickPresented = false
+        picker.presentOpenPanel(source: .files, allowsMultipleSelection: true) { _ in
+            repickPresented = true
+        }
+        let followUp = try XCTUnwrap(presenter.presentedPanel as? UIDocumentPickerViewController)
+        followUp.delegate?.documentPickerWasCancelled?(followUp)
+        XCTAssertTrue(repickPresented)
     }
 
     func testAttachmentPickerParsesSourcesPrefersMoviesAndSanitizesNames() {

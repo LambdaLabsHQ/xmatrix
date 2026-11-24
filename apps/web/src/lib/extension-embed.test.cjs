@@ -121,13 +121,14 @@ test("an address the page is asked to navigate to goes to the open app, which sa
   assert.equal(embed.openEmbedAddress("/app/s/channels/c"), false);
 });
 
-test("the page beside the panel is a web page with bounded text, and Recent holds only app conversations", (t) => {
+test("the page beside the panel is a web page, its content left to the Agent, and Recent holds only app conversations", (t) => {
   const { embed } = load(t, EXTENSION);
-  const page = { title: "Incident 2481", href: "https://status.example.com/i/2481", text: "p99 rose", path: "/app/s1/channels/c1" };
+  const page = { title: "Incident 2481", href: "https://status.example.com/i/2481", path: "/app/s1/channels/c1" };
   assert.deepEqual(embed.parseEmbedPage(page), page);
+  // A web page is not a file (Daniel 2026-11-24): its text is not handed over; an Agent reads it with `xmatrix browse`.
+  assert.deepEqual(embed.parseEmbedPage({ ...page, text: "p99 rose" }), page);
   assert.equal(embed.parseEmbedPage({ ...page, href: "file:///etc/passwd" }), null);
-  assert.deepEqual(embed.parseEmbedPage({ ...page, text: "x".repeat(200_001) }), { title: page.title, href: page.href, path: page.path });
-  assert.deepEqual(embed.parseEmbedPage({ ...page, path: "/app/s1/settings" }), { title: page.title, href: page.href, text: page.text });
+  assert.deepEqual(embed.parseEmbedPage({ ...page, path: "/app/s1/settings" }), { title: page.title, href: page.href });
   assert.deepEqual(embed.parseEmbedRecent([
     { path: "/app/s1/channels/c1", title: "One", href: "https://a.example/" },
     { path: "https://evil.example/", title: "Two", href: "https://a.example/" },
@@ -160,6 +161,18 @@ test("outside the side panel an Agent's page read goes nowhere", (t) => {
   assert.equal(win.parent.posted.length, 0);
 });
 
+test("a web page the person wrote from is brought back in its own tab, and only a web page", (t) => {
+  const { win, embed } = load(t, EXTENSION);
+  assert.equal(embed.showEmbedWebPage("https://x.com/daniel/status/1"), true);
+  assert.deepEqual(win.parent.posted.at(-1), { origin: EXTENSION,
+    message: { protocol: "xmatrix-embed/1", type: "show-page", href: "https://x.com/daniel/status/1" } });
+  assert.equal(embed.showEmbedWebPage("javascript:alert(1)"), false);
+  assert.equal(win.parent.posted.length, 1);
+  // Outside the side panel the card stays a plain link.
+  globalThis.window = frameWindow("https://evil.example");
+  assert.equal(embed.showEmbedWebPage("https://x.com/daniel/status/1"), false);
+});
+
 // Each message written in the side panel carries the page beside it (browser-page.ts).
 test("the side panel knows the page beside it, and messages carry only a web page", (t) => {
   const { win, embed } = load(t, EXTENSION);
@@ -175,4 +188,39 @@ test("the side panel knows the page beside it, and messages carry only a web pag
   assert.equal(browserPageOf({ other: true }), null);
   globalThis.window = require("./extension-embed-test-frame.cjs").frameWindow("https://evil.example");
   assert.equal(embed.embedBrowserPage(), null);
+});
+
+// The composer's page chip: × takes this page off what is written, until the panel is beside another page.
+test("the person can leave the page beside the panel off, until they move to another", (t) => {
+  const { win, embed } = load(t, EXTENSION);
+  const stop = embed.subscribeEmbedPage(() => undefined);
+  let changes = 0;
+  const unsubscribe = embed.subscribeEmbedBrowserPage(() => { changes += 1; });
+  const show = (href, title) => win.dispatch({ source: win.parent, origin: EXTENSION,
+    data: { protocol: "xmatrix-embed/1", type: "page", title, href } });
+  show("https://a.example/one", "One");
+  assert.deepEqual(embed.embedBrowserPage(), { title: "One", href: "https://a.example/one" });
+  embed.leaveOutEmbedBrowserPage();
+  assert.equal(embed.embedBrowserPage(), null);
+  show("https://a.example/two", "Two");
+  assert.deepEqual(embed.embedBrowserPage(), { title: "Two", href: "https://a.example/two" });
+  show("https://a.example/one", "One");
+  assert.equal(embed.embedBrowserPage(), null);
+  assert.ok(changes >= 3);
+  unsubscribe();
+  stop();
+});
+
+// A question asked in the box on a page is shown in the panel as sending at once (Daniel 2026-11-24: too slow).
+test("the question on its way is a bounded message with its own id and the page it was asked on", (t) => {
+  const { embed } = load(t, EXTENSION);
+  const pending = { clientMessageId: "0b6c6a3e-6f1b-4a5c-9f1e-2a9d8c7b6a51", body: "> quote\n\nis this right?",
+    metadata: { browserPage: { title: "Home / X", href: "https://x.com/home" } } };
+  assert.deepEqual(embed.parseEmbedPendingMessage(pending), pending);
+  assert.equal(embed.parseEmbedPendingMessage({ ...pending, clientMessageId: "x" }), undefined);
+  assert.equal(embed.parseEmbedPendingMessage({ ...pending, body: "   " }), undefined);
+  assert.equal(embed.parseEmbedPendingMessage({ ...pending, body: "x".repeat(64 * 1024 + 1) }), undefined);
+  // Only a web page goes with it; anything else the metadata holds is dropped.
+  assert.deepEqual(embed.parseEmbedPendingMessage({ ...pending, metadata: { browserPage: { href: "javascript:1" }, xmatrixSystemNotice: true } }),
+    { clientMessageId: pending.clientMessageId, body: pending.body });
 });

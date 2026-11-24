@@ -3,7 +3,7 @@ const test = require("node:test");
 require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  MARGIN_GAP, anchorTop, layoutMargin, listedMessage, marginConversations, sectionConversationCounts, withOpenConversation,
+  MARGIN_GAP, anchorTop, layoutMargin, listedMessage, marginConversations, openBesideDraft, sectionConversationCounts, withOpenConversation,
 } = require("./page-margin-model.ts");
 
 const NOW = Date.parse("2026-09-27T12:00:00.000Z");
@@ -121,6 +121,23 @@ test("cards sit at their anchors and push down the ones after them; a focused ca
   // With nothing open, a column crowded at the top still moves down rather than above the page.
   assert.deepEqual(Object.fromEntries(layoutMargin([{ id: "a", top: -20, height: 50 }, { id: "b", top: 10, height: 50 }])),
     { a: 0, b: 50 + MARGIN_GAP });
+});
+
+test("a comment box written in the margin and an open thread both stay in view, neither over the other", () => {
+  const box = { top: 400, height: 90 };
+  // A thread whose passage is above the box keeps its place and ends over the box, scrolling inside.
+  assert.deepEqual(openBesideDraft(100, box, 2000, 192), { top: 100, room: 300 - MARGIN_GAP });
+  // With too little room above, or with its passage below, it stands under the box, down to the page's end.
+  assert.deepEqual(openBesideDraft(300, box, 2000, 192), { top: 490 + MARGIN_GAP, room: 2000 - 490 - MARGIN_GAP });
+  assert.deepEqual(openBesideDraft(900, box, 2000, 192), { top: 900, room: 1100 });
+  assert.deepEqual(openBesideDraft(420, box, 600, 192), { top: 490 + MARGIN_GAP, room: 192 });
+  assert.deepEqual(openBesideDraft(420, box, null, 192), { top: 490 + MARGIN_GAP, room: null });
+  // Laid out with the box as the focused place, the thread is where it was put and the other cards go round both.
+  const above = layoutMargin([{ id: "a", top: 90, height: 60 }, { id: "open", top: 100, height: 300 - MARGIN_GAP },
+    { id: "box", ...box }, { id: "b", top: 410, height: 60 }], "box");
+  assert.deepEqual(Object.fromEntries(above), { a: 100 - MARGIN_GAP - 60, open: 100, box: 400, b: 490 + MARGIN_GAP });
+  const below = layoutMargin([{ id: "open", top: 490 + MARGIN_GAP, height: 500 }, { id: "box", ...box }], "box");
+  assert.deepEqual(Object.fromEntries(below), { box: 400, open: 490 + MARGIN_GAP });
 });
 
 test("the margin fits the page: near its end the cards move up, and what still does not fit beside an open one waits", () => {

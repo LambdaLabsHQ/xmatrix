@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import { SITE_LOCALES, localizedAlternates, localizedPath, type SiteLocale } from "@/lib/site-locales";
 import { shareImage } from "@/lib/site-url";
+import { APP_STORE_ID } from "@/lib/app-stores";
+
+/** Safari on iPhone and iPad shows the App Store banner for the phone app on public pages. */
+export const smartAppBanner = { itunes: { appId: APP_STORE_ID } } satisfies Metadata;
 
 /** Canonical and sharing metadata name the same page at the public site origin. */
 export function sitePageMetadata(path: string, title: string, description: string): Metadata {
@@ -8,6 +12,7 @@ export function sitePageMetadata(path: string, title: string, description: strin
     title,
     description,
     alternates: { canonical: path },
+    ...smartAppBanner,
     openGraph: { title, description, url: path, siteName: "xMatrix", type: "website", images: [shareImage] },
   };
 }
@@ -29,6 +34,7 @@ export function localizedSitePageMetadata(
     title,
     description,
     alternates: localizedAlternates(locale, basePath),
+    ...smartAppBanner,
     openGraph: {
       title,
       description,

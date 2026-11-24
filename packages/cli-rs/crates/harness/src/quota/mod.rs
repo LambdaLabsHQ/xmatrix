@@ -25,6 +25,32 @@ pub mod opencode;
 pub mod windows;
 pub mod zai;
 
+/// Global opt-out environment variable that disables all local provider quota
+/// probes (both daemon pre-launch probes and live session polling) so xMatrix
+/// does not read local provider credential stores or query provider usage APIs.
+pub const QUOTA_PROBES_DISABLE_ENV: &str = "XMATRIX_DISABLE_QUOTA_PROBES";
+
+/// Whether `value` turns on a boolean disable flag (`1`, `true`, `yes`, `on`).
+pub fn is_flag_enabled_value(value: Option<&str>) -> bool {
+    value.is_some_and(|raw| {
+        matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+/// Whether all provider quota probes are disabled in the given environment view.
+pub fn quota_probes_disabled_in(env: impl Fn(&str) -> Option<String>) -> bool {
+    is_flag_enabled_value(env(QUOTA_PROBES_DISABLE_ENV).as_deref())
+}
+
+/// Whether all provider quota probes are disabled in the current process
+/// environment (`XMATRIX_DISABLE_QUOTA_PROBES`).
+pub fn quota_probes_disabled() -> bool {
+    quota_probes_disabled_in(|key| std::env::var(key).ok())
+}
+
 pub(crate) fn observed_provider_quotas(
     quotas: Vec<crate::usage::LlmQuotaUsage>,
 ) -> Option<LlmUsage> {
@@ -93,6 +119,9 @@ pub struct ReadOptions {
 /// Returns `None` when the provider has no reading for that account, or when
 /// the provider does not support the requested [`Account`] binding.
 pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> {
+    if quota_probes_disabled() {
+        return None;
+    }
     let force = options.force;
     match (provider, options.account) {
         (Provider::Antigravity, Account::Process) => {
@@ -222,6 +251,33 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn global_quota_probe_opt_out_flag_parses_truthy_and_falsy_values() {
+        for truthy in ["1", "true", "TRUE", "yes", "On", "  1  "] {
+            assert!(
+                quota_probes_disabled_in(|key| {
+                    (key == QUOTA_PROBES_DISABLE_ENV).then(|| truthy.to_string())
+                }),
+                "{truthy:?}"
+            );
+            assert!(
+                antigravity::is_quota_probe_disabled_in(|key| {
+                    (key == QUOTA_PROBES_DISABLE_ENV).then(|| truthy.to_string())
+                }),
+                "global flag must also disable Antigravity: {truthy:?}"
+            );
+        }
+        for falsy in ["", "0", "false", "no", "off"] {
+            assert!(
+                !quota_probes_disabled_in(|key| {
+                    (key == QUOTA_PROBES_DISABLE_ENV).then(|| falsy.to_string())
+                }),
+                "{falsy:?}"
+            );
+        }
+        assert!(!quota_probes_disabled_in(|_| None));
     }
 
     #[tokio::test]

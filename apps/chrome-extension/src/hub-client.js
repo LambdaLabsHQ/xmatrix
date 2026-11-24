@@ -13,11 +13,14 @@ const PROTOCOL_VERSION = "2";
 
 /** A Hub answer that is not a success, with the Hub's own code when it gave one. */
 export class HubError extends Error {
-  constructor(status, message, code) {
+  constructor(status, message, code, { retryable = false, retryAfterMs = 0 } = {}) {
     super(message);
     this.name = "HubError";
     this.status = status;
     this.code = code;
+    /** The Hub says the same request may be sent again (a transient 503), after `retryAfterMs`. */
+    this.retryable = retryable;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -59,9 +62,37 @@ async function request(deps, path, { method = "GET", body, token } = {}) {
   const json = await readJson(response);
   if (!response.ok) {
     const message = typeof json.error === "string" ? json.error : `xMatrix answered ${response.status}`;
-    throw new HubError(response.status, message, typeof json.code === "string" ? json.code : undefined);
+    const retryAfter = Number(response.headers?.get?.("retry-after"));
+    throw new HubError(response.status, message, typeof json.code === "string" ? json.code : undefined, {
+      retryable: json.retryable === true || GATEWAY_STATUSES.has(response.status),
+      retryAfterMs: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0,
+    });
   }
   return json;
+}
+
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+const RETRY_DELAYS_MS = [400, 1200];
+const MAX_RETRY_WAIT_MS = 3000;
+
+/**
+ * Sends a request that carries its own idempotency key (a message's clientMessageId) until the Hub takes it: a
+ * transient refusal or a dropped connection is sent again, as the App's message send does (apps/web
+ * workspace-refresh-policy.ts). The Hub asks for exactly this when it committed a message but could not hand its
+ * Agent launch on yet ("Agent Launch Channel coordinator is unavailable", 503): the retry completes the handover.
+ */
+async function idempotentRequest(deps, path, options, { attempts = 3, sleep } = {}) {
+  const wait = sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await request(deps, path, options);
+    } catch (error) {
+      const transient = error instanceof HubError ? error.retryable : error instanceof TypeError;
+      if (!transient || attempt >= attempts) throw error;
+      const asked = error instanceof HubError ? error.retryAfterMs : 0;
+      await wait(Math.min(MAX_RETRY_WAIT_MS, Math.max(asked, RETRY_DELAYS_MS[attempt - 1] ?? 1200)));
+    }
+  }
 }
 
 /** Starts a device sign-in: the person approves `verificationUriComplete` in their browser. */
@@ -223,12 +254,15 @@ export async function createConversation(deps, token, { spaceId, name, memberNam
  * the same send land once; `launch` starts the Agents it mentions, as the web
  * composer does.
  */
-export async function sendMessage(deps, token, { channelId, body, clientMessageId, invocationSelections }) {
-  const json = await request(deps, `/api/channels/${encodeURIComponent(channelId)}/messages`, {
+export async function sendMessage(deps, token, { channelId, body, clientMessageId, invocationSelections, metadata },
+  retry = {}) {
+  // The same clientMessageId on every attempt: a retry lands the message once.
+  const json = await idempotentRequest(deps, `/api/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     token,
-    body: { body, clientMessageId, launch: true, ...(invocationSelections ? { invocationSelections } : {}) },
-  });
+    body: { body, clientMessageId, launch: true, ...(invocationSelections ? { invocationSelections } : {}),
+      ...(metadata ? { metadata } : {}) },
+  }, retry);
   return { messageId: json.message?.messageId ?? clientMessageId };
 }
 

@@ -68,13 +68,12 @@ protocol, billing, PostgreSQL package and script tests and the duplicate-code
 scan again on the merged revision, and a train that ships the Hub runs the Hub
 suite. Pull requests run the Node tests and the duplicate scan too: a change
 that fails them only after merge fails the train for every change riding it.
-The Web suites (the
-checked build, browser shards and performance budget) and the client suites
-(the Rust tests on Linux and Windows, Desktop, Android and the iOS simulator
-gate) gate the stable train that ships them, not each beta: a beta Web or
-client reaches only the people on the beta Web, its dev channel or TestFlight,
-its pull requests checked it and the release builds it (`scripts/ci-areas.mjs`,
-`releaseOutputs`). Merging runs nothing more.
+The Web suites (the checked build, browser shards and performance budget) and
+the Rust, Desktop and Android suites gate the stable train that ships those
+components (`scripts/ci-areas.mjs`, `releaseOutputs`). The iOS simulator suite
+runs on the exact release revision before any train that ships iOS can upload
+to TestFlight or proceed to App Store submission. It shares the simulator
+action used in iOS pull request CI. Merging runs nothing more.
 Only full-tier jobs carry ledgered names (`scripts/ci-ledger.mjs`), so a release
 reuses only results the full tier earned and still blocks on every gate its
 scope and channel select. The train's jobs belong to Production Release

@@ -6,7 +6,7 @@ import { Face } from "@/components/dashboard/face";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
 import { cn } from "@/lib/utils";
 import { sameValue } from "@/lib/same-value";
-import { anchorTop, layoutMargin, type MarginConversation } from "./page-margin-model";
+import { MARGIN_GAP, anchorTop, layoutMargin, openBesideDraft, type MarginConversation } from "./page-margin-model";
 import type { PresentPerson } from "./page-chrome";
 import { CardPen, MarginPen } from "./page-pen";
 import { discussionTitle } from "@/components/dashboard/selection-discussion";
@@ -14,6 +14,8 @@ import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
 
 /** A card's height before it is measured. */
 const ESTIMATED_CARD_HEIGHT = 76;
+/** The comment box in the margin, as the layout knows it. */
+const DRAFT_ID = "comment-draft";
 /** A quiet navigation line at each viewport edge, clear of the conversation cards. */
 const EDGE_ROOM = 32;
 /** Marks what the margin draws, so a paragraph's writers show beside it only where nothing stands. */
@@ -372,7 +374,7 @@ export function PageOffscreenCard({ side, entries, onJump }: {
  * and the other cards make room above and below it.
  */
 export function PageMargin({ conversations, writers = [], editors = [], view = null, end = null, tops, focusedId, openId = null,
-  renderOpen, canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions }: {
+  draft = null, renderOpen, canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions }: {
   conversations: MarginConversation[];
   /** The Agents at work on the page. Each stands beside its line, and its channel's card is not drawn again. */
   writers?: readonly MarginWriter[];
@@ -386,6 +388,11 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
   focusedId: string | null;
   /** The conversation open in the margin, and the conversation itself to show there. */
   openId?: string | null;
+  /**
+   * The comment box being written in the margin, which the page draws: it stands level with its passage, and the
+   * cards, an open conversation among them, make room for it above and below as they do for an open one.
+   */
+  draft?: { top: number; height: number } | null;
   renderOpen?: () => ReactNode;
   canResolve: boolean;
   onOpen: (conversationId: string) => void;
@@ -462,16 +469,32 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
 
   // The margin fits the page and never lengthens it. Near the page's end, an open thread stays at its passage, only
   // as tall as the room left under it, its messages scrolling inside; with too little room, it rises.
+  const opened = items.find((item) => item.id === openItem) ?? null;
+  const pill = holder ? ESTIMATED_WRITER_HEIGHT : 0;
+  // While a comment box is written in the margin, the open thread stays in view beside it: over it or under it.
+  const beside = draft && opened ? openBesideDraft(opened.top, draft, end, OPEN_MIN_ROOM + pill) : null;
   const openRoom = ((): number | null => {
-    const opened = items.find((item) => item.id === openItem);
+    if (beside) return beside.room === null ? null : beside.room - pill;
     if (end === null || !opened) return null;
-    return Math.max(OPEN_MIN_ROOM, end - opened.top - (holder ? ESTIMATED_WRITER_HEIGHT : 0));
+    return Math.max(OPEN_MIN_ROOM, end - opened.top - pill);
   })();
   // Only the open conversation moves the column. A hovered card only lights up:
   // moving it would slide another card under the pointer, which then moves in turn.
   // A card with no place beside the open one waits, unseen but measured, until it closes.
-  const positions = layoutMargin(items.map((item) => ({ id: item.id, top: item.top,
-    height: heights.get(item.id) ?? item.estimate })), openItem, end);
+  const laid = items.map((item) => {
+    const height = heights.get(item.id) ?? item.estimate;
+    return item === opened && beside
+      ? { id: item.id, top: beside.top, height: Math.min(height, beside.room ?? height) }
+      : { id: item.id, top: item.top, height };
+  });
+  // The box is the focused place and stays where the page drew it; it and the thread beside it are never left out
+  // for running past the page's end.
+  const kept = beside ? laid.find((item) => item.id === openItem) : undefined;
+  const positions = layoutMargin(draft ? [...laid, { id: DRAFT_ID, top: draft.top, height: draft.height }] : laid,
+    draft ? DRAFT_ID : openItem,
+    draft && end !== null
+      ? Math.max(end, draft.top + draft.height + (kept && kept.top > draft.top ? MARGIN_GAP + kept.height : 0)) : end);
+  positions.delete(DRAFT_ID);
   const shown = items.filter((item) => positions.has(item.id));
   const bottom = Math.max(0, ...shown.map((item) => positions.get(item.id)! + (heights.get(item.id) ?? item.estimate)));
   const openCard = (conversation: MarginConversation, quietAgents: boolean) => renderOpen && (

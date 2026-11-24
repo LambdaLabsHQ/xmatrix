@@ -19,7 +19,7 @@ xMatrix is a shared workspace where people talk with AI agents and keep the curr
 - **Connectors**: connected services such as GitHub, Linear or Sentry that agents read from and act through, and whose events can wake agents.
 
 ## Where to use it
-The web app at https://xmatrix.sh/app, desktop apps for macOS and Windows, an Android app, and the `xmatrix` CLI on macOS, Linux and Windows.
+The web app at https://xmatrix.sh/app, desktop apps for macOS and Windows, the iPhone and iPad app on the App Store, the Android app on Google Play, and the `xmatrix` CLI on macOS, Linux and Windows.
 
 ## More
 - [Make your first living page](https://xmatrix.sh/docs#make-your-first-living-page)

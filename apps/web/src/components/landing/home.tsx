@@ -1,16 +1,18 @@
 import type { Metadata } from "next";
 import { Navbar } from "@/components/shared/navbar";
 import { Hero } from "@/components/landing/hero";
-import { QuickStart } from "@/components/landing/quick-start";
-import { AgentStrip } from "@/components/landing/agent-strip";
+import { Conversations } from "@/components/landing/conversations";
+import { Agents } from "@/components/landing/agents";
 import { LivePage } from "@/components/landing/live-page";
 import { Why } from "@/components/landing/why";
 import { Faq } from "@/components/landing/faq";
+import { Closing } from "@/components/landing/closing";
 import { Connectors } from "@/components/landing/connectors";
 import { Pricing } from "@/components/landing/pricing";
 import { Footer, X_ACCOUNT_URL } from "@/components/landing/footer";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 import { SITE_LOCALES, localizedAlternates } from "@/lib/site-locales";
+import { smartAppBanner } from "@/lib/site-metadata";
 import { shareImage, siteUrl } from "@/lib/site-url";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
@@ -21,6 +23,7 @@ export function homeMetadata(locale: Locale): Metadata {
     title: meta.title,
     description: meta.description,
     alternates: localizedAlternates(locale, "/"),
+    ...smartAppBanner,
     openGraph: {
       title: meta.title,
       description: meta.shareDescription,
@@ -64,13 +67,16 @@ export function Home({ locale }: { locale: Locale }) {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: homeStructuredData(locale) }} />
       <Navbar locale={locale} />
       <Hero locale={locale} />
-      <AgentStrip locale={locale} />
-      <LivePage locale={locale} />
-      <QuickStart locale={locale} />
-      <Why locale={locale} />
-      <Connectors locale={locale} />
-      <Pricing locale={locale} />
-      <Faq locale={locale} />
+      <main>
+        <LivePage locale={locale} />
+        <Conversations locale={locale} />
+        <Agents locale={locale} />
+        <Why locale={locale} />
+        <Connectors locale={locale} />
+        <Pricing locale={locale} />
+        <Faq locale={locale} />
+        <Closing locale={locale} />
+      </main>
       <Footer locale={locale} basePath="/" />
     </div>
   );

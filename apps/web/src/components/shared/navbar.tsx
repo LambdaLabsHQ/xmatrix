@@ -17,6 +17,8 @@ const GLASS_REVEAL_DISTANCE_PX = 120;
 export function Navbar({ locale = "en" }: { locale?: Locale }) {
   const { home, nav: copy } = landingCopy[locale];
   const docsHref = localizedPath(locale, "/docs");
+  // The bar's action is the App: the download page picks the build for this device.
+  const downloadHref = localizedPath(locale, "/download");
   const [glassReveal, setGlassReveal] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -103,10 +105,10 @@ export function Navbar({ locale = "en" }: { locale?: Locale }) {
                 {copy.openApp}
               </Link>
               <Link
-                href={appHref("/login")}
+                href={downloadHref}
                 className="site-navbar-cta group inline-flex items-center gap-1 text-[13px] tracking-[-0.015em]"
               >
-                {copy.startFree}
+                {copy.download}
                 <ArrowRight
                   aria-hidden
                   className="size-3.5 transition-transform group-hover:translate-x-0.5"
@@ -166,11 +168,11 @@ export function Navbar({ locale = "en" }: { locale?: Locale }) {
               </LiquidGlassPill>
               <LiquidGlassPill
                 as={Link}
-                href={appHref("/login")}
+                href={downloadHref}
                 onClick={() => setMenuOpen(false)}
                 className="mt-2 inline-flex h-11 w-full items-center justify-center text-sm font-semibold text-[#2f281f]"
               >
-                {copy.startFree}
+                {copy.download}
               </LiquidGlassPill>
             </nav>
           </SheetContent>

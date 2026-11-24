@@ -1,13 +1,16 @@
 import { expect, test } from "@playwright/test";
 
+const appStore = "https://apps.apple.com/app/id6766625147";
+const googlePlay = "https://play.google.com/store/apps/details?id=sh.xmatrix.app";
+
 const cases = [
   { name: "Windows", ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", href: "/api/desktop/releases/stable/latest-x64.exe" },
   { name: "macOS", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: "/api/desktop/releases/stable/latest-arm64.dmg", architecture: "arm", other: "/api/desktop/releases/stable/latest-x64.dmg" },
   { name: "Intel macOS", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: "/api/desktop/releases/stable/latest-x64.dmg", architecture: "x86", other: "/api/desktop/releases/stable/latest-arm64.dmg" },
   { name: "macOS without client hints", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: "/api/desktop/releases/stable/latest-arm64.dmg", architecture: null, other: "/api/desktop/releases/stable/latest-x64.dmg" },
-  { name: "Android", ua: "Mozilla/5.0 (Linux; Android 14; Pixel 8)", href: "/api/android/releases/stable/latest.apk" },
-  { name: "iOS", ua: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", href: "/app" },
-  { name: "iPadOS desktop mode", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: "/app", ipad: true },
+  { name: "Android", ua: "Mozilla/5.0 (Linux; Android 14; Pixel 8)", href: googlePlay },
+  { name: "iOS", ua: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", href: appStore },
+  { name: "iPadOS desktop mode", ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", href: appStore, ipad: true },
   { name: "Linux", ua: "Mozilla/5.0 (X11; Linux x86_64)", href: "/app" },
   { name: "unknown", ua: "UnknownBrowser", href: "/app" },
 ];
@@ -44,6 +47,9 @@ for (const scenario of cases) {
       [`macOS Intel${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.dmg`,
       [`Windows Installer${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.exe`,
       [`Android APK${suffix}`]: `/api/android/releases/${channel}/latest.apk`,
+      // The stores carry Stable only: App Store stays in both lists, Google Play only in Stable's.
+      ["iPhone & iPad App Store"]: appStore,
+      ...(channel === "stable" ? { ["Android Google Play"]: googlePlay } : {}),
       [`macOS ZIP, Apple Silicon${suffix}`]: `/api/desktop/releases/${channel}/latest-arm64.zip`,
       [`macOS ZIP, Intel${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.zip`,
       [`Desktop release notes${suffix}`]: `/releases?component=desktop&channel=${channel}`,
@@ -64,8 +70,11 @@ for (const scenario of cases) {
     await expect(recommendation.getByRole("button", { name: "Release channel: Preview" })).toBeFocused();
     await expect(page).toHaveURL(/\?channel=preview/);
     await expectBuilds("dev", " preview");
+    await expect(page.getByRole("link", { name: "Android Google Play", exact: true })).toHaveCount(0);
     // The main download is the same channel as the list.
-    const preview = (href: string) => href === "/app" ? "https://beta.xmatrix.sh/app" : href.replace("/stable/", "/dev/");
+    const preview = (href: string) => href === "/app" ? "https://beta.xmatrix.sh/app"
+      : href === googlePlay ? "/api/android/releases/dev/latest.apk"
+      : href.replace("/stable/", "/dev/");
     await expect(recommendation.getByRole("link").first()).toHaveAttribute("href", preview(scenario.href));
     if (scenario.other) {
       await expect(recommendation.getByRole("link", { name: scenario.architecture === "x86" ? "Apple Silicon Mac" : "Intel Mac" })).toHaveAttribute("href", preview(scenario.other));

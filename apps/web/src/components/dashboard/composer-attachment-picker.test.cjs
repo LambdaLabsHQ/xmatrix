@@ -57,6 +57,13 @@ test("draft pick ownership rejects A->B, A->B->A, same-channel sends, wrong owne
 
 test("page-wide native attachment panel serializes across composers and settles even after the opener unmounts", () => {
   const listeners = new Map();
+  const events = [];
+  const fakeActiveElement = {
+    blur() {
+      events.push("blur");
+      globalThis.document.activeElement = null;
+    },
+  };
   let clickCount = 0;
   const fakeInput = {
     type: "",
@@ -71,11 +78,13 @@ test("page-wide native attachment panel serializes across composers and settles 
       listeners.set(name, fn);
     },
     click() {
+      events.push("click");
       clickCount += 1;
     },
   };
   globalThis.window = {};
   globalThis.document = {
+    activeElement: fakeActiveElement,
     body: {
       appendChild(node) {
         node.isConnected = true;
@@ -104,6 +113,8 @@ test("page-wide native attachment panel serializes across composers and settles 
     true
   );
   assert.equal(clickCount, 1);
+  assert.deepEqual(events, ["blur", "click"]);
+  assert.equal(globalThis.document.activeElement, null);
   assert.deepEqual(getActiveNativeAttachmentPanel(), firstOrigin);
   assert.equal(globalThis.window.__xmatrixPendingAttachmentSource.source, "photos");
 

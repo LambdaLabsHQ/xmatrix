@@ -142,3 +142,50 @@ test("a page read is answered to the request's own route, with the owner's token
   assert.equal(calls[0].headers.authorization, "Bearer t");
   assert.deepEqual(calls[0].body, { title: "A", href: "https://a.test/", text: "hello" });
 });
+
+// A question asked in the box on a page carries that page, as a message written in the side panel does.
+test("a message can carry the page it was written on", async () => {
+  const { sendMessage } = await import("../src/hub-client.js");
+  const { calls, deps } = fakeHub({ "POST /api/channels/c1/messages": () => ({ json: { message: { messageId: "m1" } } }) });
+  await sendMessage(deps, "t", { channelId: "c1", body: "is this right?", clientMessageId: "x",
+    metadata: { browserPage: { title: "Home / X", href: "https://x.com/home" } } });
+  assert.deepEqual(calls[0].body.metadata, { browserPage: { title: "Home / X", href: "https://x.com/home" } });
+  await sendMessage(deps, "t", { channelId: "c1", body: "again", clientMessageId: "y" });
+  assert.equal(calls[1].body.metadata, undefined);
+});
+
+// The Hub committed the message but could not hand its Agent launch on, and asks for the same request again
+// (agent-launch-coordinator-wake.ts): the question box on a page must not fail on that (Daniel 2026-11-24).
+test("a message the Hub asks to send again is sent again, with the same clientMessageId, until it lands", async () => {
+  const { sendMessage } = await import("../src/hub-client.js");
+  const calls = [];
+  const waits = [];
+  let answers = [
+    { status: 503, json: { error: "Agent Launch Channel coordinator is unavailable", code: "agent_launch_handover_unavailable", retryable: true }, retryAfter: "1" },
+    { status: 200, json: { message: { messageId: "m1" } } },
+  ];
+  const deps = { hubUrl: "https://hub.test", version: "4.7.3", fetch: async (url, init) => {
+    calls.push(JSON.parse(init.body));
+    const next = answers.shift();
+    return new Response(JSON.stringify(next.json), { status: next.status, headers: next.retryAfter ? { "retry-after": next.retryAfter } : {} });
+  } };
+  const sent = await sendMessage(deps, "t", { channelId: "c1", body: "is this right?", clientMessageId: "cm-1" },
+    { sleep: async (ms) => { waits.push(ms); } });
+  assert.equal(sent.messageId, "m1");
+  assert.deepEqual(calls.map((call) => call.clientMessageId), ["cm-1", "cm-1"]);
+  assert.deepEqual(waits, [1000]);
+
+  // A refusal that is not transient is not sent again.
+  calls.length = 0;
+  answers = [{ status: 400, json: { error: "Message body is empty", code: "invalid_request" } }];
+  await assert.rejects(sendMessage(deps, "t", { channelId: "c1", body: "", clientMessageId: "cm-2" }, { sleep: async () => {} }),
+    /Message body is empty/u);
+  assert.equal(calls.length, 1);
+
+  // A dropped connection is; and it gives up after three attempts, saying why.
+  calls.length = 0;
+  const dropped = { ...deps, fetch: async (url, init) => { calls.push(JSON.parse(init.body)); throw new TypeError("Failed to fetch"); } };
+  await assert.rejects(sendMessage(dropped, "t", { channelId: "c1", body: "x", clientMessageId: "cm-3" }, { sleep: async () => {} }),
+    /Failed to fetch/u);
+  assert.equal(calls.length, 3);
+});

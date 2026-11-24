@@ -17,16 +17,23 @@
  * to hide it.
  */
 import { createRoot } from "react-dom/client";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { type AuthUser, type SerializedSpace } from "@xmatrix/protocol";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { WEB_PROXY_ROUTES, type AuthUser, type ChannelSnapshot, type SerializedSpace } from "@xmatrix/protocol";
 import { API_ROUTES } from "xmatrix-extension:api-routes";
 import { Composer } from "@/components/dashboard/workspace-composer-dialogs";
 import { askMessage } from "./ask-message";
+import {
+  channelReferences,
+  MessageReferenceCatalogProvider,
+  type ChannelReference,
+  type MessageReferenceCatalog,
+} from "@/components/dashboard/message-reference-catalog";
 import type { ComposerSendSnapshot } from "@/components/dashboard/workspace-shell-message-model";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
 import { GrantedAuthProvider } from "@/lib/auth-context";
 import { markExtensionAskSurface } from "@/lib/extension-embed";
+import { UserFacingProblem } from "@/lib/user-facing-error";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { installLocalApi } from "./local-api";
 
@@ -38,20 +45,29 @@ type AskContext = {
   user: AuthUser;
   spaceId: string | null;
   passage: { text: string; label: string; href: string };
-  windowId: number | null;
+  /** The tab the box is on: its panel is the one that opens. */
+  tabId: number | null;
   /** The selection it was read for: a new one seeds the composer's draft afresh. */
   round?: number;
 };
 
 type Extension = {
   runtime: { sendMessage: (message: unknown) => Promise<{ ok: boolean; value?: unknown; error?: string; code?: string } | undefined> };
-  sidePanel?: { open: (options: { windowId: number }) => Promise<void> };
+  sidePanel?: { open: (options: { tabId: number }) => Promise<void> };
 };
 const extension = (globalThis as unknown as { chrome: Extension }).chrome;
 
+/**
+ * Asks the extension's service worker. Its refusals are sentences for the person ("Sign in to xMatrix in the side
+ * panel first.", the Hub's own reason a conversation could not start): the box shows them as they are, not as an
+ * unexplained "Something went wrong" (Daniel 2026-11-24: "Couldn't prepare the message" said nothing of why).
+ */
 async function ask<T>(type: string, args?: unknown): Promise<T> {
-  const answer = await extension.runtime.sendMessage({ type, args });
-  if (!answer?.ok) throw Object.assign(new Error(answer?.error ?? "xMatrix could not be reached."), { code: answer?.code });
+  const answer = await extension.runtime.sendMessage({ type, args }).catch(() => undefined);
+  if (!answer?.ok) {
+    throw Object.assign(new UserFacingProblem(answer?.error || "xMatrix could not be reached. Try again.", true),
+      { code: answer?.code });
+  }
   return answer.value as T;
 }
 
@@ -146,8 +162,17 @@ function Surface() {
         if (live) setSpace(spaces.find((item) => item.id === spaceId) ?? null);
       })
       .catch(() => undefined);
+    // The Space's channels: what `#` completes, as it does in the App (message-reference-catalog.tsx).
+    void xmatrixApiRequest<{ channels?: ChannelSnapshot[] }>({ url: WEB_PROXY_ROUTES.channels, token })
+      .then(({ channels = [] }) => {
+        if (live) setChannels(channelReferences([], channels.filter((channel) => channel.spaceId === spaceId)));
+      })
+      .catch(() => undefined);
     return () => { live = false; };
   }, [token, spaceId]);
+  const [channels, setChannels] = useState<readonly ChannelReference[]>([]);
+  const referenceCatalog = useMemo<MessageReferenceCatalog | null>(() => channels.length
+    ? { channels, channelActivityMs: () => 0, onOpenChannel: () => undefined } : null, [channels]);
 
   // The frame is as big as what it shows, wherever the App positions it.
   useLayoutEffect(() => {
@@ -204,7 +229,8 @@ function Surface() {
     sending.current = true;
     const { body, invocationSelections } = await askMessage(context.passage, question, picked, space?.id ?? null);
     // The panel opens on the new conversation; Chrome lets it open only shortly after this keystroke or click.
-    if (context.windowId !== null) void extension.sidePanel?.open({ windowId: context.windowId }).catch(() => undefined);
+    // This tab's own panel (one per page); background.js turned it on for the tab when the passage was picked.
+    if (typeof context.tabId === "number") void extension.sidePanel?.open({ tabId: context.tabId }).catch(() => undefined);
     try {
       await ask("askSend", { body, invocationSelections });
       tellFrame({ type: "close" });
@@ -220,6 +246,7 @@ function Surface() {
     <div ref={frame} className="xmatrix-app box-content w-[30rem]" style={{ padding: "12px 12px 24px" }}>
       {context && passage ? (
         <GrantedAuthProvider token={context.token} user={context.user}>
+          <MessageReferenceCatalogProvider catalog={referenceCatalog}>
           <ComposerStage>
             <Composer
               channel={null}
@@ -240,7 +267,6 @@ function Surface() {
               mentionInsertRequest={null}
               autoFocusRequest={0}
               error={problem}
-              placeholder={space ? `Ask ${space.name} about this` : "Ask about this"}
               ariaLabel="Ask about this"
               sendTitle="Ask"
               onDraftChange={() => undefined}
@@ -252,6 +278,7 @@ function Surface() {
               onSend={send}
             />
           </ComposerStage>
+          </MessageReferenceCatalogProvider>
         </GrantedAuthProvider>
       ) : problem && <p role="alert" className="text-sm font-medium text-destructive">{problem}</p>}
     </div>
