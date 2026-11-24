@@ -6,6 +6,7 @@
   /* One corner for every site slab, wood or glass: the 20px a liquid glass
      card already has. Pill-shaped controls stay pills. */
   --site-surface-radius: 1.25rem;
+  overflow-x: clip;
   color: var(--foreground);
   background:
     radial-gradient(circle at 15% -8%, oklch(1 0.018 92 / 0.95), transparent 34rem),
@@ -20,6 +21,7 @@
 }
 
 html:has(.site-page) {
+  overflow-x: clip;
   scroll-padding-top: 5.5rem;
 }
 

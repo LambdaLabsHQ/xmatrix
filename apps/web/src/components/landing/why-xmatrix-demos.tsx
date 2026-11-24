@@ -125,12 +125,12 @@ function RealPaperSheet({
 
   return (
     <div className={LIVE_SHEET_CLASS} inert>
-      <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-5 sm:px-7 sm:py-6">
-        {topRight && <div className="mb-3 flex justify-end">{topRight}</div>}
+      <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3 sm:px-7 sm:py-6">
+        {topRight && <div className="mb-1.5 flex justify-end sm:mb-3">{topRight}</div>}
         <div
           ref={hostRef}
-          className={`ProseMirror page-document text-[13.5px]! leading-[1.6]! sm:text-[14px]! [&_blockquote]:my-2.5! [&_blockquote]:py-1.5! [&_h2]:mt-0! [&_h2]:mb-3! [&_h2]:text-[17px]! [&_h2]:font-semibold! [&_li]:my-1.5! [&_p]:my-1.5! [&_ul]:my-1.5! ${
-            pen ? "pr-9 sm:pr-32" : ""
+          className={`ProseMirror page-document text-[12px]! leading-[1.45]! sm:text-[14px]! sm:leading-[1.6]! [&_blockquote]:my-1.5! [&_blockquote]:py-1! sm:[&_blockquote]:my-2.5! sm:[&_blockquote]:py-1.5! [&_h2]:mt-0! [&_h2]:mb-1.5! [&_h2]:text-[14px]! [&_h2]:font-semibold! sm:[&_h2]:mb-3! sm:[&_h2]:text-[17px]! [&_li]:my-1! sm:[&_li]:my-1.5! [&_p]:my-1! sm:[&_p]:my-1.5! [&_ul]:my-1! sm:[&_ul]:my-1.5! ${
+            pen ? "pr-8 sm:pr-32" : ""
           }`}
           data-editable="false"
           translate="no"
@@ -146,10 +146,10 @@ function RealPaperSheet({
             </div>
             {/* Phone: compact face-only pen at the right edge, matching the real mobile app */}
             <div
-              className="pointer-events-none absolute right-3 z-10 inline-flex rounded-full p-[2px] shadow-[0_3px_10px_-3px_rgba(0,0,0,0.28)] transition-[top] duration-300 sm:hidden"
+              className="pointer-events-none absolute right-2.5 z-10 inline-flex rounded-full p-[2px] shadow-[0_3px_10px_-3px_rgba(0,0,0,0.28)] transition-[top] duration-300 sm:hidden"
               style={{ top: `${penTop}px`, backgroundColor: pen.color }}
             >
-              <Face of={pen.face} size="xs" shape="circle" className="size-5! rounded-full bg-white" />
+              <Face of={pen.face} size="xs" shape="circle" className="size-4! rounded-full bg-white" />
             </div>
           </>
         )}
@@ -398,9 +398,9 @@ function ParallelWorkDemo({ step }: { step: number }) {
       {/* Main split: paper conversation list + live page */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden sm:flex-row">
         <div className="flex min-w-0 shrink-0 flex-col bg-[color-mix(in_oklch,var(--site-ink)_3.5%,var(--background))] sm:w-[48%]">
-          <div className="flex h-10 shrink-0 items-center justify-between px-3.5">
-            <span className="text-[13px] font-bold text-[var(--site-ink)]">Acme</span>
-            <span className="rounded-md bg-[color-mix(in_oklch,var(--site-ink)_6%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--site-ink-muted)]">
+          <div className="flex h-7 shrink-0 items-center justify-between px-3 sm:h-10 sm:px-3.5">
+            <span className="text-[11.5px] font-bold text-[var(--site-ink)] sm:text-[13px]">Acme</span>
+            <span className="rounded-md bg-[color-mix(in_oklch,var(--site-ink)_6%,transparent)] px-1.5 py-0.5 text-[9.5px] font-semibold text-[var(--site-ink-muted)] sm:text-[10px]">
               4 active
             </span>
           </div>
@@ -412,14 +412,16 @@ function ParallelWorkDemo({ step }: { step: number }) {
               return (
                 <div
                   key={thread.id}
-                  className={`flex items-center gap-2 px-3.5 py-2 transition-colors ${
-                    idx === 3 ? "max-sm:hidden" : ""
+                  className={`flex items-center gap-2 px-3 py-1 transition-colors sm:px-3.5 sm:py-2 ${
+                    idx >= 2 ? "max-sm:hidden" : ""
                   } ${justFinished ? "bg-[var(--background)]" : ""}`}
                 >
-                  <Hash className="size-3.5 shrink-0 text-[var(--site-ink-muted)]/75" />
+                  <Hash className="size-3 shrink-0 text-[var(--site-ink-muted)]/75 sm:size-3.5" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12px] leading-tight font-semibold text-[var(--site-ink)]">{thread.name}</p>
-                    <p className="mt-0.5 truncate text-[11px] leading-tight text-[var(--site-ink-muted)]">
+                    <p className="truncate text-[11px] leading-tight font-semibold text-[var(--site-ink)] sm:text-[12px]">
+                      {thread.name}
+                    </p>
+                    <p className="mt-0.5 truncate text-[10px] leading-tight text-[var(--site-ink-muted)] sm:text-[11px]">
                       {done ? thread.doneText : thread.workingText}
                     </p>
                   </div>
@@ -428,10 +430,10 @@ function ParallelWorkDemo({ step }: { step: number }) {
                       of={{ kind: "agent", name: agent.name, harness: agent.harness }}
                       size="xs"
                       shape="circle"
-                      className="size-5! rounded-full"
+                      className="size-4! rounded-full sm:size-5!"
                     />
                     <span
-                      className={`absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-[1.5px] ring-[var(--background)] ${
+                      className={`absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full ring-[1.5px] ring-[var(--background)] sm:size-2 ${
                         done ? "bg-[#2f855a]" : "bg-[#d97706]"
                       }`}
                     />
@@ -442,10 +444,10 @@ function ParallelWorkDemo({ step }: { step: number }) {
           </div>
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-between bg-[var(--background)] px-4 py-3 sm:py-3.5">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-between bg-[var(--background)] px-3.5 py-2 sm:px-4 sm:py-3.5">
           <div
             ref={hostRef}
-            className="ProseMirror page-document text-[12.5px]! leading-[1.5]! [&_h2]:mt-0! [&_h2]:mb-2! [&_h2]:text-[14.5px]! [&_li]:my-1.5! [&_ul]:my-1!"
+            className="ProseMirror page-document text-[11.5px]! leading-[1.4]! sm:text-[12.5px]! sm:leading-[1.5]! [&_h2]:mt-0! [&_h2]:mb-1! [&_h2]:text-[12.5px]! sm:[&_h2]:mb-2! sm:[&_h2]:text-[14.5px]! [&_li]:my-0.5! sm:[&_li]:my-1.5! [&_ul]:my-0.5! sm:[&_ul]:my-1!"
             data-editable="false"
             translate="no"
           />
@@ -540,11 +542,11 @@ function AcrossMachinesDemo({ step }: { step: number }) {
 
   return (
     <div
-      className={`${LIVE_SHEET_CLASS} justify-center bg-[var(--site-paper)]! px-5 py-4`}
+      className={`${LIVE_SHEET_CLASS} justify-center bg-[var(--site-paper)]! px-4 py-3.5 sm:px-5 sm:py-4`}
       style={{ "--app-panel-paper": "var(--site-paper)" } as CSSProperties}
       inert
     >
-      <div className="site-matrix w-full min-w-0 [zoom:0.88] sm:[zoom:0.84]">
+      <div className="site-matrix w-full min-w-0 [zoom:0.62] sm:[zoom:0.84]">
         {wide ? (
           <FleetMatrix columns={FLEET_COLUMNS} rows={rows} selected={null} onSelect={noop} editors={[]} />
         ) : (
@@ -585,7 +587,7 @@ function SharedDecisionsDemo({ step }: { step: number }) {
       highlightColor={WRITER.alex.color}
       pen={step === 1 ? makePerson("alex", { editing: true }) : null}
       footer={
-        <div className="flex shrink-0 flex-wrap items-center gap-2 px-6 pb-5 sm:px-7">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 pb-3 sm:gap-2 sm:px-7 sm:pb-5">
           <span className="text-[11.5px] font-medium text-[var(--site-ink-muted)]">
             {syncedCount === 0 ? "Waiting for edit…" : "Read by:"}
           </span>
