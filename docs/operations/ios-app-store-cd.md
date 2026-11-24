@@ -83,7 +83,7 @@ retry reconciles Apple's version, build relationship, submission and items first
 The job updates only declared localizations, preserving other languages, screenshots,
 pricing, territories, privacy declarations and release settings. It uses an editable
 version or creates a new one; an existing higher editable version is never downgraded.
-New versions use manual release after approval. Existing release settings are kept.
+Every version the release job creates or updates is released automatically after approval (`AFTER_APPROVAL`, Daniel 2026-11-24); manual release is never used.
 The exact build relationship is read back before submission. Apple must return a
 waiting/in-review/completed submission receipt before `submitted` is reported.
 What's New carries the authored stable notes once an earlier version has been on

@@ -125,7 +125,7 @@ test("create_version creates the next version and carries App Review details ove
     "POST /v1/appStoreReviewDetails": { data: { type: "appStoreReviewDetails", id: "rd-2", attributes: {} } } },
   `@appstoreconnect:create_version:${BUNDLE} 1.2.0`);
   const [post, copy] = created.calls.filter((call) => call.method === "POST");
-  assert.deepEqual(post.body.attributes, { platform: "IOS", versionString: "1.2.0", releaseType: "MANUAL" });
+  assert.deepEqual(post.body.attributes, { platform: "IOS", versionString: "1.2.0", releaseType: "AFTER_APPROVAL" });
   assert.deepEqual(copy.body.attributes, detail, "contact and sign-in details go from Apple back to Apple");
   assert.equal(copy.body.relationships.appStoreVersion.data.id, "v22");
   assert.match(created.value.summary, /Created version 1\.2\.0 .* copied from 1\.1\.0\./u);

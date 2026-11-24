@@ -581,7 +581,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       writeAction("create_profile", "Create profile", "Create an App Store provisioning profile for a bundle ID and a distribution certificate.", "<com.example.app> <certificate id> [store=ios|macos|tvos|catalyst]"),
       readAction("read_profile", "Read profile", "A provisioning profile's content, to install on the build machine.", "<profile id>"),
       writeAction("set_review_contact", "Set App Review contact", "Set a version's App Review contact, notes and whether sign-in is needed. The sign-in password is entered in App Store Connect.", '<com.example.app> <1.0.0> {"contactFirstName":"…","contactEmail":"…"}'),
-      writeAction("create_version", "Create version", "Create the next App Store version, or rename the one still open for editing; App Review contact details carry over from the previous version.", "<com.example.app> <1.2.0> [release=manual|after_approval]"),
+      writeAction("create_version", "Create version", "Create the next App Store version, or rename the one still open for editing; App Review contact details carry over from the previous version.", "<com.example.app> <1.2.0> [release=after_approval|manual]"),
       writeAction("set_metadata", "Set listing text", "Set a version's description, keywords, what's new, promotional text, URLs or copyright for one language.", '<com.example.app> <1.2.0> {"locale":"en-US","whatsNew":"…"}'),
       writeAction("set_build", "Attach build", "Attach a processed build to a version by its build number.", "<com.example.app> <1.2.0> <build number>"),
       writeAction("submit", "Submit for review", "Submit a version with its attached build for App Review.", "<com.example.app> <1.2.0>"),
