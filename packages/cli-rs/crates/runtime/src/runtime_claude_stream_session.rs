@@ -50,6 +50,10 @@ use crate::{
     CliError, agent_instance_connection, error, merge_llm_usage, process_tree, protocol,
     write_current_run_effort, write_current_run_model, write_json_line,
 };
+use xmatrix_harness::quota::claude::{
+    claude_get_usage_control_request, claude_version_answers_get_usage, known_claude_usage,
+    read_claude_usage, read_claude_usage_with,
+};
 
 pub(crate) const CLAUDE_STREAM_IDLE_LIMIT: Duration = Duration::from_secs(900);
 
@@ -91,6 +95,10 @@ pub(crate) const CLAUDE_INTERRUPT_RECEIPT_TIMEOUT: Duration = Duration::from_sec
 /// phases and receive this definite result before timing out.
 pub(crate) const CLAUDE_CONTROL_SWITCH_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// How long a `get_usage` read may wait for its answer; Claude Code asks its
+/// usage endpoint before answering.
+const CLAUDE_USAGE_ANSWER_TIMEOUT: Duration = Duration::from_secs(8);
+
 /// The switchable session controls — model and reasoning effort — shared
 /// between the session, its stdout reader, and the daemon event loop, together
 /// with the correlation map every control request answers through.
@@ -110,11 +118,15 @@ pub(crate) struct ClaudeSessionControls {
     /// account default, which this runtime cannot see".
     current_effort: Mutex<Option<String>>,
     /// In-flight control requests awaiting a `control_response` (`set_model`
-    /// switches, `apply_flag_settings` effort changes and `interrupt` receipts
-    /// share the same correlation map).
-    pending_controls: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<(), String>>>>,
+    /// switches, `apply_flag_settings` effort changes, `interrupt` receipts and
+    /// `get_usage` reads share the same correlation map). A success carries
+    /// the answer's `response` payload.
+    pending_controls: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<Value, String>>>>,
     native_parameters: Mutex<crate::claude_parameters::Facts>,
     parameter_request: Mutex<Option<String>>,
+    /// The `claude_code_version` the running process's `system/init` frame
+    /// stated; `None` until a turn has started it.
+    cli_version: Mutex<Option<String>>,
     selected_parameters: Mutex<std::collections::BTreeMap<String, String>>,
     /// AskUserQuestion requests parked until their card is answered, by tool
     /// use id.
@@ -139,6 +151,7 @@ impl ClaudeSessionControls {
             pending_controls: Mutex::new(HashMap::new()),
             native_parameters: Mutex::new(crate::claude_parameters::Facts::default()),
             parameter_request: Mutex::new(None),
+            cli_version: Mutex::new(None),
             selected_parameters: Mutex::new(std::collections::BTreeMap::new()),
             questions: PendingQuestions::default(),
         }
@@ -167,6 +180,16 @@ impl ClaudeSessionControls {
             .unwrap_or_else(|p| p.into_inner()) =
             crate::claude_parameters::initialize_facts(value, self.current().as_deref());
         true
+    }
+
+    /// Keep the Claude Code release a `system/init` frame states.
+    pub(crate) fn observe_cli_version(&self, init: &Value) {
+        if let Some(version) = init.get("claude_code_version").and_then(Value::as_str) {
+            *self
+                .cli_version
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner()) = Some(version.to_string());
+        }
     }
 
     fn parameter_request_id(&self) -> String {
@@ -268,7 +291,7 @@ impl ClaudeSessionControls {
     fn register_control(
         &self,
         request_id: String,
-        waiter: tokio::sync::oneshot::Sender<Result<(), String>>,
+        waiter: tokio::sync::oneshot::Sender<Result<Value, String>>,
     ) {
         self.pending_controls
             .lock()
@@ -279,7 +302,7 @@ impl ClaudeSessionControls {
     pub(crate) fn resolve_control(
         &self,
         request_id: &str,
-    ) -> Option<tokio::sync::oneshot::Sender<Result<(), String>>> {
+    ) -> Option<tokio::sync::oneshot::Sender<Result<Value, String>>> {
         self.pending_controls
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
@@ -339,6 +362,69 @@ pub(crate) struct ClaudeStreamInterrupter {
 }
 
 impl ClaudeStreamInterrupter {
+    /// This session's Claude subscription quota, asked of Claude Code itself
+    /// (`get_usage`): over the running process's stdin when there is one,
+    /// else, with `ask_when_idle`, of a briefly started `claude`, else only
+    /// what is already known. `verdict` lets a fresh `rate_limit_event`
+    /// answer instead; a read after a refusal passes false, since the verdict
+    /// only repeats the refusal.
+    pub(crate) async fn account_usage(
+        &self,
+        force: bool,
+        verdict: bool,
+        ask_when_idle: bool,
+    ) -> Option<protocol::LlmUsage> {
+        if xmatrix_cli_core::config::quota_probes_disabled() {
+            return None;
+        }
+        let live = self
+            .stdin
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone();
+        match live {
+            Some(stdin) => {
+                read_claude_usage_with(force, verdict, || self.ask_live_usage(stdin)).await
+            }
+            None if ask_when_idle => read_claude_usage(force, verdict).await,
+            None => known_claude_usage(verdict),
+        }
+    }
+
+    /// One `get_usage` exchange with the running process. Detached, so a
+    /// prompt written meanwhile does not wait for it.
+    async fn ask_live_usage(&self, stdin: Arc<AsyncMutex<ChildStdin>>) -> Option<Value> {
+        let version = self
+            .controls
+            .cli_version
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone();
+        if !claude_version_answers_get_usage(version.as_deref()) {
+            return None;
+        }
+        let request_id = format!("xmatrix-usage-{}", uuid::Uuid::new_v4());
+        let (waiter_tx, waiter_rx) = tokio::sync::oneshot::channel();
+        self.controls
+            .register_control(request_id.clone(), waiter_tx);
+        let request = claude_get_usage_control_request(&request_id, true);
+        let written = match serde_json::to_vec(&request) {
+            Ok(bytes) => write_json_line(&stdin, bytes, "Claude usage").await.is_ok(),
+            Err(_) => false,
+        };
+        let answer = if written {
+            tokio::time::timeout(CLAUDE_USAGE_ANSWER_TIMEOUT, waiter_rx)
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .and_then(Result::ok)
+        } else {
+            None
+        };
+        self.controls.resolve_control(&request_id);
+        answer
+    }
+
     /// Answer the AskUserQuestion `reply` is for. False when no such question
     /// is parked (it was cancelled, or the card outlived its turn): the reply
     /// is then an ordinary message.
@@ -441,7 +527,7 @@ impl ClaudeStreamInterrupter {
         let controls = self.controls.clone();
         tokio::spawn(async move {
             match tokio::time::timeout(CLAUDE_INTERRUPT_RECEIPT_TIMEOUT, waiter_rx).await {
-                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Ok(_))) => {}
                 Ok(Ok(Err(err))) => {
                     eprintln!(
                         "{} Claude rejected the interrupt request: {err}",
@@ -973,7 +1059,7 @@ impl ClaudeStreamSession {
             return Err(err);
         }
         match tokio::time::timeout(CLAUDE_CONTROL_SWITCH_TIMEOUT, waiter_rx).await {
-            Ok(Ok(Ok(()))) => Ok(()),
+            Ok(Ok(Ok(_))) => Ok(()),
             Ok(Ok(Err(err))) => Err(err),
             // Reader dropped the waiter (process died) or no response arrived
             // in time: nothing confirmed the switch, so report failure and

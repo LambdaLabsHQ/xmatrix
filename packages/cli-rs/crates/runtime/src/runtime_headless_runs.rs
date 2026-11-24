@@ -28,10 +28,9 @@ use crate::{
     flush_headless_delivery_queue, format_incoming_channel_message_with_context,
     inject_remote_submission, kkp, materialize_inbound_image_files, parse_goal_command,
     process_tree, protocol, provider_subscription_quota_usage, pty, publish_bound_goal_state,
-    read_claude_oauth_rate_limit_usage, read_initial_message_launch,
-    read_initial_spawn_context_from_env, reply_to_current_agent, runtime_accepts_channel_delivery,
-    send_presence, shell_wrap, slash_command_passthrough, spawn_goal_inbox_poller,
-    uses_claude_code_runtime, write_current_run_model,
+    read_initial_message_launch, read_initial_spawn_context_from_env, reply_to_current_agent,
+    runtime_accepts_channel_delivery, send_presence, shell_wrap, slash_command_passthrough,
+    spawn_goal_inbox_poller, uses_claude_code_runtime, write_current_run_model,
 };
 
 pub(crate) async fn run_headless_external(run: ExternalRun<'_>) -> error::Result<()> {
@@ -471,10 +470,9 @@ pub(crate) async fn run_claude_print_external(run: ExternalRun<'_>) -> error::Re
     // arrive once a first turn *finishes*, so a freshly summoned agent would
     // show an empty card until someone talks to it.
     let quota_relay = relay.clone();
+    let quota_reader = session.interrupter();
     tokio::spawn(async move {
-        if !xmatrix_cli_core::config::quota_probes_disabled()
-            && let Some(usage) = read_claude_oauth_rate_limit_usage(false).await
-        {
+        if let Some(usage) = quota_reader.account_usage(false, true, true).await {
             send_presence(&quota_relay, None, PresencePatch::usage(Some(usage)));
         }
     });
@@ -653,11 +651,10 @@ pub(crate) async fn run_claude_print_external(run: ExternalRun<'_>) -> error::Re
                         auto_join_channel_id.as_deref(),
                         &reconnected_agent,
                     );
-                    let usage = if xmatrix_cli_core::config::quota_probes_disabled() {
-                        None
-                    } else {
-                        read_claude_oauth_rate_limit_usage(false).await
-                    };
+                    let usage = session
+                        .interrupter()
+                        .account_usage(false, true, false)
+                        .await;
                     send_presence(
                         &relay,
                         Some("idle"),

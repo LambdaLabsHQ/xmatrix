@@ -251,7 +251,7 @@ enum ClaudeLogin {
     DefaultLogin,
 }
 
-fn claude_login_key(login: ClaudeLogin, env: &dyn Fn(&str) -> Option<String>) -> String {
+fn claude_login_key(login: ClaudeLogin, env: &(dyn Fn(&str) -> Option<String> + Sync)) -> String {
     let home = home_dir_path();
     match login {
         ClaudeLogin::DefaultLogin => {
@@ -285,21 +285,16 @@ fn resolve_claude_program() -> Option<PathBuf> {
     cli::resolve_program("claude", &fallbacks)
 }
 
-/// Whether the `claude` on this host answers `get_usage`; an older one is
-/// logged once and never asked.
-pub async fn claude_cli_answers_get_usage() -> bool {
-    match resolve_claude_program() {
-        Some(program) => {
-            cli::cli_at_least(
-                &program,
-                home_dir_path().as_deref(),
-                MIN_GET_USAGE_CLI_VERSION,
-                "Claude Code",
-            )
-            .await
-        }
-        None => false,
-    }
+/// Whether a running Claude Code of the release its `system/init` frame
+/// stated (`claude_code_version`) answers `get_usage`. An older or unknown
+/// release is logged once and never asked.
+pub fn claude_version_answers_get_usage(version: Option<&str>) -> bool {
+    cli::version_at_least(
+        "a running session",
+        version.and_then(cli::parse_cli_semver),
+        MIN_GET_USAGE_CLI_VERSION,
+        "Claude Code",
+    )
 }
 
 /// Read this process's Claude quota through `ask`, an exchange that sends
@@ -319,7 +314,7 @@ async fn read_claude_usage_as<F, Fut>(
     login: ClaudeLogin,
     force: bool,
     verdict: bool,
-    env: &dyn Fn(&str) -> Option<String>,
+    env: &(dyn Fn(&str) -> Option<String> + Sync),
     ask: F,
 ) -> Option<LlmUsage>
 where
@@ -352,10 +347,24 @@ where
         .await
 }
 
-/// Claude subscription quota for this process's login: a fresh verdict, else
-/// a briefly started `claude` asked `get_usage`.
-pub async fn read_claude_usage(force: bool) -> Option<LlmUsage> {
-    read_claude_usage_with(force, true, || ask_spawned_claude(ClaudeLogin::Process)).await
+/// Claude subscription quota for this process's login: a fresh verdict (when
+/// `verdict`), else a briefly started `claude` asked `get_usage`.
+pub async fn read_claude_usage(force: bool, verdict: bool) -> Option<LlmUsage> {
+    read_claude_usage_with(force, verdict, || ask_spawned_claude(ClaudeLogin::Process)).await
+}
+
+/// What this process already knows of its Claude quota, asking nothing: a
+/// fresh verdict (when `verdict`), else a current reading.
+pub fn known_claude_usage(verdict: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
+    if verdict && let Some(verdict) = fresh_claude_rate_limit_verdict() {
+        return Some(verdict);
+    }
+    CLAUDE_USAGE
+        .hit(&claude_login_key(ClaudeLogin::Process, &process_env))
+        .flatten()
 }
 
 /// Claude subscription quota for Claude Code's default login, asked of a

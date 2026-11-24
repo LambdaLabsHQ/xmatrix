@@ -854,3 +854,57 @@ sleep 1"#,
     drop(restore);
     fixture.finish().await;
 }
+
+/// Claude Code 2.1.331 answering `get_usage` on a running session: the read
+/// goes over the session's own stdin as a detached control request, never a
+/// prompt, and the answer is the account reading.
+#[cfg(unix)]
+#[tokio::test]
+async fn claude_session_quota_is_asked_of_its_own_process() {
+    let mut fixture = ClaudeCliTurnFixture::start(
+        r#"root="$1"
+emit() { printf '%s\n' "$1"; }
+read_user || exit 0
+emit '{"type":"system","subtype":"init","session_id":"s1","model":"claude-test","claude_code_version":"2.1.331"}'
+emit '{"type":"result","subtype":"success","result":"DONE","session_id":"s1"}'
+IFS= read -r line || exit 0
+printf '%s\n' "$line" > "$root/usage-request"
+rid=$(printf '%s' "$line" | sed 's/.*"request_id":"\([^"]*\)".*/\1/')
+emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$rid\",\"response\":{\"subscription_type\":\"max\",\"rate_limits_available\":true,\"rate_limits\":{\"five_hour\":{\"utilization\":12,\"resets_at\":\"2026-11-24T22:20:00Z\"},\"seven_day\":{\"utilization\":79,\"resets_at\":\"2026-11-26T18:00:00Z\"},\"model_scoped\":[]}}}}"
+sleep 30
+"#,
+    )
+    .await;
+    let turn = fixture.submit("work").await;
+    assert!(matches!(turn.status, ClaudeTurnStatus::Completed));
+    let usage = tokio::time::timeout(
+        fixture.patience,
+        fixture
+            .session
+            .interrupter()
+            .account_usage(true, false, false),
+    )
+    .await
+    .expect("the session answered")
+    .expect("a reading");
+    let windows = usage.quota_usages.unwrap();
+    assert_eq!(windows[0].label.as_deref(), Some("5h"));
+    assert_eq!(windows[1].percent, Some(79.0));
+    assert!(
+        usage
+            .scoped_quota_usages
+            .is_some_and(|scoped| scoped.is_empty())
+    );
+    let request: serde_json::Value = serde_json::from_str(
+        std::fs::read_to_string(fixture.root.join("usage-request"))
+            .unwrap()
+            .trim(),
+    )
+    .unwrap();
+    assert_eq!(request["type"], "control_request");
+    assert_eq!(
+        request["request"],
+        serde_json::json!({ "subtype": "get_usage", "skip_behaviors": true, "detached": true })
+    );
+    fixture.finish().await;
+}

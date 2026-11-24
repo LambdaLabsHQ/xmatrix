@@ -132,7 +132,7 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::Antigravity, Account::DefaultLogin) => {
             antigravity::read_antigravity_quota_usage_for_default_account(force).await
         }
-        (Provider::Claude, Account::Process) => claude::read_claude_usage(force).await,
+        (Provider::Claude, Account::Process) => claude::read_claude_usage(force, true).await,
         (Provider::Claude, Account::DefaultLogin) => {
             claude::read_claude_usage_for_default_account(force).await
         }

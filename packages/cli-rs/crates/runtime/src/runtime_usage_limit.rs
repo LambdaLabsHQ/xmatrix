@@ -6,10 +6,9 @@
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use xmatrix_harness::quota::{self, Account, Provider, ReadOptions};
-use xmatrix_harness::LlmUsage;
 #[cfg(test)]
 use xmatrix_harness::LlmQuotaUsage;
+use xmatrix_harness::LlmUsage;
 
 /// The provider account behind this Instance cannot run another turn until
 /// `resets_at` (RFC 3339, UTC) when the provider said when.
@@ -37,34 +36,19 @@ fn rfc3339_from_unix_seconds(seconds: i64) -> Option<String> {
         .ok()
 }
 
-/// Whether a Claude Code this runtime spawns bills the default login, the
-/// one account the usage reader can vouch for.
-fn claude_spawn_uses_default_login() -> bool {
-    xmatrix_harness::home_dir_path().is_some()
-        && !quota::claude::CLAUDE_LOGIN_OVERRIDE_KEYS
-            .iter()
-            .any(|key| std::env::var(key).is_ok_and(|value| !value.trim().is_empty()))
-}
-
-/// Gather the raw provider reading after a Claude usage limit. Reads the usage
-/// endpoint now, past any cached reading or rate-limit verdict (which only
-/// repeat the refusal), sharing one request with any other read of the same
-/// account. Hub attributes the scope from the refusal's reset time and reading.
-pub(crate) async fn resolve_claude_usage_limit(limit: UsageLimit) -> UsageLimitReport {
+/// Gather the raw provider reading after a Claude usage limit. Asks the
+/// refused session's own Claude Code now, past any cached reading or
+/// rate-limit verdict (which only repeat the refusal), so the reading is of
+/// the very login that was refused. Hub attributes the scope from the
+/// refusal's reset time and reading.
+pub(crate) async fn resolve_claude_usage_limit(
+    limit: UsageLimit,
+    session: &crate::runtime_claude_stream_session::ClaudeStreamInterrupter,
+) -> UsageLimitReport {
     if xmatrix_cli_core::config::quota_probes_disabled() {
         return usage_limit_report(limit, Err("quota_probes_disabled"));
     }
-    if !claude_spawn_uses_default_login() {
-        return usage_limit_report(limit, Err("login_not_default"));
-    }
-    let reading = quota::read(
-        Provider::Claude,
-        ReadOptions {
-            account: Account::DefaultLogin,
-            force: true,
-        },
-    )
-    .await;
+    let reading = session.account_usage(true, false, true).await;
     usage_limit_report(limit, reading.ok_or("usage_read_failed"))
 }
 
@@ -191,12 +175,16 @@ mod tests {
         );
         assert_eq!(report.resets_at.as_deref(), Some("2026-11-19T18:00:00Z"));
         assert_eq!(report.quota_scope_reason, None);
-        assert!(report.usage.is_some(), "the reading travels for Hub attribution");
+        assert!(
+            report.usage.is_some(),
+            "the reading travels for Hub attribution"
+        );
     }
 
     #[test]
     fn usage_limit_report_marks_missing_reset_time_and_failed_reads() {
-        let missing_reset = usage_limit_report(UsageLimit::default(), Ok(reading(0.0, 55.0, 100.0)));
+        let missing_reset =
+            usage_limit_report(UsageLimit::default(), Ok(reading(0.0, 55.0, 100.0)));
         assert_eq!(missing_reset.resets_at, None);
         assert_eq!(missing_reset.quota_scope_reason, Some("no_reset_time"));
         assert!(missing_reset.usage.is_some());

@@ -34,9 +34,9 @@ struct BinaryFingerprint {
 /// upgrade in place).
 static VERSIONS: OnceLock<Mutex<HashMap<PathBuf, (BinaryFingerprint, CliVersion)>>> =
     OnceLock::new();
-/// Binaries whose version refusal was already logged, so a refusal is said
-/// once per binary rather than on every presence refresh.
-static LOGGED_REFUSALS: OnceLock<Mutex<HashSet<(PathBuf, Option<CliVersion>)>>> = OnceLock::new();
+/// Version refusals already logged, so a refusal is said once per binary
+/// and release rather than on every presence refresh.
+static LOGGED_REFUSALS: OnceLock<Mutex<HashSet<(String, Option<CliVersion>)>>> = OnceLock::new();
 
 fn binary_fingerprint(program: &Path) -> Option<BinaryFingerprint> {
     let metadata = std::fs::metadata(program).ok()?;
@@ -130,24 +130,32 @@ pub(crate) async fn cli_at_least(
     tool: &str,
 ) -> bool {
     let version = cli_version(program, cwd).await;
+    version_at_least(&program.display().to_string(), version, min, tool)
+}
+
+/// Whether `version` of the `tool` at `source` is at least `min`; a refusal
+/// is logged once per source and version.
+pub(crate) fn version_at_least(
+    source: &str,
+    version: Option<CliVersion>,
+    min: CliVersion,
+    tool: &str,
+) -> bool {
     if version.is_some_and(|version| version >= min) {
         return true;
     }
     let first = LOGGED_REFUSALS
         .get_or_init(|| Mutex::new(HashSet::new()))
         .lock()
-        .is_ok_and(|mut logged| logged.insert((program.to_path_buf(), version)));
+        .is_ok_and(|mut logged| logged.insert((source.to_string(), version)));
     if first {
         let found = version.map_or_else(
-            || "an unreadable version".to_string(),
+            || "an unknown release".to_string(),
             |(major, minor, patch)| format!("{major}.{minor}.{patch}"),
         );
         eprintln!(
-            "xmatrix: {tool} quota needs {tool} {}.{}.{} or later; {} is {found}, so its quota is not read",
-            min.0,
-            min.1,
-            min.2,
-            program.display()
+            "xmatrix: {tool} quota needs {tool} {}.{}.{} or later; {source} is {found}, so its quota is not read",
+            min.0, min.1, min.2
         );
     }
     false
