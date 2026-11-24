@@ -62,6 +62,7 @@ impl AcpSession {
             subagent_poll_interval: ACP_SUBAGENT_POLL_INTERVAL,
             subagent_wakeup_grace: ACP_SUBAGENT_WAKEUP_GRACE,
             inbox_closed: false,
+            steered_prompts: AcpSteeredPrompts::default(),
         })
     }
 
@@ -161,6 +162,10 @@ impl AcpSession {
         Ok(AcpInterrupter {
             write: self.write.clone(),
             questions: self.questions.clone(),
+            steered_prompts: self
+                .config
+                .steers_mid_turn
+                .then(|| self.steered_prompts.clone()),
             session_id: self.session_id.clone().ok_or_else(|| {
                 CliError::Launch(format!(
                     "{} agent session not initialized",
@@ -742,8 +747,12 @@ impl AcpSession {
                 "prompt": acp_prompt_blocks(content_blocks, self.prompt_images),
             },
         });
+        self.steered_prompts.clear();
         self.write_message(&request).await?;
         crate::runtime_wake_metrics::record_acp_prompt_sent();
+        // Whether this turn's own prompt has answered; a prompt joined to the
+        // turn later makes the agent answer it early with `end_turn`.
+        let mut prompt_answered = false;
 
         let mut output = String::new();
         let mut latest_usage = self.presentation.usage.clone();
@@ -856,7 +865,21 @@ impl AcpSession {
                 AcpTurnServerRequest::NotHandled => {}
             }
 
-            if acp_message_id_matches(message.get("id"), id) {
+            let answers_steer = self.steered_prompts.close(message.get("id"));
+            let answers_prompt = acp_message_id_matches(message.get("id"), id);
+            prompt_answered |= answers_prompt;
+            // The turn goes on under the prompts joined to it: it ends when
+            // its own prompt and every joined one have answered.
+            if (answers_prompt || answers_steer)
+                && message.get("error").is_none()
+                && (self.steered_prompts.any_open() || !prompt_answered)
+            {
+                if let Some(result) = message.get("result") {
+                    latest_usage = merge_llm_usage(latest_usage, extract_llm_usage(result));
+                }
+                continue;
+            }
+            if answers_prompt || answers_steer {
                 if let Some(error) = message.get("error") {
                     let detail = acp_error_message(error);
                     tool_waits.clear();

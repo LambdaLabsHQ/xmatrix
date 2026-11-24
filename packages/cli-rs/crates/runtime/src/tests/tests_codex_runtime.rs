@@ -2397,6 +2397,69 @@ async fn generic_acp_session_streams_and_auto_approves_permission() {
     .expect("generic ACP fixture should not hang");
 }
 
+/// A prompt joined mid-turn (Antigravity) does not end the turn when the
+/// agent answers the earlier prompt early: the turn ends with the joined one,
+/// and its output carries what the joined prompt said.
+#[tokio::test]
+async fn acp_turn_joins_a_mid_turn_prompt_instead_of_ending() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        require_node_fixture_runtime();
+        let cwd = env!("CARGO_MANIFEST_DIR");
+        let mut session = spawn_generic_acp_fixture("acp-steer", "antigravity").await;
+        session
+            .initialize(Some(cwd), None, false, None)
+            .await
+            .expect("initialize ACP steer fixture");
+        let interrupter = session.interrupter().expect("ACP interrupter");
+        let agent = test_serialized_agent("antigravity-fixture");
+        let steer = async {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            interrupter
+                .steer_active_turn("the code word is PINEAPPLE")
+                .await
+                .expect("steer the running turn")
+        };
+        let turn = session.submit_turn(
+            "work on it",
+            vec![serde_json::json!({"type":"text","text":"work on it"})],
+            None,
+            None,
+            &agent,
+            None,
+            None,
+            None,
+        );
+        let (turn, steered) = tokio::join!(turn, steer);
+        assert!(steered, "Antigravity takes prompts mid-turn");
+        let turn = turn.expect("steered ACP turn");
+        assert!(!turn.failed, "{:?}", turn.failure_detail);
+        assert_eq!(turn.local_output, "working;joined:PINEAPPLE");
+        session.shutdown().await;
+    })
+    .await
+    .expect("a steered ACP turn should not hang");
+}
+
+/// An ACP agent that is not known to join mid-turn prompts is interrupted as
+/// before: steering declines.
+#[tokio::test]
+async fn acp_steer_declines_for_agents_that_do_not_join_prompts() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        require_node_fixture_runtime();
+        let cwd = env!("CARGO_MANIFEST_DIR");
+        let mut session = spawn_generic_acp_fixture("acp", "kimi").await;
+        session
+            .initialize(Some(cwd), None, false, None)
+            .await
+            .expect("initialize generic ACP fixture");
+        let interrupter = session.interrupter().expect("ACP interrupter");
+        assert!(!interrupter.steer_active_turn("hello").await.expect("decline"));
+        session.shutdown().await;
+    })
+    .await
+    .expect("declining a steer should not hang");
+}
+
 /// Current Cursor CLI answers authRequired until `authenticate` names the
 /// method it advertised (`cursor_login`); `login` is rejected outright.
 #[tokio::test]

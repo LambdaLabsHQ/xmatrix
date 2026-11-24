@@ -725,6 +725,24 @@ function handleAcp(message) {
         completeLiveCanaryPrompt(message);
         break;
       }
+      // Antigravity joins a prompt sent mid-turn to the running turn: the
+      // earlier prompt answers end_turn at once and the work carries on.
+      if (provider === "acp-steer") {
+        const chunk = (text) => send({ jsonrpc: "2.0", method: "session/update", params: {
+          sessionId: "acp-fixture-session",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } } });
+        if (acpState.steerFirstId === undefined) {
+          acpState.steerFirstId = message.id;
+          chunk("working;");
+          break;
+        }
+        response({ id: acpState.steerFirstId }, { stopReason: "end_turn" });
+        const joined = message.params.prompt.map((block) => block.text ?? "").join("");
+        chunk(`joined:${joined.includes("PINEAPPLE") ? "PINEAPPLE" : "missing"}`);
+        setTimeout(() => response(message, { stopReason: "end_turn",
+          usage: { inputTokens: 5, outputTokens: 3, totalTokens: 8 } }), 50);
+        break;
+      }
       acpState.promptId = message.id;
       // Kimi-measured permission request: kind-tagged options.
       send({
@@ -791,6 +809,7 @@ const handlers = {
   "acp-quits": handleAcp,
   "acp-browser-login": handleAcp,
   "acp-live-canary": handleAcp,
+  "acp-steer": handleAcp,
 };
 
 if (!handlers[provider]) {
