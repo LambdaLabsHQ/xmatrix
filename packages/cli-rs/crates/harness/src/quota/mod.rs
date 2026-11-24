@@ -256,7 +256,7 @@ pub(crate) fn write_test_executable(path: &std::path::Path, script: &str) {
 }
 
 /// A fresh directory under the system temp dir, unique to this test run.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn test_temp_dir(prefix: &str, name: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
