@@ -297,6 +297,12 @@ final class NativeAttachmentPicker: NSObject {
             return
         }
 
+        // Resign any active keyboard / WKWebView text focus before presenting a
+        // modal picker so UIKit does not resurrect the keyboard on top of the
+        // bottom composer when the picker cancels or dismisses.
+        anchorView?.window?.endEditing(true)
+        anchorView?.endEditing(true)
+
         activeCompletion = OpenPanelCompletionBox(completionHandler)
         if let source {
             present(source: source, allowsMultipleSelection: allowsMultipleSelection, from: presenter)
