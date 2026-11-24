@@ -1,5 +1,5 @@
 import { PostgresMachineControlRepository } from "@xmatrix/db";
-import { MACHINE_TEXT_TASK_CAPABILITY, TEXT_TASK_HARNESSES } from "@xmatrix/protocol";
+import { MACHINE_TEXT_TASK_CAPABILITY, postgresJsonText, TEXT_TASK_HARNESSES } from "@xmatrix/protocol";
 import { registrationQuotaProbeTargetReader } from "./agent-routing-quota-refresh";
 import { machineDaemonCommand, machineDatabase } from "./machines";
 import { createPostgresAuthorityDatabase, createPostgresAuthorityFleet } from "./postgres-authority-fleet";
@@ -49,6 +49,6 @@ export async function issueTextTask(env: Env, machine: TextTaskMachine,
     commandId: `issue:${task.requestId}`, action: "issue", controlId: task.requestId, commandType: "text_task",
     principal: { kind: "user", id: machine.ownerUserId },
     payload: { type: "machine_text_task", requestId: task.requestId, presetId: machine.harness,
-      instruction: task.instruction, input: task.input },
+      instruction: postgresJsonText(task.instruction), input: postgresJsonText(task.input) },
   });
 }

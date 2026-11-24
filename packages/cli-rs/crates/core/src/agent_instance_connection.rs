@@ -2932,8 +2932,10 @@ fn emit_client_network_samples(
     // text: the Hub refuses any other reason (protocol diagnostic-events).
     reason: Option<&'static str>,
 ) {
-    if crate::config::telemetry_disabled() {
-        return;
+    // Connected again: possibly a new network and country, so the next
+    // send asks the Hub afresh.
+    if network_state == "online" {
+        crate::telemetry_consent::invalidate_consent();
     }
     let channels: Vec<String> = history_channels
         .lock()
@@ -2958,7 +2960,12 @@ fn emit_client_network_samples(
         HubRoutes::OBSERVABLE_CLIENT_METRICS,
     );
 
+    let hub_base_url = derive_http_base_url(relay_url);
     tokio::spawn(async move {
+        // Decided before anything leaves the machine (telemetry_consent.rs).
+        if !crate::telemetry_consent::telemetry_allowed_now(&hub_base_url, &token_value).await {
+            return;
+        }
         for channel_id in channels {
             let mut body = serde_json::json!({
                 "clientKind": "cli",

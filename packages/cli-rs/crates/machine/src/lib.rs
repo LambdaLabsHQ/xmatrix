@@ -19,8 +19,8 @@ use fs2::FileExt;
 use xmatrix_cli_args::{
     ForeignWorktreeOrigin, MachineCommand, MachineSupervisorCommand, MachineWorktreesCommand, OnOff,
 };
-use xmatrix_cli_core::config;
 use xmatrix_cli_core::error::{self, CliError};
+use xmatrix_cli_core::{config, telemetry_consent};
 use xmatrix_repo_pool::machine_worktrees::{self, MachineWorktree, WorktreeOrigin};
 #[cfg(windows)]
 use xmatrix_windows_continuity::{
@@ -31,6 +31,16 @@ use xmatrix_windows_continuity::{
 const SUPERVISOR_RESTART_WINDOW: Duration = Duration::from_secs(60);
 #[cfg(windows)]
 const SUPERVISOR_RESTART_LIMIT: usize = 5;
+
+/// Whether this machine's network diagnostics would be sent now, as the daemon decides it.
+async fn telemetry_allowed(hub_url: &str) -> bool {
+    match config::load_session_for_hub(hub_url).await {
+        Some(session) => {
+            telemetry_consent::telemetry_allowed_now(&session.hub_url, &session.token).await
+        }
+        None => false,
+    }
+}
 
 pub async fn cmd_config(
     hub_url: &str,
@@ -66,12 +76,29 @@ pub async fn cmd_config(
                 ))
             })?;
             config::set_telemetry_enabled(enabled).await?;
+            // An explicit choice here is also the account's, so the apps follow it.
+            let choice = if enabled {
+                telemetry_consent::DiagnosticsChoice::OptedIn
+            } else {
+                telemetry_consent::DiagnosticsChoice::OptedOut
+            };
+            let recorded = match config::load_session_for_hub(hub_url).await {
+                Some(session) => {
+                    telemetry_consent::write_choice(&session.hub_url, &session.token, choice).await
+                }
+                None => false,
+            };
             if enabled {
                 println!(
-                    "CLI network diagnostics enabled (opt-in; still suppressed when XMATRIX_TELEMETRY=0 or DO_NOT_TRACK=1 is set)."
+                    "Diagnostics turned on for this machine (still off while XMATRIX_TELEMETRY=0 is set)."
                 );
             } else {
-                println!("CLI network diagnostics disabled (off by default).");
+                println!("Diagnostics turned off for this machine.");
+            }
+            if !recorded {
+                println!(
+                    "  Not saved to your account (signed out or offline); the apps keep their own setting."
+                );
             }
             return Ok(());
         }
@@ -80,7 +107,7 @@ pub async fn cmd_config(
             return Ok(());
         }
         (Some("telemetry"), None) => {
-            println!("{}", !config::telemetry_disabled());
+            println!("{}", telemetry_allowed(hub_url).await);
             return Ok(());
         }
         (None, _) => {
@@ -96,7 +123,7 @@ pub async fn cmd_config(
                 );
                 map.insert(
                     "telemetry".into(),
-                    serde_json::Value::Bool(!config::telemetry_disabled()),
+                    serde_json::Value::Bool(telemetry_allowed(hub_url).await),
                 );
             }
             println!("{}", serde_json::to_string_pretty(&output)?);

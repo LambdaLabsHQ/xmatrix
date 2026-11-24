@@ -3,6 +3,26 @@
 ## Unreleased: an Agent's message wakes only the resting Instances it addresses
 
 Every committed message woke every resting Instance in its Channel, with the message as the woken Instance's first prompt. A live Instance reads another Agent's progress as context, but a woken one took it as its task, so one Agent's report, a review request or a "no further action" receipt woke four or five peers that each started the same work: on 2026-11-17 the Hub canary and its secret check were each opened as three parallel pull requests in one conversation. An Agent's message now wakes only the resting Instances it addresses (an exact `@name:N`, a reply to that Instance's message, a broadcast) and never its author; the others read it by catch-up the next time something wakes them. A person's message still wakes every resting Instance, and idle sleep itself is unchanged. Hub only, no migration. Recovery is a CI-validated beta Hub reverting this change.
+## Unreleased: build both macOS CLI architectures on one Apple Silicon runner
+
+After #1880 moved hosted `macos-x64` CLI builds onto `macos-26`, requesting two
+concurrent `macos-26` VMs per release (and per `cli-release-cache.yml` push)
+hit GitHub's hosted Apple Silicon pool capacity: 6 of 46 CLI releases (including
+four consecutive `web,cli` releases on 2026-11-24, `4.11.1-beta.18`–`beta.21`)
+failed because the second `macos-26` job sat unallocated for 15 minutes and was
+cancelled while the first `macos-26` job finished in ~2 minutes. Both
+`cli-build.yml` and `cli-release-cache.yml` now build `aarch64-apple-darwin`
+(`macos-arm64`) and `x86_64-apple-darwin` (`macos-x64`) sequentially on a single
+`macos-26` VM, resetting the ephemeral `kache` store between targets via
+`.github/scripts/reset-kache-store.sh` so each target retains its full per-part
+cache budget without cross-eviction (self-hosted runners keep their persistent
+store untouched). Both binaries still undergo isolated Developer ID signing,
+`verify-macos-cli-signature.sh`, `lipo -archs` architecture checks, exact
+`--version` verification (via Rosetta `arch -x86_64` for Intel), and separate
+R2 release-part uploads (`macos-arm64` and `macos-x64`). CI / release
+infrastructure only; no binary format, signing identity, or client behavior
+change. Recovery is a CI-validated forward release restoring separate matrix
+entries (or moving `macos-x64` to `macos-26-intel`).
 
 ## Unreleased: Google Cloud results are deleted at 29 days and at disconnect
 

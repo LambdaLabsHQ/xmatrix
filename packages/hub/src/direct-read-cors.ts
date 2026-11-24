@@ -25,6 +25,8 @@ const DIRECT_ROUTES: ReadonlyArray<{ method: "GET" | "POST" | "PUT"; path: RegEx
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/page-links(?:\/agents)?$/u },
   { method: "GET", path: /^\/api\/spaces\/[^/]+\/faces$/u },
   { method: "GET", path: /^\/api\/channels\/[^/]+\/history$/u },
+  // The edge must see the person's own connection to tell the regime of where they are.
+  { method: "GET", path: /^\/api\/me\/diagnostics$/u },
   { method: "POST", path: /^\/api\/channels\/[^/]+\/page-edits\/query$/u },
   // A ticket names no more than the bearer's own access, and lapses unused within a minute.
   { method: "POST", path: /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/live$/u },

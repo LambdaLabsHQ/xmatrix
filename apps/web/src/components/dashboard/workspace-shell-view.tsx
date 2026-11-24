@@ -43,6 +43,7 @@ import { DockTabSlideLayer, MobileListTransitionLayer, SlidingMobileTabDock } fr
 import { useDockTabSlide } from "./use-dock-tab-slide";
 import { closeViewSelection } from "./url-query-state";
 import { ConnectionStatus } from "./connection-status";
+import { DiagnosticsConsentPrompt } from "./diagnostics-consent-prompt";
 import { markStartup, reportStartupTiming, STARTUP_REPORT_SETTLE_MS } from "@/lib/startup-timing";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { Maximize2, X } from "lucide-react";
@@ -750,6 +751,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     onOpenMachine: (machineId) => changeAppViewRef.current("machines", machineId),
   }), [machineTargets]);
   const manageSecrets = useCallback(() => changeAppViewRef.current("settings", "secrets"), []);
+  const openDiagnosticsSettings = useCallback(() => changeAppViewRef.current("settings", "legal"), []);
   const spaceAllowance = useSpaceAllowance(user?.id, currentSpaceId);
   const composerAllowance = useMemo(() => user ? {
     userId: user.id,
@@ -1740,6 +1742,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           className="app-main relative flex min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-card/80"
         >
           <ConnectionStatus />
+          <DiagnosticsConsentPrompt token={token} onOpenSettings={openDiagnosticsSettings} />
           {companion && companionBar ? (
             <CompanionHeader
               channel={composingConversation ? null : selectedChannel}

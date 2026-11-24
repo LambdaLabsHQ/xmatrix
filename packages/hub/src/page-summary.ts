@@ -1,5 +1,5 @@
 import { PageControlError, PostgresPageRepository } from "@xmatrix/db";
-import { TEXT_TASK_INPUT_MAX_BYTES, utf8ByteLength, type PageDocument } from "@xmatrix/protocol";
+import { postgresJsonText, sliceCodeUnitsSafe, TEXT_TASK_INPUT_MAX_BYTES, utf8ByteLength, type PageDocument } from "@xmatrix/protocol";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { issueTextTask, textTaskMachines, type TextTaskMachine } from "./text-task-machines";
@@ -42,8 +42,10 @@ export function pageSummaryLine(text: string): string {
  * is longer than a task carries.
  */
 export function pageSummaryInput(body: string): string {
-  let input = body;
-  while (utf8ByteLength(input) > TEXT_TASK_INPUT_MAX_BYTES) input = input.slice(0, Math.floor(input.length * 0.9));
+  let input = postgresJsonText(body);
+  while (utf8ByteLength(input) > TEXT_TASK_INPUT_MAX_BYTES) {
+    input = sliceCodeUnitsSafe(input, Math.floor(input.length * 0.9));
+  }
   return input;
 }
 

@@ -20,6 +20,7 @@ on:
       - .github/actions/setup-unix-rust-toolchain/**
       - .github/actions/setup-windows-rust-cli/**
       - .github/actions/setup-rust-kache/**
+      - .github/scripts/reset-kache-store.sh
       - .github/scripts/setup-kache.sh
       - .github/scripts/setup-kache.ps1
       - scripts/kache.toml
@@ -41,11 +42,14 @@ jobs:
           - part: linux-x64
             target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
+          # Warm both macOS per-target kache stores sequentially on one
+          # `macos-26` VM so main pushes do not compete for two Apple Silicon
+          # runners simultaneously alongside CLI and iOS releases.
           - part: macos-arm64
-            target: aarch64-apple-darwin
-            runner: macos-26
-          - part: macos-x64
-            target: x86_64-apple-darwin
+            target: aarch64-apple-darwin,x86_64-apple-darwin
+            primary_target: aarch64-apple-darwin
+            secondary_part: macos-x64
+            secondary_target: x86_64-apple-darwin
             runner: macos-26
           - part: windows-x64
             target: x86_64-pc-windows-msvc
@@ -82,7 +86,7 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: packages/cli-rs
         shell: bash
-        run: cargo build --release --target ${{ matrix.target }} --bin xmatrix
+        run: cargo build --release --target ${{ matrix.primary_target || matrix.target }} --bin xmatrix
 
       - name: Build release binary to warm kache (Windows)
         if: runner.os == 'Windows'
@@ -97,3 +101,27 @@ jobs:
         uses: ./.github/actions/cli-release-kache-save
         with:
           part: ${{ matrix.part }}
+
+      - name: Reset hosted kache store before secondary target
+        if: matrix.secondary_target != '' && runner.os != 'Windows'
+        shell: bash
+        run: bash .github/scripts/reset-kache-store.sh
+
+      - name: Restore secondary CLI release kache store
+        id: kache-cache-secondary
+        if: matrix.secondary_part != '' && runner.os != 'Windows'
+        uses: ./.github/actions/cli-release-kache-restore
+        with:
+          part: ${{ matrix.secondary_part }}
+
+      - name: Build secondary release binary to warm kache (Unix)
+        if: matrix.secondary_target != '' && runner.os != 'Windows'
+        working-directory: packages/cli-rs
+        shell: bash
+        run: cargo build --release --target ${{ matrix.secondary_target }} --bin xmatrix
+
+      - name: Save secondary CLI release kache store
+        if: matrix.secondary_part != '' && runner.os != 'Windows' && steps.kache-cache-secondary.outputs.cache-hit != 'true'
+        uses: ./.github/actions/cli-release-kache-save
+        with:
+          part: ${{ matrix.secondary_part }}

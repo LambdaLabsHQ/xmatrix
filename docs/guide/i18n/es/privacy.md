@@ -54,10 +54,10 @@ Para desactivar solo Antigravity, define `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROB
 
 xMatrix no usa cookies publicitarias, rastreo entre sitios, grabación de sesiones ni SDKs de analítica de comportamiento de terceros (como PostHog, Google Analytics o Cloudflare Web Analytics).
 
-**Los diagnósticos opcionales del cliente y los informes de fallos del navegador están desactivados por defecto en todas las regiones (opt-in explícito).** Las páginas públicas de marketing, documentación y avisos legales nunca cargan Sentry. Solo se envían si decides activarlos (o si haces clic en **Send failure report** en una tarjeta de fallo de inicio del daemon):
+Los diagnósticos opcionales del cliente y los informes de fallos del navegador están **desactivados por defecto en las apps y la CLI estables**; los valores por defecto de la beta se describen en la tabla. Las páginas de marketing, documentación y legales sin sesión nunca cargan Sentry. Qué se envía cuando los diagnósticos están activados:
 
-- **Informes de errores y fallos (Sentry):** solo cuando un usuario con sesión iniciada los activa, se envían la clase del error, su código si lo tiene y las ubicaciones de código de su pila. Nunca se envían el mensaje del error, breadcrumbs, URL, cookies, cabeceras, cuerpos de petición ni datos del usuario. Las compilaciones locales o autoalojadas sin DSN no envían nada. (Los errores del Hub en el servidor se siguen informando desde el servidor para operar el servicio alojado; ver más abajo.)
-- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** solo cuando están activados, envían tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave.
+- **Informes de errores y fallos (Sentry):** solo dentro de la app con sesión iniciada, se envían la clase del error, su código si lo tiene y las ubicaciones de código de su pila. Nunca se envían el mensaje del error, breadcrumbs, URL, cookies, cabeceras, cuerpos de petición ni datos del usuario. Las compilaciones locales o autoalojadas sin DSN no envían nada. (Los errores del Hub en el servidor se siguen informando desde el servidor para operar el servicio alojado; ver más abajo.)
+- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** envían tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave.
 
 ### Qué puede contener un evento de diagnóstico
 
@@ -68,10 +68,27 @@ Solo dos caminos llevan texto:
 - **Send failure report en una tarjeta de fallo de inicio del escritorio:** las últimas líneas de la CLI, que la App de escritorio censura antes en tu equipo (directorio personal, direcciones de correo, parámetros de consulta URL y cualquier cosa con forma de token o clave). La tarjeta te muestra esas líneas antes de enviarlas y solo se envían al pulsar el botón; el informe automático enviado con los diagnósticos activados solo lleva la etapa del fallo, el código de salida, la plataforma y la versión de la App.
 - **Informes de errores del Hub en el servidor:** el propio mensaje de error del servidor, sin valores entrecomillados, direcciones de correo, parámetros de consulta URL, rutas del directorio personal ni cadenas con forma de token. Los datos registrados junto al error solo se informan cuando son números, true/false o identificadores opacos.
 
+### Valores por defecto: beta y estable
+
+| | Apps y CLI estables | Apps y CLI beta |
+| --- | --- | --- |
+| Los activaste | Se envían | Se envían |
+| Los desactivaste, o Do Not Track, Global Privacy Control o `XMATRIX_TELEMETRY=0` | No se envían | No se envían |
+| Sin elección; país de registro **y** país actual fuera de la UE, el EEE, el Reino Unido y Suiza | No se envían | Se envían, tras un aviso de una línea con enlace para desactivarlos |
+| Sin elección; alguno de los dos países en la UE, el EEE, el Reino Unido o Suiza, o desconocido | No se envían | No se envían; se ofrece la casilla sin marcar **Send diagnostics to help improve the beta** |
+
+Las filas se aplican en orden: una activación explícita se respeta aunque Do Not Track o Global Privacy Control estén activos. Solo marcar esa casilla o cambiar el interruptor en Ajustes (o `xmatrix config telemetry on|off`) cuenta como elección. Cerrar el aviso no es una elección, y xMatrix nunca cambia tu ajuste por ti.
+
+**Cómo se decide la región.** Tus clientes no tienen una ubicación fiable propia (la zona horaria y el idioma son ajustes), así que se la indica el Hub:
+
+- **Región de registro.** Al crear tu cuenta, el Hub registra, a partir del país que Cloudflare indica para esa solicitud, si es un país que exige consentimiento previo. Solo se guarda esa categoría, nunca el país ni tu dirección IP, y ninguna solicitud posterior la cambia. Las cuentas anteriores la obtienen la primera vez que usan una versión beta. Se elimina con tu cuenta.
+- **Región actual.** Antes de cada envío, el cliente usa la respuesta del Hub para su conexión actual, con un máximo de 10 minutos; si es más antigua, vuelve a preguntar con una pequeña solicitud que no lleva diagnósticos. Si la consulta falla, agota el tiempo o el país es desconocido, no se envía nada. Así, al entrar en un país que exige consentimiento, el envío por defecto se detiene en 10 minutos como máximo.
+
 ### Activar o desactivar diagnósticos e informes de errores
 
-- **Web, escritorio, iOS y Android:** abre **Settings → Legal and privacy** y cambia **Send diagnostics and crash reports** (desactivado por defecto). En escritorio, este interruptor también actualiza `telemetry` en el daemon local.
+- **Web, escritorio, iOS y Android:** abre **Settings → Legal and privacy** y cambia **Send diagnostics and crash reports**. Tu elección se guarda en tu cuenta y todos los clientes la siguen. En escritorio, este interruptor también actualiza el ajuste `telemetry` del daemon local.
 - **CLI y daemon:** desactivados por defecto; actívalos con `xmatrix config telemetry on` o `XMATRIX_TELEMETRY=1`, y desactívalos con `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`.
+- **CLI y daemon:** actívalos con `xmatrix config telemetry on` o `XMATRIX_TELEMETRY=1`, y desactívalos con `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`. `xmatrix config telemetry on|off` también guarda la elección en tu cuenta.
 
 ## Documentos legales
 

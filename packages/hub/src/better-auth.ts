@@ -25,6 +25,7 @@ import { EmailDeliveryConfigurationError, escapeHtml, sendEmail } from "./email-
 import { passwordResetEmail, VERIFIED_PASSWORD_OPTIONS } from "./auth-password-policy";
 import { runBetterAuthHandlerWithObservedHookFailure } from "./better-auth-request-lifecycle";
 import { mintHandleForNewAccount } from "./human-handle-mint";
+import { recordSignupDiagnosticsRegime, requestDiagnosticsRegime, requestFromPersonsConnection } from "./diagnostics-consent";
 import { mcpOAuthPlugins } from "./mcp-oauth";
 import { oauthStateDiagnostic } from "./oauth-state-diagnostic";
 import { TWO_FACTOR_REQUIRED, twoFactorPlugins } from "./two-factor";
@@ -80,6 +81,8 @@ type AuthDatabase = NonNullable<BetterAuthOptions["database"]>;
 
 export interface AuthBehaviorHooks {
   mintHandleForNewAccount(userId: string): Promise<void>;
+  /** Records the diagnostics regime of the country the signup request came from. Never throws. */
+  recordSignupDiagnosticsRegime(userId: string): Promise<void>;
   sendLoginCode(email: string, otp: string): Promise<void>;
   sendPasswordReset(email: string, url: string): Promise<void>;
 }
@@ -167,7 +170,7 @@ async function handleProductAuthRequestWithDatabase(
     env,
     database,
     postgres,
-    productAuthBehavior(env),
+    productAuthBehavior(env, request),
     (error) => {
       emailOtpFailure = error;
     },
@@ -182,9 +185,16 @@ async function handleProductAuthRequestWithDatabase(
   );
 }
 
-function productAuthBehavior(env: Env): AuthBehaviorHooks {
+function productAuthBehavior(env: Env, request: Request): AuthBehaviorHooks {
   return {
     mintHandleForNewAccount: (userId) => mintHandleForNewAccount(env, userId),
+    // A signup relayed by the Web (the apps' native sign-in) has no country of
+    // the person's; their first beta read records it from their own connection.
+    recordSignupDiagnosticsRegime: async (userId) => {
+      if (requestFromPersonsConnection(request)) {
+        await recordSignupDiagnosticsRegime(env, userId, requestDiagnosticsRegime(request));
+      }
+    },
     sendLoginCode: (email, otp) => sendLoginCodeEmail(env, email, otp),
     sendPasswordReset: (email, url) => sendEmail(env, email, passwordResetEmail(url)),
   };
@@ -314,6 +324,9 @@ function createAuthWithDatabase(
             // nothing here is worth failing a sign-up over. The backfill
             // sweeps up whatever this misses.
             await behavior.mintHandleForNewAccount(user.id);
+            // Decided once, here, from the edge's country for the signup
+            // request; an unknown country records consent-required.
+            await behavior.recordSignupDiagnosticsRegime(user.id);
           },
         },
       },

@@ -5,19 +5,23 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { Switch } from "@/components/ui/switch";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import {
+  DIAGNOSTICS_BUILD,
+  diagnosticsPreferenceVersion,
   isDiagnosticsEnabled,
-  setDiagnosticsEnabled,
   subscribeDiagnosticsPreference,
 } from "@/lib/diagnostics-preference";
+import { recordChoice } from "./diagnostics-consent-prompt";
 import { ToolDetailSection, ToolSettingRow } from "./tool-split";
 
-/** Settings toggles for opt-in client diagnostics and (on Desktop) local provider quota probes. */
+const DIAGNOSTICS_DESCRIPTION = DIAGNOSTICS_BUILD === "beta"
+  ? "In this beta, on by default outside the EU, EEA, UK and Switzerland; there, only if you turn it on. "
+  : "Off by default. ";
+
+/** Settings toggles for client diagnostics and (on Desktop) local provider quota probes. */
 export function DiagnosticsSetting() {
-  const enabled = useSyncExternalStore(
-    subscribeDiagnosticsPreference,
-    () => isDiagnosticsEnabled(),
-    () => false,
-  );
+  useSyncExternalStore(subscribeDiagnosticsPreference, diagnosticsPreferenceVersion, () => 0);
+  const enabled = isDiagnosticsEnabled();
+  const [choiceError, setChoiceError] = useState<string | null>(null);
   const [localPrivacy, setLocalPrivacy] = useState<{ telemetry: boolean; quotaProbes: boolean } | null>(null);
 
   useEffect(() => {
@@ -31,12 +35,11 @@ export function DiagnosticsSetting() {
   }, []);
 
   function handleDiagnosticsChange(next: boolean) {
-    setDiagnosticsEnabled(next);
-    const bridge = getDesktopBridge();
-    if (!bridge?.setLocalPrivacySetting) return;
-    void bridge.setLocalPrivacySetting("telemetry", next).then((settings) => {
+    setChoiceError(null);
+    void recordChoice(next ? "opted-in" : "opted-out").then(async () => {
+      const settings = await getDesktopBridge()?.getLocalPrivacySettings?.().catch(() => null);
       if (settings) setLocalPrivacy(settings);
-    }).catch(() => undefined);
+    }, () => setChoiceError("Couldn't save your choice. Try again."));
   }
 
   function handleQuotaProbesChange(next: boolean) {
@@ -52,7 +55,7 @@ export function DiagnosticsSetting() {
     <ToolDetailSection title="Diagnostics and local privacy">
       <ToolSettingRow
         title="Send diagnostics and crash reports"
-        description="Off by default. Opt in to share keyed-HMAC pseudonymized startup timing, onboarding progress, CLI reconnect samples, and scrubbed error reports so we can fix bugs. Never includes messages, code, or credentials."
+        description={`${DIAGNOSTICS_DESCRIPTION}Shares keyed-HMAC pseudonymized startup timing, onboarding progress, CLI reconnect samples, and scrubbed error reports so we can fix bugs. Never includes messages, code, or credentials.${choiceError ? ` ${choiceError}` : ""}`}
         control={(
           <Switch
             checked={enabled}

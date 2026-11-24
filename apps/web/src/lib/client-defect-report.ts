@@ -1,7 +1,7 @@
 import { defaultStackParser } from "@sentry/browser";
 import { diagnosticStackFrame, isDiagnosticCode, type ClientDefectAction } from "@xmatrix/protocol";
 
-import { isDiagnosticsEnabled } from "./diagnostics-preference";
+import { diagnosticsMaySendNow } from "./diagnostics-preference";
 import { xmatrixRawResponse } from "./query/api-client";
 
 /** The web Worker route that forwards a browser defect to error reporting. */
@@ -19,19 +19,22 @@ const reported = new Set<string>();
  * never leave (protocol diagnostic-events).
  */
 export function reportClientDefect(action: ClientDefectAction, error: unknown): void {
-  if (typeof window === "undefined" || !isDiagnosticsEnabled() || reported.size >= PAGE_BUDGET) return;
+  if (typeof window === "undefined" || reported.size >= PAGE_BUDGET) return;
   const name = error instanceof Error ? error.name : typeof error;
   const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
   const stack = error instanceof Error ? browserDefectStack(error) : "";
   const key = `${action}\n${name}\n${String(code)}\n${stack}`;
   if (reported.has(key)) return;
   reported.add(key);
-  void xmatrixRawResponse(CLIENT_DEFECT_ROUTE, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action, name, ...(isDiagnosticCode(code) ? { code } : {}), stack }),
-    keepalive: true,
-  }).catch(() => undefined);
+  const body = JSON.stringify({ action, name, ...(isDiagnosticCode(code) ? { code } : {}), stack });
+  void diagnosticsMaySendNow().then((send) => send
+    ? xmatrixRawResponse(CLIENT_DEFECT_ROUTE, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      keepalive: true,
+    })
+    : undefined).catch(() => undefined);
 }
 
 /** Normalize browser frames for the Worker reporter's Node stack parser. */

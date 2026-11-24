@@ -48,3 +48,48 @@ export function trimEdges(value: string, characters: string): string {
   while (start < value.length && characters.includes(value[start]!)) start += 1;
   return trimEnd(value.slice(start), characters);
 }
+
+/**
+ * Drops NUL (U+0000) and replaces unpaired UTF-16 surrogates with U+FFFD so
+ * `JSON.stringify` never emits Unicode escapes PostgreSQL `jsonb` rejects (22P05).
+ */
+export function postgresJsonText(value: string): string {
+  let out = "";
+  let chunkStart = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0) {
+      out += value.slice(chunkStart, index);
+      chunkStart = index + 1;
+      continue;
+    }
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0;
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        index += 1;
+        continue;
+      }
+      out += `${value.slice(chunkStart, index)}\uFFFD`;
+      chunkStart = index + 1;
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      out += `${value.slice(chunkStart, index)}\uFFFD`;
+      chunkStart = index + 1;
+    }
+  }
+  return chunkStart === 0 ? value : out + value.slice(chunkStart);
+}
+
+/** Slices at most `maxCodeUnits` UTF-16 code units without splitting a surrogate pair. */
+export function sliceCodeUnitsSafe(value: string, maxCodeUnits: number): string {
+  if (maxCodeUnits <= 0) return "";
+  if (value.length <= maxCodeUnits) return value;
+  let cut = maxCodeUnits;
+  const last = value.charCodeAt(cut - 1);
+  if (last >= 0xd800 && last <= 0xdbff) {
+    const next = value.charCodeAt(cut);
+    if (next >= 0xdc00 && next <= 0xdfff) cut -= 1;
+  }
+  return value.slice(0, cut);
+}

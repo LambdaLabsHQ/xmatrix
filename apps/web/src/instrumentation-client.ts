@@ -1,6 +1,6 @@
 import { clientErrorReport } from "@xmatrix/protocol";
 
-import { isDiagnosticsEnabled, subscribeDiagnosticsPreference } from "./lib/diagnostics-preference";
+import { diagnosticsMaySendNow, isDiagnosticsEnabled, subscribeDiagnosticsPreference } from "./lib/diagnostics-preference";
 import { earlyScriptLocation, isBrowserNoticeReport, isStaleBuild } from "./lib/error-noise";
 
 // The Desktop and iOS apps load this same Web app, so this also reports their
@@ -36,10 +36,13 @@ async function startErrorReporting(dsn: string) {
     tracesSampleRate: 0,
     // A report never carries breadcrumbs (clicks, console lines, URLs), so none are collected.
     integrations: (defaults) => defaults.filter((integration) => integration.name !== "Breadcrumbs" && integration.name !== "Console"),
-    beforeSend(event, hint) {
-      if (!isSignedInAppRoute() || !isDiagnosticsEnabled()) return null;
+    async beforeSend(event, hint) {
+      if (!isSignedInAppRoute()) return null;
       // A reload fixes a stale build, and the failure screen offers it; neither is a defect to report.
       if (isStaleBuild(hint.originalException) || isBrowserNoticeReport(hint.originalException, event)) return null;
+      // Decided per report, against a current answer from the Hub: a switch
+      // turned off, or a move into a country that needs consent, stops it.
+      if (!await diagnosticsMaySendNow()) return null;
       // The error's class, code and stack locations only: never what it said (protocol error-report-contract).
       return clientErrorReport(event, hint.originalException);
     },
