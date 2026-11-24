@@ -42,13 +42,22 @@ export async function createWebReleaseHandoff(directory, webDirectory, deploySha
   return createReleaseAssetHandoff(directory, WEB_HANDOFF_ASSETS, handoffOptions);
 }
 
-export async function restoreWebReleaseHandoff(directory, webDirectory, deploySha) {
+/**
+ * A handoff is usable for `deploySha` when its checksums hold and its identity
+ * names that exact commit. This is also the check a tagged build runs on a
+ * bundle its train built beside the gates, before deciding to reuse it.
+ */
+export async function verifyWebReleaseHandoff(directory, deploySha) {
   assertDeploySha(deploySha);
   await verifyReleaseAssetHandoff(directory, WEB_HANDOFF_ASSETS, handoffOptions);
   const identity = JSON.parse(await readFile(path.join(directory, WEB_HANDOFF_IDENTITY), "utf8"));
   if (identity?.schema !== 1 || identity.deploySha !== deploySha) {
     throw new Error(`Web handoff was built from ${identity?.deploySha}, not ${deploySha}`);
   }
+}
+
+export async function restoreWebReleaseHandoff(directory, webDirectory, deploySha) {
+  await verifyWebReleaseHandoff(directory, deploySha);
   if (existsSync(path.join(webDirectory, OPEN_NEXT_DIRECTORY))) {
     throw new Error(`Refusing to restore over an existing ${OPEN_NEXT_DIRECTORY} in ${webDirectory}`);
   }
@@ -67,13 +76,18 @@ export async function restoreWebReleaseHandoff(directory, webDirectory, deploySh
   }
 }
 
-const commands = { create: createWebReleaseHandoff, restore: restoreWebReleaseHandoff };
+const commands = {
+  create: createWebReleaseHandoff,
+  restore: restoreWebReleaseHandoff,
+  // Same arguments as the others; verifying reads only the handoff.
+  verify: (directory, _webDirectory, deploySha) => verifyWebReleaseHandoff(directory, deploySha),
+};
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const [command, directory, webDirectory, deploySha] = process.argv.slice(2);
   try {
     if (!Object.hasOwn(commands, command)) {
-      throw new Error("Usage: node scripts/web-release-handoff.mjs <create|restore> <handoff-directory> <web-directory> <deploy-sha>");
+      throw new Error("Usage: node scripts/web-release-handoff.mjs <create|restore|verify> <handoff-directory> <web-directory> <deploy-sha>");
     }
     await commands[command](directory, webDirectory, deploySha);
   } catch (error) {
