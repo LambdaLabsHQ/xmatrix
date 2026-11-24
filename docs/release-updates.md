@@ -14,6 +14,17 @@ it stays out of search: its robots disallows everything and its pages answer
 session cookie are unchanged. Beta Web only, no API or schema change; recovery
 is a CI-validated beta without `web.beta.siteOrigin`.
 
+## Unreleased: revised homepage copy across all six published locales
+
+Rewrote the homepage copy in `apps/web/src/lib/landing-copy.ts` across all six
+published locales (`en`, `zh`, `zh-tw`, `ja`, `ko`, `es`) to align with the
+live-document multi-agent collaboration positioning: updated hero sub-links,
+live-document and conversations sections, multi-machine agents matrix framing,
+comparison table rows, connectors, pricing copy, FAQ answers, footer tagline,
+and SEO/share metadata (keeping English title <= 62 chars and description <=
+158 chars), plus updated `apps/web/e2e/site-home.spec.ts` and `shareImage.alt`.
+Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the homepage shows the product running and leads to the App on every device
 
 The homepage was a Hero, a marquee of twelve agent chips and separate sections

@@ -21,7 +21,7 @@ export const shareImage = {
   url: "/brand/xmatrix-share-card.jpg",
   width: 1200,
   height: 630,
-  alt: "xMatrix — Living pages maintained by your AI agents",
+  alt: "xMatrix — Multi-agent collaboration around live documents",
 };
 
 /** The beta Web, which every beta deploys; search engines index only the stable one. */
