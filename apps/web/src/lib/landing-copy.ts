@@ -10,17 +10,6 @@ export type Locale = SiteLocale;
 type Pair = readonly [string, string];
 type Row = readonly [string, string, string];
 
-/** The words inside Why xMatrix's animated examples, one example per row. */
-export interface WhyScenes {
-  terminal: string; thread: string; terminalLine: string; threadLine: string; prLine: string;
-  page: string; web: string; mobile: string; docs: string; progress: readonly [string, string, string]; done: readonly [string, string, string];
-  pings: readonly [string, string, string]; quiet: string;
-  copied: string; paste: string; waiting: string;
-  machines: readonly [string, string, string]; thisMachineOnly: string;
-  decided: string; decision: string; read: string; forgot: string;
-  stop: string; again: string; draft: readonly [string, string, string]; edited: string; agentWaits: string;
-}
-
 /**
  * Section headings in Chinese and Japanese break only at punctuation, at a
  * space, or where a zero-width space (`\u200b`) marks the end of a phrase
@@ -41,7 +30,7 @@ export interface LandingCopy {
   conversations: { title: string; body: string };
   /** `body` says how many agents the registry holds. */
   agents: { title: string; body: (count: number) => string; matrixArt: string; listLabel: string };
-  why: { title: string; others: string; rows: readonly Row[]; scenes: WhyScenes };
+  why: { title: string; others: string; rows: readonly Row[] };
   connectors: { title: string; body: string; label: string };
   pricing: {
     title: string; body: string;
@@ -101,15 +90,6 @@ const en: LandingCopy = {
       ["Shared decisions", "Write a decision once; every human and agent reads it.", "Re-explain to every agent, then repeat in the next session."],
       ["Human in the loop", "Edit any line directly—an agent on that paragraph waits for you.", "Interrupt the agent, explain again, and start over."],
     ],
-    scenes: {
-      terminal: "Terminal", thread: "Thread", terminalLine: "claude › fixing auth…", threadLine: "codex: which branch?", prLine: "Changes requested",
-      page: "Launch", web: "Web editor", mobile: "Mobile app", docs: "Launch video", progress: ["login fix, checks 3/5", "build 2.4 at 60%", "cut 2 of 4 scenes"], done: ["merged, live in `v1.0.464`", "build 2.4 in `TestFlight`", "on the launch page"],
-      pings: ["Claude needs your input", "Codex: which branch?", "Cursor is waiting for you"], quiet: "No pings",
-      copied: "Copied the API from Claude", paste: "Paste it into Codex", waiting: "Cursor waits for both",
-      machines: ["Mac Studio", "Linux server", "Windows"], thisMachineOnly: "this machine only",
-      decided: "Decided", decision: "Ship Friday, behind one switch.", read: "read", forgot: "New session: what did we decide?",
-      stop: "Stop", again: "Let me explain again…", draft: ["The editor saves ", "every change", " to the page."], edited: "every keystroke", agentWaits: "waits for you",
-    },
   },
   connectors: {
     title: "Connect your stack. Keep the final say.",
@@ -188,15 +168,6 @@ const zh: LandingCopy = {
       ["团队决策", "写进文档一次，所有成员与智能体实时共享。", "每个智能体都要重复交代，开新会话就全忘。"],
       ["随时介入", "文档里任意一行都能直接改，同段智能体会自动等你。", "只能强行打断智能体，重新解释，从头再来。"],
     ],
-    scenes: {
-      terminal: "终端", thread: "聊天", terminalLine: "claude › 正在修登录…", threadLine: "codex：用哪个分支？", prLine: "需要修改",
-      page: "发布", web: "网页编辑器", mobile: "手机 App", docs: "发布视频", progress: ["修登录，检查 3/5", "2.4 版构建 60%", "剪了 2/4 个镜头"], done: ["已合并，`v1.0.464` 上线", "2.4 版已进 TestFlight", "已放上发布页"],
-      pings: ["Claude 需要你回复", "Codex：用哪个分支？", "Cursor 在等你"], quiet: "没有打扰",
-      copied: "从 Claude 复制了接口", paste: "再粘贴给 Codex", waiting: "Cursor 等着两边",
-      machines: ["Mac Studio", "Linux 服务器", "Windows"], thisMachineOnly: "只看得到本机",
-      decided: "已决定", decision: "周五发布，用一个开关控制。", read: "已读", forgot: "新会话：我们定了什么？",
-      stop: "停止", again: "我再解释一遍……", draft: ["编辑器会把", "每一次修改", "存进页面。"], edited: "每一次按键", agentWaits: "在等你",
-    },
   },
   connectors: {
     title: "连上常用服务，操作由你把关",
@@ -278,15 +249,6 @@ const zhTw: LandingCopy = {
       ["團隊決策", "寫進文件一次，所有成員與代理即時共享。", "每個代理都要重複交代，開新工作階段就全忘。"],
       ["隨時介入", "文件裡任意一行都能直接改，同段代理會自動等你。", "只能強行打斷代理，重新解釋，從頭再來。"],
     ],
-    scenes: {
-      terminal: "終端機", thread: "對話串", terminalLine: "claude › 修復登入中…", threadLine: "codex：用哪個分支？", prLine: "需要修改",
-      page: "發佈", web: "網頁編輯器", mobile: "行動 App", docs: "發佈影片", progress: ["登入修復，檢查 3/5", "2.4 版建置 60%", "剪輯 2/4 個片段"], done: ["已合併，`v1.0.464` 上線", "2.4 版進 TestFlight", "已放上發佈頁"],
-      pings: ["Claude 等待你的回覆", "Codex：用哪個分支？", "Cursor 正在等你"], quiet: "不再打擾",
-      copied: "從 Claude 複製了 API", paste: "貼到 Codex", waiting: "Cursor 等待雙方",
-      machines: ["Mac Studio", "Linux 伺服器", "Windows"], thisMachineOnly: "僅限本機",
-      decided: "已拍板", decision: "週五上線，加上功能開關。", read: "已讀", forgot: "新工作階段：我們決定了什麼？",
-      stop: "停止", again: "我再說明一次……", draft: ["編輯器會把", "每一次修改", "存進頁面。"], edited: "每次按鍵", agentWaits: "正在等你",
-    },
   },
   connectors: {
     title: "連上常用服務，操作由你把關",
@@ -368,15 +330,6 @@ const ja: LandingCopy = {
       ["チームの意思決定", "ドキュメントに一度書けば、メンバーも全エージェントも即座に共有。", "エージェントごとに何度も説明し直し、新しいセッションで忘れられる。"],
       ["いつでも介入", "どの行も直接編集でき、同じ段落のエージェントは自動で待機。", "エージェントを強制停止し、説明し直して最初からやり直し。"],
     ],
-    scenes: {
-      terminal: "ターミナル", thread: "スレッド", terminalLine: "claude › 認証を修正中…", threadLine: "codex: どのブランチ？", prLine: "修正依頼あり",
-      page: "リリース", web: "Web エディタ", mobile: "モバイルアプリ", docs: "紹介動画", progress: ["ログイン修正 チェック 3/5", "2.4 ビルド 60%", "4 シーン中 2 完了"], done: ["マージ済 `v1.0.464` 公開", "2.4 を TestFlight 配信", "公開ページに掲載済"],
-      pings: ["Claude が入力待ち", "Codex: どのブランチ？", "Cursor が待機中"], quiet: "通知なし",
-      copied: "Claude から API をコピー", paste: "Codex に貼り付け", waiting: "Cursor が両方を待機",
-      machines: ["Mac Studio", "Linux サーバー", "Windows"], thisMachineOnly: "このマシン限定",
-      decided: "決定", decision: "金曜日にフラグ付きで出荷。", read: "参照済", forgot: "新規セッション：何を決めた？",
-      stop: "停止", again: "もう一度説明します…", draft: ["エディタは", "すべての変更を", "ページに保存します。"], edited: "入力のたびに", agentWaits: "待機中",
-    },
   },
   connectors: {
     title: "いつものサービスをつなぎ、\u200b最終判断はあなたが。",
@@ -458,15 +411,6 @@ const ko: LandingCopy = {
       ["팀 의사결정", "문서에 한 번 기록하면 모든 팀원과 에이전트가 즉시 공유.", "에이전트마다 반복 설명하고 새 세션이면 전부 잊음."],
       ["언제든 개입", "문서의 어느 줄이든 바로 수정 가능. 같은 문단의 에이전트는 자동 대기.", "에이전트를 강제로 멈추고 다시 설명한 뒤 처음부터 재시작."],
     ],
-    scenes: {
-      terminal: "터미널", thread: "스레드", terminalLine: "claude › 인증 수정 중…", threadLine: "codex: 어떤 브랜치?", prLine: "수정 요청됨",
-      page: "출시", web: "웹 에디터", mobile: "모바일 앱", docs: "출시 영상", progress: ["로그인 수정, 체크 3/5", "2.4 빌드 60%", "4장면 중 2장면 완료"], done: ["병합 완료, `v1.0.464` 배포", "2.4 TestFlight 업로드", "출시 페이지 반영"],
-      pings: ["Claude가 응답 대기 중", "Codex: 어떤 브랜치?", "Cursor가 대기 중"], quiet: "방해 없음",
-      copied: "Claude에서 API 복사", paste: "Codex에 붙여넣기", waiting: "Cursor가 둘 다 대기",
-      machines: ["Mac Studio", "Linux 서버", "Windows"], thisMachineOnly: "이 머신만 가능",
-      decided: "결정됨", decision: "금요일 출시, 피처 플래그 적용.", read: "읽음", forgot: "새 세션: 뭘 결정했죠?",
-      stop: "중지", again: "다시 설명할게요…", draft: ["에디터가 ", "모든 변경사항을", " 페이지에 저장합니다."], edited: "매 입력마다", agentWaits: "대기 중",
-    },
   },
   connectors: {
     title: "자주 쓰는 서비스를 연결하고, 최종 결정은 직접.",
@@ -548,15 +492,6 @@ const es: LandingCopy = {
       ["Decisiones compartidas", "Escribe una decisión una vez; cada persona y agente la lee.", "Vuelve a explicarlo a cada agente y repítelo en la siguiente sesión."],
       ["Tú al mando", "Edita cualquier línea directamente; el agente en ese párrafo te espera.", "Interrumpe al agente, vuelve a explicar y empieza de cero."],
     ],
-    scenes: {
-      terminal: "Terminal", thread: "Hilo", terminalLine: "claude › corrigiendo auth…", threadLine: "codex: ¿qué rama?", prLine: "Cambios pedidos",
-      page: "Lanzamiento", web: "Editor web", mobile: "App móvil", docs: "Video de lanzamiento", progress: ["fix login, checks 3/5", "build 2.4 al 60%", "2 de 4 escenas listas"], done: ["fusionado en `v1.0.464`", "build 2.4 en `TestFlight`", "en la página de lanzamiento"],
-      pings: ["Claude necesita tu respuesta", "Codex: ¿qué rama?", "Cursor está esperando"], quiet: "Sin interrupciones",
-      copied: "API copiada de Claude", paste: "Pegar en Codex", waiting: "Cursor espera a ambos",
-      machines: ["Mac Studio", "Servidor Linux", "Windows"], thisMachineOnly: "solo esta máquina",
-      decided: "Decidido", decision: "Publicar el viernes con feature flag.", read: "leído", forgot: "Nueva sesión: ¿qué decidimos?",
-      stop: "Detener", again: "Te explico de nuevo…", draft: ["El editor guarda ", "cada cambio", " en la página."], edited: "cada pulsación", agentWaits: "te espera",
-    },
   },
   connectors: {
     title: "Conecta tu stack. Conserva la última palabra.",

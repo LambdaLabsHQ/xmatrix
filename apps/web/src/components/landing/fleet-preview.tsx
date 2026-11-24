@@ -52,12 +52,58 @@ function machines(step: number): Machine[] {
 }
 const STEPS = 6;
 
-const workingOn = (machine: Machine) =>
+const workingOn = (machine: { cells: Record<string, FleetMatrixCell> }) =>
   Object.values(machine.cells).reduce((sum, cell) => sum + (cell.kind === "agent" ? cell.working : 0), 0);
-const stateLine = (machine: Machine) => {
+const stateLine = (machine: { online: boolean; cells: Record<string, FleetMatrixCell> }) => {
   const count = workingOn(machine);
   return !machine.online ? "Offline · seen 2h ago" : count === 0 ? "Idle" : `${count} working`;
 };
+
+export interface SampleFleetMachine {
+  key: string;
+  name: string;
+  os: MachineOs;
+  online: boolean;
+  cells: Record<string, FleetMatrixCell>;
+}
+
+/** Builds real FleetMatrix & MobileAvatarMatrix props for sample Spaces on the homepage. */
+export function buildSampleFleetView(space: readonly SampleFleetMachine[]) {
+  const rows: FleetMatrixRow[] = space.map((machine) => ({
+    key: machine.key,
+    name: machine.name,
+    dimmed: !machine.online,
+    cells: machine.cells,
+    heading: (
+      <span className={FLEET_MATRIX_MACHINE_HEADING_CLASS}>
+        <span className="app-tool-state-icon shrink-0" data-state={machine.online ? "running" : "offline"}>
+          <MachineGlyph os={machine.os} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className={FLEET_MATRIX_MACHINE_NAME_CLASS}>{machine.name}</span>
+          <span className={FLEET_MATRIX_MACHINE_FACTS_CLASS}>{stateLine(machine)}</span>
+        </span>
+      </span>
+    ),
+  }));
+  const mobileRows: MobileMatrixRow[] = space.map((machine) => ({
+    key: machine.key,
+    name: machine.name,
+    os: machine.os,
+    own: true,
+    online: machine.online,
+    dimmed: !machine.online,
+    exception: machine.cells.claude?.kind === "agent" && machine.cells.claude.state === "attention" ? "claude 5h limit" : null,
+    loadAlerts: [],
+    quietNote: machine.online ? null : "Offline · 2h ago",
+    cells: machine.cells,
+  }));
+  const attention = space.filter((machine) =>
+    Object.values(machine.cells).some((cell) => cell.kind === "agent" && cell.state === "attention"),
+  ).length;
+  const workingCount = space.reduce((sum, machine) => sum + workingOn(machine), 0);
+  return { rows, mobileRows, attention, workingCount };
+}
 
 /** The Agents matrix of a sample Space, moving while it is in view. */
 export function FleetPreview() {
@@ -83,26 +129,7 @@ export function FleetPreview() {
   }, [host]);
 
   const space = useMemo(() => machines(step), [step]);
-  const rows: FleetMatrixRow[] = space.map((machine) => ({
-    key: machine.key, name: machine.name, dimmed: !machine.online, cells: machine.cells,
-    heading: (
-      <span className={FLEET_MATRIX_MACHINE_HEADING_CLASS}>
-        <span className="app-tool-state-icon shrink-0" data-state={machine.online ? "running" : "offline"}>
-          <MachineGlyph os={machine.os} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className={FLEET_MATRIX_MACHINE_NAME_CLASS}>{machine.name}</span>
-          <span className={FLEET_MATRIX_MACHINE_FACTS_CLASS}>{stateLine(machine)}</span>
-        </span>
-      </span>
-    ),
-  }));
-  const mobileRows: MobileMatrixRow[] = space.map((machine) => ({
-    key: machine.key, name: machine.name, os: machine.os, own: true, online: machine.online, dimmed: !machine.online,
-    exception: machine.cells.claude.kind === "agent" && machine.cells.claude.state === "attention" ? "claude 5h limit" : null,
-    loadAlerts: [], quietNote: machine.online ? null : "Offline · 2h ago", cells: machine.cells,
-  }));
-  const attention = space.filter((machine) => Object.values(machine.cells).some((cell) => cell.kind === "agent" && cell.state === "attention")).length;
+  const { rows, mobileRows, attention, workingCount } = buildSampleFleetView(space);
 
   return (
     // On the page's paper, not the app's: the table's sticky column takes the same paper.
@@ -111,7 +138,7 @@ export function FleetPreview() {
       {desktop
         ? <FleetMatrix columns={COLUMNS} rows={rows} selected={null} onSelect={noop} editors={[]} />
         : <MobileAvatarMatrix columns={COLUMNS} rows={mobileRows} ownMachineCount={space.length} attentionCount={attention}
-            workingCount={space.reduce((sum, machine) => sum + workingOn(machine), 0)} selected={null} onSelect={noop} editors={[]} />}
+            workingCount={workingCount} selected={null} onSelect={noop} editors={[]} />}
     </div>
   );
 }
