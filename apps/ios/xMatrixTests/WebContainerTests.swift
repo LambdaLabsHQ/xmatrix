@@ -1,4 +1,5 @@
 import XCTest
+import PhotosUI
 import WebKit
 import StoreKit
 import AuthenticationServices
@@ -698,6 +699,43 @@ final class WebContainerTests: XCTestCase {
         XCTAssertNotEqual(staged, source)
         XCTAssertEqual(staged.lastPathComponent, "note.txt")
         XCTAssertEqual(try Data(contentsOf: staged), payload)
+    }
+
+    func testNativePickerResignsFirstResponderBeforePresentingAndAllowsRepickAfterCancel() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let presenter = RecordingPickerPresenter()
+        let textField = UITextField(frame: CGRect(x: 16, y: 740, width: 320, height: 44))
+        presenter.view.addSubview(textField)
+        window.rootViewController = presenter
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        XCTAssertTrue(textField.becomeFirstResponder())
+        XCTAssertTrue(textField.isFirstResponder)
+
+        let picker = NativeAttachmentPicker()
+        picker.anchorView = presenter.view
+
+        var cancelCompleted = false
+        picker.presentOpenPanel(source: .photos, allowsMultipleSelection: true) { urls in
+            XCTAssertNil(urls)
+            cancelCompleted = true
+        }
+        XCTAssertFalse(textField.isFirstResponder)
+        let photoPicker = try XCTUnwrap(presenter.presentedPanel as? PHPickerViewController)
+        photoPicker.presentationController?.delegate?.presentationControllerDidDismiss?(
+            try XCTUnwrap(photoPicker.presentationController)
+        )
+        XCTAssertTrue(cancelCompleted)
+        XCTAssertFalse(textField.isFirstResponder)
+
+        var repickPresented = false
+        picker.presentOpenPanel(source: .files, allowsMultipleSelection: true) { _ in
+            repickPresented = true
+        }
+        let followUp = try XCTUnwrap(presenter.presentedPanel as? UIDocumentPickerViewController)
+        followUp.delegate?.documentPickerWasCancelled?(followUp)
+        XCTAssertTrue(repickPresented)
     }
 
     func testAttachmentPickerParsesSourcesPrefersMoviesAndSanitizesNames() {
