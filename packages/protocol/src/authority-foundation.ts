@@ -416,6 +416,16 @@ export const HUB_ROUTES = {
     `/api/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}`,
   cross_space_read_grant_decision: (spaceId: string, grantId: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}/decision`,
+  channel_support_handoffs: (channelId: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/support-handoffs`,
+  support_handoff: (spaceId: string, grantId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}`,
+  support_handoff_part: (spaceId: string, grantId: string, part: "messages" | "diagnostics" | "logs") =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}/${part}`,
+  support_handoff_revoke: (spaceId: string, grantId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}/revoke`,
+  support_handoff_replies: (spaceId: string, grantId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}/replies`,
   observable_client_metrics: "/api/observable/client-metrics",
   observable_onboarding_step: "/api/observable/onboarding-step",
   observable_startup_timing: "/api/observable/startup-timing",
@@ -643,6 +653,16 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}`,
   cross_space_read_grant_decision: (spaceId: string, grantId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}/decision`,
+  channel_support_handoffs: (channelId: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/support-handoffs`,
+  support_handoff: (spaceId: string, grantId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}`,
+  support_handoff_part: (spaceId: string, grantId: string, part: "messages" | "diagnostics" | "logs") =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}/${part}`,
+  support_handoff_revoke: (spaceId: string, grantId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}/revoke`,
+  support_handoff_replies: (spaceId: string, grantId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}/replies`,
   space_norn_program: (spaceId: string, programId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/norn-programs/${encodeURIComponent(programId)}`,
   space_norn_request: (spaceId: string, requestRef: string) =>

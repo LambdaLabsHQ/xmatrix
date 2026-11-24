@@ -1,4 +1,6 @@
 import { ControlError } from "./control-error.js";
+import { useSupportGrant } from "./support-handoff-grants.js";
+import type { SupportHandoffPart } from "@xmatrix/protocol";
 import { storedIso as iso } from "./stored-values.js";
 import type { QueryResultRow } from "pg";
 import { sha256Hex } from "@xmatrix/protocol";
@@ -53,9 +55,14 @@ export interface CrossSpaceReadGrant {
   requestedAt: string; decidedAt?: string; expiresAt: string; lastReadAt?: string;
 }
 
-/** Who a granted read is made as: always the Run's owner, in the target Space. */
+/**
+ * Who a granted read is made as, in the target Space: the Run's owner for a
+ * Run's grant, the person who handed the Channel over for a support handoff.
+ * `accessNote` names the Channel to tell that support read it, at most hourly.
+ */
 export interface CrossSpaceReadAuthorization {
   ownerUserId: string; spaceId: string; grantId: string;
+  accessNote?: { channelId: string; at: string };
 }
 
 const { text } = commandFields((field) =>
@@ -87,6 +94,15 @@ const GRANT_COLUMNS = `grant_id,space_id,channel_id,scope,owner_user_id,agent_id
   instance_id,source_space_id,source_channel_id,notice_message_id,status,reason,version,read_count,
   requested_at,decided_at,expires_at,last_read_at`;
 
+/** Terminal grants older than 30 days leave, a bounded batch per new request in the Space. */
+export async function removeOldTerminalGrants(tx: DatabaseTransaction, spaceId: string, at: Date): Promise<void> {
+  await tx.query({ name: "cross_space_read_cleanup_v2", text: `DELETE FROM data.cross_space_read_grants
+    WHERE grant_id IN (SELECT grant_id FROM data.cross_space_read_grants WHERE space_id=$1
+      AND status IN ('denied','revoked','expired') AND requested_at<$2
+      ORDER BY requested_at LIMIT ${CLEANUP_LIMIT})`,
+  values: [spaceId, new Date(at.getTime() - TERMINAL_RETENTION_MS).toISOString()], maxRows: 0 });
+}
+
 export class PostgresCrossSpaceReadRepository {
   private readonly channels: PostgresChannelSpaceDirectory;
   private readonly entities: PostgresEntitySpaceDirectory;
@@ -101,7 +117,7 @@ export class PostgresCrossSpaceReadRepository {
   }
 
   /** One transaction on the shard that holds `spaceId`, while it is not moving. */
-  private async inSpace<T>(requestId: string, operation: string, spaceId: string,
+  protected async inSpace<T>(requestId: string, operation: string, spaceId: string,
     work: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
     const placement = await this.placements.resolveWritable(
       { requestId, operation: `${operation}.placement` }, spaceId, () => new CrossSpaceReadError(
@@ -112,7 +128,7 @@ export class PostgresCrossSpaceReadRepository {
   }
 
   /** The target Channel's Space, or not found; never an existence oracle. */
-  private async channelSpace(requestId: string, channelId: string): Promise<string> {
+  protected async channelSpace(requestId: string, channelId: string): Promise<string> {
     const route = await this.channels.resolve({ requestId, operation: "cross-space-read.channel.locate" },
       text(channelId, "channelId"));
     if (!route) throw new CrossSpaceReadError("channel_not_found", 404, "Channel not found");
@@ -123,7 +139,7 @@ export class PostgresCrossSpaceReadRepository {
    * Prove the exact live Run in its own Space, the way invocation diagnostics
    * do, and return its owner.
    */
-  private async proveRun(requestId: string, proof: CrossSpaceRunProof): Promise<{
+  protected async proveRun(requestId: string, proof: CrossSpaceRunProof): Promise<{
     ownerUserId: string; agentName: string | null; executionKeyDigest: string }> {
     const runId = text(proof.runId, "runId");
     const route = await this.entities.resolve({ requestId, operation: "cross-space-read.run.locate" }, "run", runId);
@@ -158,7 +174,7 @@ export class PostgresCrossSpaceReadRepository {
   }
 
   /** The owner may read the Channel now; a Channel they cannot see does not exist. */
-  private async requireOwnerRead(tx: DatabaseTransaction, spaceId: string, channelId: string,
+  protected async requireOwnerRead(tx: DatabaseTransaction, spaceId: string, channelId: string,
     ownerUserId: string): Promise<void> {
     await requireChannelCapability(tx, { capability: "message_content_read", channelId, spaceId,
       principal: { kind: "user", id: ownerUserId },
@@ -194,11 +210,7 @@ export class PostgresCrossSpaceReadRepository {
         SET status='expired',version=version+1 WHERE run_id=$1 AND space_id=$2
           AND status IN ('pending','approved') AND expires_at<=$3`,
       values: [input.proof.runId, spaceId, at.toISOString()], maxRows: 0 });
-      await tx.query({ name: "cross_space_read_cleanup_v1", text: `DELETE FROM data.cross_space_read_grants
-        WHERE grant_id IN (SELECT grant_id FROM data.cross_space_read_grants WHERE space_id=$1
-          AND status IN ('denied','revoked','expired') AND requested_at<$2
-          ORDER BY requested_at LIMIT ${CLEANUP_LIMIT})`,
-      values: [spaceId, new Date(at.getTime() - TERMINAL_RETENTION_MS).toISOString()], maxRows: 0 });
+      await removeOldTerminalGrants(tx, spaceId, at);
       const existing = (await tx.query<QueryResultRow>({ name: "cross_space_read_open_v1", text: `SELECT
           ${GRANT_COLUMNS},execution_key_digest FROM data.cross_space_read_grants
         WHERE run_id=$1 AND space_id=$2 AND status IN ('pending','approved')
@@ -305,7 +317,8 @@ export class PostgresCrossSpaceReadRepository {
       const row = (await tx.query<QueryResultRow>({ name: "cross_space_read_get_v1", text: `SELECT
           ${GRANT_COLUMNS} FROM data.cross_space_read_grants WHERE space_id=$1 AND grant_id=$2 LIMIT 1`,
       values: [spaceId, grantId], maxRows: 1 }))[0];
-      const visible = row && (principal.kind === "user"
+      // A support handoff is read through its own routes, never as a Run's grant.
+      const visible = row && row.run_id && (principal.kind === "user"
         ? row.owner_user_id === principal.id
         : row.run_id === principal.proof.runId && row.instance_id === principal.proof.instanceId);
       if (!visible) throw new CrossSpaceReadError("grant_not_found", 404, "Grant not found");
@@ -332,7 +345,7 @@ export class PostgresCrossSpaceReadRepository {
       const row = (await tx.query<QueryResultRow>({ name: "cross_space_read_decide_lock_v1", text: `SELECT
           ${GRANT_COLUMNS} FROM data.cross_space_read_grants WHERE space_id=$1 AND grant_id=$2 LIMIT 1
         FOR UPDATE`, values: [spaceId, grantId], maxRows: 1 }))[0];
-      if (!row || row.owner_user_id !== ownerUserId) throw new CrossSpaceReadError(
+      if (!row || !row.run_id || row.owner_user_id !== ownerUserId) throw new CrossSpaceReadError(
         "grant_not_found", 404, "Grant not found");
       const current = grant(row);
       const at = new Date();
@@ -377,7 +390,7 @@ export class PostgresCrossSpaceReadRepository {
    * names a Space-wide catalog read, which only a Space grant covers.
    */
   async authorizeRead(input: { requestId: string; proof: CrossSpaceRunProof; channelId?: string;
-    spaceId?: string }): Promise<CrossSpaceReadAuthorization | null> {
+    spaceId?: string; part?: SupportHandoffPart }): Promise<CrossSpaceReadAuthorization | null> {
     const requestId = text(input.requestId, "requestId", 200);
     const channelId = input.channelId === undefined ? null : text(input.channelId, "channelId");
     if (!channelId && input.spaceId === undefined) throw new CrossSpaceReadError(
@@ -399,6 +412,17 @@ export class PostgresCrossSpaceReadRepository {
         RETURNING g.grant_id`,
       values: [spaceId, input.proof.runId, input.proof.instanceId, run.executionKeyDigest,
         run.ownerUserId, at, channelId], maxRows: 1 });
+      if (!rows[0] && channelId && input.part) {
+        // Not the Run's own grant: a support handoff to the Run's Space may cover it.
+        // Only a Run working in that handoff's support conversation reads through it.
+        const handoff = await useSupportGrant(tx, { spaceId, channelId, part: input.part, at,
+          supportSpaceId: input.proof.spaceId, supportChannelId: input.proof.channelId });
+        if (handoff) {
+          await this.requireOwnerRead(tx, spaceId, channelId, handoff.ownerUserId);
+          return { ownerUserId: handoff.ownerUserId, spaceId, grantId: handoff.grantId,
+            ...(handoff.accessNote ? { accessNote: handoff.accessNote } : {}) };
+        }
+      }
       if (!rows[0]) throw new CrossSpaceReadError("cross_space_read_grant_required", 403,
         "This Run has no approved grant to read outside its own Space; " +
         "ask its owner with `xmatrix access request <channel>`");

@@ -482,6 +482,11 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/page-migration\/apply$/u.test(path)) return true;
   if (request.method === "POST" && path === HUB_ROUTES.cross_space_read_requests) return true;
   if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/cross-space-read-grants\/[^/]+$/u.test(path)) return true;
+  // A Run working in a support conversation reads and answers its handoff; the
+  // routes prove the exact Run and that conversation (support-handoff.ts).
+  if (request.method === "GET" &&
+      /^\/api\/spaces\/[^/]+\/support-handoffs\/[^/]+(?:\/(?:messages|diagnostics|logs))?$/u.test(path)) return true;
+  if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/support-handoffs\/[^/]+\/replies$/u.test(path)) return true;
   // Human collaboration parity: open threads, create and reorganize Channels,
   // edit and delete its own messages, react, read the launch catalog. Each route
   // proves the exact Run and its owner through requireAgentRunChannelDelegation.
