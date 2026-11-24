@@ -59,6 +59,33 @@ test("a reply names its parent, activity folds to one line, a recall hides its b
   assert.ok(context.text.includes("[attachment] shot.png (image/png, 12 bytes) — run `xmatrix channel history c1`"));
 });
 
+test("a launch transcript carries the Chrome page metadata of earlier side-panel messages", () => {
+  const question = message("m1", 1, "Daniel", "who is this?", {
+    metadata: { browserPage: { title: "Profile  Page", href: "https://example.test/profile" } },
+  });
+  const recalled = message("m2", 2, "Daniel", "hidden", {
+    recalledAt: "2026-09-18T20:03:00Z",
+    metadata: { browserPage: { title: "Secret", href: "https://example.test/secret" } },
+  });
+  const summon = message("xmatrix-summon:m1", 3, "xMatrix", "@claude", {
+    from: { kind: "system", label: "xMatrix" },
+    replyToMessageId: "m1",
+  });
+  const context = renderLaunchContext({
+    channelId: "c1",
+    complete: true,
+    readAt: READ_AT,
+    startedForId: "xmatrix-summon:m1",
+    messages: [question, recalled, summon],
+  });
+  assert.ok(
+    context.text.includes(
+      "  Viewing in Chrome: Profile Page <https://example.test/profile> (`xmatrix browse` reads this page from their browser)\n",
+    ),
+  );
+  assert.ok(!context.text.includes("https://example.test/secret"));
+});
+
 test("an oversized conversation keeps the newest messages, says so, and only then carries the About", () => {
   const messages = Array.from({ length: 10 }, (_, index) => message(`m${index}`, index + 1, "Ann", "x".repeat(100)));
   const whole = renderLaunchContext({ channelId: "c1", complete: true, readAt: READ_AT, messages,

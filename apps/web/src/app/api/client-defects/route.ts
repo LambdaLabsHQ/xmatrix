@@ -1,40 +1,37 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { clientDefectAction } from "@xmatrix/protocol";
+import { parseClientDefectReport } from "@xmatrix/protocol";
 
 import { webErrorReporting } from "@/lib/server-error-reporting";
 
 export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 8_192;
-const LIMITS = { name: 80, message: 300, stack: 2_000 } as const;
 
 /**
  * A browser defect, reported like a Worker failure: under the action the person
- * was taking, with a bounded name, message and stack. Same-origin only; the
- * body carries no content by construction (src/lib/client-defect-report.ts),
- * and an action outside the closed set is not written at all.
+ * was taking, with the error's class, its code and its stack's code locations
+ * (protocol `parseClientDefectReport`). Same-origin only; a body with any other
+ * field, a message among them, or an action outside the closed set is not
+ * written at all.
  */
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(request.url).origin) return new Response(null, { status: 403 });
   const text = await request.text();
   if (text.length > MAX_BODY_BYTES) return new Response(null, { status: 413 });
-  let body: Record<string, unknown>;
+  let report: ReturnType<typeof parseClientDefectReport>;
   try {
-    const parsed: unknown = JSON.parse(text);
-    if (!parsed || typeof parsed !== "object") return new Response(null, { status: 400 });
-    body = parsed as Record<string, unknown>;
+    report = parseClientDefectReport(JSON.parse(text));
   } catch {
-    return new Response(null, { status: 400 });
+    report = undefined;
   }
-  const field = (key: keyof typeof LIMITS) => typeof body[key] === "string"
-    ? (body[key] as string).slice(0, LIMITS[key]) : "";
+  if (!report) return new Response(null, { status: 400 });
   const reporting = await webErrorReporting();
   if (!reporting) return Response.json({ reference: null }, { status: 202 });
-  const defect = new Error(field("message") || "(no message)");
-  defect.name = field("name") || "ClientDefect";
-  defect.stack = `${defect.name}: ${defect.message}\n${field("stack")}`;
-  const reference = reporting.reportError(defect, { operation: `browser: ${clientDefectAction(body.action) ?? "unknown action"}` });
+  const defect = Object.assign(new Error(report.code ?? ""), report.code ? { code: report.code } : {});
+  defect.name = report.name;
+  defect.stack = `${defect.name}: ${defect.message}\n${report.stack}`;
+  const reference = reporting.reportError(defect, { operation: `browser: ${report.action}` });
   getCloudflareContext().ctx.waitUntil(reporting.sendErrorReports());
   return Response.json({ reference: reference ?? null }, { status: 202 });
 }

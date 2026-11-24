@@ -229,9 +229,12 @@ CLI file an older running daemon still holds (`os error 32`/`33`), and a
 daemon Windows ended from outside (exit code 4294967295). Any other failure says
 what it means in one sentence. Either way the lines and exit code are folded
 under Details, the card follows the person's language, and "Try again" starts
-the service once more. The Web sends each failure once per
-page to `POST /api/observable/desktop-daemon-failure`, which writes one point to
-the diagnostics dataset under the person's keyed hash.
+the service once more. With diagnostics on, the Web sends each failure once per
+page to `POST /api/observable/desktop-daemon-failure` as its stage, exit code,
+platform and App version; the lines go only when the person presses "Send
+failure report" on the card (the event's one `submitted` field, protocol
+`DESKTOP_DAEMON_FAILURE_EVENT`). The Hub writes one point to the diagnostics
+dataset under the person's keyed hash; `blob11` is empty for an automatic report.
 
 The day's failures, by stage:
 

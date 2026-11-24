@@ -291,9 +291,9 @@ export {
 export type {
   PublicMachineStartupFailure,
 } from "./machine-startup-failure.js";
-export { clientDefectAction } from "./client-defect-actions.js";
+export { clientDefectAction, parseClientDefectReport } from "./client-defect-actions.js";
 export { CHANNEL_CREATE_KEY_HEADER, channelCreateId } from "./channel-create-id.js";
-export type { ClientDefectAction } from "./client-defect-actions.js";
+export type { ClientDefectAction, ClientDefectReport } from "./client-defect-actions.js";
 export {
   hmacBytes, hmacHex, lowercaseHex, sha256BytesSync, sha256Hex, timingSafeEqual, utf8ByteLength,
 } from "./hex.js";
@@ -652,6 +652,9 @@ export type {
 export {
   DESKTOP_DAEMON_FAILURE_DETAIL_MAX, DESKTOP_DAEMON_FAILURE_STAGES, parseDesktopDaemonFailureReport,
 } from "./desktop-bridge.js";
+export { diagnosticStackFrame, isDiagnosticCode, isDiagnosticId, parseDiagnosticEvent } from "./diagnostic-events.js";
+export { clientErrorReport } from "./error-report-contract.js";
+export type { DiagnosticEvent, DiagnosticEventSchema, DiagnosticField } from "./diagnostic-events.js";
 export {
   readBoundedStream,
 } from "./read-bounded-stream.js";

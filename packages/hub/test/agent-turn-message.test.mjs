@@ -32,3 +32,18 @@ test("attachments, a linked sender and a relayed cross-Channel reply keep their 
     crossChannelReply: { sourceChannelId: "c7", sourceMessageId: "q1", replierKind: "agent" } } };
   assert.match(renderAgentTurnMessage(relayed, {}, AT), / from Ann \[agent\] replying in Channel c7 to a cross-Channel request from this Channel \(answer there with `xmatrix send c7 --reply-to q1`\):hello$/);
 });
+
+test("a message written in the Chrome side panel names the page and how to read it", () => {
+  const sidePanel = {
+    ...base,
+    body: "what does this say?",
+    metadata: { browserPage: { title: "Pool\n  sizing", href: "https://docs.example.test/pool" } },
+  };
+  assert.equal(
+    renderAgentTurnMessage(sidePanel, {}, AT),
+    "xMatrix channel c1 messageId=m1 deliveredAt=2026-10-25T22:00:00.000Z from Ann [user]:what does this say?\n\n" +
+      "Viewing in Chrome: Pool sizing <https://docs.example.test/pool> (`xmatrix browse` reads this page from their browser)",
+  );
+  const unsafe = { ...base, metadata: { browserPage: { title: "x", href: "file:///etc/passwd" } } };
+  assert.ok(!renderAgentTurnMessage(unsafe, {}, AT).includes("Viewing in Chrome"));
+});

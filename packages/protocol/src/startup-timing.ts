@@ -1,4 +1,5 @@
-import { isOneOf, ONBOARDING_DEVICES, type OnboardingDevice } from "./onboarding-funnel.js";
+import { parseDiagnosticEvent, type DiagnosticEventSchema } from "./diagnostic-events.js";
+import { ONBOARDING_DEVICES, type OnboardingDevice } from "./onboarding-funnel.js";
 
 /**
  * How long one app start took for the person, in milliseconds since the
@@ -20,18 +21,23 @@ export type StartupTimingReport = {
 /** Longest stage time a report may carry: a start slower than this is reported as this. */
 export const STARTUP_TIMING_MAX_MS = 120_000;
 
+/** The declared fields of one app start (src/diagnostic-events.ts). */
+const STARTUP_TIMING_EVENT = {
+  device: { kind: "enum", values: ONBOARDING_DEVICES },
+  cache: { kind: "enum", values: STARTUP_CACHES },
+  ...Object.fromEntries(STARTUP_TIMING_STAGES.map((stage) =>
+    [stage, { kind: "number", min: 0, max: STARTUP_TIMING_MAX_MS, optional: true } as const])) as
+    Record<StartupTimingStage, { kind: "number"; min: 0; max: typeof STARTUP_TIMING_MAX_MS; optional: true }>,
+} as const satisfies DiagnosticEventSchema;
+
 /** One start as a client reports it; anything else is not counted. */
 export function parseStartupTimingReport(value: unknown): StartupTimingReport | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const report = value as Record<string, unknown>;
-  if (Object.keys(report).some((key) => key !== "device" && key !== "cache" && !isOneOf(STARTUP_TIMING_STAGES, key)) ||
-      !isOneOf(ONBOARDING_DEVICES, report.device) || !isOneOf(STARTUP_CACHES, report.cache)) return undefined;
+  const report = parseDiagnosticEvent(STARTUP_TIMING_EVENT, value);
+  if (!report) return undefined;
   const parsed: StartupTimingReport = { device: report.device, cache: report.cache };
   for (const stage of STARTUP_TIMING_STAGES) {
     const ms = report[stage];
-    if (ms === undefined) continue;
-    if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0 || ms > STARTUP_TIMING_MAX_MS) return undefined;
-    parsed[stage] = Math.round(ms);
+    if (ms !== undefined) parsed[stage] = Math.round(ms);
   }
   return parsed;
 }

@@ -53,7 +53,6 @@ const WRITE_CHANNEL_CAPACITY: usize = 256;
 // Reconnection constants
 const RECONNECT_BASE: std::time::Duration = std::time::Duration::from_secs(1);
 const RECONNECT_MAX: std::time::Duration = std::time::Duration::from_secs(30);
-const CLIENT_NETWORK_REASON_MAX_CHARS: usize = 240;
 const CLIENT_NETWORK_SAMPLE_MAX_CHANNELS: usize = 1;
 const CLIENT_NETWORK_SAMPLE_FAILURE_LOG_INTERVAL_MS: u64 = 60_000;
 static LAST_CLIENT_NETWORK_SAMPLE_FAILURE_LOG_MS: AtomicU64 = AtomicU64::new(0);
@@ -861,7 +860,7 @@ impl AgentInstanceConnectionClient {
                     None,
                     Some(0),
                     Some(last_activity_age_ms),
-                    Some("disconnect_detected".into()),
+                    Some("disconnect_detected"),
                 );
 
                 // ── Reconnection loop with exponential backoff ──────────────
@@ -912,7 +911,7 @@ impl AgentInstanceConnectionClient {
                                 None,
                                 Some(reconnect_attempt),
                                 Some(last_activity_age_ms),
-                                Some("websocket_connect_failed".into()),
+                                Some("websocket_connect_failed"),
                             );
                             continue;
                         }
@@ -934,7 +933,7 @@ impl AgentInstanceConnectionClient {
                                 None,
                                 Some(reconnect_attempt),
                                 Some(last_activity_age_ms),
-                                Some("auth_token_state_poisoned".into()),
+                                Some("auth_token_state_poisoned"),
                             );
                             continue;
                         }
@@ -971,7 +970,7 @@ impl AgentInstanceConnectionClient {
                                 None,
                                 Some(reconnect_attempt),
                                 Some(last_activity_age_ms),
-                                Some("register_serialize_failed".into()),
+                                Some("register_serialize_failed"),
                             );
                             continue;
                         }
@@ -987,7 +986,7 @@ impl AgentInstanceConnectionClient {
                             None,
                             Some(reconnect_attempt),
                             Some(last_activity_age_ms),
-                            Some("register_send_failed".into()),
+                            Some("register_send_failed"),
                         );
                         continue;
                     }
@@ -1011,7 +1010,7 @@ impl AgentInstanceConnectionClient {
                                 None,
                                 Some(reconnect_attempt),
                                 Some(last_activity_age_ms),
-                                Some("registration_response_timeout".into()),
+                                Some("registration_response_timeout"),
                             );
                             continue;
                         }
@@ -1030,7 +1029,7 @@ impl AgentInstanceConnectionClient {
                                 None,
                                 Some(reconnect_attempt),
                                 Some(last_activity_age_ms),
-                                Some("registration_non_text_message".into()),
+                                Some("registration_non_text_message"),
                             );
                             continue;
                         }
@@ -1075,7 +1074,7 @@ impl AgentInstanceConnectionClient {
                                     None,
                                     Some(reconnect_attempt),
                                     Some(last_activity_age_ms),
-                                    Some("terminal_registration_rejection".into()),
+                                    Some("terminal_registration_rejection"),
                                 );
                                 let _ = event_tx.send(AgentInstanceConnectionEvent::Server(
                                     AgentInstanceServerMessage::ShutdownRequested { reason },
@@ -1101,7 +1100,7 @@ impl AgentInstanceConnectionClient {
                                     None,
                                     Some(reconnect_attempt),
                                     Some(last_activity_age_ms),
-                                    Some("unexpected_registration_response".into()),
+                                    Some("unexpected_registration_response"),
                                 );
                                 continue;
                             }
@@ -1149,7 +1148,7 @@ impl AgentInstanceConnectionClient {
                             None,
                             Some(reconnect_attempt),
                             Some(last_activity_age_ms),
-                            Some("presence_replay_failed".into()),
+                            Some("presence_replay_failed"),
                         );
                         continue;
                     }
@@ -1243,7 +1242,7 @@ impl AgentInstanceConnectionClient {
                         Some(now_ms().saturating_sub(reconnect_started_ms)),
                         Some(reconnect_attempt),
                         Some(last_activity_age_ms),
-                        Some("reconnected".into()),
+                        Some("reconnected"),
                     );
 
                     // Break out of back-off loop → go back to waiting for
@@ -1504,7 +1503,7 @@ impl AgentInstanceConnectionClient {
                     None,
                     None,
                     None,
-                    Some("channel_joined".into()),
+                    Some("channel_joined"),
                 );
                 Ok(())
             }
@@ -2929,7 +2928,9 @@ fn emit_client_network_samples(
     latency_ms: Option<u64>,
     reconnect_attempt: Option<u32>,
     last_server_activity_age_ms: Option<u64>,
-    reason: Option<String>,
+    // A code this file names (`websocket_connect_failed`), never an error's own
+    // text: the Hub refuses any other reason (protocol diagnostic-events).
+    reason: Option<&'static str>,
 ) {
     // Connected again: possibly a new network and country, so the next
     // send asks the Hub afresh.
@@ -2958,12 +2959,6 @@ fn emit_client_network_samples(
         &derive_http_base_url(relay_url),
         HubRoutes::OBSERVABLE_CLIENT_METRICS,
     );
-    let reason = reason.map(|value| {
-        value
-            .chars()
-            .take(CLIENT_NETWORK_REASON_MAX_CHARS)
-            .collect::<String>()
-    });
 
     let hub_base_url = derive_http_base_url(relay_url);
     tokio::spawn(async move {
@@ -2988,7 +2983,7 @@ fn emit_client_network_samples(
             if let Some(last_server_activity_age_ms) = last_server_activity_age_ms {
                 body["lastServerActivityAgeMs"] = serde_json::json!(last_server_activity_age_ms);
             }
-            if let Some(reason) = &reason {
+            if let Some(reason) = reason {
                 body["reason"] = serde_json::json!(reason);
             }
 

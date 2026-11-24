@@ -16,6 +16,11 @@ library:
   `agy -p "/usage" --output-format json` command instead of reading local OAuth
   token files or calling private Cloud Code endpoints directly (set
   `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` to opt out of Antigravity only).
+  Codex is asked through its own app-server method `account/rateLimits/read`
+  (Codex 0.48.0 or newer): a running session asks the app-server it holds, and
+  a pre-launch probe starts `codex app-server` for one config home, asks, and
+  stops it. Codex keeps its own sign-in; the reader opens no Codex credential
+  file.
 - **Record stream (planned).** Harness frames will be turned into one
   normalized record stream. See "Not yet extracted" below.
 

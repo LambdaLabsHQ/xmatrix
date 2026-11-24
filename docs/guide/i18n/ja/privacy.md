@@ -15,14 +15,14 @@ xMatrix はホスト型コラボレーション Hub と、ご自身のマシン�
 
 ## ローカルのプロバイダクォータ照会
 
-**要約:** 登録した AI ツールの残りクォータを表示するため、xMatrix daemon はお使いのコンピュータ上にあるそれらのツール自身のログインファイル（例: `~/.codex/auth.json`）を読み取り、各プロバイダに直接問い合わせます。これらのファイルから読み取った内容（トークン、アカウント ID、ファイル内容、ファイルのフィンガープリント）は一切 xMatrix に送信されず、Hub が受け取るのは正規化されたクォータ情報のみです。1 つのスイッチでファイルの読み取りとプロバイダへのリクエストの両方を停止できます（下記「ローカルクォータ照会を無効にする」を参照）。
+**要約:** 登録した AI ツールの残りクォータを表示するため、xMatrix daemon はお使いのコンピュータ上にあるそれらのツール自身のログインファイル（例: `~/.grok/auth.json`）を読み取り、各プロバイダに直接問い合わせます。Codex は例外で、xMatrix は実行中の Codex セッションまたは一時的に起動した `codex app-server` を通じて Codex 自身に問い合わせ、Codex のログインファイルは開きません。これらのファイルから読み取った内容（トークン、アカウント ID、ファイル内容、ファイルのフィンガープリント）は一切 xMatrix に送信されず、Hub が受け取るのは正規化されたクォータ情報のみです。1 つのスイッチでファイルの読み取り、Codex app-server へのリクエスト、プロバイダへのリクエストをすべて停止できます（下記「ローカルクォータ照会を無効にする」を参照）。
 
 登録済みのハーネス（Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity 等）について、`xmatrix agent list` や Agents 画面で残量を表示し、`@auto` ルーティングで上限到達アカウントを避けるために、ローカルデーモンが登録済みツールのローカル認証ストアを読み取り各プロバイダの残量 API を直接照会する場合があります。
 
 | ハーネス | ローカルメモリのみで読む保存先 | マシンから直接問い合わせるプロバイダ API |
 | --- | --- | --- |
 | Claude Code | macOS キーチェーン（`Claude Code-credentials`）または `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
-| Codex | `$CODEX_HOME/auth.json` または `~/.codex/auth.json` | `https://chatgpt.com/backend-api/wham/usage` |
+| Codex | 読み取りなし: Codex 自身の app-server メソッド `account/rateLimits/read`（実行中のセッションまたは一時的に起動した `codex app-server`） | Codex が自身のサインインで処理 |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS キーチェーン（`cursor-access-token`）、または Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` または `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` または OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` または ChatGPT `wham/usage` |
@@ -46,7 +46,7 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-Antigravity のみ無効にする場合は `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` を設定してください。無効化するとすべての経路でローカル認証ストアの読み取りと残量照会を行いません。
+Antigravity のみ無効にする場合は `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` を設定してください。無効化するとすべての経路でローカル認証ストアの読み取り、`codex app-server` の起動や Codex セッションへの問い合わせ、残量照会を行いません。
 
 ## クライアント診断とクラッシュレポート
 
@@ -54,8 +54,17 @@ xMatrix は広告 Cookie、クロスサイト追跡、セッションリプレ�
 
 任意のクライアント診断とブラウザのクラッシュレポートは、**安定版のアプリと CLI ではデフォルトでオフ**です。ベータ版のデフォルトは下の表のとおりです。未ログインのマーケティング、ドキュメント、法的文書のページは Sentry を読み込みません。診断がオンのときに送信されるもの：
 
-- **エラーとクラッシュレポート（Sentry）**：ログイン後のアプリ内でのみ有効。`userInfo`、Cookie、HTTP ヘッダー/本文、URL クエリパラメータ、コンソールのブレッドクラムは無効化され、引用テキストはマスクされます。DSN のないローカル/セルフホストのビルドは何も送信しません。（Hub サーバー側のエラーは、ホスト型サービス運用のため引き続きサーバー側で報告されます。）
-- **ファーストパーティ診断（xMatrix Hub → Cloudflare Analytics Engine）**：起動時間（`/api/observable/startup-timing`）、オンボーディングのステップ数（`/api/observable/onboarding-step`）、デスクトップ daemon の起動失敗（`/api/observable/desktop-daemon-failure`）、CLI の再接続サンプル（`/api/observable/client-metrics`）。識別子はサーバー側で鍵付き HMAC-SHA-256 により仮名化され、メッセージやコマンドの本文は含まれません。
+- **エラー・クラッシュレポート（Sentry）**：ログイン済みアプリ内でのみ、エラーのクラス、エラー自身のコード（ある場合）、スタックのコード位置だけを送信します。エラーメッセージ、パンくず、URL、Cookie、HTTP ヘッダー、リクエストボディ、ユーザー情報は送信しません。DSN のないローカル／セルフホストビルドでは送信しません。（Hub サーバー側のエラーはホスティングサービス運用のためサーバー側で報告されます。下記参照。）
+- **ファーストパーティ診断（xMatrix Hub → Cloudflare Analytics Engine）**：起動時間（`/api/observable/startup-timing`）、初期設定ステップ数（`/api/observable/onboarding-step`）、デスクトップデーモン起動失敗情報（`/api/observable/desktop-daemon-failure`）、CLI 再接続サンプル（`/api/observable/client-metrics`）を送信します。識別子はサーバー側の鍵付き HMAC-SHA-256 で仮名化されます。
+
+### 診断イベントに含められるもの
+
+すべての診断イベントには宣言済みのフィールドがあり、クライアントが作成するときと Hub が受け取るときの 2 回検査されます。フィールドに入れられるのは、リスト内の固定値、数値、true/false、バージョン、不透明な識別子、または `websocket_connect_failed` のような短いコード（小文字、数字、`_`、`-`）だけです。宣言されていないフィールドや範囲外の値が 1 つでもあればイベント全体が拒否され、切り詰めて通すことはしません。そのため、あなたが書いた文章を運ぶフィールドはありません。エラーはクラスとコードで報告し、メッセージは含めません。
+
+文章を運ぶのは次の 2 つの経路だけです：
+
+- **デスクトップ起動失敗カードの「失敗レポートを送信」**：CLI の最後の数行。デスクトップアプリがあなたのマシン上で先にマスクします（ホームディレクトリ、メールアドレス、URL クエリ、トークンや鍵のように見える文字列を置換）。カードは送信前にその内容を表示し、ボタンを押したときだけ送信します。診断がオンのときの自動レポートには、失敗した段階、終了コード、プラットフォーム、アプリのバージョンだけが含まれます。
+- **Hub サーバー側のエラーレポート**：サーバー自身のエラーメッセージ。引用された値、メールアドレス、URL クエリ、ホームディレクトリのパス、トークン状の文字列は取り除かれます。ログに添えられた項目は、数値、true/false、不透明な識別子の場合だけ報告されます。
 
 ### ベータ版と安定版のデフォルト
 
@@ -76,7 +85,7 @@ xMatrix は広告 Cookie、クロスサイト追跡、セッションリプレ�
 ### 診断とクラッシュレポートの有効化・無効化
 
 - **Web、デスクトップ、iOS、Android**：**Settings → Legal and privacy** で **Send diagnostics and crash reports** を切り替えます。選択はアカウントに保存され、すべてのクライアントが従います。デスクトップでは、このスイッチがローカル daemon の `telemetry` 設定も更新します。
-- **デスクトップの起動失敗カード**：診断がオフでも、daemon の起動失敗カードで **Send failure report** を一度選べば、マスク済みの失敗情報を送れます。
+- **CLI とデーモン**：デフォルトはオフです。有効にするには `xmatrix config telemetry on` または `XMATRIX_TELEMETRY=1`、無効にするには `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0`、または `DO_NOT_TRACK=1` を設定してください。
 - **CLI と daemon**：`xmatrix config telemetry on` または `XMATRIX_TELEMETRY=1` でオン、`xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0`、`DO_NOT_TRACK=1` でオフ。`xmatrix config telemetry on|off` は選択をアカウントにも保存します。
 
 ## 法的文書

@@ -691,7 +691,6 @@ fn collect_llm_usage(value: &Value, usage: &mut protocol::LlmUsage) {
             if is_rate_limit_snapshot_map(map)
                 || !zai_monitor_quota_usages(map).is_empty()
                 || !grok_billing_quota_usages(map).is_empty()
-                || !codex_wham_quota_usages(map).is_empty()
             {
                 return;
             }

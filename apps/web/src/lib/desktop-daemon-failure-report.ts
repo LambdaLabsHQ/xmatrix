@@ -1,12 +1,13 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { WEB_PROXY_ROUTES, type DesktopDaemonFailure } from "@xmatrix/protocol";
+import { DESKTOP_DAEMON_FAILURE_DETAIL_MAX, parseDesktopDaemonFailureReport, WEB_PROXY_ROUTES, type DesktopDaemonFailure } from "@xmatrix/protocol";
 import { diagnosticsMaySendNow } from "@/lib/diagnostics-preference";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 
+/** Per failure and per kind: the automatic report never stands in for the person's own. */
 const reported = new Set<string>();
-/** Failures the Hub accepted: only these may say they were sent. */
+/** Failures the person sent and the Hub accepted: only these may say they were sent. */
 const delivered = new Set<string>();
 const listeners = new Set<() => void>();
 
@@ -14,9 +15,11 @@ const failureKey = (failure: DesktopDaemonFailure) => `${failure.stage}\n${failu
 
 /**
  * Tells the Hub that the desktop App could not start its background service:
- * where, the exit code and the CLI's last lines, which the App already
- * redacted on the machine (docs/architecture/first-space.md). The same failure
- * is reported once per page; nothing waits on it.
+ * where, the exit code, the platform and the App version
+ * (docs/architecture/first-space.md). The CLI's last lines, which the App
+ * already redacted on the machine, go only when the person presses Send on the
+ * failure card (`explicit`); the opted-in automatic report never carries them.
+ * The same failure is reported once per page; nothing waits on it.
  */
 export function reportDesktopDaemonFailure(
   token: string | null | undefined,
@@ -25,25 +28,37 @@ export function reportDesktopDaemonFailure(
   options?: { explicit?: boolean },
 ): void {
   const key = failureKey(failure);
-  if (!token || reported.has(key)) return;
-  reported.add(key);
+  const explicit = options?.explicit === true;
+  const attempt = `${explicit ? "sent" : "automatic"}\n${key}`;
+  if (!token || reported.has(attempt)) return;
+  reported.add(attempt);
+  // Only a report that is its declared fields leaves (protocol diagnostic-events).
+  const report = parseDesktopDaemonFailureReport({
+    stage: failure.stage,
+    ...(failure.exitCode !== undefined ? { exitCode: failure.exitCode } : {}),
+    platform: app.platform,
+    appVersion: app.version,
+    ...(explicit ? { detail: failure.detail.slice(0, DESKTOP_DAEMON_FAILURE_DETAIL_MAX) } : {}),
+  });
+  if (!report) return;
   // A report the person sends from the failure card is their own act; an
   // automatic one goes only where diagnostics may be sent now.
-  const allowed = options?.explicit ? Promise.resolve(true) : diagnosticsMaySendNow();
+  const allowed = explicit ? Promise.resolve(true) : diagnosticsMaySendNow();
   void allowed.then((send) => {
     if (!send) {
-      reported.delete(key);
+      reported.delete(attempt);
       return;
     }
-    return xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_desktop_daemon_failure, token, method: "POST",
-      body: { ...failure, platform: app.platform, appVersion: app.version } }).then(() => {
-      delivered.add(key);
-      for (const listener of listeners) listener();
-    }, (error: unknown) => {
-      // Not sent: a later showing of the same failure may try again.
-      reported.delete(key);
-      console.warn("[xmatrix] daemon start failure not reported", error);
-    });
+    return xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_desktop_daemon_failure, token, method: "POST", body: report })
+      .then(() => {
+        if (!explicit) return;
+        delivered.add(key);
+        for (const listener of listeners) listener();
+      }, (error: unknown) => {
+        // Not sent: a later showing of the same failure may try again.
+        reported.delete(attempt);
+        console.warn("[xmatrix] daemon start failure not reported", error);
+      });
   });
 }
 
