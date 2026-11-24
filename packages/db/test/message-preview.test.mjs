@@ -23,3 +23,15 @@ test("a message written before previews reads none; a malformed stored preview f
     { bodyPreview: "b", senderSnapshot: { kind: "user" } });
   assert.throws(() => readMessagePreview({ bodyPreview: "b" }), /stored message preview is invalid/u);
 });
+
+test("a stored message preview strips NUL and unpaired surrogates so PostgreSQL jsonb accepts it", () => {
+  const serialized = storedMessagePreview({
+    bodyPreview: "ok 🚀 bad\u0000\ud83d!\udc00end",
+    senderSnapshot: { label: "name\u0000\ud800", nested: ["\udfff", "🎉"] },
+  });
+  assert.doesNotMatch(serialized, /\\u0000|\\u[dD][89a-fA-F][0-9a-fA-F]{2}/u);
+  assert.deepEqual(JSON.parse(serialized), {
+    bodyPreview: "ok 🚀 bad\uFFFD!\uFFFDend",
+    senderSnapshot: { label: "name\uFFFD", nested: ["\uFFFD", "🎉"] },
+  });
+});

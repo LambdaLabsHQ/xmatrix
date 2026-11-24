@@ -640,7 +640,7 @@ export { compareBytes, concatenateBytes } from "./bytes.js";
 export { dropHtmlElements, stripHtmlTags } from "./html-text.js";
 export { legacyCanonicalJson } from "./legacy-canonical-json.js";
 export {
-  hasControlCharacter, replaceControlCharacters, requireLowercaseSha256, requireSafeIntegerRange, trimEdges, trimEnd,
+  hasControlCharacter, postgresJsonText, replaceControlCharacters, requireLowercaseSha256, requireSafeIntegerRange, sliceCodeUnitsSafe, trimEdges, trimEnd,
 } from "./field-validation.js";
 export type {
   DesktopAgentPresetDiscoveryShape, DesktopAgentPresetInput, DesktopBadgeState,

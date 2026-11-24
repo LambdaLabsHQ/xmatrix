@@ -21,3 +21,11 @@ test("a discussion is named by what was written, not by the passage it quotes", 
   // Nothing written yet: the passage is all there is.
   assert.equal(automaticConversationName(head.trimEnd()), "加上任何人提交的页面修订（编辑、建议、评论）");
 });
+
+test("automatic conversation names never split an emoji or keep PostgreSQL-rejected escapes", () => {
+  const withBoundaryEmoji = automaticConversationName(`${"a".repeat(59)}🚀tail`);
+  assert.equal(withBoundaryEmoji, `${"a".repeat(59)}…`);
+  assert.doesNotMatch(JSON.stringify(withBoundaryEmoji), /\\u[dD][89a-fA-F][0-9a-fA-F]{2}|\\u0000/u);
+  const cleaned = automaticConversationName("hello\u0000\ud83dworld 🚀");
+  assert.equal(cleaned, "hello\uFFFDworld 🚀");
+});
