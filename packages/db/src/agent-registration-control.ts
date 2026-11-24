@@ -5,7 +5,7 @@ import { ACTIVE_RUN_STATUS_SQL, digestCanonicalCloneCborV1, parseSpaceAgentRegis
   parseRegistrationResourceLimits, intersectRegistrationLimits,
   parseAgentRegistrationEnvironment, routingModelCatalogObservation,
   type AgentRegistrationEnvironment, type AgentRegistrationMachinePlatform, type AgentRegistrationRunningInstance, type AgentRegistrationSummary,
-  parseLlmQuotaAccount, type SpaceAgentRegistrationKey, type SpaceAgentConfiguration , utf8ByteLength,
+  type SpaceAgentRegistrationKey, type SpaceAgentConfiguration , utf8ByteLength,
   parseHarnessProfileCommand, type HarnessProfileCommand, type SpaceHarnessProfile } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -13,8 +13,8 @@ import type { DatabasePlacementContext } from "./context.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
 import { DatabaseContractError } from "./errors.js";
 import { enrollGlobalRegistration } from "./agent-registration-enrollment.js";
-import { currentRegistrationQuotaJoin, registrationLiveQuota, registrationQuotaColumns, registrationQuotaWindows,
-  registrationShownQuotaReading } from "./agent-registration-quota-probe.js";
+import { currentRegistrationQuotaJoin, registrationLiveQuota, registrationQuotaAccount, registrationQuotaColumns,
+  registrationQuotaWindows, registrationShownQuotaReading } from "./agent-registration-quota-probe.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import { writeRegistrationOwnerGrant } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationAccess, registrationKeyValues, registrationOwnerGrant, spaceState } from "./agent-registration-rows.js";
@@ -555,7 +555,7 @@ export class PostgresAgentRegistrationRepository {
       const platform = machinePlatform(label?.platform);
       const reading = registrationShownQuotaReading(label);
       const windows = registrationQuotaWindows(label);
-      const account = parseLlmQuotaAccount(label?.account_json);
+      const account = registrationQuotaAccount(label);
       // A provider account's headroom is its owner's; the Space's owners and admins manage its use.
       const { quota, balance } = row.canConfigureSpace || row.canManageOwnerGrant
         ? registrationLiveQuota(reading, windows, account) : {};

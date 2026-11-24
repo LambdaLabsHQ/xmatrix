@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import { E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, fixtureRequestBodies, fixtureRule,
-  installWorkspaceStubs } from "./workspace-fixtures";
+  installWorkspaceStubs, releaseFixture } from "./workspace-fixtures";
 
 // Cursor has no official quota interface: its quota stays unknown until the
 // machine's owner allows reading its sign-in there. Only that owner sees the
@@ -91,6 +91,46 @@ test("Settings lists where a sign-in is read and stops it there", async ({ page 
   await expect.poll(() => fixtureRequestBodies(page, "quota-access-revoke")).toEqual([
     { machineId: MACHINE, hostId: "host-studio", presetId: "cursor", action: "quota_access_off" },
   ]);
+});
+
+// Stopping reads like allowing: the agent's card says so at once, and once
+// the machine answers, the numbers read under the grant are gone from it
+// without a reload, because the Hub dropped them and the Agents are read again.
+test("Stop reading shows at once in the agent's card and its numbers go when the machine answers", async ({ page }) => {
+  const resetAt = new Date(Date.parse(E2E_NOW) + 2 * 24 * 60 * 60_000).toISOString();
+  const read = { ...cursor("e2e-user"), live: { machine: { online: true, platform: "linux" }, running: [],
+    quota: { remainingPercent: 73, observedAt: E2E_NOW, expiresAt: resetAt,
+      windows: [{ label: "1mo", scope: "Auto", usedPercent: 27, resetAt }] } } };
+  const catalog = (registration: Record<string, unknown>) => ({ registrations: [registration],
+    capabilities: [{ harness: "cursor", models: [], locations: [registration] }] });
+  const catalogPattern = /\/api\/xmatrix\/spaces\/[^/]+\/agent-registrations(?:\?quota=refresh)?$/;
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], machineDaemons: [daemon("granted")] });
+  await fixtureJson(page, "quota-access-read", catalogPattern, catalog(read));
+  await page.goto("/app/personal-sspaceperso/agents");
+  await page.locator('[data-testid="agent-row"]').filter({ hasText: "cursor-studio" }).click();
+  const card = page.getByTestId("fleet-cell-edit");
+  const access = card.getByTestId("harness-quota-access");
+  await expect(access).toContainText("Read from Cursor's sign-in on Studio");
+  await expect(card).toContainText("Auto · Monthly");
+
+  await fixtureRule(page, { id: "quota-access-stop", pattern: "**/api/xmatrix/machine-daemons/harness-actions", method: "POST",
+    responder: { kind: "sequence", responses: [{ status: 202, json: { controlId: ACTION, status: "queued" } }] } });
+  await fixtureRule(page, { id: "quota-access-stopped", method: "GET",
+    pattern: `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(ACTION)}`,
+    responder: { kind: "deferred", json: { controlId: ACTION, presetId: "cursor", action: "quota_access_off", status: "succeeded",
+      result: { presetId: "cursor", action: "quota_access_off", status: "succeeded",
+        item: { id: "cursor", installed: true, probeStatus: "ok", version: "2026.11.20", quotaAccess: "not_granted" } } } } });
+  await access.getByRole("button", { name: "Stop reading" }).click();
+  // While the machine makes the change, the card already reads it as stopped.
+  await expect(access).toHaveAttribute("data-state", "not_granted");
+  await expect(access).toContainText("Quota: Unknown");
+  await expect(access).not.toContainText("Read from Cursor's sign-in");
+
+  // The machine answers; the Hub no longer has the reading.
+  await fixtureJson(page, "quota-access-dropped", catalogPattern, catalog(cursor("e2e-user")));
+  await releaseFixture(page, "quota-access-stopped");
+  await expect(card).not.toContainText("Auto · Monthly");
+  await expect(access.getByRole("button", { name: "Allow reading Cursor sign-in to show quota" })).toBeEnabled();
 });
 
 // OpenCode reports its own quota from 2.2.0 on; before that it is read like

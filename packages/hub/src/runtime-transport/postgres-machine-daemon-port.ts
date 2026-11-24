@@ -305,7 +305,9 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       if (message.snapshotComplete === true) delete machineControlInput.replayable;
     }
     const result = await this.dependencies.daemonCommand(machineControlInput);
-    if (message.type === "machine_quota_probe_result") {
+    // A probe's readings, or a grant the machine reported gone (its reading
+    // went with it): the owner's Agents are shown the pool as it is now.
+    if (message.type === "machine_quota_probe_result" || result.registrationQuotaChanged === true) {
       await this.dependencies.quotaChanged?.({ ownerUserId: session.principal.ownerUserId, machineId: session.principal.machineId });
     }
     if (message.type === "machine_text_task_result") {

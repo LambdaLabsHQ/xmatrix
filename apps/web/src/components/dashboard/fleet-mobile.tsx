@@ -63,6 +63,7 @@ export function mobileAttentionPhrase(harness: string, label: string): string {
   if (label === "Update") return `${harness} needs update`;
   if (label === "No balance") return `${harness} has no balance`;
   if (label === "Out of quota") return `${harness} out of quota`;
+  if (label === "Refused") return `${harness} refused by its provider`;
   if (label === "Set up") return `${harness} needs setup`;
   return `${harness} ${label}`;
 }
