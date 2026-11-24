@@ -3,6 +3,7 @@
 ## Unreleased: a handoff that took over still shows the successor its author wrote
 
 A handoff written with conditions, such as `@grok:1:handoff:@model:claude-fable-5-2`, showed the written model on its card only while it was in flight. Once the successor's record arrived the card redrew the successor as its bare name (`@claude · Took over`), so the model the author asked for and the parameters xMatrix picked disappeared from the conversation. The recorded card now reads the stored mention back and keeps drawing the successor as written, each condition marked, followed by the picks of the successor's launch, the same way the in-flight card does. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the card a shared link shows carries the site's title and its own address
 
 The card a link to the site shows when it is shared still read "Living pages
