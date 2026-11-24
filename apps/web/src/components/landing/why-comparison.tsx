@@ -149,20 +149,20 @@ export function WhyComparison({
         aria-label={topic}
         className="mt-8 grid grid-cols-1 gap-10 lg:grid-cols-2 lg:gap-8"
       >
-        {/* Left column: xMatrix accented by a compact walnut plaque + slender walnut sheet spine */}
+        {/* Left column: xMatrix anchored by a compact rounded-rectangle walnut plaque with downward shadow */}
         <figure className="m-0 flex min-w-0 flex-col gap-4">
-          <div className="flex h-8 items-center justify-between gap-2">
+          <div className="flex h-9 items-center justify-between gap-2">
             <WoodPanel
               as="span"
-              className="site-wood-pill inline-flex h-8 items-center gap-2 px-3 text-[13.5px] leading-none shadow-[inset_0_1px_0_oklch(1_0.02_90/0.42),0_4px_12px_-6px_oklch(0.18_0.04_55/0.42)]!"
+              className="inline-flex h-9 items-center gap-2 rounded-[11px]! px-3.5 text-[14px] leading-none shadow-[inset_0_1px_0_oklch(1_0.02_90/0.52),inset_1px_0_0_oklch(1_0.02_90/0.26),inset_0_-1px_0_oklch(0.32_0.06_58/0.3),inset_-1px_0_0_oklch(0.32_0.06_58/0.18),0_12px_22px_-10px_oklch(0.14_0.04_55/0.56),0_3px_6px_-2px_oklch(0.18_0.04_55/0.26)]!"
             >
-              <span className="inline-flex size-[18px] items-center justify-center rounded-full bg-[oklch(0.99_0.008_88/0.78)]">
+              <span className="inline-flex size-5 items-center justify-center rounded-[6px] bg-[oklch(0.99_0.008_88/0.82)] shadow-[0_1px_2px_oklch(0.2_0.04_55/0.18)]">
                 <Image
                   src="/brand/xmatrix-icon-transparent-128.png"
                   alt=""
-                  width={13}
-                  height={13}
-                  className="size-[13px] shrink-0"
+                  width={14}
+                  height={14}
+                  className="size-3.5 shrink-0"
                 />
               </span>
               <span>xMatrix</span>
@@ -189,7 +189,7 @@ export function WhyComparison({
 
         {/* Right column: Juggling tabs & terminals, quiet and borderless */}
         <figure className="m-0 flex min-w-0 flex-col gap-4">
-          <div className="flex h-8 items-center justify-between gap-2">
+          <div className="flex h-9 items-center justify-between gap-2">
             <span className="truncate text-[15px] font-medium tracking-[-0.01em] text-[var(--site-ink-muted)]">
               {others}
             </span>

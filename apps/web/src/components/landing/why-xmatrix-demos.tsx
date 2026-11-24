@@ -11,12 +11,10 @@ import type { PresentPerson } from "@/components/pages/page-chrome";
 import { renderPageDocument } from "@/components/pages/page-document-render";
 import { CardPen } from "@/components/pages/page-pen";
 import { pageMentions, type PageReferenceTargets } from "@/components/pages/page-reference-chips";
-import { WoodPanel } from "@/components/ui/material-surfaces";
 
 /* Real xMatrix interfaces for each of the six comparison topics.
-   Borderless warm-paper sheets accented by a slender walnut inlay spine
-   (echoing the desktop app's walnut rail without ever becoming a heavy wood slab),
-   reusing renderPageDocument, CardPen, Face, FleetMatrix, and MobileAvatarMatrix. */
+   Borderless warm-paper sheets reusing renderPageDocument, CardPen, Face,
+   FleetMatrix, and MobileAvatarMatrix. */
 
 interface WriterSpec {
   name: string;
@@ -68,17 +66,6 @@ function makePerson(
   };
 }
 
-/** Slender walnut bookbinding spine on the left edge of the paper sheet. */
-function WalnutSpine() {
-  return (
-    <WoodPanel
-      as="div"
-      aria-hidden
-      className="w-[10px] shrink-0 rounded-none! shadow-[inset_-1px_0_0_oklch(0.32_0.06_58/0.14)]!"
-    />
-  );
-}
-
 /** Borderless warm-paper sheet matching the real xMatrix page header and sheet. */
 function XMatrixSheetFrame({
   breadcrumb,
@@ -93,24 +80,21 @@ function XMatrixSheetFrame({
 }) {
   return (
     <div
-      className={`xmatrix-app flex h-full w-full overflow-hidden rounded-[14px] bg-[var(--site-paper)] text-[var(--site-ink)] ${SHEET_SHADOW}`}
+      className={`xmatrix-app flex h-full w-full flex-col overflow-hidden rounded-[14px] bg-[var(--site-paper)] text-[var(--site-ink)] ${SHEET_SHADOW}`}
       inert
     >
-      <WalnutSpine />
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex h-10 shrink-0 items-center justify-between gap-2 bg-[color-mix(in_oklch,var(--site-paper)_86%,var(--background))] px-4">
-          <div className="flex min-w-0 items-center gap-2 text-[12px] text-[var(--site-ink-muted)]">
-            <span className="truncate font-semibold text-[var(--site-ink)]">{breadcrumb}</span>
-            {revision && (
-              <span className="shrink-0 rounded-md bg-[color-mix(in_oklch,var(--site-ink)_5.5%,transparent)] px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-[var(--site-ink-muted)]">
-                {revision}
-              </span>
-            )}
-          </div>
-          {rightSlot}
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 bg-[color-mix(in_oklch,var(--site-paper)_86%,var(--background))] px-4">
+        <div className="flex min-w-0 items-center gap-2 text-[12px] text-[var(--site-ink-muted)]">
+          <span className="truncate font-semibold text-[var(--site-ink)]">{breadcrumb}</span>
+          {revision && (
+            <span className="shrink-0 rounded-md bg-[color-mix(in_oklch,var(--site-ink)_5.5%,transparent)] px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-[var(--site-ink-muted)]">
+              {revision}
+            </span>
+          )}
         </div>
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
+        {rightSlot}
       </div>
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
     </div>
   );
 }
@@ -427,13 +411,11 @@ function ParallelWorkDemo({ step }: { step: number }) {
 
   return (
     <div
-      className={`xmatrix-app flex h-full w-full overflow-hidden rounded-[14px] bg-[var(--site-paper)] text-[var(--site-ink)] ${SHEET_SHADOW}`}
+      className={`xmatrix-app flex h-full w-full flex-col overflow-hidden rounded-[14px] bg-[var(--site-paper)] text-[var(--site-ink)] sm:flex-row ${SHEET_SHADOW}`}
       inert
     >
-      <WalnutSpine />
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden sm:flex-row">
-        {/* Left: real xMatrix paper channel list */}
-        <div className="flex min-w-0 shrink-0 flex-col bg-[color-mix(in_oklch,var(--site-ink)_3%,var(--site-paper))] sm:w-[46%]">
+      {/* Left: real xMatrix paper channel list */}
+      <div className="flex min-w-0 shrink-0 flex-col bg-[color-mix(in_oklch,var(--site-ink)_3%,var(--site-paper))] sm:w-[46%]">
           <div className="flex h-8 shrink-0 items-center justify-between px-3 sm:h-9">
             <span className="text-[11.5px] font-semibold text-[var(--site-ink)] sm:text-[12px]">Acme · Threads</span>
             <span className="rounded-full bg-[color-mix(in_oklch,var(--site-ink)_6%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--site-ink-muted)]">
@@ -486,14 +468,13 @@ function ParallelWorkDemo({ step }: { step: number }) {
             <span className="truncate text-[11.5px] font-semibold text-[var(--site-ink)]">Page · Launch</span>
             <span className="shrink-0 text-[10.5px] font-medium text-[var(--site-ink-muted)]">Auto-updated</span>
           </div>
-          <RealPageBody
-            markdown={mdLines}
-            compact
-            highlightBlockIndex={highlightIdx}
-            highlightColor={activeWriter ? WRITER[activeWriter].color : undefined}
-            pen={activeWriter ? makePerson(activeWriter, { editing: true }) : null}
-          />
-        </div>
+        <RealPageBody
+          markdown={mdLines}
+          compact
+          highlightBlockIndex={highlightIdx}
+          highlightColor={activeWriter ? WRITER[activeWriter].color : undefined}
+          pen={activeWriter ? makePerson(activeWriter, { editing: true }) : null}
+        />
       </div>
     </div>
   );
