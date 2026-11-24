@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Download } from "lucide-react";
 import Image from "next/image";
 import { WoodPanel } from "@/components/ui/material-surfaces";
+import { APP_STORE_URL, GOOGLE_PLAY_URL } from "@/lib/app-stores";
 import { type SiteLocale } from "@/lib/site-locales";
 import { sitePagesCopy, type DownloadPageCopy } from "@/lib/site-pages-copy";
 
@@ -50,6 +51,14 @@ export const downloads = (copy: DownloadLinksCopy, channel: Channel = "stable") 
   Android: { href: `/api/android/releases/${channel}/latest.apk`, label: copy.downloadFor("Android"), detail: copy.androidDetail },
 });
 
+/** Phones install from their store; only Preview, which the stores do not carry, falls back to the Android APK. */
+export const phoneDownloads = (copy: DownloadPageCopy, channel: Channel = "stable") => ({
+  iOS: { href: APP_STORE_URL, label: copy.downloadFor("iPhone"), detail: copy.iosDetail },
+  Android: channel === "stable"
+    ? { href: GOOGLE_PLAY_URL, label: copy.downloadFor("Android"), detail: copy.androidDetail }
+    : { href: `/api/android/releases/${channel}/latest.apk`, label: copy.downloadFor("Android"), detail: copy.androidApkDetail },
+});
+
 /** Where the web app of a channel lives: Preview is the beta Web. */
 export const webApp = (channel: Channel) => channel === "stable" ? "/app" : "https://beta.xmatrix.sh/app";
 
@@ -72,7 +81,8 @@ export function DownloadRecommendation({
     if (detected === "macOS") detectIntelMac().then(setIntelMac).catch(() => {});
   }, []);
   const download = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "x64" : "arm64"]
-    : platform === "Windows" || platform === "Android" ? downloads(copy, channel)[platform] : null;
+    : platform === "Windows" ? downloads(copy, channel).Windows
+    : platform === "iOS" || platform === "Android" ? phoneDownloads(copy, channel)[platform] : null;
   const otherMac = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "arm64" : "x64"] : null;
 
   return (

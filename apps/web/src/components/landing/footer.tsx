@@ -1,5 +1,6 @@
 import { BrandMark } from "@/components/shared/brand-mark";
 import { WoodPanel } from "@/components/ui/material-surfaces";
+import { APP_STORE_URL, GOOGLE_PLAY_URL } from "@/lib/app-stores";
 import { agentDocFiles, aiAskLinks } from "@/lib/agent-docs";
 import { footerAlternativePages } from "@/lib/alternatives";
 import { landingCopy, type LandingCopy, type Locale } from "@/lib/landing-copy";
@@ -17,6 +18,8 @@ function footerLinks(copy: LandingCopy, locale: Locale) {
     [copy.footer.product]: [
       { label: links.app, href: appHref("/app") },
       { label: links.download, href: localizedPath(locale, "/download") },
+      { label: "App Store", href: APP_STORE_URL },
+      { label: "Google Play", href: GOOGLE_PLAY_URL },
       { label: links.pricing, href: `${copy.home}#pricing` },
       { label: links.docs, href: localizedPath(locale, "/docs") },
       { label: links.support, href: localizedPath(locale, "/support") },

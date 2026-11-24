@@ -14,6 +14,8 @@ export interface DownloadPageCopy {
   intelDetail: string;
   windowsDetail: string;
   androidDetail: string;
+  iosDetail: string;
+  androidApkDetail: string;
   releaseChannelSr: string;
   releaseChannelMenu: string;
   stableLabel: string;
@@ -26,6 +28,7 @@ export interface DownloadPageCopy {
   windowsNote: string;
   windowsBuild: string;
   androidNote: string;
+  iosNote: string;
   webNote: string;
   webBuild: string;
   desktopNotes: string;
@@ -98,9 +101,9 @@ export interface SitePagesCopy {
 export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
   en: {
     download: {
-      metaTitle: "Download xMatrix for macOS, Windows and Android",
+      metaTitle: "Download xMatrix for Mac, Windows, iPhone and Android",
       metaDescription:
-        "Download the xMatrix desktop app for macOS (Apple Silicon and Intel) and Windows, or the Android APK, to follow and answer your AI coding agents from anywhere.",
+        "Get xMatrix on the App Store and Google Play, or download the desktop app for macOS and Windows, to follow and answer your AI coding agents from anywhere.",
       getXMatrix: "Get xMatrix",
       useOnWeb: "Use xMatrix on the Web",
       openWebApp: "Open Web App",
@@ -111,7 +114,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       appleSiliconDetail: "For Apple Silicon (M-series) Macs.",
       intelDetail: "For Intel-based Macs.",
       windowsDetail: "For 64-bit Windows.",
-      androidDetail: "Android APK.",
+      androidDetail: "Android, from Google Play.",
+      androidApkDetail: "Android APK.",
+      iosDetail: "iPhone and iPad, from the App Store.",
       releaseChannelSr: "Release channel: ",
       releaseChannelMenu: "Release channel",
       stableLabel: "Stable",
@@ -124,7 +129,8 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       windowsNote: "Desktop app, x64",
       windowsBuild: "Installer",
       androidNote: "Phone app",
-      webNote: "iPhone, iPad, Linux and any browser",
+      iosNote: "iPhone and iPad app",
+      webNote: "Linux and any browser",
       webBuild: "Open",
       desktopNotes: "Desktop release notes",
       androidNotes: "Android release notes",
@@ -191,8 +197,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
   },
   zh: {
     download: {
-      metaTitle: "下载 xMatrix — 支持 macOS、Windows 与 Android",
-      metaDescription: "下载 xMatrix 桌面客户端（macOS Apple Silicon / Intel、Windows）或 Android APK，随时随地查看并回复你的 AI 编程智能体。",
+      metaTitle: "下载 xMatrix — 支持 Mac、Windows、iPhone 与 Android",
+      metaDescription:
+        "在 App Store 和 Google Play 下载 xMatrix，或下载 macOS、Windows 桌面客户端，随时随地查看并回复你的 AI 编程智能体。",
       getXMatrix: "获取 xMatrix",
       useOnWeb: "在浏览器中使用 xMatrix",
       openWebApp: "打开在线应用",
@@ -203,7 +210,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       appleSiliconDetail: "适用于 Apple Silicon（M1 及更新机型）Mac。",
       intelDetail: "适用于 Intel 芯片 Mac。",
       windowsDetail: "适用于 64 位 Windows。",
-      androidDetail: "Android 安装包（APK）。",
+      androidDetail: "Android 版，来自 Google Play。",
+      androidApkDetail: "Android 安装包（APK）。",
+      iosDetail: "iPhone 与 iPad 版，来自 App Store。",
       releaseChannelSr: "发布渠道：",
       releaseChannelMenu: "发布渠道",
       stableLabel: "稳定版",
@@ -216,7 +225,8 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       windowsNote: "桌面应用，x64",
       windowsBuild: "安装程序",
       androidNote: "手机应用",
-      webNote: "iPhone、iPad、Linux 及任意浏览器",
+      iosNote: "iPhone 与 iPad 应用",
+      webNote: "Linux 及任意浏览器",
       webBuild: "打开",
       desktopNotes: "桌面端版本说明",
       androidNotes: "Android 版本说明",
@@ -277,8 +287,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
   },
   "zh-tw": {
     download: {
-      metaTitle: "下載 xMatrix — 支援 macOS、Windows 與 Android",
-      metaDescription: "下載 xMatrix 桌面應用（macOS Apple Silicon / Intel、Windows）或 Android APK，隨時隨地掌握並回覆你的 AI 程式設計代理。",
+      metaTitle: "下載 xMatrix — 支援 Mac、Windows、iPhone 與 Android",
+      metaDescription:
+        "在 App Store 與 Google Play 下載 xMatrix，或下載 macOS、Windows 桌面應用，隨時隨地掌握並回覆你的 AI 程式設計代理。",
       getXMatrix: "取得 xMatrix",
       useOnWeb: "在瀏覽器中使用 xMatrix",
       openWebApp: "開啟網頁應用",
@@ -289,7 +300,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       appleSiliconDetail: "適用於 Apple Silicon（M1 及更新機型）Mac。",
       intelDetail: "適用於 Intel 處理器 Mac。",
       windowsDetail: "適用於 64 位元 Windows。",
-      androidDetail: "Android 安裝檔（APK）。",
+      androidDetail: "Android 版，來自 Google Play。",
+      androidApkDetail: "Android 安裝檔（APK）。",
+      iosDetail: "iPhone 與 iPad 版，來自 App Store。",
       releaseChannelSr: "發佈通道：",
       releaseChannelMenu: "發佈通道",
       stableLabel: "穩定版",
@@ -302,7 +315,8 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       windowsNote: "桌面應用，x64",
       windowsBuild: "安裝程式",
       androidNote: "手機應用",
-      webNote: "iPhone、iPad、Linux 與任意瀏覽器",
+      iosNote: "iPhone 與 iPad 應用",
+      webNote: "Linux 與任意瀏覽器",
       webBuild: "開啟",
       desktopNotes: "桌面端版本說明",
       androidNotes: "Android 版本說明",
@@ -363,8 +377,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
   },
   ja: {
     download: {
-      metaTitle: "xMatrix をダウンロード — macOS、Windows、Android 対応",
-      metaDescription: "macOS（Apple Silicon / Intel）・Windows 向けデスクトップアプリや Android APK をダウンロードして、どこからでもコーディングエージェントと協働できます。",
+      metaTitle: "xMatrix をダウンロード — Mac、Windows、iPhone、Android 対応",
+      metaDescription:
+        "App Store と Google Play で xMatrix を入手、または macOS・Windows 向けデスクトップアプリをダウンロードして、どこからでもコーディングエージェントと協働できます。",
       getXMatrix: "xMatrix を入手",
       useOnWeb: "ブラウザで xMatrix を使う",
       openWebApp: "Web アプリを開く",
@@ -375,7 +390,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       appleSiliconDetail: "Apple Silicon（M1 以降）搭載 Mac 向け。",
       intelDetail: "Intel 搭載 Mac 向け。",
       windowsDetail: "64ビット Windows 向け。",
-      androidDetail: "Android 用 APK。",
+      androidDetail: "Google Play から入手できる Android 版。",
+      androidApkDetail: "Android 用 APK。",
+      iosDetail: "App Store から入手できる iPhone・iPad 版。",
       releaseChannelSr: "リリースチャンネル：",
       releaseChannelMenu: "リリースチャンネル",
       stableLabel: "安定版",
@@ -388,7 +405,8 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       windowsNote: "デスクトップアプリ（x64）",
       windowsBuild: "インストーラー",
       androidNote: "モバイルアプリ",
-      webNote: "iPhone、iPad、Linux、その他ブラウザ",
+      iosNote: "iPhone・iPad アプリ",
+      webNote: "Linux、その他ブラウザ",
       webBuild: "開く",
       desktopNotes: "デスクトップ版リリースノート",
       androidNotes: "Android 版リリースノート",
@@ -449,8 +467,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
   },
   ko: {
     download: {
-      metaTitle: "xMatrix 다운로드 — macOS, Windows, Android 지원",
-      metaDescription: "macOS(Apple Silicon / Intel), Windows 데스크톱 앱 또는 Android APK를 다운로드해 어디서나 AI 코딩 에이전트와 협업하세요.",
+      metaTitle: "xMatrix 다운로드 — Mac, Windows, iPhone, Android 지원",
+      metaDescription:
+        "App Store와 Google Play에서 xMatrix를 받거나 macOS, Windows 데스크톱 앱을 다운로드해 어디서나 AI 코딩 에이전트와 협업하세요.",
       getXMatrix: "xMatrix 받기",
       useOnWeb: "웹에서 xMatrix 사용하기",
       openWebApp: "웹 앱 열기",
@@ -461,7 +480,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       appleSiliconDetail: "Apple Silicon(M1 이상) Mac용.",
       intelDetail: "Intel Mac용.",
       windowsDetail: "64비트 Windows용.",
-      androidDetail: "Android APK.",
+      androidDetail: "Google Play에서 받는 Android 앱.",
+      androidApkDetail: "Android APK.",
+      iosDetail: "App Store에서 받는 iPhone·iPad 앱.",
       releaseChannelSr: "릴리스 채널: ",
       releaseChannelMenu: "릴리스 채널",
       stableLabel: "안정판",
@@ -474,7 +495,8 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       windowsNote: "데스크톱 앱, x64",
       windowsBuild: "설치 파일",
       androidNote: "모바일 앱",
-      webNote: "iPhone, iPad, Linux 및 모든 브라우저",
+      iosNote: "iPhone·iPad 앱",
+      webNote: "Linux 및 모든 브라우저",
       webBuild: "열기",
       desktopNotes: "데스크톱 릴리스 노트",
       androidNotes: "Android 릴리스 노트",
@@ -535,8 +557,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
   },
   es: {
     download: {
-      metaTitle: "Descargar xMatrix para macOS, Windows y Android",
-      metaDescription: "Descarga xMatrix para macOS (Apple Silicon e Intel) y Windows, o el APK de Android, y coordina tus agentes de código desde cualquier lugar.",
+      metaTitle: "Descargar xMatrix para Mac, Windows, iPhone y Android",
+      metaDescription:
+        "Consigue xMatrix en App Store y Google Play, o descarga la app de escritorio para macOS y Windows, y coordina tus agentes de código desde cualquier lugar.",
       getXMatrix: "Obtén xMatrix",
       useOnWeb: "Usa xMatrix en la web",
       openWebApp: "Abrir app web",
@@ -547,7 +570,9 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       appleSiliconDetail: "Para Mac con Apple silicon (M1 o posterior).",
       intelDetail: "Para Mac con procesador Intel.",
       windowsDetail: "Para Windows de 64 bits.",
-      androidDetail: "APK de Android.",
+      androidDetail: "Android, desde Google Play.",
+      androidApkDetail: "APK de Android.",
+      iosDetail: "iPhone y iPad, desde App Store.",
       releaseChannelSr: "Canal de lanzamiento: ",
       releaseChannelMenu: "Canal de lanzamiento",
       stableLabel: "Estable",
@@ -560,7 +585,8 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
       windowsNote: "App de escritorio, x64",
       windowsBuild: "Instalador",
       androidNote: "App móvil",
-      webNote: "iPhone, iPad, Linux y cualquier navegador",
+      iosNote: "App para iPhone y iPad",
+      webNote: "Linux y cualquier navegador",
       webBuild: "Abrir",
       desktopNotes: "Notas de versión de escritorio",
       androidNotes: "Notas de versión de Android",
