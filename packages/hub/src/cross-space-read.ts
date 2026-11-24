@@ -60,13 +60,16 @@ export interface CrossSpaceOwnerRead {
  * A read of a Channel's messages (`part`) may instead be covered by a support
  * handoff to the Run's Space, made as the person who handed it over and noted
  * in their Channel (docs/cross-space-read-grants.md#support-handoffs).
+ * `alongside` marks the Channel's name and threads read next to its messages:
+ * a handoff covers it too, without counting a second read.
  */
 export async function crossSpaceReadOwner(env: Env, run: AgentRunPrincipal | undefined,
-  target: { channelId: string } | { spaceId: string }, part?: "messages"): Promise<CrossSpaceOwnerRead | null> {
+  target: { channelId: string } | { spaceId: string }, part?: "messages", alongside = false,
+): Promise<CrossSpaceOwnerRead | null> {
   if (!run) return null;
   const proof = runProof(run);
   const authorization = await repository(env).authorizeRead({ requestId: crypto.randomUUID(),
-    proof, ...target, ...(part ? { part } : {}) });
+    proof, ...target, ...(part ? { part } : {}), ...(alongside ? { alongside } : {}) });
   if (!authorization) return null;
   await postSupportAccessNote(env, authorization.accessNote, { grantId: authorization.grantId,
     spaceId: authorization.spaceId, ownerUserId: authorization.ownerUserId });
@@ -226,14 +229,14 @@ function notifyCrossSpaceRead(env: Env, grant: CrossSpaceReadGrant): Promise<voi
  * anything the owner cannot see keeps the original refusal.
  */
 export async function crossSpaceRetryOwner(env: Env, run: AgentRunPrincipal | undefined,
-  target: { channelId: string } | { spaceId: string }, denied: Response, part?: "messages",
+  target: { channelId: string } | { spaceId: string }, denied: Response, part?: "messages", alongside = false,
 ): Promise<CrossSpaceOwnerRead | Response> {
   if (!run || (denied.status !== 403 && denied.status !== 404)) return denied;
   // Grants live only in PostgreSQL; without it there is no grant to find, and
   // the ordinary refusal stands rather than becoming an availability error.
   if (!env.RELAY_POSTGRES?.connectionString || !env.RELAY_POSTGRES_SHARD_ID) return denied;
   try {
-    return await crossSpaceReadOwner(env, run, target, part) ?? denied;
+    return await crossSpaceReadOwner(env, run, target, part, alongside) ?? denied;
   } catch (error) {
     if (error instanceof CrossSpaceReadError && error.code === "cross_space_read_grant_required") {
       return postgresControlErrorResponse(error);

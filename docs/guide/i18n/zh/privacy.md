@@ -131,7 +131,7 @@ xMatrix 不使用广告 Cookie、跨站追踪、会话录屏，也不集成 Post
 - **谁来读：** xMatrix 支持，即 xMatrix 团队及其支持 Agent，在为这次交接开设的支持对话里处理。
 - **只读：** 支持按你能看到的样子读取你勾选的内容，不能在你的对话里写入、回应或启动任何东西。支持的答复以"xMatrix support"的消息出现在你的对话里，或通过邮件发给你。
 - **多长时间：** 14 天。你，或你所在空间的所有者或管理员，随时可以在它留在对话里的说明上点 **Withdraw now**。撤回或到期后立刻停止读取。
-- **每次读取你都看得到：** 支持在任意一小时内第一次读取时，你的对话会显示"xMatrix support read this conversation"和时间。
+- **每次读取你都看得到：** 支持在一小时内第一次读取时，你的对话会显示"xMatrix support read this conversation"和时间。这一小时内之后的每次读取都会更新同一条提示，写明读了几次和最近一次的时间，例如"xMatrix support read this conversation 3 times (latest 14:05 UTC)"。下一个小时会另起一条。
 - 只有对话的发起人，或其空间的所有者或管理员，才能交出这个对话。
 
 ## 法律文件

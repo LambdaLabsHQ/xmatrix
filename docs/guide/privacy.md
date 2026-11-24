@@ -131,7 +131,7 @@ What the handoff allows:
 - **Who reads it:** xMatrix support, which is the xMatrix team and its support Agents, working in a support conversation opened for your handoff.
 - **Read-only:** support reads what you ticked, as you see it, and cannot write, react or start anything in your conversation. Support's answer arrives in your conversation as a message from "xMatrix support", or by email.
 - **For how long:** 14 days. You, or an owner or admin of your Space, can withdraw it any time with **Withdraw now** on the note it leaves in your conversation. Reading stops at once when it is withdrawn or expires.
-- **You see each read:** the first time support reads it in any hour, your conversation says "xMatrix support read this conversation" with the time.
+- **You see each read:** the first time support reads it in an hour, your conversation says "xMatrix support read this conversation" with the time. Each later read in that hour updates the same note with how many times support read it and when it last did, for example "xMatrix support read this conversation 3 times (latest 14:05 UTC)". The next hour starts a new note.
 - Only the person who started a conversation, or an owner or admin of its Space, can hand it over.
 
 ## Legal documents
