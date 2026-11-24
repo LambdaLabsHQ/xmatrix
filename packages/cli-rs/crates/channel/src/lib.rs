@@ -133,7 +133,12 @@ fn print_found_channels(channels: &[protocol::SerializedChannel]) {
             channel.message_count.unwrap_or(0),
             channel.id.dimmed()
         );
-        if let Some(summary) = channel.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(summary) = channel
+            .summary
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             println!("  {}", summary.replace('\n', " "));
         }
     }
@@ -2855,6 +2860,19 @@ pub(crate) fn format_history_message_with_local_images(
                 "  [attachment] {} ({} bytes, {}, {})\n",
                 attachment.name, attachment.size, attachment.mime_type, has_data
             ));
+            // What commands that name a Channel file take (`@x:publish_video`,
+            // a program's `X.prepareVideo`): `<message id>/<attachment id>`.
+            if !attachment.id.is_empty() {
+                output.push_str(&format!(
+                    "    ref: {}/{}\n",
+                    attachment
+                        .message_id
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or(message.message_id.as_str()),
+                    attachment.id
+                ));
+            }
             if let Some(path) = local_path.as_deref() {
                 output.push_str(&format!("    local: {path}\n"));
             }
@@ -4034,6 +4052,8 @@ mod tests {
         let output = super::format_history_message_with_local_images(&message, &local, None, &[]);
         assert!(output.contains("image/png, local"));
         assert!(output.contains("local: /tmp/xmatrix-history-screen.png"));
+        // A cached file still names the reference commands take.
+        assert!(output.contains("ref: msg-1/att-local"));
         assert!(!output.contains("missing data"));
     }
 
