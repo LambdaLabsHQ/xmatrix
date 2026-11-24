@@ -90,3 +90,33 @@ test("PR CI exercises the same simulator gate and production keeps its exact rev
   assert.equal(evaluate(request.jobs.ios.if), false);
   assert.equal(evaluate(gates.if), true);
 });
+
+test("a beta train ships without waiting for its CodeQL scan and a stable train waits for it", () => {
+  const { codeql, gates } = request.jobs;
+  const beta = request.jobs["codeql-beta"];
+  // One analysis under two job ids: only `codeql` is among the gates' needs.
+  assert.ok(gates.needs.includes("codeql"));
+  assert.ok(!gates.needs.includes("codeql-beta"));
+  assert.ok(!Object.values(request.jobs).some((job) => [job.needs ?? []].flat().includes("codeql-beta")));
+  for (const key of ["name", "runs-on", "permissions", "strategy", "steps"]) assert.deepEqual(beta[key], codeql[key], key);
+  const needs = { plan: { result: "success", outputs: { scope: "web", channel: "beta" } }, ci: { result: "success" }, ios: { result: "skipped" }, codeql: { result: "skipped" } };
+  const evaluate = (expression) => new Function("needs", "always", "contains", "format", `return (${expression});`)(
+    needs, () => true, (value, part) => value.includes(part), (_, scope) => `,${scope},`,
+  );
+  assert.equal(evaluate(codeql.if), false);
+  assert.equal(evaluate(beta.if), true);
+  assert.equal(evaluate(gates.if), true);
+  for (const result of ["failure", "cancelled"]) {
+    needs.codeql.result = result;
+    assert.equal(evaluate(gates.if), false, `beta: ${result}`);
+  }
+  needs.plan.outputs.channel = "stable";
+  assert.equal(evaluate(codeql.if), true);
+  assert.equal(evaluate(beta.if), false);
+  for (const result of ["skipped", "failure", "cancelled"]) {
+    needs.codeql.result = result;
+    assert.equal(evaluate(gates.if), false, `stable: ${result}`);
+  }
+  needs.codeql.result = "success";
+  assert.equal(evaluate(gates.if), true);
+});

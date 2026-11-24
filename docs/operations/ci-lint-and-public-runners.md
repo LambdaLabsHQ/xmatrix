@@ -207,8 +207,11 @@ publishes them to a dev channel or TestFlight (`codeql` in
 languages use build mode `none`. Results upload as code scanning alerts on
 `main` under the same `/language:<name>` categories GitHub's default setup
 used, which must stay disabled: GitHub refuses a workflow's upload while
-default setup is on. The analysis has to finish before the train ships; its
-findings are alerts, not a gate verdict. A train already running keeps the
+default setup is on. Its findings are alerts, not a gate verdict. A stable
+train waits for the analysis to finish before it ships. A beta train runs the
+same analysis beside its gates (`codeql-beta`) and ships when the gates pass,
+without waiting: the scan was the longest thing a Web beta waited for, about
+three minutes, and its result never decided whether the beta shipped. A train already running keeps the
 scan list it started with. Existing tags and artifacts stay immutable. The
 next beta that ships the CLI shows no Rust analysis, while JavaScript,
 TypeScript and the release workflows still run; the next stable that ships a
