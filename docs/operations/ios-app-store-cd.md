@@ -35,14 +35,26 @@ browser-session release path.
   build number, outcome and state. Temporary API key files are removed even after
   a failed step; the upload helper uses `API_PRIVATE_KEYS_DIR`, not `$HOME` storage.
 
-## Version and retry behavior
+## Physical device verification
 
 The Web attachment picker can open the system camera for a photo or video.
 The shipped app must include nonempty camera and microphone purpose strings;
 video capture uses both, and iOS terminates an app that accesses a protected
-resource without its purpose string. The hosted simulator test checks the
-built app's Info.plist. Camera recording still needs a physical-device check;
-simulator tests do not establish that capture works on an iPad or iPhone.
+resource without its purpose string. The hosted simulator suite checks the
+built app's Info.plist, file selection callbacks, and cancellation before
+TestFlight and App Store upload. The browser suite covers the composer and
+the Web side of cancellation.
+
+Use a dedicated team iPhone with a test account and synthetic files for checks
+that need physical hardware or the installed TestFlight build, including camera
+and microphone capture, iCloud assets, and system VoiceOver gestures. Connect
+the device by USB to its Mac test host for XCUITest. Record the iOS version,
+TestFlight build, Web revision, and observed results. If a team device is
+unavailable, record the hardware checks as pending. CI and Apple's upload
+receipt do not establish those results.
+
+## Version and retry behavior
+
 The public support URL is `https://xmatrix.sh/support`, which provides direct
 contact information without requiring an account; the user guide is separate.
 

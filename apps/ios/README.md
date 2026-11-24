@@ -73,12 +73,20 @@ On iPhone the bottom tab dock is rendered by a native UIKit tab bar instead of t
 - `setMobileTabState({ visible, activeView })` reports the page's current view and whether the dock shows; the native bar highlights the tab that owns the view (Pages, Channels and Agents own themselves, every other view is in More). The web layer also sends `spaceId` and `userId`, which only older app builds that kept a page per tab use.
 - The web-rendered `MobileTabDock` is hidden when the iOS shell is detected, so only the native capsule dock is visible.
 
-## Native startup regression tests
+## Native regression tests
 
 Run `xcodebuild -project apps/ios/xMatrix.xcodeproj -scheme xMatrix -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test` from the repository root (or select another available iOS 26 simulator).
 
-PR CI and the production release gate share `.github/actions/ios-simulator-test`:
-they select Xcode and an installed iOS 26 iPhone by UDID. The release gate tests
-the exact stamped release revision and fails if no suitable simulator is available.
+PR CI and the production release gate share `.github/actions/ios-simulator-test`.
+They select Xcode and an installed iOS 26 iPhone simulator by UDID. Every beta
+and stable train that ships iOS tests the exact stamped release revision before
+upload and fails if no suitable simulator is available. These checks run without
+a physical iPhone, Apple ID, TestFlight installation, or signing credentials.
 
-The `xMatrixTests` target exercises the production coordinator with real `WKWebView` instances whose top-level `load` calls are recorded instead of sent to the network. It verifies single-page startup, tab taps that switch panes without loading, deep links in the same page, foreground resume, and bridge state decoding. These are lifecycle tests, not end-to-end network latency benchmarks.
+The `xMatrixTests` target exercises the production coordinator with real
+`WKWebView` instances whose top-level loads are recorded locally. It checks
+single-page startup, tabs, deep links, resume, and bridge state, as well as the
+native file picker's cancellation and disk-backed selection callbacks. The Web
+browser suite checks composer animation and whether cancelling a picker restores
+Send. See [physical device verification](../../docs/operations/ios-app-store-cd.md#physical-device-verification)
+for hardware coverage.

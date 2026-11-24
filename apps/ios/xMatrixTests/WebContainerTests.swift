@@ -641,6 +641,60 @@ final class WebContainerTests: XCTestCase {
         XCTAssertNil(NativeAttachmentPicker.parseArmedSource(expired))
     }
 
+    func testNativeFilePickerCanSelectAgainAfterCancellation() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xmatrix-file-picker-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let payload = Data("Simulator document".utf8)
+        let source = directory.appendingPathComponent("note.txt")
+        try payload.write(to: source)
+
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let presenter = UIViewController()
+        window.rootViewController = presenter
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        func dismissPanel() async {
+            await withCheckedContinuation { continuation in
+                presenter.dismiss(animated: false) { continuation.resume() }
+            }
+        }
+
+        let picker = NativeAttachmentPicker(
+            store: AttachmentStagingStore(rootDirectory: directory.appendingPathComponent("staging"))
+        )
+        picker.anchorView = presenter.view
+
+        var cancelled = false
+        picker.presentOpenPanel(source: .files, allowsMultipleSelection: true) { urls in
+            XCTAssertNil(urls)
+            cancelled = true
+        }
+        let firstPanel = try XCTUnwrap(presenter.presentedViewController as? UIDocumentPickerViewController)
+        XCTAssertTrue(firstPanel.allowsMultipleSelection)
+        await dismissPanel()
+        firstPanel.delegate?.documentPickerWasCancelled?(firstPanel)
+        XCTAssertTrue(cancelled)
+
+        var result: [URL]?
+        picker.presentOpenPanel(source: .files, allowsMultipleSelection: false) { urls in
+            result = urls
+        }
+        let secondPanel = try XCTUnwrap(presenter.presentedViewController as? UIDocumentPickerViewController)
+        XCTAssertFalse(secondPanel.allowsMultipleSelection)
+        await dismissPanel()
+        secondPanel.delegate?.documentPicker?(secondPanel, didPickDocumentsAt: [source])
+        let selected = try XCTUnwrap(result)
+        XCTAssertEqual(selected.count, 1)
+        let staged = try XCTUnwrap(selected.first)
+        XCTAssertNotEqual(staged, source)
+        XCTAssertEqual(staged.lastPathComponent, "note.txt")
+        XCTAssertEqual(try Data(contentsOf: staged), payload)
+    }
+
     func testAttachmentPickerParsesSourcesPrefersMoviesAndSanitizesNames() {
         XCTAssertEqual(NativeAttachmentPicker.parseArmedSource("photos"), .photos)
         XCTAssertEqual(NativeAttachmentPicker.parseArmedSource("camera"), .camera)

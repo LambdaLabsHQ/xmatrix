@@ -388,12 +388,23 @@ test.describe("mock-auth app fixture", () => {
       expect(interruptCheck.sawClosingPanel).toBe(true);
       await expectSettledAtRestingHeight();
 
-      // Picking Choose Files synchronously arms the one-shot source, holds Send
-      // while the native picker is in flight, and clicks the composer's file input
-      // so WKUIDelegate.runOpenPanelWith receives it.
+      // A cancelled native panel must release Send and allow the next pick while
+      // preserving the draft. Playwright intercepts the chooser, so dispatch the
+      // event WebKit delivers when the native delegate returns nil.
       await composerBox.locator(".composer-textarea").fill("pending send");
       const sendButton = composerBox.locator(".app-composer-send");
       await expect(sendButton).toBeEnabled();
+      await attachButton.click();
+      const [cancelledChooser] = await Promise.all([
+        page.waitForEvent("filechooser"),
+        menu.getByRole("menuitem", { name: "Photo Library" }).click(),
+      ]);
+      await expect(sendButton).toBeDisabled();
+      await cancelledChooser.element().dispatchEvent("cancel");
+      await expect(sendButton).toBeEnabled();
+
+      // Picking Choose Files synchronously arms the source and holds Send until
+      // the file input has delivered the selection.
       await attachButton.click();
       await expect(menu).toBeVisible();
       const [fileChooser] = await Promise.all([
