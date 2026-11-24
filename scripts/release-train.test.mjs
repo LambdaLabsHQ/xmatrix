@@ -137,6 +137,8 @@ test("code scanning runs on main and daily, and no release train waits for it", 
   const codeql = read("codeql.yml");
   assert.match(codeql, /\n  push:\n    branches: \[main\]\n  schedule:\n/u);
   assert.match(codeql, /release-train\.mjs codeql "\$SCAN"/u);
+  // A started scan finishes: cancelling it per push left none completing.
+  assert.match(codeql, /\n  cancel-in-progress: false\n/u);
   const scan = (mode) => JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL("release-train.mjs", import.meta.url)), "codeql", mode], { encoding: "utf8" }));
   assert.deepEqual([...new Set(scan("push").map((analysis) => analysis.language))], ["actions", "javascript-typescript"]);
   assert.deepEqual(

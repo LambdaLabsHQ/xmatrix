@@ -5,8 +5,10 @@ name: CodeQL
 # through, not a verdict on a release, so no train waits for them. Each push
 # to main scans what every beta ships: Hub, Web and Desktop JavaScript and
 # TypeScript, and the workflows. A daily run, or one dispatched by hand, scans every
-# language, Rust, Kotlin and Swift included. A newer push replaces a scan
-# still running: only the newest main matters. Test code never ships, so it
+# language, Rust, Kotlin and Swift included. A scan that has started
+# finishes; while it runs, GitHub keeps only the newest waiting push, so main
+# is scanned as often as a scan takes. Cancelling the running scan for each
+# push left none finishing while merges arrived every few minutes. Test code never ships, so it
 # is not scanned. The JavaScript and TypeScript analysis runs as two halves
 # side by side. Rust stays one analysis so cross-crate flow remains. This
 # CodeQL only accepts Rust build-mode none. Its rust-analyzer does not load
@@ -25,7 +27,7 @@ permissions:
 
 concurrency:
   group: codeql-${{ github.event_name }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   plan:
