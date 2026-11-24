@@ -33,6 +33,7 @@ import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
 import { GrantedAuthProvider } from "@/lib/auth-context";
 import { markExtensionAskSurface } from "@/lib/extension-embed";
+import { UserFacingProblem } from "@/lib/user-facing-error";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { installLocalApi } from "./local-api";
 
@@ -55,9 +56,17 @@ type Extension = {
 };
 const extension = (globalThis as unknown as { chrome: Extension }).chrome;
 
+/**
+ * Asks the extension's service worker. Its refusals are sentences for the person ("Sign in to xMatrix in the side
+ * panel first.", the Hub's own reason a conversation could not start): the box shows them as they are, not as an
+ * unexplained "Something went wrong" (Daniel 2026-11-24: "Couldn't prepare the message" said nothing of why).
+ */
 async function ask<T>(type: string, args?: unknown): Promise<T> {
-  const answer = await extension.runtime.sendMessage({ type, args });
-  if (!answer?.ok) throw Object.assign(new Error(answer?.error ?? "xMatrix could not be reached."), { code: answer?.code });
+  const answer = await extension.runtime.sendMessage({ type, args }).catch(() => undefined);
+  if (!answer?.ok) {
+    throw Object.assign(new UserFacingProblem(answer?.error || "xMatrix could not be reached. Try again.", true),
+      { code: answer?.code });
+  }
   return answer.value as T;
 }
 
