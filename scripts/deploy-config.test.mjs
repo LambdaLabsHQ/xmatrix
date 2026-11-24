@@ -138,7 +138,8 @@ test("a site origin is the stable Web's second domain, outside the cookie domain
     XMATRIX_SITE_ORIGIN: "https://acme-site.example",
   });
   const betaWeb = renderWebConfig(base, resolved, "web-beta");
-  assert.deepEqual(betaWeb.routes, [{ pattern: "beta.acme.example", custom_domain: true }], "the beta Web is never the site");
+  assert.deepEqual(betaWeb.routes, [{ pattern: "beta.acme.example", custom_domain: true }],
+    "the stable Web's site origin is never the beta Web's");
   assert.equal("vars" in betaWeb, false);
   assert.equal("vars" in renderWebConfig(base, resolveProfile(profile(), env)), false);
 
@@ -153,6 +154,33 @@ test("a site origin is the stable Web's second domain, outside the cookie domain
   }
   assert.throws(() => resolveProfile(profile({ web: { siteOrigin: "https://acme-site.example/docs" } }), env),
     /bare https origin/u);
+});
+
+test("a beta Web serves the site at a site origin of its own, and builds for it", () => {
+  const sites = { stable: "https://acme-site.example", beta: "https://beta.acme-site.example" };
+  const web = (betaSite) => ({
+    siteOrigin: sites.stable,
+    beta: { workerName: "acme-web-beta", origin: "https://beta.acme.example", siteOrigin: betaSite },
+  });
+  const resolved = resolveProfile(profile({ web: web(sites.beta) }), env);
+  const base = { name: "xmatrix-web", main: "worker.mjs" };
+  const hosts = (component) => renderWebConfig(base, resolved, component).routes.map((route) => route.pattern);
+  assert.deepEqual(hosts("web-beta"), ["beta.acme.example", "beta.acme-site.example"]);
+  assert.deepEqual(hosts("web"), ["acme.example", "acme-site.example"], "the stable Web is unchanged");
+  // worker.mjs sends anything but the site at the beta site origin to the beta app, where the session is.
+  assert.deepEqual(renderWebConfig(base, resolved, "web-beta").vars,
+    { XMATRIX_APP_ORIGIN: "https://beta.acme.example", XMATRIX_SITE_ORIGIN: sites.beta });
+
+  const built = profileEnvironment(resolved, "web-beta");
+  assert.equal(built.NEXT_PUBLIC_SITE_URL, sites.beta);
+  assert.equal(built.NEXT_PUBLIC_APP_URL, "https://beta.acme.example", "sign-in stays at the beta app");
+  assert.equal(built.NEXT_PUBLIC_XMATRIX_WEB_CHANNEL, "beta", "the channel keeps every beta origin out of search");
+  assert.equal(profileEnvironment(resolved).NEXT_PUBLIC_SITE_URL, sites.stable);
+  assert.equal(Object.values(renderHubConfig(hubBase, resolved).vars).includes(sites.beta), false, "the Hub trusts only the apps");
+
+  for (const origin of ["https://acme.example", "https://hub.acme.example", "https://beta.acme.example", sites.stable]) {
+    assert.throws(() => resolveProfile(profile({ web: web(origin) }), env), /web\.beta\.siteOrigin must be its own origin/u);
+  }
 });
 
 test("a deployment meters nothing unless its profile names a billing policy", () => {

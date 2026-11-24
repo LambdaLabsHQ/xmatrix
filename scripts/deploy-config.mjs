@@ -37,7 +37,7 @@ const WEB_KEYS = new Set([
   "config", "workerName", "origin", "siteOrigin", "workersDev", "previewUrls", "omitBindings", "beta",
 ]);
 // The Web that every beta deploys, beside the stable one at `web.origin`.
-const WEB_BETA_KEYS = new Set(["workerName", "origin", "workersDev", "previewUrls"]);
+const WEB_BETA_KEYS = new Set(["workerName", "origin", "siteOrigin", "workersDev", "previewUrls"]);
 // URL and identity vars derived from profile fields, never set as raw vars.
 const DERIVED_HUB_VARS = new Set(["APP_URL", "APP_BETA_URL", "HUB_URL"]);
 
@@ -162,13 +162,20 @@ export function resolveProfile(profile, env = process.env) {
     }
   }
 
-  // The marketing site may also answer at its own origin, outside the session's cookie domain: the stable Web
-  // serves it there beside `web.origin`, and canonical URLs name it. Signed-in surfaces stay at `web.origin`.
-  const site = profile.web.siteOrigin === undefined
-    ? null : resolveOrigin(profile.web.siteOrigin, "web.siteOrigin", env);
-  if (site && [webOrigin.origin, hubOrigin.origin, beta?.origin].includes(site.origin)) {
-    fail("web.siteOrigin must be its own origin");
-  }
+  // The marketing site may also answer at its own origin, outside the session's cookie domain: a Web serves it
+  // there beside its app origin, and its canonical URLs name it. Signed-in surfaces stay at the app origin. The
+  // stable Web's (`web.siteOrigin`) is the one search engines index; the beta Web's (`web.beta.siteOrigin`) shows
+  // the site at an address of its own before a stable carries it.
+  const taken = [webOrigin.origin, hubOrigin.origin, beta?.origin];
+  const siteOrigin = (value, where) => {
+    if (value === undefined) return null;
+    const site = resolveOrigin(value, where, env);
+    if (taken.includes(site.origin)) fail(`${where} must be its own origin`);
+    taken.push(site.origin);
+    return site;
+  };
+  const site = siteOrigin(profile.web.siteOrigin, "web.siteOrigin");
+  if (beta) beta.site = siteOrigin(betaProfile.siteOrigin, "web.beta.siteOrigin");
 
   for (const [where, value] of [["hub", profile.hub], ["web", profile.web], ["web.beta", betaProfile ?? {}]]) {
     for (const key of ["workersDev", "previewUrls"]) {
@@ -285,8 +292,8 @@ export function webTarget(resolved, component = "web") {
 /** Merges a resolved profile into the committed Web config, for the stable or the beta Web. */
 export function renderWebConfig(base, resolved, component = "web") {
   const web = webTarget(resolved, component);
-  // Only the stable Web serves the site origin; the beta Web is never indexed.
-  const site = component === "web" ? resolved.web.site : null;
+  // Each Web serves the site at its own site origin, never at the other's.
+  const { site } = web;
   const config = structuredClone(base);
   delete config.$schema;
   assertNoDeploymentIdentity(config, resolved.web.config);
@@ -340,8 +347,8 @@ export function profileEnvironment(resolved, web = "web") {
     XMATRIX_HUB_CONFIG: renderedConfigPath("hub", resolved),
     XMATRIX_WEB_CONFIG: renderedConfigPath(web, resolved),
     NEXT_PUBLIC_APP_URL: target.origin,
-    // The origin canonical URLs, the sitemap and robots name: the site origin when the stable Web has one.
-    NEXT_PUBLIC_SITE_URL: (web === "web" && resolved.web.site ? resolved.web.site : target).origin,
+    // The origin canonical URLs, the sitemap and robots name: this Web's site origin when it has one.
+    NEXT_PUBLIC_SITE_URL: (target.site ?? target).origin,
     NEXT_PUBLIC_XMATRIX_WEB_CHANNEL: web === "web-beta" ? "beta" : "stable",
     NEXT_PUBLIC_AUTH_BASE_URL: resolved.hub.origin,
     NEXT_PUBLIC_XMATRIX_HUB_URL: resolved.hub.origin,

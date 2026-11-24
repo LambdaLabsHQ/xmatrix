@@ -43,6 +43,7 @@
     "beta": {
       "workerName": "xmatrix-web-beta",
       "origin": "https://beta.xmatrix.sh",
+      "siteOrigin": "https://beta.xmatrix.page",
       "workersDev": false,
       "previewUrls": false
     }

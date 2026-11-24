@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: the site's beta answers at beta.xmatrix.page
+
+The site lives at xmatrix.page, but a beta of it could only be read at
+beta.xmatrix.sh, the beta app's address, so a change to the site was reviewed
+under a domain that is not the site's. The beta Web now also serves the
+marketing site at beta.xmatrix.page (`web.beta.siteOrigin`), arranged as
+xmatrix.page is beside xmatrix.sh: the site's pages answer there, the beta
+build's canonical URLs name it, and any other path, the app and sign-in among
+them, goes to beta.xmatrix.sh with a temporary redirect. Like every beta origin
+it stays out of search: its robots disallows everything and its pages answer
+`noindex`. The Hub does not trust it; the stable Web, xmatrix.page and the
+session cookie are unchanged. Beta Web only, no API or schema change; recovery
+is a CI-validated beta without `web.beta.siteOrigin`.
+
 ## Unreleased: revised homepage copy across all six published locales
 
 Rewrote the homepage copy in `apps/web/src/lib/landing-copy.ts` across all six
