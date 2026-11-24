@@ -137,6 +137,7 @@ fn redelivery_window(result: &Value) -> Duration {
         Some(
             "machine_harness_action_result"
             | "machine_text_task_result"
+            | "machine_log_excerpt_result"
             | "machine_worktree_action_result",
         ) => DAY,
         _ => 31 * DAY,

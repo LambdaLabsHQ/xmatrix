@@ -452,6 +452,8 @@ export type {
   MachineDaemonWorktreeCleanupResultReport as MachineWorktreeCleanupResultMessage,
   MachineDaemonSleepCommand,
   MachineDaemonSleepResultReport,
+  MachineDaemonLogExcerptCommand,
+  MachineDaemonLogExcerptResultReport,
 } from "./connections/machine-daemon.js";
 export { MACHINE_SLEEP_CAPABILITY, MACHINE_CLI_RELEASE_CAPABILITY, MACHINE_CLI_UPDATE_CHECK_CAPABILITY,
   MACHINE_CLI_UPDATE_CHECK_COALESCE_MS } from "./connections/machine-daemon.js";

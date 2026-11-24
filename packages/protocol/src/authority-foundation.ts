@@ -211,6 +211,10 @@ export const HUB_ROUTES = {
   machine_worktree_actions: "/api/machine-daemons/worktree-actions",
   machine_worktree_action: (controlId: string) =>
     `/api/machine-daemons/worktree-actions/${encodeURIComponent(controlId)}`,
+  /** The owner asks one of their Machines for a redacted tail of its daemon log, to preview for support. */
+  machine_log_excerpts: "/api/machine-daemons/log-excerpts",
+  machine_log_excerpt: (controlId: string) =>
+    `/api/machine-daemons/log-excerpts/${encodeURIComponent(controlId)}`,
   machine_daemon_credentials: "/api/machine-daemon-credentials",
   machine_daemon_migration_fence: "/api/machine-daemon/migration-fence",
   machine_daemon_workspaces: "/api/machine-daemon/workspaces",
@@ -655,6 +659,9 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}/decision`,
   channel_support_handoffs: (channelId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/support-handoffs`,
+  machine_log_excerpts: "/api/xmatrix/machine-daemons/log-excerpts",
+  machine_log_excerpt: (controlId: string) =>
+    `/api/xmatrix/machine-daemons/log-excerpts/${encodeURIComponent(controlId)}`,
   support_handoff: (spaceId: string, grantId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}`,
   support_handoff_part: (spaceId: string, grantId: string, part: "messages" | "diagnostics" | "logs") =>

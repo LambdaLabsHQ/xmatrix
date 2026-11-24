@@ -82,7 +82,8 @@ fn command_admission_report(command: &MachineDaemonCommand) -> error::Result<Mac
             channel_id,
             ..
         } => (request_id.clone(), None, Some(channel_id.clone())),
-        MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
+        MachineDaemonCommand::MachineLogExcerpt { request_id, .. }
+        | MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
         | MachineDaemonCommand::MachineHarnessAction { request_id, .. }
         | MachineDaemonCommand::MachineTextTask { request_id, .. }
         | MachineDaemonCommand::MachineSleepAgent { request_id, .. }
@@ -2036,6 +2037,8 @@ pub(crate) const DAEMON_CAPABILITIES: &[&str] = &[
     "machine_handoff_export_v1",
     // The owner lists and reclaims this machine's git worktrees.
     "machine_worktree_action_v1",
+    // The owner previews a redacted tail of this daemon's log for a support handoff.
+    "machine_log_excerpt_v1",
     // A spawn's prompt bundle may carry further official texts by name.
     "bootstrap_prompt_texts_v1",
     // The daemon keeps the Hub's harness registry and uses it over its compiled copy.
@@ -2681,6 +2684,20 @@ async fn run_daemon_connection(
                             };
                             if let Err(error) = send_command_result(&command_results, &control_id, &relay, report) {
                                 eprintln!("{} failed to report sleep result: {error}", "⚠".yellow().bold());
+                            }
+                        });
+                    }
+                    MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineLogExcerpt { .. }) => {
+                        let (control_id, _) = command_dispatch.expect("command has a control ID");
+                        spawn_admitted_daemon_command(hub_url, &relay, &command_results, control_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { relay, command_results, control_id, .. } = context;
+                            let MachineDaemonCommand::MachineLogExcerpt { request_id, relay_lease } = command else {
+                                return;
+                            };
+                            let result = crate::runtime_daemon_log_excerpt::read_redacted_daemon_log().await;
+                            let report = MachineDaemonReport::MachineLogExcerptResult { request_id, result, relay_lease };
+                            if let Err(error) = send_command_result(&command_results, &control_id, &relay, report) {
+                                eprintln!("{} failed to report log excerpt: {error}", "⚠".yellow().bold());
                             }
                         });
                     }
