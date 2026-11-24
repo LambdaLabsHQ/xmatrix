@@ -209,13 +209,15 @@ async function buildStyles(out, minify) {
   const css = minify
     ? (await esbuild.transform(result.css, { loader: "css", minify: true, target: TARGET, logLevel: "error" })).code
     : result.css;
-  fs.writeFileSync(path.join(out, "app.css"), css);
+  // The side panel is a desktop browser surface, not a phone: settle width media queries at desktop width
+  // while keeping viewport-height units (dvh/vh) live so the panel fills Chrome's side panel height.
+  fs.writeFileSync(path.join(out, "app.css"), desktopStylesheet(css, DESKTOP_WIDTH_PX, DESKTOP_HEIGHT_PX, { viewportUnits: false }));
   fs.writeFileSync(path.join(out, "ask.css"), desktopStylesheet(css));
   return css;
 }
 
 const PAGE = `<!doctype html>
-<html lang="en" class="font-sans light" data-app-theme="wood" style="color-scheme: light">
+<html id="xmatrix-side-panel" lang="en" class="font-sans light" data-app-theme="wood" style="color-scheme: light; background: #ffffff">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -223,8 +225,116 @@ const PAGE = `<!doctype html>
   <link rel="stylesheet" href="app.css">
   <link rel="modulepreload" href="main.js">
   <script src="document.js"></script>
+  <style>
+    /* The side panel composer is a full-bleed warm paper writing dock flush to the bottom edge
+       (Daniel 2026-11-24: occupies the full bottom area instead of a floating capsule or inset box,
+       with warm paper contrast and a dedicated two-row writing + toolbar layout so it unmistakably
+       reads as an input box; the on-page selection box keeps its floating glass capsule in ask.html).
+       #xmatrix-side-panel guarantees higher specificity than globals.css's glass-surface recipes. */
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer {
+      position: relative !important;
+      inset: auto !important;
+      padding: 0 !important;
+      background: transparent !important;
+      pointer-events: auto !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer-shell {
+      padding: 0 !important;
+      gap: 0 !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box:not(.app-agent-work-card) {
+      --app-liquid-rim-layers: 0 0 transparent !important;
+      --app-liquid-edge-meniscus: 0 0 transparent !important;
+      --app-glass-edge: none !important;
+      --app-liquid-backdrop-filter: none !important;
+      --app-liquid-surface-bg: oklch(0.968 0.008 82) !important;
+      border: 0 !important;
+      border-top: 1px solid oklch(0.83 0.016 78) !important;
+      border-radius: 0 !important;
+      background: oklch(0.968 0.008 82) !important;
+      background-color: oklch(0.968 0.008 82) !important;
+      background-image: none !important;
+      box-shadow: 0 -2px 10px oklch(0.24 0.02 70 / 0.04) !important;
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+      transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box:not(.app-agent-work-card):focus-within {
+      border-top-color: oklch(0.56 0.045 65) !important;
+      background: oklch(0.978 0.006 82) !important;
+      background-color: oklch(0.978 0.006 82) !important;
+      box-shadow: inset 0 1px 0 oklch(0.56 0.045 65 / 0.2), 0 -4px 14px oklch(0.24 0.02 70 / 0.05) !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box::before,
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box::after {
+      display: none !important;
+      content: none !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box > .px-2.pt-2 {
+      padding: 0.625rem 0.75rem 0 !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-browser-page {
+      background: #ffffff !important;
+      border: 1px solid oklch(0.88 0.012 78) !important;
+      border-radius: 8px !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-input-row {
+      display: flex !important;
+      flex-wrap: wrap !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      gap: 0.25rem 0.375rem !important;
+      padding: 0.5rem 0.75rem 0.625rem !important;
+      min-height: 0 !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-field-host {
+      order: -1 !important;
+      flex: 1 0 100% !important;
+      width: 100% !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-textarea {
+      min-height: 2.75rem !important;
+      padding: 0.25rem 0.125rem 0.5rem !important;
+      font-size: 0.875rem !important;
+      line-height: 1.45 !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-attach {
+      order: 1 !important;
+      margin-right: auto !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-inline-actions:not(.composer-attach) {
+      order: 2 !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer :is(.app-composer-send, .app-composer-send-ready) {
+      order: 3 !important;
+      width: 2rem !important;
+      height: 2rem !important;
+      border-radius: 999px !important;
+      background: oklch(0.24 0.03 60 / 0.11) !important;
+      box-shadow: none !important;
+      -webkit-backdrop-filter: none !important;
+      backdrop-filter: none !important;
+      color: var(--muted-foreground) !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-composer .app-composer-send-ready {
+      background: var(--foreground) !important;
+      color: #ffffff !important;
+    }
+    /* Because the composer is in flow below the scroller, the timeline needs only quiet breathing room at its end. */
+    #xmatrix-side-panel .xmatrix-app-shell .app-message-timeline {
+      scroll-padding-bottom: 0.75rem !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-message-timeline:not(.app-message-timeline-work-dock-offset) > div,
+    #xmatrix-side-panel .xmatrix-app-shell .app-message-timeline:not(.app-message-timeline-work-dock-offset) .app-message-timeline-scroll-end {
+      padding-bottom: 0.75rem !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .app-agent-work-dock {
+      bottom: calc(var(--app-composer-height, 5.5rem) + 0.375rem) !important;
+      padding: 0.125rem 0.75rem !important;
+    }
+  </style>
 </head>
-<body class="site-canvas antialiased">
+<body class="site-canvas antialiased" style="background: #ffffff">
   <script type="module" src="main.js"></script>
 </body>
 </html>
@@ -245,8 +355,10 @@ const ASK_PAGE = `<!doctype html>
   <style>
     /* Only the capsule and its shadow sit on the page: the App's paper behind the composer would show as a pale
        box over the page's text around it. In a frame the glass cannot blur the page behind it, so the capsule
-       carries the paper itself (Daniel 2026-11-23: the box is the input alone). */
+       carries the paper itself (Daniel 2026-11-23: the box is the input alone). Keep the composer in normal flow
+       so the frame measures its height directly without an async ResizeObserver stage loop. */
     html[data-app-theme] .xmatrix-app { background: transparent !important; }
+    .xmatrix-app .app-composer { position: relative !important; inset: auto !important; padding: 0 !important; }
     .xmatrix-app .app-composer-box {
       --app-liquid-surface-bg: var(--background) !important;
       --app-liquid-shared-surface-bg: var(--background) !important;
@@ -304,14 +416,16 @@ export function widthCondition(text, width = DESKTOP_WIDTH_PX) {
  * Lengths in viewport units are the window's too, not the frame's: a field
  * capped at a third of the viewport would otherwise be a third of the box.
  */
-export function desktopStylesheet(css, width = DESKTOP_WIDTH_PX, height = DESKTOP_HEIGHT_PX) {
+export function desktopStylesheet(css, width = DESKTOP_WIDTH_PX, height = DESKTOP_HEIGHT_PX, { viewportUnits = true } = {}) {
   const root = postcss.parse(css);
-  const units = { vh: height / 100, dvh: height / 100, svh: height / 100, lvh: height / 100,
-    vw: width / 100, dvw: width / 100, svw: width / 100, lvw: width / 100 };
-  root.walkDecls((decl) => {
-    if (decl.prop.startsWith("--") && !/\d(?:[dsl]?v[hw])\b/u.test(decl.value)) return;
-    decl.value = decl.value.replace(/(-?\d*\.?\d+)([dsl]?v[hw])\b/gu, (_, value, unit) => `${+(Number(value) * units[unit]).toFixed(3)}px`);
-  });
+  if (viewportUnits) {
+    const units = { vh: height / 100, dvh: height / 100, svh: height / 100, lvh: height / 100,
+      vw: width / 100, dvw: width / 100, svw: width / 100, lvw: width / 100 };
+    root.walkDecls((decl) => {
+      if (decl.prop.startsWith("--") && !/\d(?:[dsl]?v[hw])\b/u.test(decl.value)) return;
+      decl.value = decl.value.replace(/(-?\d*\.?\d+)([dsl]?v[hw])\b/gu, (_, value, unit) => `${+(Number(value) * units[unit]).toFixed(3)}px`);
+    });
+  }
   root.walkAtRules("media", (rule) => {
     if (/,|\bor\b|\bnot\b|\bonly\b/u.test(rule.params)) return;
     const parts = rule.params.split(/\s*\band\b\s*/u).map((part) => part.trim()).filter(Boolean);

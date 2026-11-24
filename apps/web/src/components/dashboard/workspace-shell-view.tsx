@@ -15,6 +15,7 @@ import {
 } from "react";
 import { useStableCallback } from "./workspace-shell-helpers";
 import { BrowserReadApprovalDialog } from "./browser-read-approval-dialog";
+import { CompanionHeader } from "./companion-header";
 import { useExtensionCompanion } from "./use-extension-companion";
 import { absoluteChannelUrl } from "./channel-links";
 import { appAddressHref } from "@/lib/app-address";
@@ -1221,6 +1222,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onOpenAppsForSpace={openAppsForSpace}
       onEditHarnessProfile={openHarnessProfile}
       allowance={composerAllowance}
+      companion={Boolean(companion)}
     />
   );
 
@@ -1242,12 +1244,19 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     <section
       className="app-message-surface relative flex min-w-0 flex-1 flex-col overflow-hidden"
     >
-      {selectedChannel && <ChannelTransferQueue token={token} userId={user.id}
+      {companion && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-3 bg-gradient-to-b from-white to-transparent"
+        />
+      )}
+      {!companion && selectedChannel && <ChannelTransferQueue token={token} userId={user.id}
         spaceId={selectedChannel.spaceId} channelId={selectedChannel.id}
         enabled={spaces.some((space) => space.id === selectedChannel.spaceId &&
           ["owner", "admin"].includes(transferSpaceRole(space, user.id) || ""))} />}
-      {/* In a page's margin the card is the header: the page draws its title, passage and actions. */}
-      {selectedChannel && placement !== "page-margin" && (
+      {/* In a page's margin the card is the header: the page draws its title, passage and actions.
+          In the Chrome side panel, CompanionHeader draws the single quiet bar above this surface. */}
+      {!companion && selectedChannel && placement !== "page-margin" && (
         <ChannelHeader
           channel={selectedChannel}
           spaces={spaces}
@@ -1275,7 +1284,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           ) : undefined}
         />
       )}
-      {selectedChannel && token && placement !== "page-margin" && (
+      {!companion && selectedChannel && token && placement !== "page-margin" && (
         <ConversationPageCards spaceId={selectedChannel.spaceId} conversationId={selectedChannel.id} token={token}
           conversationName={selectedChannel.name ?? null} onOpenPage={openPage}
           excludePageId={placement === "beside-page" ? selectedPageId : null} />
@@ -1294,7 +1303,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           />
         </div>
       )}
-      {selectedChannel && !showSpaceAgentSetup && !showSpaceFirstTask && placement !== "page-margin" && (
+      {!companion && selectedChannel && !showSpaceAgentSetup && !showSpaceFirstTask && placement !== "page-margin" && (
         <MobileChannelSummaryPlaque
           summary={selectedChannel.summary}
           onOpen={openMobileChannelDetails}
@@ -1358,6 +1367,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         threadRootMessage={selectedThreadRootContext?.message}
         threadRootChannel={selectedThreadRootContext?.channel}
         inPageMargin={placement === "page-margin"}
+        compactLayout={Boolean(companion)}
       />
       )}
       <AgentWorkDetailsDock
@@ -1389,6 +1399,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onOpenAgentTrace={openAgentTraceAt}
         traceAnchor={agentTraceTarget ? agentTraceAnchor : null}
         inPageMargin={placement === "page-margin"}
+        compactLayout={Boolean(companion)}
       />
       {/* The composer sits in the reserved bottom gutter; the work dock stays
           anchored to --app-composer-height. */}
@@ -1426,7 +1437,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       )}
     </section>
 
-    {(placement === "main" || mobileChannelDetailsOpen) && <ChannelDetails
+    {!companion && (placement === "main" || mobileChannelDetailsOpen) && <ChannelDetails
       channel={selectedChannel}
       space={currentSpace}
       workspaces={projects}
@@ -1612,6 +1623,13 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       />
       <div
         ref={shellRootRef}
+        data-companion={companion ? "true" : undefined}
+        style={companion ? ({
+          "--app-panel-paper": "#ffffff",
+          "--background": "#ffffff",
+          "--card": "#ffffff",
+          "--m-island-bg": "#ffffff",
+        } as CSSProperties) : undefined}
         className={cn(
           "xmatrix-app xmatrix-app-shell relative isolate m-0 flex w-screen max-w-[100dvw] justify-start bg-background text-foreground",
           desktopFrameClass,
@@ -1636,7 +1654,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         )}
         <LiquidGlassFilter />
         <div className="app-ambient pointer-events-none fixed inset-0" />
-        {!isMobileViewport && (
+        {!isMobileViewport && !companion && (
           <WorkspaceRail
             activeView={view}
             profile={railProfile!}
@@ -1672,7 +1690,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         style={{ "--app-desktop-sidebar-width": `${desktopSidebarWidth}px` } as CSSProperties}>
       <ListColumnResizeProvider value={listColumnResize}>
         {/* A destination with a list of its own draws it in this column's place. */}
-        {!isMobileViewport && (
+        {!isMobileViewport && !companion && (
           <>
             <aside
               className={cn("app-sidebar hidden w-[var(--app-desktop-sidebar-width)] flex-col bg-sidebar text-sidebar-foreground",
@@ -1718,29 +1736,40 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           className="app-main relative flex min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-card/80"
         >
           <ConnectionStatus />
-          <TopWorkspaceBar
-            page={openedPage}
-            onClosePage={closePage}
-            onClosePageConversation={phonePageConversation ? closePageConversation : undefined}
-            composing={composingConversation}
-            onCloseComposing={() => setComposingConversation(false)}
-            channel={composingConversation ? null : selectedChannel}
-            hasConversationHead={hasMobileConversationHead}
-            spaces={spaces}
-            currentSpaceId={currentSpaceId}
-            view={view}
-            onBack={backToChannelList}
-            onOpenMore={backToMore}
-            onOpenSearch={openWorkspaceSearch}
-            onShareChannel={
-              selectedChannel
-                ? () => copyChannelLink(selectedChannel)
-                : undefined
-            }
-            onOpenChannelDetails={openMobileChannelDetails}
-            onSelectSpace={selectSpace}
-            companion={companionBar}
-          />
+          {companion && companionBar ? (
+            <CompanionHeader
+              channel={composingConversation ? null : selectedChannel}
+              composing={composingConversation}
+              spaces={spaces}
+              currentSpaceId={currentSpaceId}
+              onSelectSpace={selectSpace}
+              companion={companionBar}
+            />
+          ) : (
+            <TopWorkspaceBar
+              page={openedPage}
+              onClosePage={closePage}
+              onClosePageConversation={phonePageConversation ? closePageConversation : undefined}
+              composing={composingConversation}
+              onCloseComposing={() => setComposingConversation(false)}
+              channel={composingConversation ? null : selectedChannel}
+              hasConversationHead={hasMobileConversationHead}
+              spaces={spaces}
+              currentSpaceId={currentSpaceId}
+              view={view}
+              onBack={backToChannelList}
+              onOpenMore={backToMore}
+              onOpenSearch={openWorkspaceSearch}
+              onShareChannel={
+                selectedChannel
+                  ? () => copyChannelLink(selectedChannel)
+                  : undefined
+              }
+              onOpenChannelDetails={openMobileChannelDetails}
+              onSelectSpace={selectSpace}
+              companion={companionBar}
+            />
+          )}
           {!companion && <DockTabSlideLayer store={dockTabSlide} rootRef={shellRootRef} view={view} bar={tabRootBar} />}
           {!companion && <MobileListTransitionLayer
             store={listTransition}

@@ -241,7 +241,8 @@ function ComposerInputSurface({
     pending?.cancel();
     const to = box.getBoundingClientRect().height;
     settledBoxHeightRef.current = to;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      || Boolean(box.closest("[data-ask-surface]"));
     if (from === null || Math.abs(to - from) < 1 || reducedMotion) {
       box.classList.remove("app-composer-box-morphing");
       setClosingPanel(null);

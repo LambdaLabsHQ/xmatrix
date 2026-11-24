@@ -1323,6 +1323,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   }, [markSelectedChannelReadNow]);
 
   useEffect(() => {
+    if (isExtensionCompanion()) {
+      isMobileViewportRef.current = false;
+      return;
+    }
     const query = window.matchMedia("(max-width: 767px)");
     const update = () => {
       isMobileViewportRef.current = query.matches;
