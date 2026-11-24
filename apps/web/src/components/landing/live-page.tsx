@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { Phone } from "@/components/landing/app-window";
 import { StageCaption } from "@/components/landing/section-intro";
 import { StoreBadges } from "@/components/landing/store-badges";
-import { useMedia } from "@/components/landing/use-media";
+import { useMedia, useNear } from "@/components/landing/use-media";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
 
 // The page editor reads browser-only state, so the live page renders on the client.
@@ -25,6 +25,7 @@ export function LivePage({ locale = "en" }: { locale?: Locale }) {
   // it is the face alone at the sheet's edge, and the sheet keeps a narrower margin for it.
   const tablet = useMedia("(min-width: 768px)");
   const wide = useMedia("(min-width: 1024px)");
+  const [sheet, near] = useNear<HTMLDivElement>();
   return (
     <section id="live-page" className="x-section pt-[clamp(0.5rem,1.5vw,1.25rem)]!" aria-labelledby="live-page-title">
       <div className="x-container">
@@ -33,10 +34,14 @@ export function LivePage({ locale = "en" }: { locale?: Locale }) {
         </StageCaption>
         {/* A desktop leaves room at the right and below for the phone, which covers the document's corner. */}
         <div className="lg:relative lg:pb-14 lg:pr-[calc(300px_*_0.86_-_5.5rem)]">
-          <div className="site-live-page-window" role="img" aria-label={copy.art}>
+          {/* The sheet holds its place at once; the editor in it mounts as it nears the screen. It is as tall as
+              the page gets at each width while it is written, so neither mounting nor a new line moves what
+              follows. */}
+          <div ref={sheet} role="img" aria-label={copy.art}
+            className="site-live-page-window min-h-[59rem] min-[360px]:min-h-[49rem] min-[430px]:min-h-[46rem] min-[600px]:min-h-[37.5rem] md:min-h-[34.5rem] lg:min-h-[37.5rem] xl:min-h-[36rem]">
             {/* Beside the phone the text column gives way, so every Agent's name stays on the sheet. */}
-            <LivePagePreview room={wide ? 200 : 0} width={wide ? "min(40rem, calc(100% - 9.5rem))" : undefined}
-              padding={wide ? undefined : tablet ? "2.5rem 3.5rem 2.75rem 2.5rem" : "1.75rem 2.75rem 2rem 1.25rem"} />
+            {near && <LivePagePreview room={wide ? 200 : 0} width={wide ? "min(40rem, calc(100% - 9.5rem))" : undefined}
+              padding={wide ? undefined : tablet ? "2.5rem 3.5rem 2.75rem 2.5rem" : "1.75rem 2.75rem 2rem 1.25rem"} />}
           </div>
           {wide && <Phone scene="launch" size={0.86} corner />}
         </div>
