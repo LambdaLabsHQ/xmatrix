@@ -93,3 +93,30 @@ export async function showWebPage(chromeApi, href, { preferredTabId = null } = {
   }
   return true;
 }
+
+/** The conversation this tab's questions about `url` went to, as kept in session storage. */
+export async function tabPageThread(chromeApi, tabId, url) {
+  const href = capturableUrl(url ?? "");
+  if (!href || !Number.isInteger(tabId)) return null;
+  const key = `askThread:${tabId}`;
+  const { [key]: thread } = await chromeApi.storage.session.get(key);
+  return thread && thread.page === pageKey(href) ? thread : null;
+}
+
+/**
+ * A tab as an Agent reads it: its accessibility snapshot (`src/page-snapshot.js`),
+ * at most 200,000 characters; empty where it cannot be read.
+ */
+export async function readTabSnapshot(chromeApi, tabId) {
+  try {
+    await chromeApi.scripting.executeScript({ target: { tabId }, files: ["src/page-snapshot.js"] });
+    const [result] = await chromeApi.scripting.executeScript({
+      target: { tabId },
+      func: (maxChars) => globalThis.__xmatrixPageSnapshot?.(maxChars) ?? "",
+      args: [200_000],
+    });
+    return typeof result?.result === "string" ? result.result : "";
+  } catch {
+    return "";
+  }
+}

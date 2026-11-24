@@ -9,8 +9,8 @@ TypeScript server half took about three minutes, longer than the gates beside
 it (about one and a half), so it set the pace of the train. Code scanning now
 runs from its own workflow, `.github/workflows/codeql.yml`: each push to `main`
 scans Hub, Web and Desktop JavaScript and TypeScript and the workflows, and a
-daily run scans every language, Rust, Kotlin and Swift included. A newer push
-replaces a scan still running. Alerts land in the same code scanning
+daily run scans every language, Rust, Kotlin and Swift included. A running
+scan finishes, and only the newest waiting push is scanned next. Alerts land in the same code scanning
 categories as before. No release train, beta or stable, waits for a scan.
 Decided by Daniel on 2026-11-24. CI only; no product, schema or client
 change. Recovery is a CI-validated change that makes the train's `gates` need

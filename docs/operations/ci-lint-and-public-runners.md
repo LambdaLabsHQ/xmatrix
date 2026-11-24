@@ -199,8 +199,8 @@ deployment failures.
 
 CodeQL runs from its own workflow (`.github/workflows/codeql.yml`), apart from
 the release train. Each push to `main` scans what every beta ships: Hub, Web
-and Desktop JavaScript and TypeScript, plus the workflows; a newer push
-replaces a scan still running. A daily run, or a manual dispatch, scans every
+and Desktop JavaScript and TypeScript, plus the workflows; a running scan
+finishes and only the newest waiting push is scanned next. A daily run, or a manual dispatch, scans every
 language, Rust, Kotlin and Swift included (analyses from `codeqlAnalyses` in
 `scripts/release-train.mjs`). Swift builds on macOS with autobuild; the other
 languages use build mode `none`. Results upload as code scanning alerts on
