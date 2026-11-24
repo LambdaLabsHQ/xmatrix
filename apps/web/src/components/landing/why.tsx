@@ -27,7 +27,9 @@ export function Why({ locale = "en" }: { locale?: Locale }) {
           {copy.rows.map(([topic, ours, theirs], index) => {
             const [oursScene, theirsScene] = WHY_SCENES[index]!;
             return (
-              <div key={topic} className="col-span-2 grid gap-2 md:col-span-3 md:grid-cols-subgrid md:gap-x-3 md:gap-y-0">
+              // On a phone the row is one column as wide as the row, whatever its scenes hold: a column sized by its
+              // content would follow a scene's widest line off the screen, and back, as the scene plays.
+              <div key={topic} className="col-span-2 grid grid-cols-1 gap-2 md:col-span-3 md:grid-cols-subgrid md:gap-x-3 md:gap-y-0">
                 <h3 className="text-sm leading-6 font-semibold text-foreground md:pt-4 md:pr-4">{topic}</h3>
                 <figure className="site-why-panel site-why-ours">
                   <div className="site-why-scene" aria-hidden>{oursScene(copy.scenes)}</div>
