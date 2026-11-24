@@ -181,6 +181,12 @@ export interface Env {
    */
   PLATFORM_ADMIN_SPACE_ID?: string;
   /**
+   * Space that receives "Hand to xMatrix support" handoffs
+   * (docs/cross-space-read-grants.md#support-handoffs). Deployment-owned;
+   * unset, the platform admin Space is the support Space.
+   */
+  SUPPORT_SPACE_ID?: string;
+  /**
    * Deployment secret authorizing ONLY the control-plane partition operator
    * routes (status/begin/advance/fence/activate/backfill) for unattended
    * cutover execution. Absent or shorter than 32 bytes the machine path is

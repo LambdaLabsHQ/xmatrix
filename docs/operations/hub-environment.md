@@ -29,6 +29,7 @@ Set under `hub.vars` (or derived from the origins) in `deploy/profiles/<name>.js
 | `HUB_URL` | var | Hub origin and token issuer; rendered from the profile's `hub.origin`. Unset: authentication fails closed. |
 | `PLATFORM_ADMIN_EMAILS` | var | Operator emails allowed to read the platform overview. |
 | `PLATFORM_ADMIN_SPACE_ID` | var | Space whose members are platform admins. Optional. |
+| `SUPPORT_SPACE_ID` | var | Space that receives support handoffs; defaults to PLATFORM_ADMIN_SPACE_ID. Unset with it: handing a conversation to support answers 503. |
 | `XMATRIX_EMAIL_FROM` | var | Sender address for sign-in mail; defaults to `noreply@` the Web origin's host. |
 | `XMATRIX_INVITE_EMAIL_FROM` | var | Sender address for invites; defaults to XMATRIX_EMAIL_FROM. |
 | `XMATRIX_RUNTIME_LOCATION_HINT` | var | Durable Object location hint (e.g. `apac`) for Runtime cells, which must sit next to PostgreSQL. Unset: cells are created near their first caller. |
