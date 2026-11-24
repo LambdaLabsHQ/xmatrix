@@ -339,6 +339,23 @@ test("an elsewhere handoff shows the parameters Jev picked on the successor chip
   }
 });
 
+test("a handoff that took over keeps the successor its author wrote and what xMatrix picked", async ({ page }) => {
+  const mention = "@grok:1:handoff:@model:claude-fable-5-2";
+  const tookOver = { ...handoff, sourceMention: mention, sourceName: "grok", sourceOrdinal: 1,
+    targetName: "claude", targetHarness: "claude" };
+  const picked = { ...handoffPick(mention, "claude"), routingDecision: { ...handoffPick(mention, "claude").routingDecision,
+    parameters: { ...handoffPick(mention, "claude").routingDecision.parameters,
+      selections: { model: "claude-fable-5-2", effort: "high", workspaceKind: "repo", repo: "LambdaLabsHQ/xmatrix" },
+      harness: { inputDigest: "a".repeat(64), selected: "claude", probabilities: { claude: 1 } } } } };
+  await installInvocationFixture(page, [picked], `${mention} take it from here`, [tookOver]);
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const successor = page.locator(".app-mention-handoff .app-mention-invocation").nth(1);
+  await expect(successor).toContainText("Took over");
+  // The author's own condition stays where it was written; the picks follow it.
+  await expect(successor.locator(".app-summon-condition:not([data-jev]):not([data-routing])")).toHaveText("model:claude-fable-5-2");
+  await expect(successor.locator('[data-jev="true"]')).toHaveText(["harness:claude", "effort:high", "repo:LambdaLabsHQ/xmatrix"]);
+});
+
 test("a fresh @auto handoff stays on Picking until the picked launch arrives", async ({ page }) => {
   const mention = "@claude:4:handoff:@auto";
   await page.clock.install({ time: new Date(E2E_NOW) });

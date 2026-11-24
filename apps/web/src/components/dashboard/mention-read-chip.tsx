@@ -246,7 +246,8 @@ function InteractionSegmentView({ segment, scope, starting }: {
       if ("refused" in segment) return <MentionRefusedLifecycleChip kind="handoff" text={segment.text}
         agentName={segment.agentName} ordinal={segment.ordinal} successor={segment.successor} notices={segment.refused} />;
       return "record" in segment
-        ? <MentionContinuationChip record={segment.record} unavailable={scope?.launchStatusUnavailable} />
+        ? <MentionContinuationChip record={segment.record} unavailable={scope?.launchStatusUnavailable}
+          launch={handoffSuccessorLaunch(scope?.launches, segment.text)} />
         : <HandoffCard sourceName={segment.written.sourceName} sourceOrdinal={segment.written.sourceOrdinal}
           successorName={segment.written.successorName} successorText={segment.written.successorText}
           conditionFirst={segment.written.conditionFirst} tags={segment.written.tags}
