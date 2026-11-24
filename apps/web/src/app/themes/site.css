@@ -1068,8 +1068,8 @@ html[data-app-theme] .site-phone .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-ap
   background: var(--site-paper);
 }
 
-/* Where an Agent is its face alone at the sheet's edge (a phone), the sheet
-   names a narrower padding that keeps a margin for the faces. */
+/* Where an Agent is its face alone at the sheet's edge (a phone, a tablet),
+   the sheet names a narrower padding that keeps a margin for the faces. */
 .site-live-page {
   padding: var(--site-live-page-padding, 3rem 3.5rem 3.5rem);
   pointer-events: none;

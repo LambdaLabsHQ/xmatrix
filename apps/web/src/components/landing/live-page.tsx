@@ -21,8 +21,9 @@ const LivePagePreview = dynamic(
  */
 export function LivePage({ locale = "en" }: { locale?: Locale }) {
   const copy = landingCopy[locale].livePage;
-  // Beside the text on a desktop each Agent's face carries its name; on a phone it is the face alone, at the edge.
-  const desktop = useMedia("(min-width: 768px)");
+  // Where the sheet is wide enough, each Agent's face carries its name beside the text; on a tablet and a phone
+  // it is the face alone at the sheet's edge, and the sheet keeps a narrower margin for it.
+  const tablet = useMedia("(min-width: 768px)");
   const wide = useMedia("(min-width: 1024px)");
   return (
     <section id="live-page" className="x-section pt-[clamp(0.5rem,1.5vw,1.25rem)]!" aria-labelledby="live-page-title">
@@ -33,7 +34,9 @@ export function LivePage({ locale = "en" }: { locale?: Locale }) {
         {/* A desktop leaves room at the right and below for the phone, which covers the document's corner. */}
         <div className="lg:relative lg:pb-14 lg:pr-[calc(300px_*_0.86_-_5.5rem)]">
           <div className="site-live-page-window" role="img" aria-label={copy.art}>
-            <LivePagePreview room={wide ? 200 : desktop ? 230 : 0} width={wide ? "40rem" : undefined} />
+            {/* Beside the phone the text column gives way, so every Agent's name stays on the sheet. */}
+            <LivePagePreview room={wide ? 200 : 0} width={wide ? "min(40rem, calc(100% - 9.5rem))" : undefined}
+              padding={wide ? undefined : tablet ? "2.5rem 3.5rem 2.75rem 2.5rem" : "1.75rem 2.75rem 2rem 1.25rem"} />
           </div>
           {wide && <Phone scene="launch" size={0.86} corner />}
         </div>
