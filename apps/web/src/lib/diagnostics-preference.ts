@@ -120,11 +120,6 @@ export function isDiagnosticsEnabled(): boolean {
   return currentDiagnosticsDecision().send;
 }
 
-/** The account's explicit choice, as last answered. */
-export function diagnosticsChoice(): DiagnosticsChoice | null {
-  return snapshot.consent?.choice ?? null;
-}
-
 async function migrateLegacyChoice(consent: DiagnosticsConsentState): Promise<DiagnosticsConsentState> {
   const { storage } = environment();
   let legacy: string | null = null;
