@@ -11,16 +11,25 @@ const ERROR_MAX = 256;
  * replaces the whole observation unless a fresher one is stored; a single
  * re-probed preset replaces only its own item in an existing observation and
  * records when it was observed, so a setting asked for after an earlier
- * sign-in is met only by a later one (settings-domain-harness).
+ * sign-in is met only by a later one (settings-domain-harness). Answers how
+ * many quota pools lost a reading the harness's grant no longer covers.
  */
 export async function recordHarnessActionInventory(tx: DatabaseTransaction, input: {
   ownerUserId: string; machineId: string; hostId: string; result: HarnessActionResult; at: string;
-}): Promise<void> {
+}): Promise<{ quotaCleared: number }> {
   const { ownerUserId, machineId, result } = input;
   // A harness whose owner revoked (or never gave) the grant to read its
   // sign-in keeps no reading taken under one.
-  await clearUngrantedRegistrationQuota(tx, { ownerUserId, machineId,
+  const quotaCleared = await clearUngrantedRegistrationQuota(tx, { ownerUserId, machineId,
     harnesses: ungrantedHarnesses(result.inventory?.items ?? (result.item ? [result.item] : [])) });
+  await foldHarnessActionInventory(tx, input);
+  return { quotaCleared };
+}
+
+async function foldHarnessActionInventory(tx: DatabaseTransaction, input: {
+  ownerUserId: string; machineId: string; result: HarnessActionResult; at: string;
+}): Promise<void> {
+  const { ownerUserId, machineId, result } = input;
   if (result.inventory) {
     await tx.query({ name: "machine_harness_action_inventory_v2", text: `UPDATE data.machine_daemons
       SET metadata_json=jsonb_set(metadata_json,'{harnesses}',$3::jsonb)
