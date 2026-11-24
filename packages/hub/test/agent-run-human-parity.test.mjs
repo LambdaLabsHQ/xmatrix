@@ -24,6 +24,9 @@ test("an Agent Run reaches the Human collaboration routes by default", () => {
   assert.equal(allowed("POST", "/api/channels/channel-2/delete-requests"), false, "archive is retired");
   assert.equal(allowed("POST", "/api/cross-space-read/requests"), true, "ask its owner to read another Space");
   assert.equal(allowed("GET", "/api/spaces/space-2/cross-space-read-grants/csr_1"), true, "poll that answer");
+  assert.equal(allowed("GET", "/api/spaces/space-2/support-handoffs/csr_1/messages"), true,
+    "read a handoff from the support conversation it works in");
+  assert.equal(allowed("POST", "/api/spaces/space-2/support-handoffs/csr_1/replies"), true, "answer the person");
   assert.equal(allowed("GET", "/api/machine-daemons"), true, "read its owner's Machines");
   assert.equal(allowed("GET", "/api/machine-daemons/harness-actions/harness:1"), true, "follow a harness action");
   assert.equal(allowed("POST", "/api/harness-sign-in-requests"), true, "ask its owner to sign a harness in");
@@ -49,6 +52,9 @@ test("approval, membership and destructive Channel routes stay Human-only", () =
   assert.equal(allowed("POST", "/api/trace/access-requests/grant-1/decision"), false);
   assert.equal(allowed("POST", "/api/spaces/space-2/cross-space-read-grants/csr_1/decision"), false,
     "only the owner approves a Run's read outside its Space");
+  assert.equal(allowed("POST", "/api/channels/channel-2/support-handoffs"), false,
+    "only the person hands their conversation to support");
+  assert.equal(allowed("POST", "/api/spaces/space-2/support-handoffs/csr_1/revoke"), false);
   assert.equal(allowed("POST", "/api/spaces/space-1/join-requests/request-1/decide"), false);
   assert.equal(allowed("POST", "/api/spaces/space-1/members"), false);
   assert.equal(allowed("DELETE", "/api/spaces/space-1"), false, "only a Human deletes a Space");
