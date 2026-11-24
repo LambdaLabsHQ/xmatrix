@@ -683,6 +683,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const closeShare = useCallback(() => setDialog((open) => (open === "share" ? null : open)), []);
   // The conversation whose card is being read, so its passage is marked (§4.4).
   const [focused, setFocused] = useState<string | null>(null);
+  /** The comment box written in the margin, which the margin's cards make room for. */
+  const [commentBox, setCommentBox] = useState<{ top: number; height: number } | null>(null);
   // A conversation being read is about to be opened: what opening it needs is read now.
   const conversationIntent = useRef(onConversationIntent);
   conversationIntent.current = onConversationIntent;
@@ -1778,6 +1780,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
                         {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
                         onReady={() => setEditorReady(true)} commentInMargin={marginOn}
+                        onCommentBox={setCommentBox}
                         suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
                         suggestionControl={suggestionControl}
                         actions={sectionActions} headingActions={headingActions} sections={sections}
@@ -1826,6 +1829,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                           );
                         }}
                         openId={openInMargin ? activeConversationId : null}
+                        draft={drawn ? commentBox : null}
                         {...(renderConversation ? { renderOpen: () => renderConversation("margin") } : {})}
                         {...(onCloseConversation ? { onClose: onCloseConversation } : {})}
                         {...(onExpandConversation ? { onExpand: onExpandConversation } : {})}

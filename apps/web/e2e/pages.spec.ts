@@ -2767,6 +2767,47 @@ test("a discussion with many conversations above it opens level with its passage
   await expect(open.getByRole("button", { name: "Close the conversation" })).toBeInViewport();
 });
 
+test("a comment written beside an open discussion never lies over it: the thread ends above the box or stands under it", async ({ page: browser }) => {
+  const passage = "Background paragraph 6.";
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const { editor } = await openLongPage(browser, async (server) => {
+    await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+      links: [{ linkId: "l-passage", conversationId: E2E_CHANNEL.id, pageId: "p-relay", source: "discuss", createdAt: NOW,
+        lastSeenAt: recent, resolvedAt: null, blockId: "status",
+        anchor: { quote: passage, from: positionAt(server, passage, false), to: positionAt(server, passage, true) } }],
+      conversations: [{ conversationId: E2E_CHANNEL.id, name: E2E_CHANNEL.name, activityAt: recent,
+        headSequence: 1, readSequence: 1, agents: [],
+        lastMessage: { from: { kind: "user", label: "Yiming Hu" }, bodyPreview: "A note about the status.", sentAt: recent } }],
+    });
+  });
+  const margin = browser.getByTestId("page-margin");
+  await margin.getByRole("button", { name: `Open ${E2E_CHANNEL.name} beside the page` }).click();
+  const open = margin.getByTestId("page-margin-open");
+  await expect(open).toBeVisible();
+  const box = browser.getByTestId("page-comment-box");
+  const apart = async () => {
+    const [thread, comment] = [(await open.boundingBox())!, (await box.boundingBox())!];
+    return thread.y + thread.height <= comment.y || comment.y + comment.height <= thread.y;
+  };
+  // Just under the thread's passage there is no room for the thread above the box: it stands under it. Further
+  // down, it keeps its place and ends over the box. Either way both are whole, and the box is beside its passage.
+  for (const commented of ["Background paragraph 7.", "Background paragraph 14."]) {
+    await commentOn(browser, commented);
+    await expect(box).toBeVisible();
+    await expect(open).toBeVisible();
+    await expect.poll(apart).toBe(true);
+    expect(Math.abs((await box.boundingBox())!.y - (await editor.getByText(commented, { exact: true }).boundingBox())!.y))
+      .toBeLessThan(24);
+    await browser.screenshot({ path: test.info().outputPath(`comment-beside-open-${commented.replace(/\D/gu, "")}.png`) });
+    await browser.keyboard.press("Escape");
+    await expect(box).toHaveCount(0);
+  }
+  // Closed, the thread is back level with its passage.
+  await expect.poll(async () => Math.abs((await open.boundingBox())!.y
+    - (await editor.getByText(passage, { exact: true }).boundingBox())!.y)).toBeLessThan(24);
+});
+
 test("a page's code blocks take syntax inks by their fence's language, and a table in a fence stays plain", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });

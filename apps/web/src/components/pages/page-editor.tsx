@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import {
   pageDocBlockAt, pageDocBlocks, pageSchema, type PageDocBlock,
 } from "@xmatrix/protocol/page-document";
@@ -289,7 +289,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
   onOpenConversation, discussions, programs, onProgramsPresent, headingActions, focusedConversationId = null, readCard = null,
   onFocusConversation,
-  onAnchorOffsets, cursorPresence, onReady, commentInMargin = false,
+  onAnchorOffsets, cursorPresence, onReady, commentInMargin = false, onCommentBox,
   suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
   uploadMedia, onChanges, blame, writing, summons }: {
   session: PageLiveSession;
@@ -306,6 +306,11 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   actions?: PageSectionActions;
   /** The page has a margin beside it: the comment box stands there, level with its passage, as a comment card does. */
   commentInMargin?: boolean;
+  /**
+   * Where the comment box stands in the margin, from the top of the editor, and how tall it is; null when it is
+   * closed or under its passage. The margin makes room for it, so it never lies over a card or an open thread.
+   */
+  onCommentBox?: (box: { top: number; height: number } | null) => void;
   /** Who is on each section and when it last changed, drawn beside it. */
   sections?: Map<string, SectionNote>;
   /** A section to bring into view; a new `seq` follows again. */
@@ -418,6 +423,26 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   inMargin.current = commentInMargin;
   const [commentDraft, setCommentDraftState] = useState<CommentDraft | null>(null);
   const draftRef = useRef<CommentDraft | null>(null);
+  const commentBox = useRef<HTMLDivElement | null>(null);
+  const commentBoxChange = useRef(onCommentBox);
+  commentBoxChange.current = onCommentBox;
+  const commentTop = commentDraft && commentInMargin ? commentDraft.top : null;
+  // The box grows as it is typed in; each height it takes is the room the margin keeps for it.
+  useLayoutEffect(() => {
+    const node = commentBox.current;
+    if (commentTop === null || !node) {
+      commentBoxChange.current?.(null);
+      return;
+    }
+    const report = () => commentBoxChange.current?.({ top: commentTop, height: node.offsetHeight });
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      commentBoxChange.current?.(null);
+    };
+  }, [commentTop]);
   /** A comment closed before it was sent, by its passage's text. */
   const unsent = useRef<{ quote: string; text: string } | null>(null);
   const setCommentDraft = useCallback((next: CommentDraft | null) => {
@@ -879,7 +904,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         </div>
       )}
       {commentDraft && (
-        <div className={commentInMargin ? "absolute z-30 w-80" : "absolute z-30 w-[28rem] max-w-full"}
+        <div ref={commentBox} className={commentInMargin ? "absolute z-30 w-80" : "absolute z-30 w-[28rem] max-w-full"}
           style={{ left: commentInMargin ? "calc(100% + 1.5rem)" : commentDraft.left, top: commentDraft.top }}>
           <PageCommentBox text={commentDraft.text} taker={actions?.commentTaker?.(commentDraft.blockId)}
             context={actions?.commentComposer}
