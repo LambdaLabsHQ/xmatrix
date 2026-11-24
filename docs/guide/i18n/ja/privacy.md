@@ -15,17 +15,17 @@ xMatrix はホスト型コラボレーション Hub と、ご自身のマシン�
 
 ## ローカルのプロバイダクォータ照会
 
-**要約:** 登録した AI ツールの残りクォータを表示するため、xMatrix daemon はお使いのコンピュータ上にあるそれらのツール自身のログインファイル（例: `~/.grok/auth.json`）を読み取り、各プロバイダに直接問い合わせます。Codex は例外で、xMatrix は実行中の Codex セッションまたは一時的に起動した `codex app-server` を通じて Codex 自身に問い合わせ、Codex のログインファイルは開きません。これらのファイルから読み取った内容（トークン、アカウント ID、ファイル内容、ファイルのフィンガープリント）は一切 xMatrix に送信されず、Hub が受け取るのは正規化されたクォータ情報のみです。1 つのスイッチでファイルの読み取り、Codex app-server へのリクエスト、プロバイダへのリクエストをすべて停止できます（下記「ローカルクォータ照会を無効にする」を参照）。
+**要約:** 登録した AI ツールの残りクォータを表示するため、xMatrix daemon はお使いのコンピュータ上にあるそれらのツール自身のログインファイル（例: `~/.grok/auth.json`）を読み取り、各プロバイダに直接問い合わせます。Codex、Claude Code、OpenCode は例外で、xMatrix はツール自身に問い合わせ、それらのログインファイルは開きません。Codex には実行中のセッションまたは一時的に起動した `codex app-server` を通じて、Claude Code には実行中のセッションまたは一時的に起動した `claude` を通じて（プロンプトを送らない `get_usage` リクエスト）、OpenCode には一時的に起動した `opencode serve` を通じて問い合わせます。これらのファイルから読み取った内容（トークン、アカウント ID、ファイル内容、ファイルのフィンガープリント）は一切 xMatrix に送信されず、Hub が受け取るのは正規化されたクォータ情報のみです。1 つのスイッチでファイルの読み取り、Codex・Claude Code・OpenCode へのリクエスト、プロバイダへのリクエストをすべて停止できます（下記「ローカルクォータ照会を無効にする」を参照）。
 
 登録済みのハーネス（Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity 等）について、`xmatrix agent list` や Agents 画面で残量を表示し、`@auto` ルーティングで上限到達アカウントを避けるために、ローカルデーモンが登録済みツールのローカル認証ストアを読み取り各プロバイダの残量 API を直接照会する場合があります。
 
 | ハーネス | ローカルメモリのみで読む保存先 | マシンから直接問い合わせるプロバイダ API |
 | --- | --- | --- |
-| Claude Code | macOS キーチェーン（`Claude Code-credentials`）または `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
+| Claude Code | 読み取りなし: Claude Code 自身の `get_usage` 制御リクエスト（実行中のセッションまたは一時的に起動した `claude`）。プロンプトは送信しません | Claude Code が自身のサインインで処理 |
 | Codex | 読み取りなし: Codex 自身の app-server メソッド `account/rateLimits/read`（実行中のセッションまたは一時的に起動した `codex app-server`） | Codex が自身のサインインで処理 |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS キーチェーン（`cursor-access-token`）、または Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` または `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
-| OpenCode | `OPENCODE_API_KEY` または OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` または ChatGPT `wham/usage` |
+| OpenCode | 読み取りなし: 一時的に起動した `opencode serve` の `GET /api/experimental/usage/limits`（ループバックのみで待ち受け、一回限りのパスワードを使用）。OpenCode が他のプロバイダにルーティングするモデルでは何も読み取りません | OpenCode が自身のサインインで処理 |
 | DeepSeek | `DEEPSEEK_API_KEY` または `$DSH_HOME` 認証ファイル | `https://api.deepseek.com/user/balance` |
 | Z.ai / Zhipu | `ZAI_API_KEY` / `ZHIPU_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit`（または `open.bigmodel.cn`） |
 | Antigravity | 未改変の `agy -p "/usage" --output-format json` を実行 | `agy` 自身が処理 |
@@ -46,7 +46,7 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-Antigravity のみ無効にする場合は `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` を設定してください。無効化するとすべての経路でローカル認証ストアの読み取り、`codex app-server` の起動や Codex セッションへの問い合わせ、残量照会を行いません。
+Antigravity のみ無効にする場合は `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` を設定してください。無効化するとすべての経路でローカル認証ストアの読み取り、`codex app-server`・`claude`・`opencode serve` の起動、Codex や Claude Code のセッションへの問い合わせ、残量照会を行いません。
 
 ## クライアント診断とクラッシュレポート
 

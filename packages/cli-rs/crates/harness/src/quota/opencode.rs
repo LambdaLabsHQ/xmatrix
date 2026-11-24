@@ -543,4 +543,27 @@ exit 2
             let _ = std::fs::remove_dir_all(&dir);
         }
     }
+
+    /// The installed `opencode` (or `XMATRIX_LIVE_OPENCODE`) serves the usage
+    /// limits route: `data` is null when it is not signed in.
+    #[tokio::test]
+    async fn live_e2e_opencode_usage_limits() {
+        if std::env::var("XMATRIX_LIVE_QUOTA_E2E").ok().as_deref() != Some("1") {
+            eprintln!("skip live e2e (set XMATRIX_LIVE_QUOTA_E2E=1)");
+            return;
+        }
+        let program = std::env::var_os("XMATRIX_LIVE_OPENCODE")
+            .map(PathBuf::from)
+            .or_else(resolve_opencode_program)
+            .expect("an opencode binary");
+        let home = home_dir_path();
+        let data = ask_opencode_serve(&program, home.as_deref(), OPENCODE_USAGE_TIMEOUT)
+            .await
+            .expect("opencode serve answered");
+        eprintln!(
+            "LIVE_E2E_OK opencode signed_in={} go={:?}",
+            !data.is_null(),
+            opencode_go_usage_from_limits(&data).and_then(|usage| usage.quota_usages)
+        );
+    }
 }

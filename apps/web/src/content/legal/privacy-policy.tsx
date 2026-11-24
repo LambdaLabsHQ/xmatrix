@@ -173,17 +173,21 @@ export function PrivacyPolicyContent() {
             <strong className="text-foreground">Which files.</strong> For an AI tool you registered
             as an Agent on a computer, the xMatrix daemon on that computer may read that tool&apos;s
             own sign-in: for example Grok&apos;s{" "}
-            <code className="font-mono text-xs">~/.grok/auth.json</code>, Claude Code&apos;s{" "}
-            <code className="font-mono text-xs">~/.claude/.credentials.json</code> or keychain entry,
-            Cursor&apos;s or OpenCode&apos;s <code className="font-mono text-xs">auth.json</code> or
-            keychain entry, or the API key the tool uses. The full list is in the{" "}
+            <code className="font-mono text-xs">~/.grok/auth.json</code>, Cursor&apos;s{" "}
+            <code className="font-mono text-xs">auth.json</code> or keychain entry, or the API key
+            the tool uses. The full list is in the{" "}
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and local privacy guide
             </Link>
-            . It never reads the login of a tool you did not register. Codex is not read this way:
-            the daemon asks Codex itself, through the Codex session already running or a briefly
-            started <code className="font-mono text-xs">codex app-server</code>, and Codex answers
-            with its own sign-in. xMatrix opens no Codex login file.
+            . It never reads the login of a tool you did not register. Codex, Claude Code and
+            OpenCode are not read this way: the daemon asks the tool itself, and the tool answers
+            with its own sign-in. Codex is asked through the Codex session already running or a
+            briefly started <code className="font-mono text-xs">codex app-server</code>, Claude
+            Code through the Claude Code session already running or a briefly started{" "}
+            <code className="font-mono text-xs">claude</code> (a usage request that sends no
+            prompt), and OpenCode through a briefly started{" "}
+            <code className="font-mono text-xs">opencode serve</code>. xMatrix opens no Codex,
+            Claude Code or OpenCode login file or keychain entry.
           </p>
           <p>
             <strong className="text-foreground">Why.</strong> To ask that provider how much of your
@@ -200,7 +204,8 @@ export function PrivacyPolicyContent() {
           </p>
           <p>
             <strong className="text-foreground">How to turn it off.</strong> One switch stops the
-            file reads, the Codex app-server requests and the provider requests on that computer:
+            file reads, the requests to Codex, Claude Code and OpenCode, and the provider requests
+            on that computer:
             Desktop Settings → Legal and privacy → Local provider quota probes, or{" "}
             <code className="font-mono text-xs">xmatrix config quotaProbes off</code>, or the
             environment variable{" "}

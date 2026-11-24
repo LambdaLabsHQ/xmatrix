@@ -64,7 +64,7 @@ export function DiagnosticsSetting() {
       {localPrivacy && (
         <ToolSettingRow
           title="Local provider quota probes"
-          description="Read local login stores of registered agent tools in memory to query each provider's usage endpoint directly from this computer. Credentials never leave this machine; only normalized remaining quota is sent to xMatrix."
+          description="Ask Codex, Claude Code and OpenCode for their remaining quota, and read other registered agent tools' local login stores in memory to query each provider's usage endpoint directly from this computer. Credentials never leave this machine; only normalized remaining quota is sent to xMatrix."
           control={(
             <Switch
               checked={localPrivacy.quotaProbes}

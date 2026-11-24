@@ -868,4 +868,30 @@ done
         assert_eq!(usage.quota_account.unwrap().allowed, Some(true));
         assert_eq!(usage.quota_usages.unwrap()[1].percent, Some(99.0));
     }
+
+    /// The installed `claude` answers `get_usage` for its default login.
+    #[tokio::test]
+    async fn live_e2e_claude_get_usage() {
+        if std::env::var("XMATRIX_LIVE_QUOTA_E2E").ok().as_deref() != Some("1") {
+            eprintln!("skip live e2e (set XMATRIX_LIVE_QUOTA_E2E=1)");
+            return;
+        }
+        let usage = read_claude_usage_for_default_account(true)
+            .await
+            .expect("claude answered get_usage");
+        let windows = usage.quota_usages.clone().expect("account windows");
+        assert!(
+            windows
+                .iter()
+                .any(|window| window.label.as_deref() == Some("1w"))
+        );
+        eprintln!(
+            "LIVE_E2E_OK claude windows={:?} scoped={:?}",
+            windows
+                .iter()
+                .map(|window| (window.label.clone(), window.percent))
+                .collect::<Vec<_>>(),
+            usage.scoped_quota_usages.as_ref().map(Vec::len)
+        );
+    }
 }

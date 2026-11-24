@@ -15,7 +15,7 @@ Para mantener estable un equipo conectado tras reinstalaciones bajo tu cuenta, e
 
 ## Consultas locales de cuota de proveedores
 
-**En resumen:** para mostrar cuánta cuota les queda a las herramientas de IA que registraste, el daemon de xMatrix lee los archivos de inicio de sesión de esas herramientas en tu equipo (por ejemplo `~/.grok/auth.json`) y consulta directamente a cada proveedor. Codex es la excepción: xMatrix pregunta al propio Codex, a través de la sesión de Codex en curso o de un `codex app-server` iniciado brevemente, y no abre ningún archivo de inicio de sesión de Codex. Nada de lo que lee de esos archivos (token, id de cuenta, contenido o huella del archivo) se envía a xMatrix; el Hub solo recibe la respuesta de cuota normalizada. Un único interruptor detiene la lectura de archivos, las solicitudes al app-server de Codex y las solicitudes al proveedor (consulta «Desactivar consultas locales de cuota» más abajo).
+**En resumen:** para mostrar cuánta cuota les queda a las herramientas de IA que registraste, el daemon de xMatrix lee los archivos de inicio de sesión de esas herramientas en tu equipo (por ejemplo `~/.grok/auth.json`) y consulta directamente a cada proveedor. Codex, Claude Code y OpenCode son la excepción: xMatrix pregunta a la propia herramienta y no abre ninguno de sus archivos de inicio de sesión. A Codex, a través de la sesión en curso o de un `codex app-server` iniciado brevemente; a Claude Code, a través de la sesión en curso o de un `claude` iniciado brevemente (su solicitud `get_usage`, que no envía ningún prompt); y a OpenCode, a través de un `opencode serve` iniciado brevemente. Nada de lo que lee de esos archivos (token, id de cuenta, contenido o huella del archivo) se envía a xMatrix; el Hub solo recibe la respuesta de cuota normalizada. Un único interruptor detiene la lectura de archivos, las solicitudes a Codex, Claude Code y OpenCode, y las solicitudes al proveedor (consulta «Desactivar consultas locales de cuota» más abajo).
 
 Cuando registras un agente compatible (Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai o Antigravity), xMatrix puede mostrar la cuota restante en `xmatrix agent list` y en la vista Agents, y permitir que `@auto` evite cuentas agotadas.
 
@@ -23,11 +23,11 @@ Para consultar la cuota restante directamente en tu proveedor sin ejecutar un tu
 
 | Agente | Almacén local leído (solo en memoria) | Endpoint del proveedor consultado desde tu equipo |
 | --- | --- | --- |
-| Claude Code | Llavero de macOS (`Claude Code-credentials`) o `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
+| Claude Code | Ninguno: la solicitud de control `get_usage` del propio Claude Code (la sesión en curso o un `claude` iniciado brevemente); no se envía ningún prompt | Lo gestiona Claude Code con su propio inicio de sesión |
 | Codex | Ninguno: el método `account/rateLimits/read` del propio app-server de Codex (la sesión en curso o un `codex app-server` iniciado brevemente) | Lo gestiona Codex con su propio inicio de sesión |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, llavero de macOS (`cursor-access-token`) o `auth.json` de Cursor | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` o `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
-| OpenCode | `OPENCODE_API_KEY` o `auth.json` de OpenCode | `https://opencode.ai/zen/go/v1/usage` o `wham/usage` de ChatGPT |
+| OpenCode | Ninguno: `GET /api/experimental/usage/limits` de un `opencode serve` iniciado brevemente, que escucha solo en loopback con una contraseña de un solo uso. No se lee nada para un modelo que OpenCode envía a otro proveedor | Lo gestiona OpenCode con su propio inicio de sesión |
 | DeepSeek | `DEEPSEEK_API_KEY` o archivo de credenciales en `$DSH_HOME` | `https://api.deepseek.com/user/balance` |
 | Z.ai / Zhipu | `ZAI_API_KEY` / `ZHIPU_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit` (o `open.bigmodel.cn`) |
 | Antigravity | Ejecuta `agy -p "/usage" --output-format json` sin modificar | Gestionado por el propio `agy` |
@@ -48,7 +48,7 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-Para desactivar solo Antigravity, define `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. Al desactivarlas, xMatrix no lee almacenes locales de credenciales, no inicia `codex app-server` ni pregunta a una sesión de Codex, ni consulta endpoints de uso en ninguna ruta.
+Para desactivar solo Antigravity, define `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. Al desactivarlas, xMatrix no lee almacenes locales de credenciales, no inicia `codex app-server`, `claude` ni `opencode serve`, ni pregunta a una sesión de Codex o Claude Code, ni consulta endpoints de uso en ninguna ruta.
 
 ## Diagnósticos del cliente e informes de errores
 
