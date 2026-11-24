@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNear } from "@/components/landing/use-media";
 import { SegmentedTabs, type SegmentedTabItem } from "@/components/ui/segmented-tabs";
 import { WoodPanel } from "@/components/ui/material-surfaces";
@@ -39,10 +39,12 @@ type Row = readonly [string, string, string];
  * that topic's stop so scrolling and clicking stay in sync.
  */
 export function WhyComparison({
+  heading,
   title,
   others,
   rows,
 }: {
+  heading?: ReactNode;
   title: string;
   others: string;
   rows: readonly Row[];
@@ -161,16 +163,18 @@ export function WhyComparison({
         nearRef(node);
         setTrackNode(node);
       }}
-      className="relative mt-6 min-h-[calc(620px_+_1450px)] sm:mt-8 sm:min-h-[calc(760px_+_1600px)] lg:mt-9 lg:min-h-[calc(540px_+_1680px)]"
+      className="relative min-h-[calc(650px_+_1450px)] sm:min-h-[calc(840px_+_1600px)] lg:min-h-[calc(600px_+_1680px)]"
     >
       <div
         ref={stickyRef}
-        className="sticky top-[4.75rem] sm:top-[5.25rem] lg:top-[5.75rem]"
+        className="sticky top-[5.25rem] sm:top-[5.75rem] lg:top-[6.25rem]"
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
       >
+        {heading}
+
         {/* One compact rounded-rectangle walnut wood control bar (automatically slides horizontally on vertical scroll) */}
-        <div ref={woodBarRef} className="max-w-full">
+        <div ref={woodBarRef} className="mt-3 max-w-full sm:mt-6 lg:mt-7">
           <WoodPanel
             as="div"
             className="inline-flex max-w-full rounded-[14px]! p-[4px] shadow-[inset_0_1px_0_oklch(1_0.02_90/0.52),inset_1px_0_0_oklch(1_0.02_90/0.26),inset_0_-1px_0_oklch(0.32_0.06_58/0.28),inset_-1px_0_0_oklch(0.32_0.06_58/0.18),0_14px_26px_-12px_oklch(0.16_0.04_55/0.58),0_3px_8px_-3px_oklch(0.18_0.04_55/0.24)]!"
@@ -191,10 +195,10 @@ export function WhyComparison({
           id={`why-panel-${active}`}
           role="tabpanel"
           aria-label={topic}
-          className="mt-4 grid grid-cols-1 gap-4 sm:mt-8 sm:gap-8 lg:mt-10 lg:grid-cols-2 lg:gap-10"
+          className="mt-3 grid grid-cols-1 gap-3 sm:mt-7 sm:gap-7 lg:mt-8 lg:grid-cols-2 lg:gap-10"
         >
           {/* Left: xMatrix */}
-          <figure className="m-0 flex min-w-0 flex-col gap-2 sm:gap-4 lg:gap-5">
+          <figure className="m-0 flex min-w-0 flex-col gap-1.5 sm:gap-4">
             <figcaption className="lg:min-h-[4.25rem]">
               <p className="inline-flex items-center gap-1.5 text-[13px] font-semibold tracking-[-0.01em] text-[var(--site-ink)] sm:gap-2 sm:text-sm">
                 <Image
@@ -212,7 +216,7 @@ export function WhyComparison({
             </figcaption>
 
             <div
-              className="h-[214px] w-full min-w-0 sm:h-[328px] lg:h-[344px]"
+              className="h-[204px] w-full min-w-0 sm:h-[328px] lg:h-[344px]"
               role="img"
               aria-label={`xMatrix: ${topic}`}
             >
@@ -225,7 +229,7 @@ export function WhyComparison({
           </figure>
 
           {/* Right: Juggling tabs & terminals */}
-          <figure className="m-0 flex min-w-0 flex-col gap-2 sm:gap-4 lg:gap-5">
+          <figure className="m-0 flex min-w-0 flex-col gap-1.5 sm:gap-4">
             <figcaption className="lg:min-h-[4.25rem]">
               <p className="text-[13px] font-medium tracking-[-0.01em] text-[var(--site-ink-muted)] sm:text-sm">
                 {others}
@@ -236,7 +240,7 @@ export function WhyComparison({
             </figcaption>
 
             <div
-              className="h-[214px] w-full min-w-0 sm:h-[328px] lg:h-[344px]"
+              className="h-[204px] w-full min-w-0 sm:h-[328px] lg:h-[344px]"
               role="img"
               aria-label={`${others}: ${topic}`}
             >
