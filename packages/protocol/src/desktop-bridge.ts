@@ -1,3 +1,5 @@
+import { parseDiagnosticEvent, type DiagnosticEvent, type DiagnosticEventSchema } from "./diagnostic-events.js";
+
 /** Shared desktop IPC shapes; native and browser adapters retain their distinct platform requirements. */
 
 /**
@@ -53,25 +55,31 @@ export type DesktopDaemonFailure = {
   detail: string;
 };
 
-/** What the App reports to the Hub about one failed start. */
-export type DesktopDaemonFailureReport = DesktopDaemonFailure & { platform: string; appVersion: string };
-
 export const DESKTOP_DAEMON_FAILURE_DETAIL_MAX = 600;
+
+/** The desktop App's operating systems, as Node names them. */
+const DESKTOP_PLATFORMS = ["darwin", "win32", "linux"] as const;
+
+/**
+ * The declared fields of one failed start the App reports to the Hub
+ * (src/diagnostic-events.ts). `detail`, the CLI's last lines, is sent only
+ * when the person presses Send on the failure card; the opted-in automatic
+ * report carries the stage, exit code, platform and App version alone.
+ */
+const DESKTOP_DAEMON_FAILURE_EVENT = {
+  stage: { kind: "enum", values: DESKTOP_DAEMON_FAILURE_STAGES },
+  exitCode: { kind: "number", min: -2_147_483_648, max: 4_294_967_295, integer: true, optional: true },
+  platform: { kind: "enum", values: DESKTOP_PLATFORMS },
+  appVersion: { kind: "version" },
+  detail: { kind: "submitted", max: DESKTOP_DAEMON_FAILURE_DETAIL_MAX, optional: true },
+} as const satisfies DiagnosticEventSchema;
+
+/** What the App reports to the Hub about one failed start. */
+export type DesktopDaemonFailureReport = DiagnosticEvent<typeof DESKTOP_DAEMON_FAILURE_EVENT>;
 
 /** One report as a client sends it; anything else is not written. */
 export function parseDesktopDaemonFailureReport(value: unknown): DesktopDaemonFailureReport | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const report = value as Record<string, unknown>;
-  if (Object.keys(report).some(key => !["stage", "exitCode", "detail", "platform", "appVersion"].includes(key))) return undefined;
-  if (!(DESKTOP_DAEMON_FAILURE_STAGES as readonly unknown[]).includes(report.stage)) return undefined;
-  if (report.exitCode !== undefined && !Number.isSafeInteger(report.exitCode)) return undefined;
-  const text = (key: string, max: number) => typeof report[key] === "string" ? (report[key] as string).slice(0, max) : undefined;
-  const detail = text("detail", DESKTOP_DAEMON_FAILURE_DETAIL_MAX);
-  const platform = text("platform", 16);
-  const appVersion = text("appVersion", 32);
-  if (detail === undefined || !platform || !appVersion) return undefined;
-  return { stage: report.stage as DesktopDaemonFailureStage, detail, platform, appVersion,
-    ...(report.exitCode !== undefined ? { exitCode: report.exitCode as number } : {}) };
+  return parseDiagnosticEvent(DESKTOP_DAEMON_FAILURE_EVENT, value);
 }
 
 export type DesktopSetupStatus = {

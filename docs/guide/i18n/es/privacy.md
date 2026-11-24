@@ -54,8 +54,17 @@ xMatrix no usa cookies publicitarias, rastreo entre sitios, grabación de sesion
 
 **Los diagnósticos opcionales del cliente y los informes de fallos del navegador están desactivados por defecto en todas las regiones (opt-in explícito).** Las páginas públicas de marketing, documentación y avisos legales nunca cargan Sentry. Solo se envían si decides activarlos (o si haces clic en **Send failure report** en una tarjeta de fallo de inicio del daemon):
 
-- **Informes de errores y fallos (Sentry):** solo cuando un usuario con sesión iniciada los activa; sin información de usuario, cookies, cabeceras/cuerpos HTTP, parámetros de consulta URL ni breadcrumbs de consola, y con textos entrecomillados censurados. Las compilaciones locales o autoalojadas sin DSN no envían nada.
-- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** solo cuando están activados, envían tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave; nunca incluyen contenido de mensajes ni comandos.
+- **Informes de errores y fallos (Sentry):** solo cuando un usuario con sesión iniciada los activa, se envían la clase del error, su código si lo tiene y las ubicaciones de código de su pila. Nunca se envían el mensaje del error, breadcrumbs, URL, cookies, cabeceras, cuerpos de petición ni datos del usuario. Las compilaciones locales o autoalojadas sin DSN no envían nada. (Los errores del Hub en el servidor se siguen informando desde el servidor para operar el servicio alojado; ver más abajo.)
+- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** solo cuando están activados, envían tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave.
+
+### Qué puede contener un evento de diagnóstico
+
+Cada evento de diagnóstico tiene un conjunto declarado de campos, que se comprueba cuando el cliente lo crea y otra vez cuando el Hub lo recibe. Un campo solo puede contener un valor fijo de una lista, un número, true o false, una versión, un identificador opaco o un código corto como `websocket_connect_failed` (minúsculas, dígitos, `_` y `-`). Un evento con cualquier otro campo, o con un valor fuera de su campo, se rechaza entero en lugar de recortarse, así que el texto que escribes no tiene campo por el que viajar. Los errores se informan por su clase y su código, nunca por su mensaje.
+
+Solo dos caminos llevan texto:
+
+- **Send failure report en una tarjeta de fallo de inicio del escritorio:** las últimas líneas de la CLI, que la App de escritorio censura antes en tu equipo (directorio personal, direcciones de correo, parámetros de consulta URL y cualquier cosa con forma de token o clave). La tarjeta te muestra esas líneas antes de enviarlas y solo se envían al pulsar el botón; el informe automático enviado con los diagnósticos activados solo lleva la etapa del fallo, el código de salida, la plataforma y la versión de la App.
+- **Informes de errores del Hub en el servidor:** el propio mensaje de error del servidor, sin valores entrecomillados, direcciones de correo, parámetros de consulta URL, rutas del directorio personal ni cadenas con forma de token. Los datos registrados junto al error solo se informan cuando son números, true/false o identificadores opacos.
 
 ### Activar o desactivar diagnósticos e informes de errores
 

@@ -15,16 +15,18 @@ test("a counted step carries the person's keyed hash and the step, where and on 
   assert.equal(starter.indexes[0], point.indexes[0], "one person is one hash");
 });
 
-test("a failed daemon start carries the stage, App version, exit code and the CLI's last lines", async () => {
+test("a failed daemon start carries the stage, App version, exit code and the CLI's last lines the person sent", async () => {
   const point = await desktopDaemonFailureDataPoint({ stage: "exit", exitCode: 1, detail: "Error: daemon.lock: Permission denied",
     platform: "darwin", appVersion: "1.0.540" }, "user-1", "key");
   assert.match(point.indexes[0], /^[0-9a-f]{16}$/u);
   assert.deepEqual(point.blobs.slice(0, 5), ["desktop", "darwin", "daemon_start_failed", "exit", "1.0.540"]);
   assert.equal(point.blobs[10], "Error: daemon.lock: Permission denied");
   assert.equal(point.doubles[2], 1);
-  const noCode = await desktopDaemonFailureDataPoint({ stage: "cli_install", detail: "", platform: "win32", appVersion: "1.0.540" },
+  // The automatic report has no lines: the blob stays empty.
+  const automatic = await desktopDaemonFailureDataPoint({ stage: "cli_install", platform: "win32", appVersion: "1.0.540" },
     "user-1", "key");
-  assert.equal(noCode.doubles[2], -1);
+  assert.equal(automatic.blobs[10], "");
+  assert.equal(automatic.doubles[2], -1);
 });
 
 test("an app start carries the device, whether it painted from this device's cache, and each stage it reached", async () => {

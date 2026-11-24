@@ -1,3 +1,5 @@
+import { parseDiagnosticEvent, type DiagnosticEventSchema } from "./diagnostic-events.js";
+
 /**
  * The steps of bringing agents in that only the person's own screen sees
  * (docs/architecture/first-space.md). Every later step is already a fact the
@@ -27,19 +29,18 @@ export type OnboardingFunnelEvent = { step: OnboardingFunnelStep; surface: Onboa
   /** Which first task, for `starter_chosen` only. */
   starter?: OnboardingStarter };
 
-/** Whether a reported value is one of a fixed list. */
-export const isOneOf = <T extends string>(values: readonly T[], value: unknown): value is T =>
-  (values as readonly unknown[]).includes(value);
+/** The declared fields of one onboarding step (src/diagnostic-events.ts). */
+const ONBOARDING_STEP_EVENT = {
+  step: { kind: "enum", values: ONBOARDING_FUNNEL_STEPS },
+  surface: { kind: "enum", values: ONBOARDING_SURFACES },
+  device: { kind: "enum", values: ONBOARDING_DEVICES },
+  starter: { kind: "enum", values: ONBOARDING_STARTERS, optional: true },
+} as const satisfies DiagnosticEventSchema;
 
 /** One step as a client reports it; anything else is not counted. */
 export function parseOnboardingFunnelEvent(value: unknown): OnboardingFunnelEvent | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const event = value as Record<string, unknown>;
-  if (Object.keys(event).some(key => !["step", "surface", "device", "starter"].includes(key)) ||
-      !isOneOf(ONBOARDING_FUNNEL_STEPS, event.step) || !isOneOf(ONBOARDING_SURFACES, event.surface) ||
-      !isOneOf(ONBOARDING_DEVICES, event.device)) return undefined;
-  if ((event.step === "starter_chosen") !== (event.starter !== undefined) ||
-      (event.starter !== undefined && !isOneOf(ONBOARDING_STARTERS, event.starter))) return undefined;
-  return { step: event.step, surface: event.surface, device: event.device,
-    ...(event.starter !== undefined ? { starter: event.starter as OnboardingStarter } : {}) };
+  const event = parseDiagnosticEvent(ONBOARDING_STEP_EVENT, value);
+  // A first task names which one; no other step does.
+  if (!event || (event.step === "starter_chosen") !== (event.starter !== undefined)) return undefined;
+  return event;
 }

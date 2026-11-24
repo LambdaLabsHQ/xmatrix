@@ -42,12 +42,14 @@ test("accepts the CLI initial telemetry payload with a reason", () => {
   assert.deepEqual(parseClientNetworkSample(sample), sample);
 });
 
-test("rejects unknown, malformed, and unbounded telemetry fields", () => {
+test("rejects unknown, malformed, and free-text telemetry fields", () => {
   for (const sample of [
     { ...cliReconnectSample, secret: "must-not-pass" },
     { ...cliReconnectSample, reconnectAttempt: -1 },
     { ...cliReconnectSample, lastServerActivityAgeMs: 1.5 },
-    { ...cliReconnectSample, reason: "x".repeat(241) },
+    // A reason is a code; an error's own text (a URL, a path, a quote) is refused.
+    { ...cliReconnectSample, reason: "error sending request for url (https://hub.example/ws?token=SENTINEL)" },
+    { ...cliReconnectSample, channelId: "SENTINEL private message body" },
   ]) {
     assert.equal(parseClientNetworkSample(sample), undefined);
   }
