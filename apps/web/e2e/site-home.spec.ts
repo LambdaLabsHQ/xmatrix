@@ -92,6 +92,18 @@ test("the comparison stage advances on vertical scroll and switches tabs without
   await expect(tabs).toHaveCount(6);
   await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
 
+  // Task checkboxes in the live document comparison stay vertically centered with their text.
+  await expect(why.locator("li.page-task").first()).toBeVisible();
+  const taskDeltas = await why.evaluate((section) =>
+    [...section.querySelectorAll<HTMLElement>("li.page-task")].map((li) => {
+      const input = li.querySelector<HTMLElement>("input")!.getBoundingClientRect();
+      const label = (li.querySelector<HTMLElement>("strong") ?? li.querySelector<HTMLElement>("p")!).getBoundingClientRect();
+      return Math.abs((label.top + label.bottom) / 2 - (input.top + input.bottom) / 2);
+    }),
+  );
+  expect(taskDeltas.length).toBeGreaterThanOrEqual(3);
+  for (const delta of taskDeltas) expect(delta).toBeLessThanOrEqual(1.5);
+
   // Scrolling vertically through the comparison runway keeps the stage sticky, advances the topic, and slides the wood bar.
   const bounds = await why.evaluate((section) => {
     const track = section.querySelector<HTMLElement>(".relative")!;
