@@ -4,6 +4,8 @@ import dynamic from "next/dynamic";
 import { AnimationActivityScope } from "@/components/ui/decoration-animation";
 import { ChannelDeletionDialog } from "./channel-deletion-dialog";
 import { AgentAccessConfirmationHost } from "./agent-access";
+import { SupportHandoffDialog } from "./support-handoff-dialog";
+import { openSupportHandoff } from "@/lib/support-handoff";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
 import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 
@@ -826,9 +828,16 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   );
 
 
-  /* Feedback is a public GitHub issue; the form's Environment field says
-     which client and version it came from. */
+  /* Reporting a problem in a conversation hands that conversation to xMatrix
+     support (docs/cross-space-read-grants.md#support-handoffs), with nothing
+     included unless the person ticks it. With no conversation open it is a
+     public GitHub issue, whose Environment field says which client and
+     version it came from. */
   function openIssueReport() {
+    if (selectedChannel) {
+      openSupportHandoff({ channelId: selectedChannel.id, channelName: `#${channelTitle(selectedChannel)}` });
+      return;
+    }
     const client = desktopBridge
       ? `${desktopBridge.client || "desktop"} ${desktopContext?.platform || desktopBridge.platform || ""} ${desktopContext?.version || ""}`
       : `web ${process.env.NEXT_PUBLIC_XMATRIX_WEB_BUILD_ID?.trim() || ""}`;
@@ -1597,6 +1606,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
     <AgentAccessConfirmationHost />
+    <SupportHandoffDialog token={token} />
     {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel} token={token}
       onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
     <FaceSpaceContext.Provider value={currentSpaceId}>

@@ -296,6 +296,8 @@ import { useSystemBackHandler } from "./use-system-back";
 import { cn } from "@/lib/utils";
 import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
+import { SupportHandoffCard, SupportHandoffOffer } from "@/components/dashboard/support-handoff-card";
+import { isSupportableFailureNotice, supportHandoffCardOf } from "@/lib/support-handoff";
 import { NornRequestCard, nornRequestMetadata } from "@/components/dashboard/norn-request-card";
 import { carriesNornBlock, MessageProgramFlow, MessageProgramProvider } from "@/components/dashboard/message-program-flow";
 import { MessageAskLine } from "./message-ask-line";
@@ -1998,6 +2000,7 @@ export const MessageRow = memo(function MessageRow({
   const turnFailure = signedOutNotice ? null : turnFailureEvidenceOf(message.metadata);
   const quotaRetryId = quotaRetryOfferId(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(hubMetadata);
+  const supportHandoff = supportHandoffCardOf(hubMetadata);
   const nornRequest = nornRequestMetadata(hubMetadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(hubMetadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(hubMetadata);
@@ -2639,9 +2642,12 @@ export const MessageRow = memo(function MessageRow({
       </div>
     );
   };
-  const cardBody = onboardingStage ? (
+  const baseCardBody = onboardingStage ? (
     <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
       userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : supportHandoff ? (
+    <SupportHandoffCard card={supportHandoff} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
+      body={<RichMessageContent body={displayBody} components={markdownComponents} />} />
   ) : crossSpaceRead ? (
     <CrossSpaceReadCard
       request={crossSpaceRead}
@@ -2718,6 +2724,13 @@ export const MessageRow = memo(function MessageRow({
   ) : isMachineRunFailureNotice(message) ? (
     <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
   ) : null;
+  // xMatrix's own failure notices offer to hand the conversation to support from where it went wrong.
+  const cardBody = channel && !contextOnly && (isSupportableFailureNotice(hubMetadata) || turnFailure) ? (
+    <div className="space-y-2">
+      {baseCardBody ?? <RichMessageContent body={displayBody} components={markdownComponents} />}
+      <SupportHandoffOffer channelId={channel.id} />
+    </div>
+  ) : baseCardBody;
   const hasCardBody = cardBody !== null || Boolean(message.isEvent);
   // A message that carries a program draws the program's flow over its text. An edit or a quote of it is no program.
   const programSpaceId = !contextOnly && !recalled && carriesNornBlock(displayBody) ? channel?.spaceId : undefined;

@@ -206,7 +206,7 @@ export function MoreView({
       ...(onReportIssue ? [{
         key: "report-issue",
         label: "Report an issue",
-        description: "Tell us what is broken or missing on GitHub",
+        description: "In a conversation, hand it to xMatrix support; elsewhere, a GitHub issue",
         icon: MessageSquareText,
         onSelect: onReportIssue,
       }] : []),
