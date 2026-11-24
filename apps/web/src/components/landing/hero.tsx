@@ -1,10 +1,7 @@
 import Image from "next/image";
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
 import { preload } from "react-dom";
-import { WoodPanel } from "@/components/ui/material-surfaces";
+import { HeroDownload } from "@/components/landing/hero-download";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
-import { appHref } from "@/lib/site-url";
 
 export function Hero({ locale = "en" }: { locale?: Locale }) {
   const copy = landingCopy[locale].hero;
@@ -33,16 +30,7 @@ export function Hero({ locale = "en" }: { locale?: Locale }) {
             </span>
           </h1>
 
-          <div className="mt-10 flex w-full max-w-full sm:w-auto">
-            <WoodPanel
-              as={Link}
-              href={appHref("/login")}
-              className="site-wood-pill inline-flex h-12 w-full items-center justify-center px-7 text-sm sm:w-auto"
-            >
-              {copy.startFree}
-              <ArrowRight className="ml-2 size-5" />
-            </WoodPanel>
-          </div>
+          <HeroDownload locale={locale} />
         </div>
       </div>
     </section>

@@ -1,5 +1,5 @@
 import { FREE_PLAN_FEATURES, PRO_PLAN_FEATURES } from "@/lib/space-plans";
-import { SITE_LOCALES, localizedPath, type SiteLocale } from "@/lib/site-locales";
+import { SITE_LOCALES, type SiteLocale } from "@/lib/site-locales";
 
 /**
  * The homepage's words in each language it is published in: English at `/`,
@@ -25,8 +25,8 @@ export interface LandingCopy {
   home: string;
   lang: string;
   meta: { title: string; description: string; shareDescription: string };
-  nav: { links: readonly Pair[]; docs: string; openApp: string; startFree: string; menu: string };
-  hero: { slogan: string; startFree: string; art: string };
+  nav: { links: readonly Pair[]; docs: string; openApp: string; download: string; menu: string };
+  hero: { slogan: string; startFree: string; useInBrowser: string; art: string };
   agentStrip: string;
   livePage: { title: string; body: string; art: string };
   quickStart: { title: string; body: string; machinesLabel: string; machines: readonly (readonly [string, number])[];
@@ -59,10 +59,10 @@ const en: LandingCopy = {
     shareDescription: "Talk with your team. Your AI agents keep decisions, open work and next steps current in Pages.",
   },
   nav: {
-    links: [["/download", "Download"], ["/#connectors", "Connectors"], ["/#pricing", "Pricing"]],
-    docs: "Docs", openApp: "Open App", startFree: "Start Free", menu: "Open navigation menu",
+    links: [["/#connectors", "Connectors"], ["/#pricing", "Pricing"]],
+    docs: "Docs", openApp: "Open App", download: "Download", menu: "Open navigation menu",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "Start Free",
+  hero: { slogan: "Attention is all you need.", startFree: "Start Free", useInBrowser: "Or use it in your browser",
     art: "A modular array of warm wood and liquid-glass blocks engraved with AI marks" },
   agentStrip: "Works with the agents you already use",
   livePage: {
@@ -144,10 +144,10 @@ const zh: LandingCopy = {
     shareDescription: "和团队对话，让 AI 智能体把决定、待办和下一步写进页面并保持最新。",
   },
   nav: {
-    links: [[localizedPath("zh", "/download"), "下载"], ["/zh#connectors", "连接器"], ["/zh#pricing", "价格"]],
-    docs: "文档", openApp: "打开应用", startFree: "免费开始", menu: "打开导航菜单",
+    links: [["/zh#connectors", "连接器"], ["/zh#pricing", "价格"]],
+    docs: "文档", openApp: "打开应用", download: "下载", menu: "打开导航菜单",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "免费开始",
+  hero: { slogan: "Attention is all you need.", startFree: "免费开始", useInBrowser: "或在浏览器中使用",
     art: "一组刻着 AI 标志的木块和液态玻璃方块" },
   agentStrip: "支持你已经在用的编程智能体",
   livePage: {
@@ -232,10 +232,10 @@ const zhTw: LandingCopy = {
     shareDescription: "與團隊對話，讓 AI 代理在頁面中持續更新決策、待辦與下一步。",
   },
   nav: {
-    links: [[localizedPath("zh-tw", "/download"), "下載"], ["/zh-tw#connectors", "整合工具"], ["/zh-tw#pricing", "定價"]],
-    docs: "文件", openApp: "開啟應用", startFree: "免費開始", menu: "開啟導覽選單",
+    links: [["/zh-tw#connectors", "整合工具"], ["/zh-tw#pricing", "定價"]],
+    docs: "文件", openApp: "開啟應用", download: "下載", menu: "開啟導覽選單",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "免費開始",
+  hero: { slogan: "Attention is all you need.", startFree: "免費開始", useInBrowser: "或在瀏覽器中使用",
     art: "一組刻有 AI 標誌的溫潤木塊與液態玻璃方塊" },
   agentStrip: "支援你已經在使用的程式設計代理",
   livePage: {
@@ -320,10 +320,10 @@ const ja: LandingCopy = {
     shareDescription: "チームと会話するだけで、AIエージェントが決定事項と進捗をページに最新維持。",
   },
   nav: {
-    links: [[localizedPath("ja", "/download"), "ダウンロード"], ["/ja#connectors", "コネクタ"], ["/ja#pricing", "料金"]],
-    docs: "ドキュメント", openApp: "アプリを開く", startFree: "無料で始める", menu: "ナビゲーションを開く",
+    links: [["/ja#connectors", "コネクタ"], ["/ja#pricing", "料金"]],
+    docs: "ドキュメント", openApp: "アプリを開く", download: "ダウンロード", menu: "ナビゲーションを開く",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "無料で始める",
+  hero: { slogan: "Attention is all you need.", startFree: "無料で始める", useInBrowser: "ブラウザで使う",
     art: "AIの刻印が入った温かみのある木材とリキッドガラスのブロック群" },
   agentStrip: "お使いのコーディングエージェントとそのまま連携",
   livePage: {
@@ -408,10 +408,10 @@ const ko: LandingCopy = {
     shareDescription: "팀과 대화하면 AI 에이전트가 결정사항과 진행 상황을 페이지에 최신으로 유지합니다.",
   },
   nav: {
-    links: [[localizedPath("ko", "/download"), "다운로드"], ["/ko#connectors", "커넥터"], ["/ko#pricing", "요금제"]],
-    docs: "문서", openApp: "앱 열기", startFree: "무료로 시작", menu: "내비게이션 메뉴 열기",
+    links: [["/ko#connectors", "커넥터"], ["/ko#pricing", "요금제"]],
+    docs: "문서", openApp: "앱 열기", download: "다운로드", menu: "내비게이션 메뉴 열기",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "무료로 시작",
+  hero: { slogan: "Attention is all you need.", startFree: "무료로 시작", useInBrowser: "브라우저에서 사용하기",
     art: "AI 마크가 새겨진 따뜻한 우드와 리퀴드 글라스 블록 배열" },
   agentStrip: "이미 사용 중인 코딩 에이전트와 바로 연결",
   livePage: {
@@ -496,10 +496,10 @@ const es: LandingCopy = {
     shareDescription: "Habla con tu equipo. Tus agentes de IA mantienen decisiones, pendientes y próximos pasos al día en Pages.",
   },
   nav: {
-    links: [[localizedPath("es", "/download"), "Descargar"], ["/es#connectors", "Conectores"], ["/es#pricing", "Precios"]],
-    docs: "Documentación", openApp: "Abrir app", startFree: "Empezar gratis", menu: "Abrir menú de navegación",
+    links: [["/es#connectors", "Conectores"], ["/es#pricing", "Precios"]],
+    docs: "Documentación", openApp: "Abrir app", download: "Descargar", menu: "Abrir menú de navegación",
   },
-  hero: { slogan: "Attention is all you need.", startFree: "Empezar gratis",
+  hero: { slogan: "Attention is all you need.", startFree: "Empezar gratis", useInBrowser: "O úsalo en el navegador",
     art: "Matriz modular de bloques de madera cálida y vidrio líquido grabados con marcas de IA" },
   agentStrip: "Funciona con los agentes que ya usas",
   livePage: {
