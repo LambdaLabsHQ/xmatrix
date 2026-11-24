@@ -213,6 +213,10 @@ pub struct HarnessManagement {
     /// the owner's per-machine grant.
     #[serde(default, rename = "quotaRead")]
     pub quota_read: Option<QuotaRead>,
+    /// The first release with an official quota interface, when only earlier
+    /// releases need `quotaRead` (OpenCode: `2.2.0`).
+    #[serde(default, rename = "quotaReadBefore")]
+    pub quota_read_before: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

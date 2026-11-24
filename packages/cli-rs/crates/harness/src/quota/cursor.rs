@@ -369,7 +369,7 @@ mod tests {
                     .is_none()
             );
         }
-        assert!(super::super::Provider::Cursor.reads_sign_in_only_with_grant());
+        assert!(super::super::Provider::Cursor.needs_sign_in_grant_at(None));
     }
 
     #[tokio::test]

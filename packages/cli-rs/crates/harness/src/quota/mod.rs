@@ -24,6 +24,7 @@ pub mod deepseek;
 pub mod grant;
 pub mod grok;
 
+pub use cli::{CliVersion, parse_cli_semver};
 pub use grant::{GrantedRead, SignInReadGrant};
 pub mod opencode;
 pub mod windows;
@@ -123,8 +124,9 @@ pub struct ReadOptions {
 ///
 /// Returns `None` when the provider has no reading for that account, when
 /// the provider does not support the requested [`Account`] binding, or when
-/// the provider is read only under a grant
-/// ([`Provider::reads_sign_in_only_with_grant`], read through [`read_granted`]).
+/// the provider is read only under a grant (Cursor, read through
+/// [`read_granted`]). OpenCode is read here only through its official
+/// interface; [`read_granted`] also reads it on a release without one.
 pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> {
     if quota_probes_disabled() {
         return None;
@@ -174,15 +176,20 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
 }
 
 /// Read one provider's account quota under the owner's grant to read its
-/// local sign-in. A provider that needs no grant ignores it; one that does
-/// opens no credential source without it ([`GrantedRead::Closed`]).
+/// local sign-in, for the harness running `model` when known. A provider
+/// that needs no grant ignores it; one that does opens no credential source
+/// without it ([`GrantedRead::Closed`]).
 pub async fn read_granted(
     provider: Provider,
     options: ReadOptions,
+    model: Option<&str>,
     grant: Option<&SignInReadGrant>,
 ) -> GrantedRead {
     match provider {
         Provider::Cursor => cursor::read_cursor_period_usage(options.force, grant).await,
+        Provider::OpenCode => {
+            opencode::read_opencode_usage_granted(options.force, model, grant).await
+        }
         _ => GrantedRead::Read {
             usage: read(provider, options).await,
             bound: None,
@@ -191,10 +198,22 @@ pub async fn read_granted(
 }
 
 impl Provider {
-    /// Whether this provider has no official quota interface, so its quota is
-    /// read from the harness's own local sign-in, and only under a grant.
-    pub fn reads_sign_in_only_with_grant(self) -> bool {
-        matches!(self, Provider::Cursor)
+    /// Whether this provider's quota may be read from the harness's own local
+    /// sign-in, and then only under a grant: always for Cursor, which has no
+    /// official quota interface, and for OpenCode releases before its
+    /// usage-limits route ([`Provider::needs_sign_in_grant_at`]).
+    pub fn takes_sign_in_read_grant(self) -> bool {
+        matches!(self, Provider::Cursor | Provider::OpenCode)
+    }
+
+    /// Whether, with the harness at `version` (when known), its quota is
+    /// read only under a grant.
+    pub fn needs_sign_in_grant_at(self, version: Option<CliVersion>) -> bool {
+        match self {
+            Provider::Cursor => true,
+            Provider::OpenCode => opencode::needs_sign_in_grant(version),
+            _ => false,
+        }
     }
 }
 

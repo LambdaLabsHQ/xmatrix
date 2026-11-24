@@ -190,14 +190,14 @@ export function PrivacyPolicyContent() {
               Telemetry and local privacy guide
             </Link>
             . It never reads the login of a tool you did not register. Codex, Claude Code and
-            OpenCode are not read this way: the daemon asks the tool itself, and the tool answers
-            with its own sign-in. Codex is asked through the Codex session already running or a
-            briefly started <code className="font-mono text-xs">codex app-server</code>, Claude
-            Code through the Claude Code session already running or a briefly started{" "}
+            OpenCode 2.2.0 or later are not read this way: the daemon asks the tool itself, and the
+            tool answers with its own sign-in. Codex is asked through the Codex session already
+            running or a briefly started <code className="font-mono text-xs">codex app-server</code>,
+            Claude Code through the Claude Code session already running or a briefly started{" "}
             <code className="font-mono text-xs">claude</code> (a usage request that sends no
             prompt), and OpenCode through a briefly started{" "}
-            <code className="font-mono text-xs">opencode serve</code>. xMatrix opens no Codex,
-            Claude Code or OpenCode login file or keychain entry.
+            <code className="font-mono text-xs">opencode serve</code>. xMatrix opens no Codex or
+            Claude Code login file or keychain entry, and no login file of OpenCode 2.2.0 or later.
           </p>
           <p>
             <strong className="text-foreground">Only with your permission, for tools without an official quota interface.</strong>{" "}
@@ -216,6 +216,20 @@ export function PrivacyPolicyContent() {
             withdrawn at any time in the same place, in Settings → Legal and privacy, or with{" "}
             <code className="font-mono text-xs">xmatrix config quotaAccess cursor off</code>, and the
             next read is already refused. The switch below still overrides it.
+          </p>
+          <p>
+            OpenCode before 2.2.0 has no official quota interface either, and is handled the same
+            way: until the computer&apos;s owner allows it (&quot;Allow reading OpenCode sign-in to show
+            quota&quot;, or <code className="font-mono text-xs">xmatrix config quotaAccess opencode on</code>),
+            xMatrix opens neither OpenCode&apos;s <code className="font-mono text-xs">auth.json</code> nor
+            an <code className="font-mono text-xs">OPENCODE_API_KEY</code> set for it, asks no OpenCode
+            endpoint, and shows its quota as unknown. With the permission, it reads only the key
+            OpenCode stored for OpenCode Go and uses it for one request to OpenCode Go&apos;s own usage
+            endpoint (<code className="font-mono text-xs">opencode.ai/zen/go/v1/usage</code>). It never
+            refreshes an expired sign-in on OpenCode&apos;s behalf: the quota then shows as unknown,
+            marked expired, until OpenCode is signed in again. The same account binding, withdrawal
+            and override apply. From OpenCode 2.2.0 on, xMatrix asks OpenCode itself and reads no
+            OpenCode credential, with or without the permission.
           </p>
           <p>
             <strong className="text-foreground">Why.</strong> To ask that provider how much of your
