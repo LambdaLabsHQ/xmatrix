@@ -97,7 +97,7 @@ Two paths carry text, and only these:
 | --- | --- | --- |
 | You opted in | Sent | Sent |
 | You opted out, or Do Not Track, Global Privacy Control or `XMATRIX_TELEMETRY=0` | Not sent | Not sent |
-| No choice made; signup country **and** current country outside the EU, EEA, UK and Switzerland | Not sent | Sent, after a one-line notice linking to the off switch |
+| No choice made; signup country **and** current country outside the EU, EEA, UK and Switzerland | Not sent | Sent, with a one-line notice linking to privacy settings |
 | No choice made; either country in the EU, EEA, UK or Switzerland, or unknown | Not sent | Not sent; an unticked **Send diagnostics to help improve the beta** box is offered |
 
 Rows apply in order: an explicit opt-in is honoured even with Do Not Track or Global Privacy Control on. Only ticking that box or flipping the switch in Settings (or `xmatrix config telemetry on|off`) counts as a choice. Dismissing the notice is not a choice, and xMatrix never changes your setting for you.

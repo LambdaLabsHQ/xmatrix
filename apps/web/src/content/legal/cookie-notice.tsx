@@ -85,7 +85,7 @@ export function CookieNoticeContent() {
           in the stable apps and CLI; they run only when a signed-in user opts in under Settings → Legal
           and privacy (or opts in for the CLI via <code className="font-mono text-xs">xmatrix config telemetry on</code>{" "}
           or <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code>). Beta builds turn them on by
-          default, with a one-line notice linking to the off switch, only where both your signup country
+          default, with a one-line notice linking to privacy settings, only where both your signup country
           and your current country are outside the EU, EEA, UK and Switzerland; elsewhere a beta shows an
           unticked opt-in box and sends nothing unless you tick it. Do Not Track and Global Privacy
           Control turn them off. The signed-in app keeps which diagnostics notice you dismissed in local

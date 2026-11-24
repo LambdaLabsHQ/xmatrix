@@ -1749,7 +1749,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           className="app-main relative flex min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-card/80"
         >
           <ConnectionStatus />
-          <DiagnosticsConsentPrompt token={token} onOpenSettings={openDiagnosticsSettings} />
           {companion && companionBar ? (
             <CompanionHeader
               channel={composingConversation ? null : selectedChannel}
@@ -1901,6 +1900,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           ) : (
             toolSurface
           )}
+          <DiagnosticsConsentPrompt
+            token={token}
+            onOpenSettings={openDiagnosticsSettings}
+            mobileDockVisible={!companion && nativeMobileTabVisible}
+            mobileFabVisible={!companion && Boolean(mobileCreate)}
+          />
         </main>
       </ListColumnResizeProvider>
       </div>
