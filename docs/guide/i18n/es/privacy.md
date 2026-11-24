@@ -111,6 +111,26 @@ Las filas se aplican en orden: una activación explícita se respeta aunque Do N
 - **CLI y daemon:** desactivados por defecto; actívalos con `xmatrix config telemetry on` o `XMATRIX_TELEMETRY=1`, y desactívalos con `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`.
 - **CLI y daemon:** actívalos con `xmatrix config telemetry on` o `XMATRIX_TELEMETRY=1`, y desactívalos con `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`. `xmatrix config telemetry on|off` también guarda la elección en tu cuenta.
 
+## Pasar una conversación al soporte de xMatrix
+
+El personal y los Agents de xMatrix solo leen una conversación tuya cuando se la pasas al soporte. El análisis del producto usa solo metadatos, nunca lo que escribiste.
+
+Para pedir ayuda, elige **Hand to xMatrix support** en el menú de una conversación, en un aviso de fallo que publica xMatrix (un arranque fallido, fallos repetidos, varios minutos sin avances) o en **Help → Report an issue** con la conversación abierta. Después:
+
+- Escribe una línea sobre qué salió mal.
+- Marca qué incluir. Al principio no hay nada marcado:
+  - **This conversation's messages**, con sus hilos.
+  - **Diagnostics for this conversation**: cuándo los Agents arrancaron, se detuvieron o fallaron en ella, y los códigos de fallo. Son eventos de diagnóstico con solo estados, códigos, recuentos y horas: sin texto de mensajes, prompts, mensajes de error ni identificadores.
+- Marca **I agree to let xMatrix support read what I selected**. No se envía nada hasta que lo marques.
+
+Lo que permite el traspaso:
+
+- **Quién lo lee:** el soporte de xMatrix, es decir, el equipo de xMatrix y sus Agents de soporte, en una conversación de soporte abierta para tu traspaso.
+- **Solo lectura:** el soporte lee lo que marcaste tal como tú lo ves y no puede escribir, reaccionar ni iniciar nada en tu conversación. Su respuesta llega a tu conversación como un mensaje de "xMatrix support", o por correo.
+- **Durante cuánto tiempo:** 14 días. Tú, o un propietario o administrador de tu Space, podéis retirarlo cuando queráis con **Withdraw now** en la nota que deja en tu conversación. La lectura se detiene en cuanto se retira o caduca.
+- **Ves cada lectura:** la primera vez que el soporte la lee en cada hora, tu conversación muestra "xMatrix support read this conversation" con la hora.
+- Solo quien empezó una conversación, o un propietario o administrador de su Space, puede pasarla.
+
 ## Documentos legales
 
 - [Política de privacidad (EN)](/privacy)

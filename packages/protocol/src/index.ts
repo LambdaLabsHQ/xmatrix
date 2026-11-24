@@ -725,3 +725,4 @@ export {
   type AgentMessagePresentation, type AgentInstancePresentation,
 } from "./agent-instance-presentation.js";
 export { agentModelEntry } from "./agent-instance-catalogs.js";
+export * from "./support-handoff.js";

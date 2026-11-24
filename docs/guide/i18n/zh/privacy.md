@@ -113,6 +113,26 @@ xMatrix 不使用广告 Cookie、跨站追踪、会话录屏，也不集成 Post
 - **桌面端启动失败卡片**：即便诊断开关处于关闭状态，若后台服务启动失败，你仍可在失败卡片上按需点击一次 **发送失败报告**，仅上报该次脱敏后的失败信息。
 - **CLI 与 daemon**：执行 `xmatrix config telemetry on` 或设 `XMATRIX_TELEMETRY=1` 开启；通过 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 关闭。`xmatrix config telemetry on|off` 也会把选择保存到账号。
 
+## 把对话交给 xMatrix 支持
+
+只有在你把对话交给支持时，xMatrix 的工作人员和 Agent 才会读你的对话。产品分析只用元数据，从不使用你写的内容。
+
+需要帮助时，在对话菜单里、在 xMatrix 发出的故障通知上（启动失败、反复失败、几分钟没有进展），或在对话打开时从 **Help → Report an issue** 选择 **Hand to xMatrix support**。然后：
+
+- 用一句话写下出了什么问题。
+- 勾选要包含的内容。默认什么都不勾：
+  - **This conversation's messages**，包括其中的子话题。
+  - **Diagnostics for this conversation**：Agent 在这里何时启动、停止或失败，以及失败代码。这些是只含状态、代码、计数和时间的诊断事件：没有消息正文、提示词、错误信息或 ID。
+- 勾选 **I agree to let xMatrix support read what I selected**。不勾选就什么都不会发送。
+
+这次交接允许的范围：
+
+- **谁来读：** xMatrix 支持，即 xMatrix 团队及其支持 Agent，在为这次交接开设的支持对话里处理。
+- **只读：** 支持按你能看到的样子读取你勾选的内容，不能在你的对话里写入、回应或启动任何东西。支持的答复以"xMatrix support"的消息出现在你的对话里，或通过邮件发给你。
+- **多长时间：** 14 天。你，或你所在空间的所有者或管理员，随时可以在它留在对话里的说明上点 **Withdraw now**。撤回或到期后立刻停止读取。
+- **每次读取你都看得到：** 支持在任意一小时内第一次读取时，你的对话会显示"xMatrix support read this conversation"和时间。
+- 只有对话的发起人，或其空间的所有者或管理员，才能交出这个对话。
+
 ## 法律文件
 
 - [隐私政策（EN）](/privacy)

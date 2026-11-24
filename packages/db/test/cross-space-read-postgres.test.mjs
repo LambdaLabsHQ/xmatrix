@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { Client } from "pg";
 
 import { PostgresCrossSpaceReadRepository } from "../dist/cross-space-read-control.js";
+import { PostgresSupportHandoffRepository } from "../dist/support-handoff-control.js";
+import { registeredRunRows } from "./registered-run.fixture.mjs";
 
 
 
@@ -11,11 +13,13 @@ async function fixture(client, id) {
   const ids = {
     home: `${id}-home`, target: `${id}-target`, owner: `${id}-owner`, teammate: `${id}-teammate`,
     source: `${id}-source`, debug: `${id}-debug`, thread: `${id}-thread`, secret: `${id}-secret`,
-    sibling: `${id}-sibling`, agent: `${id}-agent`,
+    sibling: `${id}-sibling`, agent: `${id}-agent`, customer: `${id}-customer`, mine: `${id}-mine`,
+    viewer: `${id}-viewer`, admin: `${id}-admin`,
   };
   // Instance and Run ids are natural keys of the Channel they run in.
   ids.instance = `${ids.source}:1`;
   ids.run = `${ids.instance}#1`;
+  ids.supportRuns = [];
   await client.query(`INSERT INTO control.postgres_shards (shard_id,state,capacity_class,created_at,updated_at)
     VALUES ('shard-0','active','test',now(),now()) ON CONFLICT DO NOTHING`);
   for (const spaceId of [ids.home, ids.target]) {
@@ -27,7 +31,9 @@ async function fixture(client, id) {
       VALUES ($1,$2,'Cross-Space read test',$1,1,'{}',now(),now())`, [spaceId, ids.owner]);
   }
   for (const [spaceId, userId, role] of [[ids.home, ids.owner, "owner"], [ids.home, ids.teammate, "member"],
-    [ids.target, ids.owner, "owner"]]) {
+    // In the target Space the Run's owner is a member, so a closed Channel stays closed to them.
+    [ids.target, ids.owner, "member"], [ids.target, ids.admin, "admin"], [ids.target, ids.customer, "member"],
+    [ids.home, ids.viewer, "viewer"]]) {
     await client.query(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at)
       VALUES ($1,$2,$3,1,now(),now())`, [spaceId, userId, role]);
   }
@@ -37,6 +43,8 @@ async function fixture(client, id) {
     [ids.thread, ids.target, "open", ids.debug,
       { kind: "thread", threadRootChannelId: ids.debug, threadRootMessageId: "root" }],
     [ids.sibling, ids.target, "open", null, {}],
+    // The customer's own conversation.
+    [ids.mine, ids.target, "open", null, { xmatrixCreatedByUserId: ids.customer }],
     // A closed Channel granted to nobody.
     [ids.secret, ids.target, "closed", null, {}],
   ]) {
@@ -63,6 +71,13 @@ async function fixture(client, id) {
 }
 
 async function cleanup(client, ids) {
+  for (const runId of ids.supportRuns ?? []) {
+    await client.query("DELETE FROM control.entity_space_routes WHERE entity_id=$1", [runId]).catch(() => {});
+    await client.query("DELETE FROM data.instances WHERE run_id=$1", [runId]).catch(() => {});
+    await client.query("DELETE FROM data.runs WHERE run_id=$1", [runId]).catch(() => {});
+  }
+  await client.query("DELETE FROM data.cross_space_read_grants WHERE space_id=$1", [ids.target]).catch(() => {});
+  await client.query("DELETE FROM data.runs WHERE channel_id=$1", [ids.mine]).catch(() => {});
   await client.query("DELETE FROM data.cross_space_read_grants WHERE run_id=$1", [ids.run]).catch(() => {});
   await client.query("DELETE FROM data.cross_space_read_notices WHERE space_id=$1", [ids.home]).catch(() => {});
   await client.query("DELETE FROM control.entity_space_routes WHERE entity_id=$1", [ids.run]).catch(() => {});
@@ -78,7 +93,8 @@ async function cleanup(client, ids) {
 }
 
 function proofOf(ids, executionKey = "execution-1") {
-  return { agentId: ids.agent, runId: ids.run, instanceId: ids.instance, executionKey,
+  // An Agent principal is its live Instance.
+  return { agentId: ids.instance, runId: ids.run, instanceId: ids.instance, executionKey,
     channelId: ids.source, spaceId: ids.home };
 }
 
@@ -190,6 +206,130 @@ integration("an owner may narrow a Space request to its Channel, and deny ends i
   });
 });
 
+integration("a person hands a conversation to support: only to support, only what they ticked, as them", async () => {
+  await withCrossSpaceFixture(async ({ client, ids, database: db }) => {
+    const repository = new PostgresSupportHandoffRepository(db);
+    const supportMember = { kind: "user", id: ids.owner };
+    const handOff = (userId, parts, extra = {}) => repository.handOff({ requestId: crypto.randomUUID(), userId,
+      channelId: ids.mine, supportSpaceId: ids.home, line: "the agent never answers", parts, ...extra });
+    const supportRead = (grantId, part, reader = supportMember) => repository.authorizeHandoffRead({
+      requestId: crypto.randomUUID(), spaceId: ids.target, grantId, reader, part });
+    const run = (channelId) => ({ ...proofOf(ids), channelId });
+    const runRead = (proof, part = "messages", channelId = ids.mine) => repository.authorizeRead({
+      requestId: crypto.randomUUID(), proof, channelId, part });
+
+    await assert.rejects(runRead(run(ids.source)), code("cross_space_read_grant_required"),
+      "with no handoff support reads nothing");
+    await assert.rejects(handOff(`${ids.customer}-stranger`, []), code("channel_not_found"));
+    await client.query(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at)
+      VALUES ($1,$2,'member',1,now(),now())`, [ids.target, ids.teammate]);
+    await assert.rejects(handOff(ids.teammate, ["messages"]), code("support_handoff_forbidden"),
+      "a member who did not start the conversation cannot hand it over for its creator");
+
+    const { handoff, supportOwnerUserId } = await handOff(ids.customer, ["messages"]);
+    assert.equal(supportOwnerUserId, ids.owner);
+    assert.deepEqual([handoff.status, handoff.parts, handoff.ownerUserId, handoff.supportSpaceId],
+      ["approved", ["messages"], ids.customer, ids.home]);
+    assert.equal((Date.parse(handoff.expiresAt) - Date.parse(handoff.requestedAt)) / 86_400_000, 14);
+
+    const first = await supportRead(handoff.id, "messages");
+    assert.equal(first.handoff.channelId, ids.mine);
+    assert.equal(first.accessNote?.channelId, ids.mine, "the first read tells the person's conversation");
+    assert.equal((await supportRead(handoff.id, "messages")).accessNote, undefined, "at most once an hour");
+    await assert.rejects(supportRead(handoff.id, "diagnostics"), code("support_handoff_part_not_shared"));
+    await assert.rejects(supportRead(handoff.id, "logs"), code("support_handoff_part_not_shared"));
+    for (const reader of [{ kind: "user", id: ids.customer }, { kind: "user", id: ids.viewer },
+      { kind: "user", id: `${ids.owner}-stranger` }]) {
+      await assert.rejects(supportRead(handoff.id, "messages", reader), code("support_handoff_not_found"),
+        "only support's members read a handoff, never a viewer or anyone else");
+    }
+
+    await assert.rejects(runRead(run(ids.source)), code("cross_space_read_grant_required"),
+      "a support Run outside the handoff's conversation reads nothing");
+    const working = await supportRun(client, ids, handoff.supportChannelId);
+    assert.deepEqual(await runRead(working), { ownerUserId: ids.customer, spaceId: ids.target, grantId: handoff.id },
+      "the Run working in the support conversation reads as the person");
+    await assert.rejects(repository.authorizeRead({ requestId: crypto.randomUUID(), proof: working,
+      channelId: ids.mine }), code("cross_space_read_grant_required"),
+    "a read that is not the conversation's messages is not covered");
+    await assert.rejects(runRead(working, "messages", ids.sibling), code("cross_space_read_grant_required"),
+      "nor is any other conversation in the person's Space");
+
+    await assert.rejects(repository.revokeHandoff({ requestId: crypto.randomUUID(), spaceId: ids.target,
+      grantId: handoff.id, userId: ids.teammate }), code("support_handoff_not_found"));
+    const revoked = await repository.revokeHandoff({ requestId: crypto.randomUUID(), spaceId: ids.target,
+      grantId: handoff.id, userId: ids.customer });
+    assert.equal(revoked.status, "revoked");
+    await assert.rejects(supportRead(handoff.id, "messages"), code("support_handoff_ended"), "withdrawal is immediate");
+    await assert.rejects(runRead(working), code("cross_space_read_grant_required"));
+    await assert.rejects(repository.authorizeHandoffReply({ requestId: crypto.randomUUID(), spaceId: ids.target,
+      grantId: handoff.id, reader: supportMember }), code("support_handoff_ended"));
+  });
+});
+
+integration("diagnostics and logs are read only as ticked, and expiry or an admin ends a handoff", async () => {
+  await withCrossSpaceFixture(async ({ client, ids, database: db }) => {
+    const repository = new PostgresSupportHandoffRepository(db);
+    const supportMember = { kind: "user", id: ids.owner };
+    await client.query(`INSERT INTO data.runs (run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at)
+      VALUES ($1,$2,$3,'failed',1,'{"executionKey":"secret-key","prompt":"private words"}',now(),now())`,
+    [`${ids.mine}:1#1`, ids.customer, ids.mine]);
+    await assert.rejects(repository.handOff({ requestId: crypto.randomUUID(), userId: ids.customer,
+      channelId: ids.mine, supportSpaceId: ids.home, line: "logs", parts: ["logs"] }), code("invalid_request"),
+    "logs are never handed over without the excerpt the person previewed");
+    await assert.rejects(repository.handOff({ requestId: crypto.randomUUID(), userId: ids.customer,
+      channelId: ids.mine, supportSpaceId: ids.target, line: "same", parts: [] }), code("same_space"));
+    const { handoff } = await repository.handOff({ requestId: crypto.randomUUID(), userId: ids.customer,
+      channelId: ids.mine, supportSpaceId: ids.home, line: "it crashed", parts: ["diagnostics", "logs"],
+      logExcerpt: "error: spawn failed at ~/…" });
+    const read = (part) => repository.authorizeHandoffRead({ requestId: crypto.randomUUID(), spaceId: ids.target,
+      grantId: handoff.id, reader: supportMember, part });
+
+    const { diagnostics } = await read("diagnostics");
+    assert.equal(diagnostics.length, 1);
+    assert.deepEqual(Object.keys(diagnostics[0]).sort(), ["createdAt", "kind", "status"],
+      "only allowlisted fields: no ids, no execution key, no prompt");
+    assert.equal(diagnostics[0].status, "failed");
+    assert.equal((await read("logs")).logExcerpt, "error: spawn failed at ~/…");
+    await assert.rejects(read("messages"), code("support_handoff_part_not_shared"),
+      "the conversation's messages were not ticked");
+
+    await client.query("UPDATE data.cross_space_read_grants SET expires_at=now()-interval '1 second' WHERE grant_id=$1",
+      [handoff.id]);
+    await assert.rejects(read("logs"), code("support_handoff_ended"), "expiry ends reads at once");
+    assert.equal((await repository.readHandoff({ requestId: crypto.randomUUID(), spaceId: ids.target,
+      grantId: handoff.id, viewer: { kind: "user", id: ids.customer } })).status, "expired");
+
+    const second = await repository.handOff({ requestId: crypto.randomUUID(), userId: ids.customer,
+      channelId: ids.mine, supportSpaceId: ids.home, line: "again", parts: ["logs"], logExcerpt: "tail" });
+    const lapsed = (await client.query("SELECT status,log_excerpt FROM data.cross_space_read_grants WHERE grant_id=$1",
+      [handoff.id])).rows[0];
+    assert.deepEqual({ ...lapsed }, { status: "expired", log_excerpt: null }, "a lapsed handoff's logs are erased");
+    const byAdmin = await repository.revokeHandoff({ requestId: crypto.randomUUID(), spaceId: ids.target,
+      grantId: second.handoff.id, userId: ids.admin });
+    assert.equal(byAdmin.status, "revoked", "an admin of the person's Space may withdraw it too");
+    const erased = (await client.query("SELECT log_excerpt FROM data.cross_space_read_grants WHERE grant_id=$1",
+      [second.handoff.id])).rows[0];
+    assert.equal(erased.log_excerpt, null);
+  });
+});
+
+/** A live Run working in the support conversation a handoff opened. */
+async function supportRun(client, ids, channelId) {
+  const instanceId = `${channelId}:1`;
+  const runId = `${instanceId}#1`;
+  await client.query(`INSERT INTO data.runs (run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at)
+    VALUES ($1,$2,$3,'running',1,'{"executionKey":"support-1"}',now(),now())`, [runId, ids.owner, channelId]);
+  await client.query(`INSERT INTO data.instances
+    (instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
+    VALUES ($1,$2,$3,1,'online',1,now(),now())`, [instanceId, runId, channelId]);
+  await client.query(`INSERT INTO control.entity_space_routes
+    (entity_kind,entity_id,space_id,shard_id,placement_epoch,entity_version,route_version,state,updated_at)
+    VALUES ('run',$1,$2,'shard-0',1,1,1,'active',now())`, [runId, ids.home]);
+  ids.supportRuns.push(runId);
+  return { agentId: instanceId, runId, instanceId, executionKey: "support-1", channelId, spaceId: ids.home };
+}
+
 async function crossSpaceClient() {
   assert.ok(connectionString, "XMATRIX_TEST_POSTGRES_URL is required");
   const client = new Client({ connectionString });
@@ -199,7 +339,12 @@ async function crossSpaceClient() {
 
 async function crossSpaceFixture(client) {
   const ids = await fixture(client, `csr-${crypto.randomUUID()}`);
-  return { ids, repository: new PostgresCrossSpaceReadRepository(database(client)), proof: proofOf(ids) };
+  // The Run executes under its Space Agent Registration, which this file does not exercise.
+  const real = database(client);
+  const db = { ...real, transaction: (context, callback) => real.transaction(context, (tx) => callback({
+    query: async (query) => registeredRunRows(query, { runId: ids.run, spaceId: ids.home, ownerUserId: ids.owner })
+      ?? tx.query(query) })) };
+  return { ids, database: db, repository: new PostgresCrossSpaceReadRepository(db), proof: proofOf(ids) };
 }
 
 async function withCrossSpaceFixture(body) {

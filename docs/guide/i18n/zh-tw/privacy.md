@@ -111,6 +111,26 @@ xMatrix 不使用廣告 Cookie、跨站追蹤、工作階段錄影，也未整�
 - **CLI 與 daemon**：預設關閉；可透過 `xmatrix config telemetry on` 或 `XMATRIX_TELEMETRY=1` 開啟，並隨時以 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 關閉。
 - **CLI 與 daemon**：以 `xmatrix config telemetry on` 或 `XMATRIX_TELEMETRY=1` 開啟；以 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 關閉。`xmatrix config telemetry on|off` 也會把選擇儲存到帳號。
 
+## 把對話交給 xMatrix 支援
+
+只有在你把對話交給支援時，xMatrix 的工作人員和 Agent 才會讀你的對話。產品分析只用中繼資料，從不使用你寫的內容。
+
+需要協助時，在對話選單裡、在 xMatrix 發出的故障通知上（啟動失敗、反覆失敗、幾分鐘沒有進展），或在對話開啟時從 **Help → Report an issue** 選擇 **Hand to xMatrix support**。然後：
+
+- 用一句話寫下出了什麼問題。
+- 勾選要包含的內容。預設什麼都不勾：
+  - **This conversation's messages**，包括其中的子討論串。
+  - **Diagnostics for this conversation**：Agent 在這裡何時啟動、停止或失敗，以及失敗代碼。這些是只含狀態、代碼、計數和時間的診斷事件：沒有訊息內文、提示詞、錯誤訊息或 ID。
+- 勾選 **I agree to let xMatrix support read what I selected**。不勾選就什麼都不會送出。
+
+這次交接允許的範圍：
+
+- **誰來讀：** xMatrix 支援，也就是 xMatrix 團隊及其支援 Agent，在為這次交接開設的支援對話裡處理。
+- **唯讀：** 支援依你能看到的樣子讀取你勾選的內容，不能在你的對話裡寫入、回應或啟動任何東西。支援的答覆以「xMatrix support」的訊息出現在你的對話裡，或透過電子郵件寄給你。
+- **多久：** 14 天。你，或你所在空間的擁有者或管理員，隨時可以在它留在對話裡的說明上按 **Withdraw now**。撤回或到期後立刻停止讀取。
+- **每次讀取你都看得到：** 支援在任一小時內第一次讀取時，你的對話會顯示「xMatrix support read this conversation」和時間。
+- 只有對話的發起人，或其空間的擁有者或管理員，才能交出這個對話。
+
 ## 法律文件
 
 - [隱私權政策（EN）](/privacy)

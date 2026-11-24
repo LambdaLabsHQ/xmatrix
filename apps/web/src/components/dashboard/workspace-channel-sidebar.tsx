@@ -130,6 +130,7 @@ import {
   Copy,
   ExternalLink,
   Inbox,
+  LifeBuoy,
   Loader2,
   Pencil,
   Pin,
@@ -144,6 +145,7 @@ import { LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { mobileChatTimeLabel } from "./time-display";
 
 import { channelTitle, spaceAppPath } from "@/components/dashboard/channel-links";
+import { openSupportHandoff } from "@/lib/support-handoff";
 import { ChannelListSkeleton, useEmptySurfaceSkeleton } from "@/components/dashboard/content-skeleton";
 import { subscribeToNetwork } from "./connection-status";
 import { channelRowsForPaint } from "./channel-list-paint";
@@ -314,8 +316,8 @@ export const ChannelSidebar = memo(function ChannelSidebar({
     const y = pointerEvent ? event.clientY : rect.top + rect.height + 4;
     setChannelContextMenu({
       channel,
-      x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - 184)),
-      y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - 72)),
+      x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - 232)),
+      y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - 112)),
       state: "idle",
     });
   }, []);
@@ -479,7 +481,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
       </div>
       {channelContextMenu && createPortal(
         <div
-          className="fixed z-[var(--z-popover)] w-44 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-xl"
+          className="fixed z-[var(--z-popover)] w-56 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-xl"
           style={{ left: channelContextMenu.x, top: channelContextMenu.y }}
           onPointerDown={(event) => event.stopPropagation()}
           role="menu"
@@ -516,6 +518,19 @@ export const ChannelSidebar = memo(function ChannelSidebar({
                   ? "Copy failed"
                   : "Copy channel link"}
             </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flex h-8 w-full items-center gap-2 rounded px-2 text-left text-sm font-semibold hover:bg-muted"
+            onClick={() => {
+              openSupportHandoff({ channelId: channelContextMenu.channel.id,
+                channelName: `#${channelTitle(channelContextMenu.channel)}` });
+              setChannelContextMenu(null);
+            }}
+          >
+            <LifeBuoy className="size-4" />
+            <span>Hand to xMatrix support…</span>
           </button>
         </div>,
         document.body
