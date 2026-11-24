@@ -10,6 +10,8 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import * as esbuild from "esbuild";
+
 import { buildApp } from "./build-app.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -77,6 +79,21 @@ export function shippedManifest(manifest, { release, unpacked = false, hubUrl })
   };
 }
 
+/**
+ * The script the side panel injects into a tab an Agent reads (sidepanel.js readTab): Playwright's accessibility
+ * snapshot, vendored under snapshot/playwright, behind `globalThis.__xmatrixPageSnapshot`.
+ */
+export async function buildPageSnapshot(outfile, { minify = true } = {}) {
+  const vendored = path.join(root, "snapshot", "playwright");
+  await esbuild.build({ entryPoints: [path.join(root, "snapshot", "page-snapshot.ts")], outfile, bundle: true,
+    format: "iife", target: "chrome116", minify, logLevel: "warning",
+    banner: { js: "/*! Includes Playwright's accessibility snapshot, Copyright (c) Microsoft Corporation, "
+      + "Apache License 2.0: page-snapshot.LICENSE.txt */" } });
+  // The Apache License asks that its text and Playwright's NOTICE go with the code.
+  fs.writeFileSync(outfile.replace(/\.js$/u, ".LICENSE.txt"),
+    `${fs.readFileSync(path.join(vendored, "NOTICE"), "utf8").trim()}\n\n${fs.readFileSync(path.join(vendored, "LICENSE"), "utf8")}`);
+}
+
 export async function packageExtension({ out, release, unpacked = false, hubUrl, minify = true } = {}) {
   const target = out ?? path.join(repo, "dist", unpacked ? "chrome-extension-unpacked" : "chrome-extension");
   const resolved = release ?? JSON.parse(fs.readFileSync(path.join(repo, "version.json"), "utf8")).version;
@@ -88,6 +105,7 @@ export async function packageExtension({ out, release, unpacked = false, hubUrl,
   const manifest = shippedManifest(JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8")),
     { release: resolved, unpacked, hubUrl });
   fs.writeFileSync(path.join(target, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  await buildPageSnapshot(path.join(target, "src", "page-snapshot.js"), { minify });
   const app = await buildApp({ extensionRoot: target, release: resolved, hubUrl, minify });
   return { out: target, version: manifest.version, versionName: manifest.version_name, app };
 }

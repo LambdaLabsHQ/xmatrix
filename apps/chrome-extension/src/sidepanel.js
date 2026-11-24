@@ -105,8 +105,6 @@ window.addEventListener("message", async (event) => {
     await showOpenPath();
     await showRecent();
     await showPage();
-  } else if (data.type === "page-text") {
-    await showPage({ text: await readPage() });
   } else if (data.type === "page-thread" && typeof data.path === "string") {
     const tab = await activeTab();
     if (tab?.id !== undefined) await ask("rememberPageThread", { tabId: tab.id, path: data.path, title: data.title, href: data.href });
@@ -158,7 +156,7 @@ async function pageThread(tab, href) {
  * where it is, and the app offers to ask about this page (Daniel 2026-11-23).
  */
 let shownPage = "";
-async function showPage({ text } = {}) {
+async function showPage() {
   if (!appReady) return;
   const tab = await activeTab();
   const href = capturableUrl(tab?.url ?? "");
@@ -166,34 +164,30 @@ async function showPage({ text } = {}) {
   const thread = await pageThread(tab, href);
   const path = thread ? `/app/${encodeURIComponent(thread.spaceId)}/channels/${encodeURIComponent(thread.channelId)}` : undefined;
   postToApp({ type: "page", title: pageTitle(tab.title) || new URL(href).host, href,
-    ...(path ? { path } : {}), ...(text ? { text } : {}) });
+    ...(path ? { path } : {}) });
   const key = `${tab.id} ${pageKey(href)}`;
   if (path && key !== shownPage) postToApp({ type: "open", path, ...(thread.snapshot ? { channel: thread.snapshot } : {}) });
   shownPage = key;
 }
 
-/** A tab's readable text: its main article, or the whole body, at most 200,000 characters; empty where it cannot be read. */
+/**
+ * A tab as an Agent reads it: its accessibility snapshot, as Playwright's `ariaSnapshot()` writes it (the
+ * extension's src/page-snapshot.js, built from snapshot/page-snapshot.ts), at most 200,000 characters; empty
+ * where it cannot be read.
+ */
 async function readTab(tabId) {
   try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["src/page-snapshot.js"] });
     const [result] = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => {
-        const root = document.querySelector("article, main, [role='main']") ?? document.body;
-        return String(root?.innerText ?? "").replace(/\n{3,}/gu, "\n\n").trim().slice(0, 200_000);
-      },
+      func: (maxChars) => globalThis.__xmatrixPageSnapshot?.(maxChars) ?? "",
+      args: [200_000],
     });
     return typeof result?.result === "string" ? result.result : "";
   } catch {
     // A page this extension may not read (no access to it, or the browser's own pages).
     return "";
   }
-}
-
-/** The readable text of the page beside the panel: read only because the person asked about this page. */
-async function readPage() {
-  const tab = await activeTab();
-  if (!tab?.id || !capturableUrl(tab.url ?? "")) return "";
-  return readTab(tab.id);
 }
 
 // ---- Agents reading a page through this browser (`xmatrix browse`, packages/hub src/browser-read.ts).

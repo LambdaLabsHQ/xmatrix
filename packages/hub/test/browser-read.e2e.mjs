@@ -57,12 +57,12 @@ test("an Agent Run reads a page through its owner's browser, and only the owner 
     assert.equal(asked.target, "current");
     // The Run's token cannot answer its own request.
     assert.notEqual((await answer(asked.requestId, { refusal: "denied" }, runToken)).status, 200);
-    const settled = await answer(asked.requestId, { title: "Pool sizing", href: "https://docs.example.test/pool", text: "Raise max_connections." });
+    const settled = await answer(asked.requestId, { title: "Pool sizing", href: "https://docs.example.test/pool", text: "- paragraph: Raise max_connections." });
     assert.equal(settled.status, 200);
     assert.deepEqual(await settled.json(), { settled: true });
     const read = await reading;
     assert.equal(read.exitCode, 0, read.stderr);
-    assert.match(read.stdout, /# Pool sizing\nhttps:\/\/docs\.example\.test\/pool\n\nRaise max_connections\./);
+    assert.match(read.stdout, /- Page URL: https:\/\/docs\.example\.test\/pool\n- Page Title: Pool sizing\n- Page Snapshot:\n```yaml\n- paragraph: Raise max_connections\.\n```/);
 
     // Another tab, which the person declines.
     const other = run(worker, runToken, ["browse", "--tab", "https://mail.example.test/inbox"]);

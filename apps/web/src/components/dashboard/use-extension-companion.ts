@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { discussionHead } from "@xmatrix/protocol";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import {
+  embedBrowserPage,
   isExtensionCompanion,
+  subscribeEmbedBrowserPage,
   subscribeEmbedPage,
   subscribeEmbedRecent,
   type EmbedPage,
@@ -39,18 +40,9 @@ export function useExtensionCompanion(): ExtensionCompanion | null {
 }
 
 /**
- * What a question about the whole page opens holding: the page quoted by its
- * title, linked, as the App opens a discussion of a page the extension hands
- * it (handleWebPassage in use-workspace-shell-actions.ts).
+ * The page that goes with what the person writes in the side panel (the composer's page chip): the page beside
+ * it, until they take it off. Null outside the side panel.
  */
-export function pageAskDraft(page: Pick<EmbedPage, "title" | "href">): string {
-  const label = page.title.trim() || new URL(page.href).host;
-  return discussionHead(label, { label, href: page.href });
-}
-
-/** The page's readable text, as the file "Ask about this page" attaches. */
-export function pageTextFile(page: EmbedPage): File | null {
-  if (!page.text?.trim()) return null;
-  const name = `${(page.title || new URL(page.href).host).replace(/[\\/:*?"<>|\n]+/gu, " ").trim().slice(0, 80) || "page"}.md`;
-  return new File([`# ${page.title}\n\n${page.href}\n\n${page.text}`], name, { type: "text/markdown" });
+export function useEmbedBrowserPage(): { title: string; href: string } | null {
+  return useSyncExternalStore(subscribeEmbedBrowserPage, embedBrowserPage, () => null);
 }

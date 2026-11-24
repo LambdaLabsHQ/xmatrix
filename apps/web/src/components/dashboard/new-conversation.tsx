@@ -17,13 +17,11 @@ import { SpaceAllowanceNotice } from "./space-allowance-notice";
  */
 export function NewConversation({
   space, token, workspaces, localContext, autoFocus, onCreate, onSend, onCancel, onOpenAppsForSpace,
-  onEditHarnessProfile, initialDraft = "", initialFiles,
+  onEditHarnessProfile, initialDraft = "",
   error = null, allowance,
 }: {
   /** What the composer opens holding, for the person to send (a welcome card's). */
   initialDraft?: string;
-  /** Files it opens holding (the extension's side panel: the page's text, which can be removed). */
-  initialFiles?: readonly File[];
   /** Why the last conversation started here could not be made. */
   error?: string | null;
   space: SerializedSpace | null;
@@ -87,7 +85,6 @@ export function NewConversation({
         localContext={localContext}
         isJoined
         draft={initialDraft}
-        initialFiles={initialFiles}
         draftSeedRevision={0}
         selectedWorkspaceId={workspaceTarget}
         replyTarget={null}
