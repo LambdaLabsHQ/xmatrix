@@ -641,7 +641,20 @@ final class WebContainerTests: XCTestCase {
         XCTAssertNil(NativeAttachmentPicker.parseArmedSource(expired))
     }
 
-    func testNativeFilePickerCanSelectAgainAfterCancellation() async throws {
+    private final class RecordingPickerPresenter: UIViewController {
+        var presentedPanel: UIViewController?
+
+        override func present(
+            _ viewControllerToPresent: UIViewController,
+            animated flag: Bool,
+            completion: (() -> Void)? = nil
+        ) {
+            presentedPanel = viewControllerToPresent
+            completion?()
+        }
+    }
+
+    func testNativeFilePickerCanSelectAgainAfterCancellation() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("xmatrix-file-picker-test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -652,16 +665,10 @@ final class WebContainerTests: XCTestCase {
         try payload.write(to: source)
 
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        let presenter = UIViewController()
+        let presenter = RecordingPickerPresenter()
         window.rootViewController = presenter
         window.isHidden = false
         defer { window.isHidden = true }
-
-        func dismissPanel() async {
-            await withCheckedContinuation { continuation in
-                presenter.dismiss(animated: false) { continuation.resume() }
-            }
-        }
 
         let picker = NativeAttachmentPicker(
             store: AttachmentStagingStore(rootDirectory: directory.appendingPathComponent("staging"))
@@ -673,9 +680,8 @@ final class WebContainerTests: XCTestCase {
             XCTAssertNil(urls)
             cancelled = true
         }
-        let firstPanel = try XCTUnwrap(presenter.presentedViewController as? UIDocumentPickerViewController)
+        let firstPanel = try XCTUnwrap(presenter.presentedPanel as? UIDocumentPickerViewController)
         XCTAssertTrue(firstPanel.allowsMultipleSelection)
-        await dismissPanel()
         firstPanel.delegate?.documentPickerWasCancelled?(firstPanel)
         XCTAssertTrue(cancelled)
 
@@ -683,9 +689,8 @@ final class WebContainerTests: XCTestCase {
         picker.presentOpenPanel(source: .files, allowsMultipleSelection: false) { urls in
             result = urls
         }
-        let secondPanel = try XCTUnwrap(presenter.presentedViewController as? UIDocumentPickerViewController)
+        let secondPanel = try XCTUnwrap(presenter.presentedPanel as? UIDocumentPickerViewController)
         XCTAssertFalse(secondPanel.allowsMultipleSelection)
-        await dismissPanel()
         secondPanel.delegate?.documentPicker?(secondPanel, didPickDocumentsAt: [source])
         let selected = try XCTUnwrap(result)
         XCTAssertEqual(selected.count, 1)
