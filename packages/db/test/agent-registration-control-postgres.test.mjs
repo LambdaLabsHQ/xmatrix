@@ -401,3 +401,118 @@ integration("composite registration commands preserve identity, configuration an
     await rejects(() => repo.offer(offer), "registration_not_found");
   } finally { await client.query("ROLLBACK"); await client.end(); }
 });
+
+integration("registration catalog scans recent Instances once via index and deduplicates shared catalogs on the wire", async () => {
+  const { isolatedPostgres } = await import("./postgres-database.fixture.mjs");
+  const isolated = await isolatedPostgres("reg_catalog_recent_scan");
+  const { client } = isolated;
+  try {
+    await client.query(`
+      INSERT INTO data.spaces (space_id, owner_user_id, name, search_rank_sequence, version, metadata_json, created_at, updated_at)
+        VALUES ('s', 'u1', 'Space', 's-rank', 1, '{}', now(), now());
+      INSERT INTO data.space_members (space_id, user_id, role, version, email, display_name, created_at, updated_at)
+        VALUES ('s', 'u1', 'owner', 1, 'u1@example.test', 'Owner', now(), now());
+      INSERT INTO data.machines (owner_user_id, machine_id, name)
+        VALUES ('u1', 'm1', 'M1'), ('u1', 'm2', 'M2');
+      INSERT INTO data.machine_daemons (daemon_id, owner_user_id, owner_email, machine_id, status, capabilities_json, metadata_json, connection_epoch, version, created_at, updated_at)
+        VALUES
+          ('d1', 'u1', 'u1@example.test', 'm1', 'online', '["registration_native_model_v1"]', '{}', 1, 1, now(), now()),
+          ('d2', 'u1', 'u1@example.test', 'm2', 'online', '["registration_native_model_v1"]', '{}', 1, 1, now(), now());
+      INSERT INTO data.channels (channel_id, space_id, name, name_key, mode, search_rank_sequence, version, metadata_json, created_at, updated_at, activity_at)
+        VALUES ('c1', 's', 'general', 'general', 'open', 'c1-rank', 1, '{}', now(), now(), now());
+      INSERT INTO data.agent_registrations (owner_user_id, machine_id, harness, version, created_at, updated_at)
+        VALUES ('u1', 'm1', 'codex', 1, now(), now()), ('u1', 'm2', 'codex', 1, now(), now());
+      INSERT INTO data.space_agent_registrations (space_id, owner_user_id, machine_id, harness, display_name, configuration_json, version, created_at, updated_at)
+        VALUES ('s', 'u1', 'm1', 'codex', 'codex-1', '{}', 1, now(), now()), ('s', 'u1', 'm2', 'codex', 'codex-2', '{}', 1, now(), now());
+      INSERT INTO data.space_agent_registration_access (space_id, owner_user_id, machine_id, harness, grant_state, grant_limits, grant_revision, grant_execution_revision, policy_state, policy_limits, policy_revision, policy_execution_revision, updated_at)
+        VALUES
+          ('s', 'u1', 'm1', 'codex', 'active', '{"models":[],"workspaces":[],"capabilities":[],"maxConcurrent":2}', 1, 1, 'enabled', '{"models":[],"workspaces":[],"capabilities":[],"maxConcurrent":2}', 1, 1, now()),
+          ('s', 'u1', 'm2', 'codex', 'active', '{"models":[],"workspaces":[],"capabilities":[],"maxConcurrent":2}', 1, 1, 'enabled', '{"models":[],"workspaces":[],"capabilities":[],"maxConcurrent":2}', 1, 1, now());
+    `);
+    // Populate 2,000 historical Runs/Instances older than 48h so the planner uses instances_updated_at_idx.
+    const sharedModels = Array.from({ length: 12 }, (_, i) => ({
+      model: `model-${i}`,
+      description: `Shared model catalog entry ${i} ${"x".repeat(80)}`,
+      supportedReasoningEfforts: [{ reasoningEffort: "high", description: "Deep reasoning" }],
+    }));
+    const sharedParameters = [{ id: "speed", label: "Speed", options: Array.from({ length: 20 }, (_, i) => `opt-${i}-${"y".repeat(24)}`) }];
+    const observedAt = new Date(Date.now() - 5_000).toISOString();
+    const sharedPresentation = JSON.stringify({
+      model: "model-0",
+      models: sharedModels,
+      modelsObservedAt: observedAt,
+      parameters: sharedParameters,
+      parametersObservedAt: observedAt,
+    });
+    await client.query(`
+      INSERT INTO data.runs (run_id, owner_user_id, channel_id, status, version, metadata_json, created_at, updated_at)
+      SELECT 'c1:' || n || '#1', 'u1', 'c1', 'exited', 1, '{}', now() - interval '10 days', now() - interval '10 days'
+      FROM generate_series(1, 2000) n;
+      INSERT INTO data.run_agent_registrations (run_id, space_id, owner_user_id, machine_id, harness, actor_user_id, allocation_id, authorization_digest, grant_revision, grant_execution_revision, policy_revision, policy_execution_revision, requested_json, created_at)
+      SELECT 'c1:' || n || '#1', 's', 'u1', CASE WHEN n % 2 = 0 THEN 'm1' ELSE 'm2' END, 'codex', 'u1', 'old-alloc-' || n, repeat('a', 64), 1, 1, 1, 1, '{}', now() - interval '10 days'
+      FROM generate_series(1, 2000) n;
+      INSERT INTO data.instances (instance_id, run_id, channel_id, channel_instance_id, status, version, created_at, updated_at, presentation_json)
+      SELECT 'c1:' || n, 'c1:' || n || '#1', 'c1', n, 'offline', 1, now() - interval '10 days', now() - interval '10 days', '{}'::jsonb
+      FROM generate_series(1, 2000) n;
+      INSERT INTO data.runs (run_id, owner_user_id, channel_id, status, version, metadata_json, created_at, updated_at)
+      VALUES ('c1:9001#1', 'u1', 'c1', 'exited', 1, '{}', now(), now()), ('c1:9002#1', 'u1', 'c1', 'exited', 1, '{}', now(), now());
+      INSERT INTO data.run_agent_registrations (run_id, space_id, owner_user_id, machine_id, harness, actor_user_id, allocation_id, authorization_digest, grant_revision, grant_execution_revision, policy_revision, policy_execution_revision, requested_json, created_at)
+      VALUES
+        ('c1:9001#1', 's', 'u1', 'm1', 'codex', 'u1', 'recent-alloc-1', repeat('a', 64), 1, 1, 1, 1, '{}', now()),
+        ('c1:9002#1', 's', 'u1', 'm2', 'codex', 'u1', 'recent-alloc-2', repeat('a', 64), 1, 1, 1, 1, '{}', now());
+    `);
+    await client.query(`INSERT INTO data.instances (instance_id, run_id, channel_id, channel_instance_id, status, version, created_at, updated_at, presentation_json)
+      VALUES ('c1:9001', 'c1:9001#1', 'c1', 9001, 'offline', 1, now(), now(), $1::jsonb),
+             ('c1:9002', 'c1:9002#1', 'c1', 9002, 'offline', 1, now(), now(), $1::jsonb)`, [sharedPresentation]);
+    await client.query("ANALYZE data.instances; ANALYZE data.run_agent_registrations;");
+
+    let capturedSql = null;
+    let capturedValues = null;
+    const origQuery = client.query.bind(client);
+    const wrapDb = {
+      cacheMode: "disabled",
+      transaction: async (_ctx, fn) => fn({
+        query: async (q) => {
+          if (q.name === "registration_catalog_page_v10") {
+            capturedSql = q.text;
+            capturedValues = q.values;
+          }
+          return (await origQuery(q.text, q.values)).rows;
+        },
+      }),
+    };
+    const wrapRepo = new PostgresAgentRegistrationRepository(wrapDb, { spaceId: "s", shardId: "test", placementEpoch: 1 });
+    let wireBytes = 0;
+    const onDataRow = (row) => { wireBytes += row.length + 1; };
+    client.connection.on("dataRow", onDataRow);
+    const page = await wrapRepo.list({ spaceId: "s", actorUserId: "u1", requestId: "dedup" })
+      .finally(() => client.connection.off("dataRow", onDataRow));
+    assert.equal(page.registrations.length, 2);
+    assert.equal(page.registrations[0].modelCatalog?.length, 12);
+    assert.deepEqual(page.registrations[1].modelCatalog, page.registrations[0].modelCatalog,
+      "second registration receives the full rehydrated shared model catalog");
+    assert.deepEqual(page.registrations[1].parameters, page.registrations[0].parameters,
+      "second registration receives the full rehydrated shared parameter catalog");
+    const singleCatalogBytes = Buffer.byteLength(sharedPresentation, "utf8");
+    assert.ok(wireBytes < singleCatalogBytes * 1.6,
+      `expected shared catalogs to ship once (${wireBytes} bytes vs single payload ${singleCatalogBytes})`);
+    // Pagination with limit=1 must still deliver the full catalog on each page.
+    const page1 = await wrapRepo.list({ spaceId: "s", actorUserId: "u1", requestId: "p1", limit: 1 });
+    assert.equal(page1.registrations[0].modelCatalog?.length, 12);
+    assert.ok(page1.nextCursor);
+    const page2 = await wrapRepo.list({ spaceId: "s", actorUserId: "u1", requestId: "p2", limit: 1, cursor: page1.nextCursor });
+    assert.equal(page2.registrations[0].modelCatalog?.length, 12);
+    assert.equal(page2.nextCursor, null);
+    // Verify EXPLAIN uses instances_updated_at_idx and does not seq-scan data.instances.
+    assert.ok(capturedSql && capturedValues);
+    const plan = (await origQuery(`EXPLAIN (FORMAT JSON) ${capturedSql}`, capturedValues)).rows[0]["QUERY PLAN"][0].Plan;
+    const nodes = function* (node) { yield node; for (const child of node.Plans ?? []) yield* nodes(child); };
+    const allNodes = [...nodes(plan)];
+    const instanceSeqScans = allNodes.filter(n => n["Node Type"] === "Seq Scan" && n["Relation Name"] === "instances");
+    assert.deepEqual(instanceSeqScans, [], "registration_catalog_page_v10 must not seq-scan data.instances");
+    const usedUpdatedAtIndex = allNodes.some(n => n["Index Name"] === "instances_updated_at_idx");
+    assert.equal(usedUpdatedAtIndex, true, "registration_catalog_page_v10 must scan recent instances via instances_updated_at_idx");
+  } finally {
+    await isolated.close();
+  }
+});
