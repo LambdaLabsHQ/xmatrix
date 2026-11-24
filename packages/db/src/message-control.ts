@@ -714,6 +714,58 @@ async function finalizeMutation(
   });
 }
 
+/** The empty-body hash every delete tombstone records. */
+const REDACTED_CONTENT_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+/**
+ * A provider's terms bound how long what it returned may be stored. Messages
+ * the app authored (connector receipts, inbound events) created at or before
+ * `cutoff` become delete tombstones, as an author's delete leaves them: body,
+ * preview and archive pointer go; the ledger records the system as actor.
+ */
+export async function expireAppAuthoredMessages(transaction: DatabaseTransaction, input: {
+  spaceId: string; appId: string; cutoff: string; now: string; limit: number;
+}): Promise<number> {
+  const rows = await transaction.query<QueryResultRow>({
+    name: "message_app_retention_due_v1",
+    text: `SELECT m.channel_id,m.message_id,m.entity_version,m.timeline_sequence,c.mode AS channel_mode
+      FROM data.messages m JOIN data.channels c ON c.space_id=m.space_id AND c.channel_id=m.channel_id
+      WHERE m.space_id=$1 AND m.author_kind='app' AND m.author_id=$2 AND m.deleted_at IS NULL
+        AND m.created_at <= $3::timestamptz
+      ORDER BY m.created_at,m.message_id LIMIT $4 FOR UPDATE OF m SKIP LOCKED`,
+    values: [input.spaceId, input.appId, input.cutoff, input.limit], maxRows: input.limit,
+  });
+  for (const row of rows) {
+    const channelId = String(row.channel_id), messageId = String(row.message_id);
+    const entityVersion = Number(row.entity_version) + 1;
+    await transaction.query({
+      name: "message_app_retention_delete_v1",
+      text: `UPDATE data.messages SET deleted_at = $4, entity_version = $5, invocation_input_version = $5, updated_at = $4,
+        content_hash = $6, payload_kind = 'redacted', payload_ref = $7,
+        archive_source_json = NULL, field_presence_base64 = NULL,
+        payload_bundle_base64 = NULL, legacy_body = NULL, body_hash = NULL,
+        sender_snapshot_digest = NULL, record_digest = NULL, record_encoded_bytes = NULL,
+        preview_json = NULL
+        WHERE space_id = $1 AND channel_id = $2 AND message_id = $3 AND entity_version = $8`,
+      values: [input.spaceId, channelId, messageId, input.now, entityVersion, REDACTED_CONTENT_HASH,
+        `redacted:${REDACTED_CONTENT_HASH}`, Number(row.entity_version)],
+      maxRows: 0,
+    });
+    const result = {
+      messageId, channelId, spaceId: input.spaceId,
+      visibilityScopeId: channelVisibilityScope({ mode: String(row.channel_mode), channelId, spaceId: input.spaceId }),
+      sequence: Number(row.timeline_sequence), entityVersion, committedAt: input.now, deletedAt: input.now,
+    };
+    await finalizeMutation(transaction, {
+      spaceId: input.spaceId, channelId, messageId, commandId: `retention:${messageId}`.slice(0, 200),
+      commandKind: "message-delete", requestDigest: REDACTED_CONTENT_HASH, entityVersion,
+      mutationKind: "delete", mutation: { redacted: true, retention: input.appId },
+      principal: { kind: "system", id: "xmatrix" }, result, now: input.now,
+    });
+  }
+  return rows.length;
+}
+
 async function liveRecipientUserIds(
   transaction: DatabaseTransaction,
   spaceId: string,

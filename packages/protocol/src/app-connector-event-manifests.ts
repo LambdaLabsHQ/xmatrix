@@ -412,6 +412,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       ],
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/cloud-platform"], secretRefs: [] },
+    // Google Cloud General Service Terms §17 (from 2027-01-01): no Google
+    // Technical Information stored past 30 days or after disconnecting.
+    resultRetentionDays: 29,
   },
   eventConnector({
     id: "webhook",

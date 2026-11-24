@@ -526,6 +526,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_login_file_reaches_only_the_provider_request() {
+        let home = unique_temp_home("containment");
+        write_auth(&home, "sentinel-grok-key", "sentinel-grok-user");
+        let (endpoint, server) = serve_billing(vec![("sentinel-grok-key", 30.0)]);
+        let usage = read_grok_usage_from_endpoint(&home, true, &endpoint)
+            .await
+            .expect("reading");
+        server.join().unwrap();
+        super::super::assert_reading_holds_nothing_of_the_login(
+            &usage,
+            &home,
+            &["sentinel-grok-key", "sentinel-grok-user"],
+        );
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[tokio::test]
     async fn a_home_without_a_login_reads_nothing() {
         let empty = unique_temp_home("empty");
         std::fs::create_dir_all(&empty).unwrap();

@@ -49,7 +49,7 @@ const MAX_AGENT_NAME_LEN: usize = 64;
 
 /* The daemon passes the name the Hub bound this Run to, and the Hub compares
 `message.name` against `principal.agentName` verbatim. The Hub is the only
-authority on what a name may be: it accepts any display name (`牛马`,
+authority on what a name may be: it accepts any display name (`测试助手`,
 `My Agent`, `claude-Devs-MacBook-Pro.local`). Folding the name here into an
 ASCII slug made every such Agent fail its handshake with "Agent credential
 does not match the live Authority run", so the name is taken as given. */

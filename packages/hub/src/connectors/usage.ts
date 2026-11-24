@@ -1,4 +1,4 @@
-import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "@xmatrix/protocol";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, appResultRetentionDays, appResultRetentionNotice } from "@xmatrix/protocol";
 import { listAppConnections } from "../apps";
 import { nornConnectorEventSpecs } from "../norn-libraries";
 import { getChannel } from "../spaces";
@@ -48,6 +48,8 @@ export async function connectorUsage(env: Env, caller: { ownerUserId: string; ch
 export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
   return APP_CONNECTOR_PROVIDER_MANIFESTS.filter((manifest) => connected.has(manifest.id)).flatMap((manifest) => {
     const executable = connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions);
+    const retention = appResultRetentionNotice(manifest.id);
+    const privateDays = Math.min(30, appResultRetentionDays(manifest.id) ?? 30);
     const actions = manifest.actions.flatMap((action) => {
       if (!action.effect) return [];
       const command = `@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`;
@@ -60,8 +62,9 @@ export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
         description: action.description + (executor?.callerOnly
           ? ` Run xmatrix call "${command}": the result returns to you alone and is always masked in the Channel; it cannot run as a Channel message.`
           : callable
-          ? ` Run xmatrix call "${command}" for a normal Channel result; add --private only to mask the result. Invocation parameters are visible in both modes; private originals are also visible to the calling Agent’s Human owner in the Web for 30 days.`
-          : action.effect === "read" ? " It runs only as a Channel message: send it with xmatrix send; xmatrix call cannot run it." : ""),
+          ? ` Run xmatrix call "${command}" for a normal Channel result; add --private only to mask the result. Invocation parameters are visible in both modes; private originals are also visible to the calling Agent’s Human owner in the Web for ${privateDays} days.`
+          : action.effect === "read" ? " It runs only as a Channel message: send it with xmatrix send; xmatrix call cannot run it." : "") +
+          (retention ? ` ${retention}` : ""),
       }];
     });
     const events = nornConnectorEventSpecs(manifest.id).map((spec) => ({

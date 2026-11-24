@@ -15,6 +15,8 @@ To keep a connected computer stable across reinstalls under your account, the da
 
 ## Local provider quota probes
 
+**In short:** to show how much quota your registered AI tools have left, the xMatrix daemon reads those tools' own login files on your computer (for example `~/.codex/auth.json`) and asks each provider directly. Nothing read from those files — no token, account id, file contents or fingerprint — is sent to xMatrix; the Hub receives only the normalized quota answer. One switch stops both the file reads and the provider requests (see [Turning off local quota probes](#turning-off-local-quota-probes)).
+
 When you register a supported harness (such as Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai, or Antigravity), xMatrix can show remaining subscription quota in `xmatrix agent list` and the Agents view, and let `@auto` route around exhausted accounts.
 
 To read remaining quota directly from each provider without running an LLM turn, the local daemon reads the credential store of the registered harness on your machine:

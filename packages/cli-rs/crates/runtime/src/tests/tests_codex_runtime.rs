@@ -3596,7 +3596,7 @@ async fn codex_trace_flushes_text_before_later_tools_and_preserves_message_ids()
     .expect("Codex trace fixture completes");
 }
 
-/// #1686: a resume Codex refuses because another live app-server writes the
+/// #2050: a resume Codex refuses because another live app-server writes the
 /// thread used to fail with Codex's bare refusal, which named no process and
 /// gave the user nothing to do. It must name the process that opened the
 /// thread, say how to end the conflict, keep the session's thread, and never

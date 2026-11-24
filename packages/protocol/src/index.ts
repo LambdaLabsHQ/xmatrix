@@ -610,7 +610,7 @@ export {
   type ParsedSettingAddress, type SettingControl, type SettingDescriptor, type SettingDomain, type SettingsCard,
   type SettingsCardEntry, type SettingState, type SettingWriter,
 } from "./settings.js";
-export { CONNECTOR_RECEIPT_FIXES_KEY, connectorFixSettled, connectorReceiptAnswersCommandSql, connectorReceiptBody,
+export { appResultRetentionDays, appResultRetentionNotice, CONNECTOR_RECEIPT_FIXES_KEY, connectorFixSettled, connectorReceiptAnswersCommandSql, connectorReceiptBody,
   connectorReceiptFixesOf, connectorReceiptMessageId, connectorReceiptPreview,
   parseConnectorReceipt, PRIVATE_CONNECTOR_RESULT, proposedValue, SETTINGS_REQUEST_KEY, settingAddress, settingAddressFix,
   type ConnectorReceiptEntry, type ConnectorReceiptFix, type ConnectorReceiptStatus, type ConnectorResultVisibility,

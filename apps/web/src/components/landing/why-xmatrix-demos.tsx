@@ -130,7 +130,7 @@ function RealPaperSheet({
         <div
           ref={hostRef}
           className={`ProseMirror page-document text-[12px]! leading-[1.45]! sm:text-[14px]! sm:leading-[1.6]! [&_blockquote]:my-1.5! [&_blockquote]:py-1! sm:[&_blockquote]:my-2.5! sm:[&_blockquote]:py-1.5! [&_h2]:mt-0! [&_h2]:mb-1.5! [&_h2]:text-[14px]! [&_h2]:font-semibold! sm:[&_h2]:mb-3! sm:[&_h2]:text-[17px]! [&_li]:my-1! sm:[&_li]:my-1.5! [&_p]:my-1! sm:[&_p]:my-1.5! [&_ul]:my-1! sm:[&_ul]:my-1.5! ${
-            pen ? "pr-8 sm:pr-32" : ""
+            pen ? "pr-8 sm:pr-44" : ""
           }`}
           data-editable="false"
           translate="no"

@@ -28,6 +28,7 @@ import {
 import { commandFields } from "./command-fields.js";
 import { readSpaceCommandReplay, storeSpaceCommandReplay } from "./command-replay.js";
 import { BLOB_STORAGE_CATEGORY, meterBlobStorage } from "./storage-usage.js";
+import { expireAppAuthoredMessages } from "./message-control.js";
 
 
 const MAX_BLOB_BYTES = RELAY_V2_BLOB_MAX_BYTES;
@@ -68,6 +69,24 @@ function positive(value: number, field: string, maximum = Number.MAX_SAFE_INTEGE
     throw new ContentControlError("invalid_command", 400, `${field} is invalid`);
   }
   return value;
+}
+
+/** A private record's object lives at its restricted scope's immutable key, or nothing is deleted. */
+function requireRestrictedRecordObject(row: QueryResultRow): void {
+  if (!parseRestrictedChannelContentScope(String(row.root_set_id)) ||
+      row.storage_key !== immutableContentObjectKey(String(row.root_set_id), String(row.checksum))) {
+    throw new ContentControlError("invalid_decision_storage", 409, "Decision storage scope is invalid");
+  }
+}
+
+/** A provider keeps results for its retention while connected; once disconnected or removed, for none. */
+async function appResultCutoff(tx: DatabaseTransaction, spaceId: string, appId: string, retentionDays: number, now: string):
+  Promise<string> {
+  const rows = await tx.query<QueryResultRow>({ name: "content_app_results_connection_v1",
+    text: "SELECT status FROM data.app_connector_connections WHERE space_id=$1 AND provider_id=$2",
+    values: [spaceId, appId], maxRows: 1 });
+  const connected = rows[0] !== undefined && rows[0].status !== "disconnected";
+  return connected ? new Date(Date.parse(now) - retentionDays * 86_400_000).toISOString() : now;
 }
 
 function command(input: { requestId: string; commandId: string }) {
@@ -1038,10 +1057,7 @@ export class PostgresContentRepository {
         values: [spaceId, cutoff, limit], maxRows: limit,
       });
       for (const row of rows) {
-        const restricted = parseRestrictedChannelContentScope(String(row.root_set_id));
-        if (!restricted || row.storage_key !== immutableContentObjectKey(String(row.root_set_id), String(row.checksum))) {
-          throw new ContentControlError("invalid_decision_storage", 409, "Decision storage scope is invalid");
-        }
+        requireRestrictedRecordObject(row);
         await tx.query({ name: "content_decision_expire_v1",
           text: `DELETE FROM data.content_refs WHERE space_id=$1 AND root_set_id=$2
             AND generation=0 AND ref_id=$3 AND owner_kind IN ('summon_decision','connector_result')
@@ -1065,6 +1081,96 @@ export class PostgresContentRepository {
     });
     for (const refId of result.refIds) await this.publishEntityRoute(requestId, placement, "content-ref", refId, "deleted", 2);
     return result;
+  }
+
+  /**
+   * A provider whose terms bound how long its results may be stored (Google
+   * Cloud: 30 days, after which or on disconnect nothing may remain). Its
+   * receipts and inbound events become tombstones, its execution summaries
+   * and reasons are cleared, and its private originals lose their ref and
+   * reach the collector at once, without the 31-day upload safety window:
+   * an object still referenced or uploading is never claimed. A connection
+   * no longer connected expires everything it left.
+   */
+  async expireAppResults(input: { requestId: string; spaceId: string; appId: string; retentionDays: number; limit?: number }):
+    Promise<{ messages: number; executions: number; refs: number; cutoff: string }> {
+    const { requestId, spaceId } = spaceRequest(input);
+    const appId = text(input.appId, "appId", 80);
+    const retentionDays = positive(input.retentionDays, "retentionDays", 3_650);
+    const limit = positive(input.limit ?? 50, "limit", 100);
+    const placement = await this.spaces.resolve(requestId, "content.app-results.expire", spaceId);
+    const result = await this.spaces.transaction(requestId, "content.app-results.expire", placement, async tx => {
+      const now = new Date().toISOString();
+      const cutoff = await appResultCutoff(tx, spaceId, appId, retentionDays, now);
+      const messages = await expireAppAuthoredMessages(tx, { spaceId, appId, cutoff, now, limit });
+      const executions = await tx.query({ name: "content_app_results_execution_clear_v1",
+        text: `UPDATE data.app_connector_executions SET result_summary=NULL,reason=NULL,version=version+1,updated_at=$4
+          WHERE execution_id IN (SELECT execution_id FROM data.app_connector_executions
+            WHERE space_id=$1 AND provider_id=$2 AND created_at <= $3::timestamptz
+              AND status IN ('completed','failed','blocked') AND (result_summary IS NOT NULL OR reason IS NOT NULL)
+            LIMIT $5 FOR UPDATE SKIP LOCKED) RETURNING execution_id`,
+        values: [spaceId, appId, cutoff, now, limit], maxRows: limit });
+      const rows = await tx.query<QueryResultRow>({ name: "content_app_results_ref_lock_v1",
+        text: `SELECT r.ref_id,r.root_set_id,r.child_object_id,o.storage_key,o.checksum,o.byte_length
+          FROM data.content_refs r JOIN data.content_objects o
+            ON o.space_id=r.space_id AND o.object_id=r.child_object_id
+          WHERE r.space_id=$1 AND r.generation=0 AND r.owner_kind='connector_result'
+            AND right(r.owner_id, length($2)+1)=':'||$2 AND r.created_at <= $3::timestamptz
+          ORDER BY r.created_at,r.ref_id LIMIT $4 FOR UPDATE OF r,o SKIP LOCKED`,
+        values: [spaceId, appId, cutoff, limit], maxRows: limit });
+      for (const row of rows) {
+        requireRestrictedRecordObject(row);
+        await tx.query({ name: "content_app_results_ref_expire_v1",
+          text: `DELETE FROM data.content_refs WHERE space_id=$1 AND root_set_id=$2
+            AND generation=0 AND ref_id=$3 AND owner_kind='connector_result'`,
+          values: [spaceId, row.root_set_id, row.ref_id], maxRows: 0 });
+        if (!await this.releaseHeldObject(tx, spaceId, String(row.child_object_id), Number(row.byte_length), now)) continue;
+        await tx.query({ name: "content_app_results_object_due_v1",
+          text: "UPDATE data.content_objects SET gc_not_before=$3 WHERE space_id=$1 AND object_id=$2",
+          values: [spaceId, row.child_object_id, now], maxRows: 0 });
+        await tx.query({ name: "content_app_results_gc_nominate_v1",
+          text: `INSERT INTO data.content_gc_candidates
+            (space_id,object_id,storage_key,content_hash,reason,unreferenced_at,not_before,
+             status,version,lease_until,attempts,last_checked_at,created_at,updated_at)
+            VALUES ($1,$2,$3,$4,'decision-expired',$5,$5,'pending',1,NULL,0,NULL,$5,$5)
+            ON CONFLICT (space_id,object_id) DO UPDATE SET not_before=LEAST(data.content_gc_candidates.not_before,EXCLUDED.not_before)`,
+          values: [spaceId, row.child_object_id, row.storage_key, row.checksum, now], maxRows: 0 });
+      }
+      const refIds = rows.map(row => String(row.ref_id));
+      if (refIds.length) await this.commit(tx, { spaceId, commandId: `app-results-expiry:${crypto.randomUUID()}`,
+        kind: "expire-app-results", requestDigest: await digest({ spaceId, appId, cutoff, refIds }),
+        aggregateId: spaceId, result: { expired: refIds.length, refIds }, now });
+      return { messages, executions: executions.length, refIds, cutoff };
+    });
+    for (const refId of result.refIds) await this.publishEntityRoute(requestId, placement, "content-ref", refId, "deleted", 2);
+    return { messages: result.messages, executions: result.executions, refs: result.refIds.length, cutoff: result.cutoff };
+  }
+
+  /** When `expireAppResults` next has work for this provider, or null. */
+  async nextAppResultsExpiry(input: { requestId: string; spaceId: string; appId: string; retentionDays: number }):
+    Promise<number | null> {
+    const { requestId, spaceId } = spaceRequest(input);
+    const appId = text(input.appId, "appId", 80);
+    const retentionDays = positive(input.retentionDays, "retentionDays", 3_650);
+    return this.spaces.transaction(requestId, "content.app-results.next", spaceId, async tx => {
+      const now = new Date().toISOString();
+      const cutoff = await appResultCutoff(tx, spaceId, appId, retentionDays, now);
+      const rows = await tx.query<QueryResultRow>({ name: "content_app_results_next_v1",
+        text: `SELECT MIN(created_at) AS oldest FROM (
+          SELECT MIN(created_at) AS created_at FROM data.messages
+            WHERE space_id=$1 AND author_kind='app' AND author_id=$2 AND deleted_at IS NULL
+          UNION ALL SELECT MIN(created_at) FROM data.app_connector_executions
+            WHERE space_id=$1 AND provider_id=$2 AND status IN ('completed','failed','blocked')
+              AND (result_summary IS NOT NULL OR reason IS NOT NULL)
+          UNION ALL SELECT MIN(created_at) FROM data.content_refs
+            WHERE space_id=$1 AND generation=0 AND owner_kind='connector_result'
+              AND right(owner_id, length($2)+1)=':'||$2
+        ) oldest`, values: [spaceId, appId], maxRows: 1 });
+      if (!rows[0]?.oldest) return null;
+      const oldest = new Date(rows[0].oldest as string | Date).getTime();
+      // The cutoff trails now by the retention; whatever is older is due now.
+      return Math.max(Date.parse(now), oldest + (Date.parse(now) - Date.parse(cutoff)));
+    });
   }
 
   async releaseRef(input: {

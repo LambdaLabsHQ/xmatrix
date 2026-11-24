@@ -18,6 +18,7 @@ import { MAX_INVITE_EMAILS_PER_REQUEST, InviteEmailRequest, AdminInviteEmailRequ
 import { appOrigin } from "./deployment-origins";
 import { forgetConnectionGrant } from "./connectors/forget-grant";
 import { grantFieldsForgottenOnDisconnect } from "./connectors/oauth";
+import { armAppResultRetention } from "./connectors/result-retention";
 import { connectorCredentialRepository } from "./connectors/credentials";
 
 /* The emails and role an invite-email request asks for, or why it is refused. */
@@ -342,11 +343,14 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
         await findAppConnection(c.env, { spaceId: c.req.param("spaceId"), providerId, actorUserId: authUser.id })) {
       await forgetConnectionGrant(c.env, { spaceId: c.req.param("spaceId"), providerId, actorUserId: authUser.id });
     }
-    return c.json(await upsertAppConnection(c.env, {
+    const saved = await upsertAppConnection(c.env, {
       commandId: productCommandId(c.req.raw, "upsert-app-connection"),
       spaceId: c.req.param("spaceId"), providerId: c.req.param("providerId"), actorUserId: authUser.id,
       body: body as unknown as Record<string, unknown>,
-    }));
+    });
+    // Terms that bound a provider's results also end them at disconnect.
+    if (body.status === "disconnected") await armAppResultRetention(c.env, c.req.param("spaceId"), providerId);
+    return c.json(saved);
   }));
   // The GitHub accounts list: the installations this Space links, each marked
   // `confirmed` once Connect recorded an administrator who handed it over, and,

@@ -59,6 +59,10 @@ test("privacy policy locks the actual Agent, trace, secret, and training boundar
   assert.match(privacySource, /does not automatically gain trace\s+access/);
   assert.match(privacySource, /Secret values are not ordinary message or Profile\s+fields/);
   assert.match(privacySource, /current local sandbox support[\s\S]*does not enforce network egress/);
+  assert.match(privacySource, /id="local-quota-probes"/);
+  assert.match(privacySource, /reads other AI tools&apos; login files/);
+  assert.match(privacySource, /Nothing read from the file[\s\S]*is sent to xMatrix/);
+  assert.match(privacySource, /One switch stops both the\s+file reads and the provider requests/);
 });
 
 test("privacy policy does not claim unimplemented regional transfer mechanisms", () => {

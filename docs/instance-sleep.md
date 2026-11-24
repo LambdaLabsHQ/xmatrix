@@ -163,16 +163,12 @@ remain context. Live and catch-up App work queues behind any active turn:
    wakes each such Instance (`wakeInstancesAwaitingMachine`, beside
    `wakeMachineChannels`), with the newest message anyone else wrote in its
    Channel as the waking message; what came before it arrives by catch-up.
-   (2026-10-24: a returning user's machine dropped, their next messages were
-   refused silently, and nothing woke the Instance when it came back.)
 7. An Instance whose registration's quota pool reads empty (a usage limit an
    Instance of it reported, held until the reset, or a provider reading of no
    headroom) is not woken (`registration_quota_exhausted`, not permanent): it
    keeps its rest, and the first message after the reset wakes it. The hold
    is recorded before the turn-failure notice that reports it commits, since
-   that notice is itself a waking message. (2026-11-13: one OpenCode Instance
-   hit its limit; its notice woke the two other resting OpenCode Instances in
-   the welcome conversation, each failed the same way and posted its own card.)
+   that notice is itself a waking message.
 
 A rest that is recorded (the daemon's exit or stop report, or a snapshot
 that reconciles an unreported exit), a wake that is recorded or refused, and
