@@ -15,6 +15,7 @@ impl HubRoutes {
     pub(crate) const EXCHANGE_SESSION: &str = "/api/auth/cli/exchange-session";
     pub(crate) const SIGN_OUT: &str = "/api/auth/cli/sign-out";
     pub const ME: &str = "/api/auth/me";
+    pub const ME_DIAGNOSTICS: &str = "/api/me/diagnostics";
     pub const AGENT_INSTANCES: &str = "/api/agent-instances";
     pub const MACHINE_DAEMONS: &str = "/api/machine-daemons";
     pub const MACHINES: &str = "/api/machines";

@@ -1,8 +1,8 @@
-import { isDiagnosticsEnabled, subscribeDiagnosticsPreference } from "./lib/diagnostics-preference";
+import { diagnosticsMaySendNow, isDiagnosticsEnabled, subscribeDiagnosticsPreference } from "./lib/diagnostics-preference";
 import { earlyScriptLocation, isBrowserNoticeReport, isStaleBuild } from "./lib/error-noise";
 
 // The Desktop and iOS apps load this same Web app, so this also reports their
-// page errors once the signed-in user opts in. Unauthenticated marketing and
+// page errors where diagnostics may be sent (lib/diagnostics-preference.ts). Unauthenticated marketing and
 // legal pages never load Sentry, and builds without a DSN report nothing.
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -44,10 +44,13 @@ async function startErrorReporting(dsn: string) {
       }
       return breadcrumb;
     },
-    beforeSend(event, hint) {
-      if (!isSignedInAppRoute() || !isDiagnosticsEnabled()) return null;
+    async beforeSend(event, hint) {
+      if (!isSignedInAppRoute()) return null;
       // A reload fixes a stale build, and the failure screen offers it; neither is a defect to report.
       if (isStaleBuild(hint.originalException) || isBrowserNoticeReport(hint.originalException, event)) return null;
+      // Decided per report, against a current answer from the Hub: a switch
+      // turned off, or a move into a country that needs consent, stops it.
+      if (!await diagnosticsMaySendNow()) return null;
       if (event.request?.url) event.request = { url: pathOnly(event.request.url) };
       delete event.user;
       return event;
