@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: the comparison's panels stay inside a phone's screen
+
+On a phone each row of the homepage's comparison is one column, and that
+column took its width from what its scenes held. A scene's widest line changes
+as it plays, so for most of each eight-second loop a row's two panels were
+wider than the screen: 116 px past their row at 393 px wide and 189 px at 320,
+the paper cut at the screen's edge with no margin on its right. Each time the
+width changed, the captions under the scenes wrapped differently and
+everything below moved by a line or more. The row's column is now as wide as
+the row whatever its scenes hold: panels end inside their row at every width,
+the section keeps one height while its scenes play, and scrolling the page on
+a phone no longer shifts its layout (0.06 before, by Chrome's layout-shift
+measure). 600 px and wider are unchanged. Web only. Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: the homepage's demos mount as they near the screen, and the live page's sheet keeps one height
 
 The homepage's three stages are the app's own components, and all three were

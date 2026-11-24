@@ -82,3 +82,16 @@ for (const width of [393, 1440]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }
+
+test("a comparison panel on a phone is as wide as its row, whatever its scene holds", async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 900 });
+  await page.goto("/");
+  const panel = page.locator("#why .site-why-panel").first();
+  // A scene's widest line changes as the scene plays; one far wider than the screen stands in for all of them.
+  await panel.locator(".site-why-scene > *").first().evaluate((scene: HTMLElement) => { scene.style.minWidth = "1000px"; });
+  const widths = await panel.evaluate((figure) => ({
+    panel: figure.getBoundingClientRect().width, row: figure.parentElement!.getBoundingClientRect().width,
+  }));
+  expect(widths.panel).toBeCloseTo(widths.row, 0);
+  expect(widths.row).toBeLessThan(393);
+});
