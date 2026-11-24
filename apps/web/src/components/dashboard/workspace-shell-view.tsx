@@ -90,7 +90,7 @@ import { spaceAgentSetupState } from "./space-agent-setup";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationListed } from "./my-agents-registrations";
 import { registrationTupleId } from "./use-registration-command";
-import { AGENT_PRESETS, WEB_PROXY_ROUTES, type ChannelSnapshot } from "@xmatrix/protocol";
+import { AGENT_PRESETS, browserPageOf, WEB_PROXY_ROUTES, type ChannelSnapshot } from "@xmatrix/protocol";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { ReaderLocaleContext, useOnboardingLocale } from "@/lib/onboarding-locale";
 import { harnessSpaceKey } from "./harness-space-switch";
@@ -884,6 +884,18 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     setCompanionAsk(null);
     return channel;
   });
+  // The web pages this reader wrote from in the Chrome side panel (their messages' browserPage), latest first: the
+  // conversation's details link back to them, for this reader only (Daniel 2026-11-24).
+  const ownWebPages = useMemo(() => {
+    const pages = new Map<string, { title: string; href: string }>();
+    for (const message of [...renderableHistory].reverse()) {
+      if (message.from.kind !== "user" || !user?.id || message.from.userId !== user.id) continue;
+      const page = browserPageOf(message.metadata);
+      if (page && !pages.has(page.href)) pages.set(page.href, page);
+      if (pages.size >= 5) break;
+    }
+    return [...pages.values()];
+  }, [renderableHistory, user?.id]);
   const companionBar = useMemo(() => companion ? {
     recent: companion.recent,
     onOpenRecent: (path: string) => void openEmbedAddress(path),
@@ -1427,6 +1439,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onDeleteChannel={canDeleteSelectedChannel ? openSelectedChannelDeletion : undefined}
       mobileOverlayOpen={mobileChannelDetailsOpen}
       onCloseMobileOverlay={closeDetailsOverlay}
+      webPages={ownWebPages}
     />}
   </div>
   );

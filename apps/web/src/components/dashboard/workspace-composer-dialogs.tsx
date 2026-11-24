@@ -1897,7 +1897,14 @@ export const ChannelDetails = memo(function ChannelDetails({
   wideOnly = false,
   mobileOverlayOpen = false,
   onCloseMobileOverlay,
+  webPages = [],
 }: {
+  /**
+   * The web pages this reader was on when they wrote here (the Chrome side panel's browserPage), latest first:
+   * a way back to the page the conversation is about. The reader's own only (Daniel 2026-11-24): someone else's
+   * browsing is not shown to them here.
+   */
+  webPages?: readonly { title: string; href: string }[];
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
   /** Registered working directories, the only record that knows a repository. */
@@ -2014,6 +2021,26 @@ export const ChannelDetails = memo(function ChannelDetails({
             {aboutSummaryError && (
               <p role="alert" className="mt-1 text-xs text-destructive">{aboutSummaryError}</p>
             )}
+          </DetailBlock>
+          )}
+
+          {webPages.length > 0 && (
+          <DetailBlock title={webPages.length > 1 ? "Web pages" : "Web page"}>
+            <div className="space-y-1">
+              {webPages.map((page) => (
+                <a key={page.href} href={page.href} target="_blank" rel="noreferrer" title={page.href}
+                  className="flex min-w-0 items-start gap-2 rounded-md px-1 py-1 hover:bg-foreground/5">
+                  <Globe aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-foreground">
+                      {page.title || new URL(page.href).host}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">{new URL(page.href).host}</span>
+                  </span>
+                </a>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">Only you see this.</p>
           </DetailBlock>
           )}
 
