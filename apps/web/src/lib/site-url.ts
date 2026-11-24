@@ -24,7 +24,10 @@ export function isSiteOnlyOrigin(origin: string): boolean {
   return siteUrl.origin !== appUrl.origin && origin === siteUrl.origin;
 }
 
-/** The card a link to the site shows when it is shared: 1200×630, the size every network renders large. */
+/**
+ * The card a link to the site shows when it is shared: 1200×630, the size every network renders large.
+ * scripts/share-card.mjs draws it from the English page title and the site's address; `alt` reads what it shows.
+ */
 export const shareImage = {
   url: "/brand/xmatrix-share-card.jpg",
   width: 1200,

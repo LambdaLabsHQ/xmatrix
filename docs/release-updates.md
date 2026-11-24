@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: the card a shared link shows carries the site's title and its own address
+
+The card a link to the site shows when it is shared still read "Living pages
+maintained by your AI agents" and "xmatrix.sh": a line the site dropped, and
+the app's domain where the site's is xmatrix.page. It was an image drawn once
+by hand, so nothing redrew it when the words changed. `node
+scripts/share-card.mjs` (apps/web) now draws it from where the words are
+decided, the English page title and the production site origin, and the image
+carries the words it was drawn with; a test fails when they are no longer the
+site's, or when the card's alt text says something else. The card now reads
+"xMatrix", "Multi-agent collaboration around live documents" and
+"xmatrix.page" over the same block art. Networks that have cached the old card
+keep it until they fetch the page again. Web only. Recovery is a CI-validated
+beta reverting this change.
+
 ## Unreleased: the comparison's panels stay inside a phone's screen
 
 On a phone each row of the homepage's comparison is one column, and that
