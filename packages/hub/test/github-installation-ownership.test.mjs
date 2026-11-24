@@ -18,6 +18,7 @@ function fixture({ granted = ["111"], stored = ["111"], confirmed = [], listed =
   const authorizations = [];
   const credentialPuts = [];
   const records = [];
+  const armed = [];
   const imports = {
     hono: { Hono },
     "./apps": {
@@ -55,6 +56,7 @@ function fixture({ granted = ["111"], stored = ["111"], confirmed = [], listed =
     "./deployment-origins": { appOrigin: () => "https://xmatrix.test" },
     "./connectors/forget-grant": { forgetConnectionGrant: async (_env, input) => { credentialPuts.push(input); } },
     "./connectors/oauth": { grantFieldsForgottenOnDisconnect },
+    "./connectors/result-retention": { armAppResultRetention: async (_env, spaceId, providerId) => { armed.push([spaceId, providerId]); } },
     "./index-shared": {
       verifyGitHubAppState: async (state) => state === "signed" ? statePayload : null,
       requireAuth: async () => ({ id: "admin" }), requireHumanAuth: (user) => user,
@@ -71,7 +73,7 @@ function fixture({ granted = ["111"], stored = ["111"], confirmed = [], listed =
   const link = (installationId, grant = "grant") => app.request("/api/spaces/space-1/app-connections/github/installations", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installationId, grant }) }, env);
   const list = (grant) => app.request(`/api/spaces/space-1/app-connections/github/installations${grant ? `?grant=${grant}` : ""}`, {}, env);
-  return { app, setup, patch, link, list, upserts, authorizations, credentialPuts, records, checks };
+  return { app, setup, patch, link, list, upserts, authorizations, credentialPuts, records, checks, armed };
 }
 
 const outcome = (response) => new URL(response.headers.get("location")).searchParams.get("github");
@@ -190,6 +192,8 @@ test("Disconnecting a Google or Composio connection forgets its grant before the
   assert.equal(response.status, 200);
   assert.deepEqual(f.credentialPuts, [{ spaceId: "space-1", providerId: "gcp", actorUserId: "admin" }]);
   assert.equal(f.upserts[0].body.status, "disconnected");
+  // Google Cloud's terms end its stored results at disconnect: the retention clock runs now.
+  assert.deepEqual(f.armed, [["space-1", "gcp"]]);
   const github = fixture();
   await github.app.request("/api/spaces/space-1/app-connections/github", { method: "PATCH",
     headers: { "content-type": "application/json" },

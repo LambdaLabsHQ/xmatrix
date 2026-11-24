@@ -1,5 +1,5 @@
 import { ControlError } from "@xmatrix/db";
-import { CONNECTOR_RECEIPT_FIXES_KEY, connectorReceiptBody, connectorReceiptMessageId, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
+import { appResultRetentionNotice, CONNECTOR_RECEIPT_FIXES_KEY, connectorReceiptBody, connectorReceiptMessageId, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
 import type { AppConnectorProviderManifest, AppConnectorRemedy, ConnectorResultVisibility } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
@@ -137,11 +137,13 @@ export async function withExecution(
 export async function publishCommandStatus(manifest: AppConnectorProviderManifest, input: ConnectorCommandInput,
   lines: readonly string[], options: { resumeRequester?: boolean; privateResultOwnerUserId?: string } = {}): Promise<void> {
   if (lines.length === 0) return;
+  const retention = appResultRetentionNotice(manifest.id);
   const response = await dispatchProductMessageAppend(input.env, input.channelId, {
     commandId: `product:${manifest.id}-status:${input.messageId}`.slice(0, 200),
     messageId: connectorReceiptMessageId(input.messageId, manifest.id),
     channelId: input.channelId,
-    body: connectorReceiptBody(lines),
+    // The notice continues the last entry, so the receipt keeps one entry per action.
+    body: connectorReceiptBody(retention ? [...lines.slice(0, -1), `${lines[lines.length - 1]}\n${retention}`] : lines),
     // Paid X work is already charged before I/O. Its receipt must remain
     // publishable when that call used the final credit or was refused.
     ...(manifest.id === "x" ? { messageKind: "xmatrix.system.x_receipt" } : {}),

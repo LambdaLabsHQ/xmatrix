@@ -21,6 +21,13 @@ export interface AppConnectorProviderManifest {
   description: string;
   /** One connection-wide default; an admin may choose read, ask or write. */
   defaultPermission?: "read" | "ask" | "write";
+  /**
+   * Days the provider's terms let its results stay stored (Google Cloud's
+   * Access Tools terms: at most 30, and nothing once disconnected). Its
+   * receipts, inbound events, execution summaries and private originals are
+   * deleted at that age, and at once when the connection is disconnected.
+   */
+  resultRetentionDays?: number;
   auth: {
     type: "oauth" | "api-token";
     scopes: string[];
