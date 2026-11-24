@@ -71,6 +71,14 @@ function positive(value: number, field: string, maximum = Number.MAX_SAFE_INTEGE
   return value;
 }
 
+/** A private record's object lives at its restricted scope's immutable key, or nothing is deleted. */
+function requireRestrictedRecordObject(row: QueryResultRow): void {
+  if (!parseRestrictedChannelContentScope(String(row.root_set_id)) ||
+      row.storage_key !== immutableContentObjectKey(String(row.root_set_id), String(row.checksum))) {
+    throw new ContentControlError("invalid_decision_storage", 409, "Decision storage scope is invalid");
+  }
+}
+
 /** A provider keeps results for its retention while connected; once disconnected or removed, for none. */
 async function appResultCutoff(tx: DatabaseTransaction, spaceId: string, appId: string, retentionDays: number, now: string):
   Promise<string> {
@@ -1049,10 +1057,7 @@ export class PostgresContentRepository {
         values: [spaceId, cutoff, limit], maxRows: limit,
       });
       for (const row of rows) {
-        const restricted = parseRestrictedChannelContentScope(String(row.root_set_id));
-        if (!restricted || row.storage_key !== immutableContentObjectKey(String(row.root_set_id), String(row.checksum))) {
-          throw new ContentControlError("invalid_decision_storage", 409, "Decision storage scope is invalid");
-        }
+        requireRestrictedRecordObject(row);
         await tx.query({ name: "content_decision_expire_v1",
           text: `DELETE FROM data.content_refs WHERE space_id=$1 AND root_set_id=$2
             AND generation=0 AND ref_id=$3 AND owner_kind IN ('summon_decision','connector_result')
@@ -1114,10 +1119,7 @@ export class PostgresContentRepository {
           ORDER BY r.created_at,r.ref_id LIMIT $4 FOR UPDATE OF r,o SKIP LOCKED`,
         values: [spaceId, appId, cutoff, limit], maxRows: limit });
       for (const row of rows) {
-        const restricted = parseRestrictedChannelContentScope(String(row.root_set_id));
-        if (!restricted || row.storage_key !== immutableContentObjectKey(String(row.root_set_id), String(row.checksum))) {
-          throw new ContentControlError("invalid_decision_storage", 409, "Decision storage scope is invalid");
-        }
+        requireRestrictedRecordObject(row);
         await tx.query({ name: "content_app_results_ref_expire_v1",
           text: `DELETE FROM data.content_refs WHERE space_id=$1 AND root_set_id=$2
             AND generation=0 AND ref_id=$3 AND owner_kind='connector_result'`,
