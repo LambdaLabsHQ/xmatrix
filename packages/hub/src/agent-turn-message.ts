@@ -1,4 +1,4 @@
-import { crossChannelReplyRelay, type ChannelAttachment, type ChannelMessage } from "@xmatrix/protocol";
+import { browserPageOf, crossChannelReplyRelay, type ChannelAttachment, type ChannelMessage } from "@xmatrix/protocol";
 
 /**
  * A Channel message as an Agent Instance reads it in a turn: the header naming its Channel, id,
@@ -24,11 +24,24 @@ export function attachmentLine(attachment: ChannelAttachment): string {
   return `- ${kind} ${attachment.name}${at} (${attachment.size} bytes, ${attachment.mimeType})\n`;
 }
 
+/** The Chrome page the sender was looking at when they wrote from the extension's side panel. */
+export function browserPageLine(metadata: unknown): string | undefined {
+  const page = browserPageOf(metadata);
+  if (!page) return undefined;
+  const title = page.title.replace(/\s+/gu, " ").trim() || page.href;
+  return `Viewing in Chrome: ${title} <${page.href}> (\`xmatrix browse\` reads this page from their browser)`;
+}
+
 export function renderAgentTurnMessage(message: ChannelMessage, reader: AgentTurnReader, deliveredAt: string): string {
   let body = redactDataUrls(message.body.trim());
   if (message.attachments?.length) {
     if (body) body += "\n\n";
     body += `Attachments:\n${message.attachments.map(attachmentLine).join("")}`;
+  }
+  const pageLine = browserPageLine(message.metadata);
+  if (pageLine) {
+    if (body) body += "\n\n";
+    body += pageLine;
   }
   const ids = message.replyToMessageId
     ? ` messageId=${message.messageId} replyToMessageId=${message.replyToMessageId}` : ` messageId=${message.messageId}`;

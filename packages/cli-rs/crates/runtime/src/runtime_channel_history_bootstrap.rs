@@ -278,6 +278,17 @@ fn render_history_entry(message: &ChannelMessage, read_at: Option<&str>) -> Stri
             attachment.name, attachment.mime_type, attachment.size, message.channel_id
         ));
     }
+    if let Some((title, href)) = xmatrix_cli_core::protocol::browser_page(message.metadata.as_ref())
+    {
+        let title = if title.is_empty() {
+            href.clone()
+        } else {
+            title
+        };
+        entry.push_str(&format!(
+            "  Viewing in Chrome: {title} <{href}> (`xmatrix browse` reads this page from their browser)\n"
+        ));
+    }
     entry
 }
 
@@ -463,6 +474,22 @@ mod tests {
         assert!(
             render_started_for(Some(&summon), Some("Old envelope"), "Recovery input")
                 .ends_with("Recovery input")
+        );
+    }
+
+    #[test]
+    fn channel_context_block_carries_browser_page_hint() {
+        let mut question = message("m1", 1, "Daniel", "who is this?");
+        question.metadata = Some(serde_json::json!({
+            "browserPage": { "title": "Profile  Page", "href": "https://example.test/profile" }
+        }));
+        let block = render_channel_context_block("channel-1", &[question], None)
+            .expect("context block");
+        assert!(
+            block.contains(
+                "  Viewing in Chrome: Profile Page <https://example.test/profile> (`xmatrix browse` reads this page from their browser)\n"
+            ),
+            "{block}"
         );
     }
 
