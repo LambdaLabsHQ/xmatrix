@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { WEB_PROXY_ROUTES, type DesktopDaemonFailure } from "@xmatrix/protocol";
-import { isDiagnosticsEnabled } from "@/lib/diagnostics-preference";
+import { diagnosticsMaySendNow } from "@/lib/diagnostics-preference";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 
 const reported = new Set<string>();
@@ -25,11 +25,18 @@ export function reportDesktopDaemonFailure(
   options?: { explicit?: boolean },
 ): void {
   const key = failureKey(failure);
-  if (!token || (!options?.explicit && !isDiagnosticsEnabled()) || reported.has(key)) return;
+  if (!token || reported.has(key)) return;
   reported.add(key);
-  void xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_desktop_daemon_failure, token, method: "POST",
-    body: { ...failure, platform: app.platform, appVersion: app.version } })
-    .then(() => {
+  // A report the person sends from the failure card is their own act; an
+  // automatic one goes only where diagnostics may be sent now.
+  const allowed = options?.explicit ? Promise.resolve(true) : diagnosticsMaySendNow();
+  void allowed.then((send) => {
+    if (!send) {
+      reported.delete(key);
+      return;
+    }
+    return xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_desktop_daemon_failure, token, method: "POST",
+      body: { ...failure, platform: app.platform, appVersion: app.version } }).then(() => {
       delivered.add(key);
       for (const listener of listeners) listener();
     }, (error: unknown) => {
@@ -37,6 +44,7 @@ export function reportDesktopDaemonFailure(
       reported.delete(key);
       console.warn("[xmatrix] daemon start failure not reported", error);
     });
+  });
 }
 
 /** Whether the Hub has this failure, so the App may say it was sent. */

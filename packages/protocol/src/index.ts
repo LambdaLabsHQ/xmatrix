@@ -323,6 +323,14 @@ export type {
   AuthCapabilities, MeResponse,
 } from "./auth-capabilities.js";
 export {
+  CONSENT_REQUIRED_COUNTRIES, DIAGNOSTICS_CHOICES, DIAGNOSTICS_CONSENT_FRESH_MS, DIAGNOSTICS_REGIMES,
+  diagnosticsDecision, diagnosticsRegimeForCountry, parseDiagnosticsConsentState,
+} from "./diagnostics-consent.js";
+export type {
+  DiagnosticsBuild, DiagnosticsChoice, DiagnosticsChoiceEdit, DiagnosticsConsentState, DiagnosticsDecision,
+  DiagnosticsPrompt, DiagnosticsRegime,
+} from "./diagnostics-consent.js";
+export {
   AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE, AGENT_RUN_PERMISSIONS, defaultAgentRunPermissions, parseAgentRunPermissions,
 } from "./agent-run-permissions.js";
 export type {
