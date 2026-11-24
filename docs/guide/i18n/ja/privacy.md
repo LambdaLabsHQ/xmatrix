@@ -15,7 +15,7 @@ xMatrix はホスト型コラボレーション Hub と、ご自身のマシン�
 
 ## ローカルのプロバイダクォータ照会
 
-**要約:** 登録した AI ツールの残りクォータを表示するため、xMatrix daemon はお使いのコンピュータ上にあるそれらのツール自身のログインファイル（例: `~/.grok/auth.json`）を読み取り、各プロバイダに直接問い合わせます。Codex は例外で、xMatrix は実行中の Codex セッションまたは一時的に起動した `codex app-server` を通じて Codex 自身に問い合わせ、Codex のログインファイルは開きません。これらのファイルから読み取った内容（トークン、アカウント ID、ファイル内容、ファイルのフィンガープリント）は一切 xMatrix に送信されず、Hub が受け取るのは正規化されたクォータ情報のみです。1 つのスイッチでファイルの読み取り、Codex app-server へのリクエスト、プロバイダへのリクエストをすべて停止できます（下記「ローカルクォータ照会を無効にする」を参照）。
+**要約:** 登録した AI ツールの残りクォータを表示するため、xMatrix daemon はお使いのコンピュータ上にあるそれらのツール自身のログインファイル（例: `~/.grok/auth.json`）を読み取り、各プロバイダに直接問い合わせます。Codex は例外で、xMatrix は実行中の Codex セッションまたは一時的に起動した `codex app-server` を通じて Codex 自身に問い合わせ、Codex のログインファイルは開きません。これらのファイルから読み取った内容（トークン、アカウント ID、ファイル内容、ファイルのフィンガープリント）は一切 xMatrix に送信されず、Hub が受け取るのは正規化されたクォータ情報のみです。1 つのスイッチでファイルの読み取り、Codex app-server へのリクエスト、プロバイダへのリクエストをすべて停止できます（下記「ローカルクォータ照会を無効にする」を参照）。公式のクォータ照会手段がないツール（Cursor など）は、そのコンピュータで許可するまで一切読み取られません（下記「許可した場合にだけ読み取るツール」を参照）。
 
 登録済みのハーネス（Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity 等）について、`xmatrix agent list` や Agents 画面で残量を表示し、`@auto` ルーティングで上限到達アカウントを避けるために、ローカルデーモンが登録済みツールのローカル認証ストアを読み取り各プロバイダの残量 API を直接照会する場合があります。
 
@@ -23,7 +23,7 @@ xMatrix はホスト型コラボレーション Hub と、ご自身のマシン�
 | --- | --- | --- |
 | Claude Code | macOS キーチェーン（`Claude Code-credentials`）または `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
 | Codex | 読み取りなし: Codex 自身の app-server メソッド `account/rateLimits/read`（実行中のセッションまたは一時的に起動した `codex app-server`） | Codex が自身のサインインで処理 |
-| Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS キーチェーン（`cursor-access-token`）、または Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
+| Cursor（そのコンピュータで許可した場合のみ） | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS キーチェーン（`cursor-access-token`）、または Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` または `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` または OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` または ChatGPT `wham/usage` |
 | DeepSeek | `DEEPSEEK_API_KEY` または `$DSH_HOME` 認証ファイル | `https://api.deepseek.com/user/balance` |
@@ -35,6 +35,24 @@ xMatrix はホスト型コラボレーション Hub と、ご自身のマシン�
 - 認証情報はローカルプロセスのメモリ内にとどまり、**該当プロバイダ自身の利用状況エンドポイントのみ**に送信されます。
 - ローカルの SHA-256 フィンガープリントはアカウント切替検知用のメモリ内キャッシュキーとしてのみ使われ、**ログ出力や xMatrix への送信は一切行いません**。
 - xMatrix Hub に送られるのは正規化された残量情報（割合、リセット時刻、利用可否、残高）のみです。
+
+### 許可した場合にだけ読み取るツール
+
+Cursor にはクォータを問い合わせる公式の手段がなく、唯一の方法は Cursor が自分用に保存したサインイン情報を読むことです。このサインイン情報は Cursor のためのものなので、xMatrix はそれを許可とはみなしません。コンピュータの所有者が許可するまで、xMatrix はそのコンピュータ上の Cursor のサインイン情報（macOS キーチェーン項目 `cursor-access-token`、Cursor の `auth.json`、環境に設定済みの `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`）を一切読み取らず、Cursor のクォータは**不明**と表示されます。使い切ったことは引き続き Cursor 自身のエラーメッセージから認識します。
+
+許可するには、コンピュータの所有者が Agents または Machines ビューで Cursor のクォータが表示される場所の **Allow reading Cursor sign-in to show quota** を選ぶか、そのコンピュータで次を実行します。
+
+```sh
+xmatrix config quotaAccess cursor on    # 許可
+xmatrix config quotaAccess cursor off   # 停止
+xmatrix config quotaAccess              # このコンピュータで許可済みのツールを表示
+```
+
+- 許可はコンピュータごと・ツールごとで、既定ではオフです。クォータ照会スイッチとは別物で、`quotaProbes` がオンでも許可にはなりません。
+- サインイン情報はそのコンピュータ上でのみ、Cursor に自身の使用量を問い合わせるためだけに読み取られます。その内容がコンピュータの外に出ることはなく、Hub が受け取るのは Cursor が返す使用量と、許可の有無だけです。
+- 許可は最初に使われたときにサインインしている Cursor アカウントに結び付けられます。その指紋はそのコンピュータの xMatrix 設定にのみ保存され、送信されません。アカウントや認証情報が変わると許可は失効し、直近のクォータの数値も削除されます。
+- 同じ場所、**Settings → Legal and privacy → Reading sign-ins for quota**、または `xmatrix config quotaAccess cursor off` でいつでも停止でき、次の読み取りから拒否されます。
+- ローカルクォータ照会を無効にする（下記）と許可より優先され、許可していても何も読み取られません。
 
 ### ローカルクォータ照会を無効にする
 
