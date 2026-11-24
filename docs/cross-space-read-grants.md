@@ -118,7 +118,7 @@ different grantee, the support Space instead of one Run
      `machineId`, then `GET .../log-excerpts/<control-id>` until it settles).
      Only the Machine's owner, signed in as a Human, may ask or read; Agent
      Runs are refused. It is the `log_excerpt` machine command (migration
-     `0274`), leased only to a daemon that advertises
+     `0275`), leased only to a daemon that advertises
      `machine_log_excerpt_v1`. The daemon reads at most the last 200 lines
      and 64 KiB of each of its own logs (launchd's
      `~/Library/Logs/xmatrix-daemon{.err,}.log` on macOS, the update-started
