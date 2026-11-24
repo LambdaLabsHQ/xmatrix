@@ -83,19 +83,43 @@ for (const width of [393, 1440]) {
   });
 }
 
-test("the comparison stage switches across all six topics without overflowing a phone", async ({ page }) => {
-  await page.setViewportSize({ width: 393, height: 900 });
+test("the comparison stage advances on vertical scroll and switches tabs without overflowing a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 844 });
   await page.goto("/");
   const why = page.locator("#why");
-  await why.scrollIntoViewIfNeeded();
+  await page.locator("#why-title").scrollIntoViewIfNeeded();
   const tabs = why.getByRole("tab");
   await expect(tabs).toHaveCount(6);
+  await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
 
-  for (let i = 0; i < 6; i += 1) {
-    await tabs.nth(i).click();
-    await expect(tabs.nth(i)).toHaveAttribute("aria-selected", "true");
-    // Both sides render live interfaces and stay inside the 393px viewport.
-    await expect(why.getByRole("tabpanel")).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  }
+  // Scrolling vertically through the comparison runway keeps the stage sticky, advances the topic, and slides the wood bar.
+  const bounds = await why.evaluate((section) => {
+    const track = section.querySelector<HTMLElement>(".relative")!;
+    const sticky = track.querySelector<HTMLElement>(".sticky")!;
+    const stickyTop = Number.parseFloat(window.getComputedStyle(sticky).top) || 0;
+    const trackDocTop = window.scrollY + track.getBoundingClientRect().top;
+    const maxTravel = Math.max(1, track.offsetHeight - sticky.offsetHeight);
+    return { trackDocTop, stickyTop, maxTravel };
+  });
+  await page.evaluate((y) => window.scrollTo(0, y), Math.round(bounds.trackDocTop - bounds.stickyTop + 0.6 * bounds.maxTravel));
+  await expect(tabs.nth(3)).toHaveAttribute("aria-selected", "true");
+  await expect(why.getByRole("tabpanel")).toBeVisible();
+  const stickyState = await why.evaluate((section) => {
+    const sticky = section.querySelector<HTMLElement>(".sticky")!;
+    const tablist = section.querySelector<HTMLElement>('[role="tablist"]')!;
+    return {
+      top: Math.round(sticky.getBoundingClientRect().top),
+      tabScrollLeft: Math.round(tablist.scrollLeft),
+      overflow: document.documentElement.scrollWidth > window.innerWidth,
+    };
+  });
+  expect(stickyState.top).toBeGreaterThanOrEqual(48);
+  expect(stickyState.top).toBeLessThanOrEqual(120);
+  expect(stickyState.tabScrollLeft).toBeGreaterThan(0);
+  expect(stickyState.overflow).toBe(false);
+
+  // Clicking a tab directly jumps to that topic cleanly.
+  await tabs.nth(5).click();
+  await expect(tabs.nth(5)).toHaveAttribute("aria-selected", "true");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
