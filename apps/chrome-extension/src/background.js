@@ -229,6 +229,27 @@ async function askSend(tab, { body, invocationSelections }) {
   if (!text.trim()) throw new Error("Write a question first.");
   const session = await store.get();
   if (!session) throw new Error("Sign in to xMatrix in the side panel first.");
+  // The conversation is shown the moment it exists (Daniel 2026-11-24: from selecting to the new conversation took
+  // too long): the side panel opens on it while its first message is still on the way, and that message arrives
+  // there live. Before, the panel waited for the conversation to be made, then the message (and the Agent it
+  // starts) to be sent: two round trips and the Hub's launch work, each over a second on a slow network.
+  // One id for the question, wherever it is sent: the side panel shows it as sending under this id, and the Hub
+  // appends it at most once however often it is sent.
+  const clientMessageId = crypto.randomUUID();
+  const metadata = { browserPage: { title: passage.label, href: passage.href } };
+  const show = async (space, channel) => {
+    await chrome.storage.session.set({ [`askThread:${tab.id}`]: { page: pageKey(passage.href), spaceId: space.id,
+      channelId: channel.id, snapshot: channel.snapshot ?? null } });
+    await chrome.storage.local.set({ lastSpace: { id: space.id, name: space.name } });
+    // For the side panel of the window the question was asked in: another window's panel (or an extension page
+    // open in a tab) must not take it. The conversation goes as the Hub answered it: the panel's app may not list
+    // it yet (it lists a window of a large catalog, and a new conversation reaches it only with the next refresh).
+    await chrome.storage.session.set({ openPath: { windowId: tab.windowId ?? null, channel: channel.snapshot ?? null,
+      path: `/app/${encodeURIComponent(space.id)}/channels/${encodeURIComponent(channel.id)}`, at: Date.now(),
+      // The question, shown in the panel as sending while it is on its way (the App's pending row).
+      pending: { clientMessageId, body: text, metadata } } });
+    void rememberRecent({ spaceId: space.id, channelId: channel.id, title: passage.label, href: passage.href });
+  };
   const result = await authed(async (scoped, token) => {
     const create = (space) => createConversation(scoped, token, {
       spaceId: space.id, name: discussionTitle(passage.text || passage.label), memberName: session.user?.name || "Human" });
@@ -236,18 +257,19 @@ async function askSend(tab, { body, invocationSelections }) {
     if (!space) throw new Error("You are not in any Space yet.");
     // Picks were made against the remembered Space; in another one they do not apply.
     const remembered = (await chrome.storage.local.get("lastSpace")).lastSpace?.id;
-    const message = (channelId, inSpace) => sendMessage(scoped, token, { channelId, body: text,
-      clientMessageId: crypto.randomUUID(),
+    const message = (channelId, inSpace) => sendMessage(scoped, token, { channelId, body: text, clientMessageId,
       // The page it was asked on goes with it, as with every message written in the side panel
       // (packages/protocol browser-page.ts): the conversation shows it, and the Agent is told which page it is.
-      metadata: { browserPage: { title: passage.label, href: passage.href } },
+      metadata,
       ...(inSpace === remembered && invocationSelections && typeof invocationSelections === "object"
         ? { invocationSelections } : {}) });
     const thread = await askThread(tab, passage.href, space.id);
     if (thread) {
+      const channel = { id: thread.channelId, snapshot: thread.snapshot ?? null };
+      await show(space, channel);
       try {
         await message(thread.channelId, space.id);
-        return { space, channel: { id: thread.channelId, snapshot: thread.snapshot ?? null } };
+        return { space, channel };
       } catch (error) {
         // The conversation is gone or no longer ours: this question starts a new one.
         if (!(error instanceof HubError) || ![403, 404].includes(error.status)) throw error;
@@ -263,21 +285,12 @@ async function askSend(tab, { body, invocationSelections }) {
       if (!space) throw new Error("You are not in any Space yet.");
       channel = await create(space);
     }
+    await show(space, channel);
+    // A failure here leaves the conversation open and the page's questions going to it: asking again lands there.
     await message(channel.id, space.id);
     return { space, channel };
   });
   await chrome.storage.session.remove(`ask:${tab.id}`);
-  await chrome.storage.session.set({ [`askThread:${tab.id}`]: { page: pageKey(passage.href), spaceId: result.space.id,
-    channelId: result.channel.id, snapshot: result.channel.snapshot ?? null } });
-  await rememberRecent({ spaceId: result.space.id, channelId: result.channel.id, title: passage.label, href: passage.href });
-  await chrome.storage.local.set({ lastSpace: { id: result.space.id, name: result.space.name } });
-  // The panel shows it: at once if its app is loaded, or opening straight onto it.
-  // For the side panel of the window the question was asked in: another window's panel (or an extension page
-  // open in a tab) must not take it.
-  // The conversation as the Hub answered it: the panel's app may not list it yet (it lists a window of a large
-  // catalog, and a new conversation reaches it only with the next refresh), and opens it from this.
-  await chrome.storage.session.set({ openPath: { windowId: tab.windowId ?? null, channel: result.channel.snapshot ?? null,
-    path: `/app/${encodeURIComponent(result.space.id)}/channels/${encodeURIComponent(result.channel.id)}`, at: Date.now() } });
   return { spaceName: result.space.name };
 }
 
@@ -382,7 +395,7 @@ const panelHandlers = {
     if (!openPath || Date.now() - openPath.at >= 60_000) return null;
     if (openPath.windowId !== null && windowId !== undefined && openPath.windowId !== windowId) return null;
     await chrome.storage.session.remove("openPath");
-    return { path: openPath.path, channel: openPath.channel ?? null };
+    return { path: openPath.path, channel: openPath.channel ?? null, pending: openPath.pending ?? null };
   },
   queuePassage: ({ passage }) => queuePassage(pagePassage(passage ?? {})),
   quickSelect: () => chrome.permissions.contains({ origins: WEB_ORIGINS }),

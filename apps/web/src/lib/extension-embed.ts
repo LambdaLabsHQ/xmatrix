@@ -17,7 +17,7 @@
  * reading (a passage, or the page itself), to quote in the open conversation
  * or to start a new one with.
  */
-import { CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AuthUser, type SerializedChannel } from "@xmatrix/protocol";
+import { browserPageMetadata, browserPageOf, CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AuthUser, type SerializedChannel } from "@xmatrix/protocol";
 import canonicalVersion from "../../../../version.json" with { type: "json" };
 import { EXTENSION_EMBED_ORIGINS } from "./extension-embed-origins";
 
@@ -195,7 +195,23 @@ const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-
  * answered its creation, when the extension just started it: the open app may
  * not list it yet.
  */
-type AddressOpener = (path: string, channel?: SerializedChannel) => boolean;
+/**
+ * A question the extension is sending to the conversation it opens (asked in the box on a page): the panel shows it
+ * as sending at once, under the id the extension sends it with, instead of waiting for the Hub to have it.
+ */
+export type EmbedPendingMessage = { clientMessageId: string; body: string; metadata?: Record<string, unknown> };
+
+type AddressOpener = (path: string, channel?: SerializedChannel, pending?: EmbedPendingMessage) => boolean;
+
+/** A pending question the extension hands over: its id, bounded text, and the page it was asked on. */
+export function parseEmbedPendingMessage(value: unknown): EmbedPendingMessage | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { clientMessageId, body, metadata } = value as Record<string, unknown>;
+  if (typeof clientMessageId !== "string" || !/^[A-Za-z0-9_-]{8,128}$/u.test(clientMessageId)) return undefined;
+  if (typeof body !== "string" || !body.trim() || body.length > 64 * 1024) return undefined;
+  const page = browserPageOf(metadata);
+  return { clientMessageId, body, ...(page ? { metadata: browserPageMetadata(page) } : {}) };
+}
 
 /** A conversation the extension hands over with an address: the one at that address, and bounded. */
 function parseOpenedChannel(value: unknown, path: string): SerializedChannel | undefined {
@@ -216,7 +232,7 @@ export function subscribeEmbedOpen(onOpen: AddressOpener): () => void {
   addressOpeners.add(onOpen);
   const stop = subscribeParent("open", (data) => {
     if (typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path)) {
-      onOpen(data.path, parseOpenedChannel(data.channel, data.path));
+      onOpen(data.path, parseOpenedChannel(data.channel, data.path), parseEmbedPendingMessage(data.pending));
     }
   });
   return () => {
