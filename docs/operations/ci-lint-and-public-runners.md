@@ -60,10 +60,10 @@ jobs each finish in about two minutes including setup:
   build, and the lint and typecheck that build would run (`next typegen`, then
   `tsc`, beside `next lint`); in the full tier the checked build stays the
   authoritative Web lint and typecheck;
-- `hub (static)` and `hub (1/4)`…`hub (4/4)`, only when the diff reaches the
+- `hub (static)` and `hub (1/8)`…`hub (8/8)`, only when the diff reaches the
   Hub (`packages/hub`, `packages/db`, `packages/protocol`, the Agent prompts
-  or a shared root file): the complete Hub suite a Hub train gates on, about
-  four minutes. From 2026-11-17 to 11-24, 53 of 65 failed trains failed on
+  or a shared root file): the complete Hub suite a Hub train gates on, in
+  eight duration-balanced shards. From 2026-11-17 to 11-24, 53 of 65 failed trains failed on
   this suite, on changes that had merged without running it, and each held
   every change riding that train until main was fixed;
 - `rust-clippy`: Clippy on the complete Rust workspace and all targets, for Linux and, cross-checked from Linux, for `x86_64-pc-windows-msvc`, so Windows-only code fails the pull request rather than a beta's cli-build.
@@ -116,7 +116,7 @@ long page is not parsed again to decide that its escapes were safe.
 
 `ci.yml` defaults to GitHub-hosted `ubuntu-24.04` and `windows-2025`.
 The public repository has no self-hosted runners. In the full tier, hosted Hub
-validation uses one static job and four test-file shards; Web uses one primary
+validation uses one static job and eight test-file shards; Web uses one primary
 job, four functional browser shards and a performance job. The primary job runs
 the unit tests and checked production build; the performance job starts
 alongside it on its own VM with one worker. Unsharded local runs still execute

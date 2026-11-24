@@ -167,6 +167,27 @@ jobs:
   # it. It runs from its own workflow on each push to main and on a daily
   # schedule (.github/workflows/codeql.yml).
 
+  # The production Web build, beside the gates instead of after them: it
+  # takes about three and a half minutes and used to start only once the
+  # gates had passed and the release was tagged. It deploys nothing. The
+  # bundle is stored under the exact release commit, and the tagged release
+  # reuses it only when its checksums and commit verify, building its own
+  # otherwise (server-release.yml, `build`).
+  web-prebuild:
+    needs: plan
+    if: contains(format(',{0},', needs.plan.outputs.scope), ',web,')
+    uses: ./.github/workflows/server-release.yml
+    permissions:
+      actions: read
+      contents: read
+    with:
+      target: web-prebuild
+      deploy_sha: ${{ needs.plan.outputs.deploy_sha }}
+      request_run_id: ${{ github.run_id }}
+      release_scope: ${{ needs.plan.outputs.scope }}
+      release_tag: ${{ needs.plan.outputs.tag }}
+    secrets: inherit
+
   # One job whose success means every gate this train's scope selects passed.
   # ci.yml fails its own aggregate unless each selected partition passed, so
   # the deployment workflows check this job instead of CI's job layout.
@@ -193,7 +214,11 @@ jobs:
         run: echo "Selected ${{ needs.plan.outputs.scope }} production gates passed for ${{ needs.plan.outputs.deploy_sha }}"
 
   authorize-and-dispatch:
-    needs: [plan, gates, authorization]
+    # It waits for the Web build the train makes beside its gates, whatever
+    # that build's result: dispatching earlier would only make the release
+    # build the bundle a second time. A failed or skipped prebuild decides
+    # nothing; the release then builds its own.
+    needs: [plan, gates, authorization, web-prebuild]
     # A gate skipped outside the scope (iOS) sits upstream of `gates`, and the
     # default success() would skip this job too; `gates` already decided.
     if: always() && needs.plan.result == 'success' && needs.gates.result == 'success' && needs.authorization.result == 'success'
