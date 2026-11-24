@@ -376,10 +376,11 @@ jobs:
     # request tested reuses the result instead of running the suite again.
     # Waiting for the selector costs seconds and keeps the hosted jobs free
     # for other runs: the account runs at most 20 at once. Hosted runners
-    # split it into a static job and four duration-balanced shards of the
-    # test files; together they run exactly the `hub` partition. Four keep a
-    # shard (about 190 s of tests) under the release train's CodeQL scan, the
-    # gate it runs beside.
+    # split it into a static job and eight duration-balanced shards of the
+    # test files; together they run exactly the `hub` partition. A shard is
+    # about a minute of setup and build plus its share of the tests: with
+    # four, a shard took 3 min 35 s to 4 min 38 s on a pull request and was
+    # its longest job by two minutes; eight halve the test share.
     # A persistent runner's file pool widens with the host's headroom
     # (packages/hub/test/hub-test-pool.mjs).
     needs: changes
@@ -388,7 +389,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"hub (static)","partition":"hub-static","shard":""},{"name":"hub (1/4)","partition":"hub-files","shard":"1/4"},{"name":"hub (2/4)","partition":"hub-files","shard":"2/4"},{"name":"hub (3/4)","partition":"hub-files","shard":"3/4"},{"name":"hub (4/4)","partition":"hub-files","shard":"4/4"}]' || '[{"name":"hub","partition":"hub","shard":""}]') }}
+        include: ${{ fromJSON((inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"hub (static)","partition":"hub-static","shard":""},{"name":"hub (1/8)","partition":"hub-files","shard":"1/8"},{"name":"hub (2/8)","partition":"hub-files","shard":"2/8"},{"name":"hub (3/8)","partition":"hub-files","shard":"3/8"},{"name":"hub (4/8)","partition":"hub-files","shard":"4/8"},{"name":"hub (5/8)","partition":"hub-files","shard":"5/8"},{"name":"hub (6/8)","partition":"hub-files","shard":"6/8"},{"name":"hub (7/8)","partition":"hub-files","shard":"7/8"},{"name":"hub (8/8)","partition":"hub-files","shard":"8/8"}]' || '[{"name":"hub","partition":"hub","shard":""}]') }}
     runs-on: *linux_runner
     permissions:
       contents: read

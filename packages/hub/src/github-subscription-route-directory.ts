@@ -6,7 +6,7 @@ export interface GitHubSubscriptionRoute {
   relationId: string;
   installationId: string;
   sourceRef: string;
-  sourceKind: "repository" | "issue";
+  sourceKind: "repository" | "issue" | "workflow_run";
   createdAt: string;
   spaceId: string;
   channelId: string;

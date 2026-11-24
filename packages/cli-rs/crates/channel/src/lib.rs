@@ -2021,12 +2021,19 @@ async fn cmd_channel_react(
 
 /// The Hub answers once it is decided, so the caller knows whether the pull
 /// request will report to the conversation before it stops watching it.
+fn is_workflow_run_url(url: &str) -> bool {
+    url.trim().starts_with("https://github.com/") && url.contains("/actions/runs/")
+}
+
 async fn cmd_channel_subscribe(
     hub_url: &str,
     token: &str,
     channel_id: &str,
     pull_request: &str,
 ) -> error::Result<()> {
+    if is_workflow_run_url(pull_request) {
+        return cmd_channel_subscribe_workflow_run(hub_url, token, channel_id, pull_request).await;
+    }
     let answer: serde_json::Value = http::request_json(
         &with_route(
             hub_url,
@@ -2058,6 +2065,60 @@ async fn cmd_channel_subscribe(
         ))),
         _ => Err(CliError::Launch(format!(
             "This Space's GitHub connection does not reach {name}, so nothing about it will arrive in this conversation. Watch it yourself."
+        ))),
+    }
+}
+
+/// Follow a workflow run: its verdict arrives in the conversation when it
+/// completes, and the subscription ends with it.
+async fn cmd_channel_subscribe_workflow_run(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+    run_url: &str,
+) -> error::Result<()> {
+    let answer: serde_json::Value = http::request_json(
+        &with_route(
+            hub_url,
+            &format!(
+                "/api/channels/{}/workflow-runs",
+                urlencoding::encode(channel_id)
+            ),
+        ),
+        "POST",
+        Some(token),
+        Some(serde_json::json!({ "url": run_url.trim() })),
+    )
+    .await?;
+    let name = match answer["name"].as_str().filter(|name| !name.is_empty()) {
+        Some(title) => format!(
+            "{} run {} ({title})",
+            answer["repository"].as_str().unwrap_or_default(),
+            answer["runId"]
+        ),
+        None => format!(
+            "{} run {}",
+            answer["repository"].as_str().unwrap_or_default(),
+            answer["runId"]
+        ),
+    };
+    match answer["subscription"].as_str() {
+        Some("subscribed") => {
+            println!(
+                "{} Subscribed to {name}: its verdict arrives in this conversation when it completes",
+                "✓".green().bold()
+            );
+            Ok(())
+        }
+        Some("completed") => {
+            println!(
+                "{name} already completed: {}. Nothing to wait for.",
+                answer["conclusion"].as_str().unwrap_or("completed")
+            );
+            Ok(())
+        }
+        _ => Err(CliError::Launch(format!(
+            "This Space's GitHub connection does not reach {name}, so its verdict will not arrive in this conversation."
         ))),
     }
 }
@@ -3849,7 +3910,8 @@ mod tests {
 
     #[test]
     fn format_history_message_includes_browser_page_hint() {
-        let mut message = bare_history_message("m-page", 2, "who is this?", "2026-09-18T20:00:00.000Z");
+        let mut message =
+            bare_history_message("m-page", 2, "who is this?", "2026-09-18T20:00:00.000Z");
         message.metadata = Some(serde_json::json!({
             "browserPage": { "title": "Profile  Page", "href": "https://example.test/profile" }
         }));
@@ -4228,23 +4290,22 @@ mod tests {
     async fn materialize_history_image_attachments_downloads_concurrently() {
         let _guard = TEST_ENV_LOCK.lock().unwrap();
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let cache_root = std::env::temp_dir().join(format!(
-            "xmatrix-history-parallel-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let cache_root =
+            std::env::temp_dir().join(format!("xmatrix-history-parallel-{}", uuid::Uuid::new_v4()));
         let previous_config = std::env::var_os("XMATRIX_CONFIG_DIR");
         unsafe {
             std::env::set_var("XMATRIX_CONFIG_DIR", &cache_root);
         }
 
-        let (hub, server) = super::http_fixture::spawn_barrier_server(2, "image/png", |_headers, body| {
-            let payload: serde_json::Value = serde_json::from_slice(body).unwrap();
-            match payload["attachmentId"].as_str().unwrap() {
-                "att-a" => b"png-bytes-a!".to_vec(),
-                "att-b" => b"png-bytes-b!".to_vec(),
-                other => panic!("unexpected attachment {other}"),
-            }
-        });
+        let (hub, server) =
+            super::http_fixture::spawn_barrier_server(2, "image/png", |_headers, body| {
+                let payload: serde_json::Value = serde_json::from_slice(body).unwrap();
+                match payload["attachmentId"].as_str().unwrap() {
+                    "att-a" => b"png-bytes-a!".to_vec(),
+                    "att-b" => b"png-bytes-b!".to_vec(),
+                    other => panic!("unexpected attachment {other}"),
+                }
+            });
 
         let messages = vec![
             history_message(
