@@ -1,5 +1,29 @@
 # Release Updates
 
+## Unreleased: the release train builds the Web beside its gates
+
+A Web release ran in two serial halves: the train's gates (about four
+minutes), then, only after the tag, the production Web build (about three and
+a half), then the deploy. The build mutates nothing a user can reach, so the
+train now runs it beside the gates (`web-prebuild` in
+`production-release-request.yml`, the same `build` job of
+`server-release.yml`), and stores the bundle under the exact release commit
+(`handoffs/web-prebuilt/<commit>/<attempt>/bundle`). The tagged release looks
+for that bundle first and reuses it only when its checksums and its recorded
+commit verify; when there is none, or it does not verify, the release builds
+its own exactly as before. The train dispatches the release once both the
+gates and the prebuild have finished, whatever the prebuild's result. Nothing
+deploys before the gates pass and the tag exists: only the tagged `web` job
+deploys, and it still re-verifies the exact request, scope and commit.
+
+The prebuild needs the production build configuration, so the `production`
+environment now also admits the `main` branch (it admitted only `xmatrix-v*`
+tags); every job that deploys still requires a tag ref in its own condition.
+Approved by Daniel on 2026-11-24. Expected effect: about three minutes less
+from merge to a live beta Web. CI and release infrastructure only. Recovery is
+a CI-validated revert, after which the `main` rule can be removed from the
+environment.
+
 ## Unreleased: a message sent to a working Antigravity joins its turn instead of cancelling it
 
 Claude's turns took a Channel message that arrived mid-turn as more input to
