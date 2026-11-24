@@ -19,7 +19,7 @@ import { queueHarnessAction, readHarnessAction } from "./machine-harness-api";
 import { ToolDetailSection } from "./tool-split";
 import { useOwnerDaemons } from "./harness-sign-in";
 
-/* Some harnesses (Cursor) have no official way to ask for their quota: the
+/* Some harnesses (Cursor, OpenCode before 2.2.0) have no official way to ask for their quota: the
    only way is to read the sign-in the harness stored for itself on its
    machine. That sign-in is not permission for xMatrix, so its quota is
    unknown until the machine's owner allows the read here, per machine. The
@@ -39,10 +39,13 @@ export function harnessQuotaAccessView(input: {
 }) {
   const { target, userId } = input;
   const preset = agentPresetById(target.key.harness);
-  const offered = preset?.management?.quotaRead === "sign_in_grant";
   const owner = Boolean(userId && target.key.ownerUserId === userId);
   const daemon = input.daemons?.find((item) => item.machineId === target.key.machineId && item.status === "online");
   const item = parseHarnessInventory(daemon?.metadata.harnesses)?.items.find((entry) => entry.id === target.key.harness);
+  const before = preset?.management?.quotaReadBefore;
+  /* A harness that needs the grant only before some release (OpenCode) needs
+     it on this machine only when its daemon says so for the installed one. */
+  const offered = preset?.management?.quotaRead === "sign_in_grant" && (!before || item?.quotaAccess !== undefined);
   const capabilities = daemon?.metadata.capabilities;
   const capable = Array.isArray(capabilities) && capabilities.includes(MACHINE_HARNESS_QUOTA_ACCESS_CAPABILITY);
   return {
@@ -51,7 +54,11 @@ export function harnessQuotaAccessView(input: {
     /** Only the machine's owner can allow or stop the read. */
     canChange: offered && owner,
     state: item?.quotaAccess as HarnessQuotaAccess | undefined,
+    /** The last read under the grant found the sign-in expired; it is not refreshed. */
+    expired: item?.quotaSignIn === "expired",
     program: preset?.displayName ?? target.key.harness,
+    /** Whose quota interface is missing: the program, or its releases before one that has it. */
+    lacking: before ? `${preset?.displayName ?? target.key.harness} before ${before}` : (preset?.displayName ?? target.key.harness),
     daemon,
     blocker: !daemon ? "Connect this machine to change this."
       : !capable ? "Update this machine's xMatrix daemon to allow this." : undefined,
@@ -84,14 +91,14 @@ export function quotaAccessConsentText(program: string, machineName: string) {
   ];
 }
 
-function QuotaAccessConsent({ program, machineName, busy, onAnswer }: {
-  program: string; machineName: string; busy: boolean; onAnswer: (allow: boolean) => void;
+function QuotaAccessConsent({ program, lacking, machineName, busy, onAnswer }: {
+  program: string; lacking: string; machineName: string; busy: boolean; onAnswer: (allow: boolean) => void;
 }) {
   return (
     <CenteredDialogShell open busy={busy} labelledBy="quota-access-title" onCancel={() => onAnswer(false)} panelClassName="max-w-md">
       <DialogPanelHeader labelledBy="quota-access-title" title={`Allow reading ${program}'s sign-in to show its quota?`} />
       <div className="space-y-2 px-5 py-4 text-sm" data-testid="quota-access-consent">
-        <p className="text-muted-foreground">{program} has no official way to ask for its quota.</p>
+        <p className="text-muted-foreground">{lacking} has no official way to ask for its quota.</p>
         {quotaAccessConsentText(program, machineName).map((line) => <p key={line}>{line}</p>)}
       </div>
       <DialogPanelFooter>
@@ -142,7 +149,9 @@ export function HarnessQuotaAccess({ target, token, userId, hasReading = false, 
           <span className="font-semibold">Quota: Unknown</span>
           {view.state === "probes_off"
             ? <span className="text-muted-foreground"> · quota probes are off on {target.machineName}</span>
-            : !granted && <span className="text-muted-foreground"> · {view.program} has no official quota interface</span>}
+            : granted && view.expired
+              ? <span className="text-muted-foreground"> · {view.program}&apos;s sign-in has expired; sign in to {view.program} again</span>
+              : !granted && <span className="text-muted-foreground"> · {view.lacking} has no official quota interface</span>}
         </p>}
         {hasReading && granted && <p className="text-muted-foreground">
           Read from {view.program}&apos;s sign-in on {target.machineName}, which never leaves it.</p>}
@@ -160,7 +169,7 @@ export function HarnessQuotaAccess({ target, token, userId, hasReading = false, 
       {view.canChange && view.blocker && <p className="text-xs text-muted-foreground">{view.blocker}</p>}
       {change.isError && <p role="status" className={noticeClass("alert", "rounded-lg p-3")}>
         {userErrorMessage(change.error, "Couldn't send that to the machine")}</p>}
-      {asking && <QuotaAccessConsent program={view.program} machineName={target.machineName} busy={change.isPending}
+      {asking && <QuotaAccessConsent program={view.program} lacking={view.lacking} machineName={target.machineName} busy={change.isPending}
         onAnswer={(allow) => { setAsking(false); if (allow) run(true); }} />}
     </div>
   );
@@ -200,7 +209,7 @@ export function QuotaAccessSettings({ token, userId }: { token: string; userId: 
           </ul>}
         {change.isError && <p role="status" className={noticeClass("alert", "rounded-lg p-3")}>
           {userErrorMessage(change.error, "Couldn't send that to the machine")}</p>}
-        <p className="text-xs text-muted-foreground">On the computer itself: <code>xmatrix config quotaAccess cursor off</code></p>
+        <p className="text-xs text-muted-foreground">On the computer itself: <code>xmatrix config quotaAccess &lt;cursor|opencode&gt; off</code></p>
       </div>
     </ToolDetailSection>
   );

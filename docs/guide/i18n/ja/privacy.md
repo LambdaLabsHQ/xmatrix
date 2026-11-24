@@ -15,7 +15,7 @@ xMatrix はホスト型コラボレーション Hub と、ご自身のマシン�
 
 ## ローカルのプロバイダクォータ照会
 
-**要約:** 登録した AI ツールの残りクォータを表示するため、xMatrix daemon はお使いのコンピュータ上にあるそれらのツール自身のログインファイル（例: `~/.grok/auth.json`）を読み取り、各プロバイダに直接問い合わせます。Codex、Claude Code、OpenCode は例外で、xMatrix はツール自身に問い合わせ、それらのログインファイルは開きません。Codex には実行中のセッションまたは一時的に起動した `codex app-server` を通じて、Claude Code には実行中のセッションまたは一時的に起動した `claude` を通じて（プロンプトを送らない `get_usage` リクエスト）、OpenCode には一時的に起動した `opencode serve` を通じて問い合わせます。これらのファイルから読み取った内容（トークン、アカウント ID、ファイル内容、ファイルのフィンガープリント）は一切 xMatrix に送信されず、Hub が受け取るのは正規化されたクォータ情報のみです。1 つのスイッチでファイルの読み取り、Codex・Claude Code・OpenCode へのリクエスト、プロバイダへのリクエストをすべて停止できます（下記「ローカルクォータ照会を無効にする」を参照）。公式のクォータ照会手段がないツール（Cursor など）は、そのコンピュータで許可するまで一切読み取られません（下記「許可した場合にだけ読み取るツール」を参照）。
+**要約:** 登録した AI ツールの残りクォータを表示するため、xMatrix daemon はお使いのコンピュータ上にあるそれらのツール自身のログインファイル（例: `~/.grok/auth.json`）を読み取り、各プロバイダに直接問い合わせます。Codex、Claude Code、OpenCode は例外で、xMatrix はツール自身に問い合わせ、それらのログインファイルは開きません。Codex には実行中のセッションまたは一時的に起動した `codex app-server` を通じて、Claude Code には実行中のセッションまたは一時的に起動した `claude` を通じて（プロンプトを送らない `get_usage` リクエスト）、OpenCode には一時的に起動した `opencode serve` を通じて問い合わせます。これらのファイルから読み取った内容（トークン、アカウント ID、ファイル内容、ファイルのフィンガープリント）は一切 xMatrix に送信されず、Hub が受け取るのは正規化されたクォータ情報のみです。1 つのスイッチでファイルの読み取り、Codex・Claude Code・OpenCode へのリクエスト、プロバイダへのリクエストをすべて停止できます（下記「ローカルクォータ照会を無効にする」を参照）。公式のクォータ照会手段がないツール（Cursor など）は、そのコンピュータで許可するまで一切読み取られません（下記「許可した場合にだけ読み取るツール」を参照）。公式のクォータ取得手段がない OpenCode 2.2.0 より前のバージョンも、そのコンピュータで許可するまで一切読み取りません。
 
 登録済みのハーネス（Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity 等）について、`xmatrix agent list` や Agents 画面で残量を表示し、`@auto` ルーティングで上限到達アカウントを避けるために、ローカルデーモンが登録済みツールのローカル認証ストアを読み取り各プロバイダの残量 API を直接照会する場合があります。
 
@@ -25,7 +25,8 @@ xMatrix はホスト型コラボレーション Hub と、ご自身のマシン�
 | Codex | 読み取りなし: Codex 自身の app-server メソッド `account/rateLimits/read`（実行中のセッションまたは一時的に起動した `codex app-server`） | Codex が自身のサインインで処理 |
 | Cursor（そのコンピュータで許可した場合のみ） | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS キーチェーン（`cursor-access-token`）、または Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` または `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
-| OpenCode | 読み取りなし: 一時的に起動した `opencode serve` の `GET /api/experimental/usage/limits`（ループバックのみで待ち受け、一回限りのパスワードを使用）。OpenCode が他のプロバイダにルーティングするモデルでは何も読み取りません | OpenCode が自身のサインインで処理 |
+| OpenCode 2.2.0 以降 | 読み取りなし: 一時的に起動した `opencode serve` の `GET /api/experimental/usage/limits`（ループバックのみで待ち受け、一回限りのパスワードを使用）。OpenCode が他のプロバイダにルーティングするモデルでは何も読み取りません | OpenCode が自身のサインインで処理 |
+| OpenCode 2.2.0 より前（そのコンピュータで許可した場合のみ） | `OPENCODE_API_KEY` または OpenCode の `auth.json` の `opencode-go` エントリ | `https://opencode.ai/zen/go/v1/usage` |
 | DeepSeek | `DEEPSEEK_API_KEY` または `$DSH_HOME` 認証ファイル | `https://api.deepseek.com/user/balance` |
 | Z.ai / Zhipu | `ZAI_API_KEY` / `ZHIPU_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit`（または `open.bigmodel.cn`） |
 | Antigravity | 未改変の `agy -p "/usage" --output-format json` を実行 | `agy` 自身が処理 |
@@ -53,6 +54,8 @@ xmatrix config quotaAccess              # このコンピュータで許可済�
 - 許可は最初に使われたときにサインインしている Cursor アカウントに結び付けられます。その指紋はそのコンピュータの xMatrix 設定にのみ保存され、送信されません。アカウントや認証情報が変わると許可は失効し、直近のクォータの数値も削除されます。
 - 同じ場所、**Settings → Legal and privacy → Reading sign-ins for quota**、または `xmatrix config quotaAccess cursor off` でいつでも停止でき、次の読み取りから拒否されます。
 - ローカルクォータ照会を無効にする（下記）と許可より優先され、許可していても何も読み取られません。
+
+OpenCode 2.2.0 より前のバージョンにも公式のクォータ取得手段がないため、同じ扱いです。許可がなければ、xMatrix は OpenCode の `auth.json` も、そのために設定された `OPENCODE_API_KEY` も開かず、OpenCode のエンドポイントにも問い合わせず、クォータは **Unknown** と表示されます。許可すると（**Allow reading OpenCode sign-in to show quota**、または `xmatrix config quotaAccess opencode on`）、xMatrix は OpenCode が OpenCode Go 用に保存したキーだけを読み、`https://opencode.ai/zen/go/v1/usage` への 1 回のリクエストにだけ使います。期限切れのサインインを OpenCode に代わって更新することはありません。OpenCode に再度サインインするまで、クォータは不明（期限切れ）と表示されます。上記のアカウントとの紐付け、取り消し、全体スイッチはそのまま適用されます。OpenCode 2.2.0 以降では、xMatrix は `opencode serve` に問い合わせ、許可の有無にかかわらず OpenCode の資格情報を読みません。
 
 ### ローカルクォータ照会を無効にする
 

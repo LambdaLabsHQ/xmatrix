@@ -15,7 +15,7 @@ xMatrix는 호스팅 협업 Hub와 사용자 머신에서 실행되는 Rust 로�
 
 ## 로컬 공급자 할당량 조회
 
-**요약:** 등록한 AI 도구의 남은 할당량을 보여 주기 위해 xMatrix daemon은 컴퓨터에 있는 해당 도구 자체의 로그인 파일(예: `~/.grok/auth.json`)을 읽고 각 공급자에게 직접 조회합니다. Codex, Claude Code, OpenCode는 예외로, xMatrix는 도구 자체에 묻고 그 로그인 파일은 열지 않습니다. Codex는 실행 중인 세션이나 잠시 실행한 `codex app-server`를 통해, Claude Code는 실행 중인 세션이나 잠시 실행한 `claude`를 통해(프롬프트를 보내지 않는 `get_usage` 요청), OpenCode는 잠시 실행한 `opencode serve`를 통해 묻습니다. 이 파일에서 읽은 내용(토큰, 계정 ID, 파일 내용, 파일 지문)은 xMatrix로 전송되지 않으며, Hub는 정규화된 할당량 결과만 받습니다. 하나의 스위치로 파일 읽기, Codex·Claude Code·OpenCode 요청, 공급자 요청을 모두 중지할 수 있습니다(아래 「로컬 할당량 조회 끄기」 참고). 공식 할당량 인터페이스가 없는 도구(예: Cursor)는 그 컴퓨터에서 허용하기 전까지 전혀 읽지 않습니다(아래 「허용한 경우에만 읽는 도구」 참고).
+**요약:** 등록한 AI 도구의 남은 할당량을 보여 주기 위해 xMatrix daemon은 컴퓨터에 있는 해당 도구 자체의 로그인 파일(예: `~/.grok/auth.json`)을 읽고 각 공급자에게 직접 조회합니다. Codex, Claude Code, OpenCode는 예외로, xMatrix는 도구 자체에 묻고 그 로그인 파일은 열지 않습니다. Codex는 실행 중인 세션이나 잠시 실행한 `codex app-server`를 통해, Claude Code는 실행 중인 세션이나 잠시 실행한 `claude`를 통해(프롬프트를 보내지 않는 `get_usage` 요청), OpenCode는 잠시 실행한 `opencode serve`를 통해 묻습니다. 이 파일에서 읽은 내용(토큰, 계정 ID, 파일 내용, 파일 지문)은 xMatrix로 전송되지 않으며, Hub는 정규화된 할당량 결과만 받습니다. 하나의 스위치로 파일 읽기, Codex·Claude Code·OpenCode 요청, 공급자 요청을 모두 중지할 수 있습니다(아래 「로컬 할당량 조회 끄기」 참고). 공식 할당량 인터페이스가 없는 도구(예: Cursor)는 그 컴퓨터에서 허용하기 전까지 전혀 읽지 않습니다(아래 「허용한 경우에만 읽는 도구」 참고). 공식 할당량 인터페이스가 없는 OpenCode 2.2.0 이전 버전도 해당 컴퓨터에서 허용하기 전에는 전혀 읽지 않습니다.
 
 등록된 하네스(Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai, Antigravity 등)의 남은 구독 할당량을 `xmatrix agent list`와 Agents 화면에 표시하고 `@auto` 라우팅이 한도 초과 계정을 피할 수 있도록, 로컬 데몬이 등록된 도구의 로컬 자격 증명 저장소를 메모리 내에서 읽어 해당 공급자 엔드포인트에 직접 조회할 수 있습니다.
 
@@ -25,7 +25,8 @@ xMatrix는 호스팅 협업 Hub와 사용자 머신에서 실행되는 Rust 로�
 | Codex | 읽지 않음: Codex 자체 app-server 메서드 `account/rateLimits/read`(실행 중인 세션 또는 잠시 실행한 `codex app-server`) | Codex가 자체 로그인으로 처리 |
 | Cursor(그 컴퓨터에서 허용한 경우에만) | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, macOS 키체인(`cursor-access-token`), 또는 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` 또는 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
-| OpenCode | 읽지 않음: 잠시 실행한 `opencode serve`의 `GET /api/experimental/usage/limits`(루프백에서만 수신, 일회용 비밀번호 사용). OpenCode가 다른 공급자로 라우팅하는 모델은 아무것도 읽지 않음 | OpenCode가 자체 로그인으로 처리 |
+| OpenCode 2.2.0 이상 | 읽지 않음: 잠시 실행한 `opencode serve`의 `GET /api/experimental/usage/limits`(루프백에서만 수신, 일회용 비밀번호 사용). OpenCode가 다른 공급자로 라우팅하는 모델은 아무것도 읽지 않음 | OpenCode가 자체 로그인으로 처리 |
+| OpenCode 2.2.0 이전(해당 컴퓨터에서 허용한 경우에만) | `OPENCODE_API_KEY` 또는 OpenCode `auth.json`의 `opencode-go` 항목 | `https://opencode.ai/zen/go/v1/usage` |
 | DeepSeek | `DEEPSEEK_API_KEY` 또는 `$DSH_HOME` 인증 파일 | `https://api.deepseek.com/user/balance` |
 | Z.ai / Zhipu | `ZAI_API_KEY` / `ZHIPU_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit` (또는 `open.bigmodel.cn`) |
 | Antigravity | 원본 `agy -p "/usage" --output-format json` 명령 위임 | `agy` 자체 처리 |
@@ -53,6 +54,8 @@ xmatrix config quotaAccess              # 이 컴퓨터에서 허용된 도구 �
 - 허용은 처음 사용될 때 로그인된 Cursor 계정에 묶이며, 그 지문은 그 컴퓨터의 xMatrix 설정에만 저장되고 전송되지 않습니다. 계정이나 자격 증명이 바뀌면 허용은 무효가 되고 마지막 할당량 수치도 삭제됩니다.
 - 같은 곳, **Settings → Legal and privacy → Reading sign-ins for quota**, 또는 `xmatrix config quotaAccess cursor off`로 언제든 중지할 수 있으며, 다음 읽기부터 바로 거부됩니다.
 - 로컬 할당량 조회 끄기(아래)가 허용보다 우선합니다. 허용했더라도 아무것도 읽지 않습니다.
+
+OpenCode 2.2.0 이전 버전에도 공식 할당량 인터페이스가 없어 같은 방식으로 처리합니다. 허용하지 않으면 xMatrix는 OpenCode의 `auth.json`도, 이를 위해 설정된 `OPENCODE_API_KEY`도 열지 않고, OpenCode 엔드포인트에 요청하지 않으며, 할당량은 **Unknown**으로 표시됩니다. 허용하면(**Allow reading OpenCode sign-in to show quota** 또는 `xmatrix config quotaAccess opencode on`) xMatrix는 OpenCode가 OpenCode Go용으로 저장한 키만 읽고 `https://opencode.ai/zen/go/v1/usage`에 대한 한 번의 요청에만 사용합니다. 만료된 로그인을 OpenCode 대신 갱신하지 않으며, OpenCode에 다시 로그인할 때까지 할당량은 알 수 없음(만료됨)으로 표시됩니다. 위의 계정 연결, 철회, 전체 스위치는 그대로 적용됩니다. OpenCode 2.2.0부터는 xMatrix가 `opencode serve`에 묻고, 허용 여부와 관계없이 OpenCode 자격 증명을 읽지 않습니다.
 
 ### 로컬 할당량 조회 끄기
 
