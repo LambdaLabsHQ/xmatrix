@@ -351,7 +351,7 @@ export function InlineThreadCard({
         </span>
         {showThinking ? (
           <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[oklch(0.962_0.014_80)] px-2 py-0.5 text-[11px] font-medium text-foreground/70">
-            <span className="size-1.5 rounded-full bg-amber-600/80 animate-pulse" />
+            <span className="size-1.5 rounded-full bg-primary animate-pulse" />
             {busyAgent ? `${busyAgent}…` : "Thinking…"}
           </span>
         ) : null}
@@ -406,7 +406,7 @@ export function InlineThreadCard({
         ))}
         {showThinking ? (
           <div className="flex items-center gap-2 px-1 py-1 text-[12.5px] text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-amber-600/75 animate-pulse" />
+            <span className="size-1.5 rounded-full bg-primary animate-pulse" />
             <span>{busyAgent ? `${busyAgent} is replying…` : "Waiting for Agent…"}</span>
           </div>
         ) : null}
@@ -482,8 +482,8 @@ export function EdgeDockTab({
           <span
             className={
               liveIndicator === "busy"
-                ? "absolute -top-0.5 -right-0.5 size-2 rounded-full bg-amber-600 animate-pulse"
-                : "absolute -top-0.5 -right-0.5 size-2 rounded-full bg-emerald-600"
+                ? "absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary animate-pulse"
+                : "absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary"
             }
           />
         ) : null}

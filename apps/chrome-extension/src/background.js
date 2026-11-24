@@ -19,7 +19,7 @@ import {
   withSession,
 } from "./hub-client.js";
 import { capturableUrl, discussionTitle, pagePassage } from "./passage.js";
-import { isTrustedWebAppOrigin, pageKey, showWebPage } from "./page-tab.js";
+import { isTrustedWebAppOrigin, pageKey, readTabSnapshot, showWebPage, tabPageThread } from "./page-tab.js";
 
 const SIGN_IN_ALARM = "sign-in";
 const MENU_ASK = "ask";
@@ -148,18 +148,10 @@ function enablePanel(tabId) {
 /** Tabs whose side panel page currently holds an open port to this service worker. */
 const openPanels = new Set();
 
-async function tabThreadForUrl(tabId, url) {
-  const href = capturableUrl(url ?? "");
-  if (!href) return null;
-  const key = `askThread:${tabId}`;
-  const { [key]: thread } = await chrome.storage.session.get(key);
-  return thread && thread.page === pageKey(href) ? thread : null;
-}
-
 async function notifyTabPanelState(tabId, open) {
   if (!Number.isInteger(tabId)) return;
   const tab = await chrome.tabs.get(tabId).catch(() => null);
-  const thread = tab ? await tabThreadForUrl(tabId, tab.url) : null;
+  const thread = tab ? await tabPageThread(chrome, tabId, tab.url) : null;
   if (!open && thread) await enablePanel(tabId).catch(() => undefined);
   await chrome.tabs.sendMessage(tabId, {
     type: "panel-state",
@@ -238,7 +230,7 @@ async function askContext(tab, { optionalPassage = false } = {}) {
   const session = stored ? { token: stored.token, user: stored.user ?? null } : null;
   if (!session?.user) throw Object.assign(new Error("Sign in to xMatrix in the side panel first."), { code: "signed_out" });
   const { lastSpace } = await chrome.storage.local.get("lastSpace");
-  const thread = passage ? await tabThreadForUrl(tab.id, passage.href) : null;
+  const thread = passage ? await tabPageThread(chrome, tab.id, passage.href) : null;
   if (thread) await enablePanel(tab.id).catch(() => undefined);
   return {
     token: session.token,
@@ -251,21 +243,6 @@ async function askContext(tab, { optionalPassage = false } = {}) {
   };
 }
 
-/** Read a tab's accessibility snapshot for `xmatrix browse` when the inline card is active without the side panel. */
-async function readTabSnapshot(tabId) {
-  try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["src/page-snapshot.js"] });
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (maxChars) => globalThis.__xmatrixPageSnapshot?.(maxChars) ?? "",
-      args: [200_000],
-    });
-    return typeof result?.result === "string" ? result.result : "";
-  } catch {
-    return "";
-  }
-}
-
 async function askBrowserRead(tab, { requestId, target }) {
   if (typeof requestId !== "string" || !requestId || !panelHandlers.claimBrowserRead({ requestId })) return;
   let answer;
@@ -276,7 +253,7 @@ async function askBrowserRead(tab, { requestId, target }) {
       if (!freshTab?.id || !href) {
         answer = { refusal: "no-page" };
       } else {
-        const text = await readTabSnapshot(freshTab.id);
+        const text = await readTabSnapshot(chrome, freshTab.id);
         answer = text ? { title: freshTab.title || "", href, text } : { refusal: "unreadable" };
       }
     } else {
@@ -290,7 +267,7 @@ async function askBrowserRead(tab, { requestId, target }) {
 
 /** Prepares this tab's side panel to open straight onto the inline conversation (called on ◫ or edge dock click). */
 async function askDock(tab, { spaceId, channelId } = {}) {
-  const existing = await tabThreadForUrl(tab.id, tab.url);
+  const existing = await tabPageThread(chrome, tab.id, tab.url);
   const resolvedSpaceId = typeof spaceId === "string" && spaceId ? spaceId : existing?.spaceId;
   const resolvedChannelId = typeof channelId === "string" && channelId ? channelId : existing?.channelId;
   await enablePanel(tab.id).catch(() => undefined);
@@ -574,7 +551,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   }
   if (message?.type === "askPageState" && sender.tab && !isExtensionPage(sender)) {
     return answer((async () => {
-      const thread = await tabThreadForUrl(sender.tab.id, typeof message.url === "string" ? message.url : sender.tab.url);
+      const thread = await tabPageThread(chrome, sender.tab.id, typeof message.url === "string" ? message.url : sender.tab.url);
       if (thread && !openPanels.has(sender.tab.id)) await enablePanel(sender.tab.id).catch(() => undefined);
       return { panelOpen: openPanels.has(sender.tab.id), hasThread: Boolean(thread) };
     })());

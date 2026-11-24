@@ -9,7 +9,7 @@
 // selection button, this bar) are handed to the app once it says it is ready.
 
 import { capturableUrl, pageTitle } from "./passage.js";
-import { pageKey } from "./page-tab.js";
+import { pageKey, readTabSnapshot, tabPageThread } from "./page-tab.js";
 
 const PROTOCOL = "xmatrix-embed/1";
 const APP_ORIGIN = window.location.origin;
@@ -171,11 +171,7 @@ async function activeTab() {
 }
 
 /** The conversation the tab's questions about its page went to, as the service worker keeps it. */
-async function pageThread(tab, href) {
-  const key = `askThread:${tab.id}`;
-  const { [key]: thread } = await chrome.storage.session.get(key);
-  return thread && thread.page === pageKey(href) ? thread : null;
-}
+const pageThread = (tab, href) => tabPageThread(chrome, tab.id, href);
 
 /**
  * Tells the app the page beside the panel. A page with a conversation of its
@@ -197,25 +193,7 @@ async function showPage() {
   shownPage = key;
 }
 
-/**
- * A tab as an Agent reads it: its accessibility snapshot, as Playwright's `ariaSnapshot()` writes it (the
- * extension's src/page-snapshot.js, built from snapshot/page-snapshot.ts), at most 200,000 characters; empty
- * where it cannot be read.
- */
-async function readTab(tabId) {
-  try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["src/page-snapshot.js"] });
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (maxChars) => globalThis.__xmatrixPageSnapshot?.(maxChars) ?? "",
-      args: [200_000],
-    });
-    return typeof result?.result === "string" ? result.result : "";
-  } catch {
-    // A page this extension may not read (no access to it, or the browser's own pages).
-    return "";
-  }
-}
+const readTab = (tabId) => readTabSnapshot(chrome, tabId);
 
 // ---- Agents reading a page through this browser (`xmatrix browse`, packages/hub src/browser-read.ts).
 //
