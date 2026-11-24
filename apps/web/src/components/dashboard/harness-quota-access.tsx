@@ -175,8 +175,8 @@ export function HarnessQuotaAccess({ target, token, userId, hasReading = false, 
   const body = (
     <div className="space-y-2 text-sm" data-testid="harness-quota-access" data-state={state ?? "unknown"}
       aria-busy={change.isPending || undefined}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        {!shownReading && <p>
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        {!shownReading && <p className="min-w-0">
           <span className="font-semibold">Quota: Unknown</span>
           {state === "probes_off"
             ? <span className="text-muted-foreground"> · quota probes are off on {target.machineName}</span>
@@ -184,14 +184,15 @@ export function HarnessQuotaAccess({ target, token, userId, hasReading = false, 
               ? <span className="text-muted-foreground"> · {view.program}&apos;s sign-in has expired; sign in to {view.program} again</span>
               : !granted && <span className="text-muted-foreground"> · {view.lacking} has no official quota interface</span>}
         </p>}
-        {shownReading && <p className="text-muted-foreground">
+        {shownReading && <p className="min-w-0 text-muted-foreground">
           Read from {view.program}&apos;s sign-in on {target.machineName}, which never leaves it.</p>}
         {view.canChange && state !== "probes_off" && (granted
           ? <Button size="sm" variant="outline" disabled={change.isPending || Boolean(view.blocker)}
             onClick={() => run(false)}>
             {change.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}Stop reading
           </Button>
-          : <Button size="sm" variant="outline" disabled={change.isPending || Boolean(view.blocker)}
+          : <Button size="sm" variant="outline" className="h-auto max-w-full whitespace-normal text-left"
+            disabled={change.isPending || Boolean(view.blocker)}
             onClick={() => setAsking(true)}>
             {change.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <KeyRound />}
             Allow reading {view.program} sign-in to show quota
