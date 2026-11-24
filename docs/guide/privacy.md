@@ -1,6 +1,6 @@
 ---
 title: "Telemetry, diagnostics and local privacy — xMatrix Docs"
-description: "What stays on your machine, how optional local quota probes and client diagnostics work, and how to turn either off."
+description: "What stays on your machine, how optional local quota probes and client diagnostics work, beta vs stable defaults by region, and how to turn either off."
 ---
 
 # Telemetry and local privacy
@@ -56,16 +56,32 @@ To disable only Antigravity quota probing, set `XMATRIX_DISABLE_ANTIGRAVITY_QUOT
 
 xMatrix does not use advertising cookies, cross-site tracking, session replay, or third-party behavioral analytics SDKs (such as PostHog, Google Analytics, or Cloudflare Web Analytics).
 
-**Optional client diagnostics and browser crash reporting are off by default across all regions.** Unauthenticated marketing, docs, and legal pages never load Sentry. Nothing is sent from your clients unless you explicitly opt in (or click **Send failure report** on a desktop daemon startup failure card):
+Optional client diagnostics and browser crash reporting are **off by default in the stable apps and CLI**. Unauthenticated marketing, docs, and legal pages never load Sentry. What is sent when diagnostics are on:
 
-- **Error and crash reports (Sentry):** when opted in inside the signed-in app, uncaught browser errors and defects are sent with `userInfo`, `cookies`, `httpHeaders`, `httpBodies`, `urlQueryParams`, and console breadcrumbs disabled, and quoted text redacted. Self-hosted/local builds without a DSN send nothing. (Server-side Hub errors remain reported server-side to operate the hosted service.)
-- **First-party diagnostics (xMatrix Hub → Cloudflare Analytics Engine):** when opted in, clients send startup timing (`/api/observable/startup-timing`), onboarding setup step counts (`/api/observable/onboarding-step`), desktop daemon startup failures (`/api/observable/desktop-daemon-failure`), and CLI reconnect samples (`/api/observable/client-metrics`). Identifiers are pseudonymized server-side with a keyed HMAC-SHA-256 secret; no message or command bodies are included.
+- **Error and crash reports (Sentry):** inside the signed-in app, uncaught browser errors and defects are sent with `userInfo`, `cookies`, `httpHeaders`, `httpBodies`, `urlQueryParams`, and console breadcrumbs disabled, and quoted text redacted. Self-hosted/local builds without a DSN send nothing. (Server-side Hub errors remain reported server-side to operate the hosted service.)
+- **First-party diagnostics (xMatrix Hub → Cloudflare Analytics Engine):** startup timing (`/api/observable/startup-timing`), onboarding setup step counts (`/api/observable/onboarding-step`), desktop daemon startup failures (`/api/observable/desktop-daemon-failure`), and CLI reconnect samples (`/api/observable/client-metrics`). Identifiers are pseudonymized server-side with a keyed HMAC-SHA-256 secret; no message or command bodies are included.
+
+### Beta and stable defaults
+
+| | Stable apps and CLI | Beta apps and CLI |
+| --- | --- | --- |
+| You opted in | Sent | Sent |
+| You opted out, or Do Not Track, Global Privacy Control or `XMATRIX_TELEMETRY=0` | Not sent | Not sent |
+| No choice made; signup country **and** current country outside the EU, EEA, UK and Switzerland | Not sent | Sent, after a one-line notice linking to the off switch |
+| No choice made; either country in the EU, EEA, UK or Switzerland, or unknown | Not sent | Not sent; an unticked **Send diagnostics to help improve the beta** box is offered |
+
+Rows apply in order: an explicit opt-in is honoured even with Do Not Track or Global Privacy Control on. Only ticking that box or flipping the switch in Settings (or `xmatrix config telemetry on|off`) counts as a choice. Dismissing the notice is not a choice, and xMatrix never changes your setting for you.
+
+**How the region is decided.** Your clients have no reliable location of their own (time zone and language are settings), so the Hub tells them:
+
+- **Signup region.** When your account is created, the Hub records, from the country Cloudflare reports for that request, whether it is a country that requires prior consent. Only that category is stored, never the country or your IP address, and it is never changed by a later request. Accounts created earlier get it the first time they use a beta build. It is deleted with your account.
+- **Current region.** Before each send, a client uses the Hub's answer for its current connection, at most 10 minutes old; when older, it asks the Hub again with a small request that carries no diagnostics. If that lookup fails, times out or the country is unknown, nothing is sent. Travelling into a consent-required country therefore stops default sending within 10 minutes.
 
 ### Opting in or turning diagnostics off
 
-- **Web, Desktop, iOS, and Android:** open **Settings → Legal and privacy** and toggle **Send diagnostics and crash reports** (off by default). On Desktop, this switch also updates the local daemon's `telemetry` setting.
+- **Web, Desktop, iOS, and Android:** open **Settings → Legal and privacy** and toggle **Send diagnostics and crash reports**. Your choice is saved to your account, so every client follows it. On Desktop, this switch also updates the local daemon's `telemetry` setting.
 - **Desktop startup failure card:** even with diagnostics off, you can choose **Send failure report** once on a daemon startup failure card to share the redacted failure details.
-- **CLI and daemon:** off by default; opt in with `xmatrix config telemetry on` or `XMATRIX_TELEMETRY=1`, and turn off with `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0`, or `DO_NOT_TRACK=1`.
+- **CLI and daemon:** opt in with `xmatrix config telemetry on` or `XMATRIX_TELEMETRY=1`, and turn off with `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0`, or `DO_NOT_TRACK=1`. `xmatrix config telemetry on|off` also saves the choice to your account.
 
 ## Legal documents
 

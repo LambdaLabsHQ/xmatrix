@@ -83,13 +83,24 @@ export function PrivacyPolicyContent() {
             operate, secure, and troubleshoot the Services. Optional client-side diagnostics—startup
             timing, first-party onboarding step counts, CLI network reconnect samples, automatic
             desktop daemon startup failure reports, and scrubbed browser Sentry error reports—are{" "}
-            <strong className="text-foreground">off by default</strong> across all regions and are
-            sent only when a signed-in user opts in under Settings → Legal and privacy, submits a
-            desktop failure report from the failure card, or enables CLI network diagnostics via{" "}
-            <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code> or{" "}
-            <code className="font-mono text-xs">xmatrix config telemetry on</code> (suppressed
-            when <code className="font-mono text-xs">DO_NOT_TRACK=1</code> or{" "}
-            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> is set). Operational
+            <strong className="text-foreground">off by default</strong> in the stable apps and CLI. In
+            beta builds they are on by default only where both the country your account signed up from
+            and the country your current connection comes from (as reported by Cloudflare) are outside
+            the European Union, the European Economic Area, the United Kingdom, and Switzerland, and
+            only after a short notice that links to the off switch; there they rest on our legitimate
+            interest in fixing defects in pre-release software. Anywhere else, or where the country
+            cannot be determined, beta builds send nothing until you tick the unticked opt-in box or
+            turn the setting on. To apply this rule we record, once, whether your account was created
+            from a country that requires prior consent (a single category, not the country or your IP
+            address); it is deleted with your account. Your explicit choice, and when you made it, is
+            stored with your account. Unless you have opted in, diagnostics are not sent when you turn
+            them off, when your browser sends Do Not Track or Global Privacy Control, or when{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> or{" "}
+            <code className="font-mono text-xs">DO_NOT_TRACK=1</code> is set for the CLI. You can opt in
+            under Settings → Legal and privacy, with{" "}
+            <code className="font-mono text-xs">xmatrix config telemetry on</code> or{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code>, or by sending a desktop
+            failure report from the failure card. Operational
             diagnostics are designed not to contain message or command bodies; see our{" "}
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and Local Privacy guide

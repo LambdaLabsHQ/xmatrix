@@ -56,16 +56,32 @@ export XMATRIX_DISABLE_QUOTA_PROBES=1
 
 xMatrix 不使用广告 Cookie、跨站追踪、会话录屏，也不集成 PostHog、Google Analytics 或 Cloudflare Web Analytics 等第三方行为分析 SDK。
 
-**所有地区的可选客户端诊断与浏览器崩溃报告默认全部关闭（显式 Opt-in）。** 未登录的官网营销页、文档页与法律条款页绝不加载 Sentry。除非你主动开启（或在桌面端后台服务启动失败卡片上手动点击「发送失败报告」），客户端不会主动上报诊断数据：
+可选的客户端诊断与浏览器崩溃报告**在稳定版应用与 CLI 中默认关闭**；Beta 版的默认规则见下表。未登录的官网营销页、文档页与法律条款页绝不加载 Sentry。诊断开启时发送的内容：
 
-- **错误与崩溃报告（Sentry）**：仅在已登录应用内且你主动开启后生效，严格关闭用户信息、Cookie、HTTP 头/请求体、URL 查询参数与控制台面包屑，并对错误文本中的引用内容脱敏；未配置 DSN 的本地或自托管构建不发送任何报告。（Hub 服务端自身故障仍在服务端上报以保障托管服务运行。）
-- **第一方诊断指标（xMatrix Hub → Cloudflare Analytics Engine）**：仅在主动开启后发送启动耗时（`/api/observable/startup-timing`）、新手引导步骤计数（`/api/observable/onboarding-step`）、桌面端 daemon 启动失败原因（`/api/observable/desktop-daemon-failure`）与 CLI 网络重连样本（`/api/observable/client-metrics`）。标识符在服务端通过密钥 HMAC-SHA-256 假名化，不包含消息或命令正文。
+- **错误与崩溃报告（Sentry）**：仅在已登录应用内生效，严格关闭用户信息、Cookie、HTTP 头/请求体、URL 查询参数与控制台面包屑，并对错误文本中的引用内容脱敏；未配置 DSN 的本地或自托管构建不发送任何报告。（Hub 服务端自身故障仍在服务端上报以保障托管服务运行。）
+- **第一方诊断指标（xMatrix Hub → Cloudflare Analytics Engine）**：启动耗时（`/api/observable/startup-timing`）、新手引导步骤计数（`/api/observable/onboarding-step`）、桌面端 daemon 启动失败原因（`/api/observable/desktop-daemon-failure`）与 CLI 网络重连样本（`/api/observable/client-metrics`）。标识符在服务端通过密钥 HMAC-SHA-256 假名化，不包含消息或命令正文。
+
+### Beta 版与稳定版的默认行为
+
+| | 稳定版应用与 CLI | Beta 版应用与 CLI |
+| --- | --- | --- |
+| 你已主动开启 | 发送 | 发送 |
+| 你已主动关闭，或开启了 Do Not Track、Global Privacy Control，或设置 `XMATRIX_TELEMETRY=0` | 不发送 | 不发送 |
+| 未作选择；注册地**与**当前所在国家都不在欧盟、欧洲经济区、英国和瑞士 | 不发送 | 发送，并显示一行附带关闭入口的提示 |
+| 未作选择；任一国家在欧盟、欧洲经济区、英国或瑞士，或无法判断 | 不发送 | 不发送；显示一个未勾选的「Send diagnostics to help improve the beta」复选框 |
+
+各行按顺序生效：主动开启即使在 Do Not Track 或 Global Privacy Control 打开时也会被尊重。只有勾选该复选框或在设置中切换开关（或 `xmatrix config telemetry on|off`）才算你的选择；关闭提示不算选择，xMatrix 也不会替你更改设置。
+
+**如何判断地区。** 客户端自身没有可靠的位置信息（时区和语言都是用户设置），因此由 Hub 告诉它们：
+
+- **注册地区。** 创建账号时，Hub 根据 Cloudflare 报告的该请求所在国家，记录它是否属于需要事先同意的国家。只保存这一类别，不保存国家或 IP 地址，之后的请求也不会改写它。较早创建的账号在第一次使用 Beta 版时记录。删除账号时一并删除。
+- **当前地区。** 每次发送前，客户端使用 Hub 对当前连接给出的答复，且不超过 10 分钟；超过时会向 Hub 发一个不含任何诊断数据的小请求重新询问。若查询失败、超时或国家未知，则不发送。因此进入需要同意的国家后，默认发送最多 10 分钟内停止。
 
 ### 如何开启或关闭诊断与崩溃报告
 
-- **Web、桌面端、iOS 与 Android**：前往 **Settings → Legal and privacy**，切换 **Send diagnostics and crash reports**（默认关闭）。在桌面端中，该开关会同步更新内置本地 daemon 的 `telemetry` 配置。
+- **Web、桌面端、iOS 与 Android**：前往 **Settings → Legal and privacy**，切换 **Send diagnostics and crash reports**。你的选择保存在账号上，所有客户端都会遵循。在桌面端中，该开关会同步更新内置本地 daemon 的 `telemetry` 配置。
 - **桌面端启动失败卡片**：即便诊断开关处于关闭状态，若后台服务启动失败，你仍可在失败卡片上按需点击一次 **发送失败报告**，仅上报该次脱敏后的失败信息。
-- **CLI 与 daemon**：默认关闭；如需开启可执行 `xmatrix config telemetry on` 或设 `XMATRIX_TELEMETRY=1`，随时可通过 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 关闭。
+- **CLI 与 daemon**：执行 `xmatrix config telemetry on` 或设 `XMATRIX_TELEMETRY=1` 开启；通过 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 关闭。`xmatrix config telemetry on|off` 也会把选择保存到账号。
 
 ## 法律文件
 

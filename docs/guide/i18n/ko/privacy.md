@@ -52,15 +52,32 @@ Antigravity만 끄려면 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`을 설정�
 
 xMatrix는 광고 쿠키, 크로스사이트 추적, 세션 리플레이, PostHog·Google Analytics·Cloudflare Web Analytics 같은 서드파티 행동 분석 SDK를 사용하지 않습니다.
 
-**모든 지역에서 선택적 클라이언트 진단과 브라우저 오류 보고는 기본적으로 꺼져 있습니다(명시적 옵트인).** 로그인하지 않은 마케팅·문서·법적 페이지에서는 Sentry를 로드하지 않으며, 사용자가 직접 켜거나 데스크톱 시작 실패 카드에서 수동 전송을 클릭한 경우에만 전송됩니다:
+선택적 클라이언트 진단과 브라우저 오류 보고는 **안정 버전 앱과 CLI에서 기본적으로 꺼져 있습니다**. 베타 버전의 기본값은 아래 표와 같습니다. 로그인하지 않은 마케팅, 문서, 법적 문서 페이지는 Sentry를 불러오지 않습니다. 진단이 켜져 있을 때 보내는 내용:
 
-- **오류 및 충돌 보고(Sentry)**: 로그인된 앱에서 옵트인한 경우에만 전송되며, 사용자 정보, 쿠키, HTTP 헤더/본문, URL 쿼리, 콘솔 브레드크럼을 비활성화하고 인용 문자열을 마스킹합니다. DSN이 없는 로컬/셀프호스트 빌드에서는 전송하지 않습니다.
-- **퍼스트파티 진단(xMatrix Hub → Cloudflare Analytics Engine)**: 옵트인한 경우에만 시작 시간(`/api/observable/startup-timing`), 온보딩 단계 수(`/api/observable/onboarding-step`), 데스크톱 데몬 시작 실패 정보(`/api/observable/desktop-daemon-failure`), CLI 재연결 샘플(`/api/observable/client-metrics`)을 전송합니다. 식별자는 서버 키 기반 HMAC-SHA-256으로 가명화되며 메시지나 명령 본문은 포함되지 않습니다.
+- **오류 및 크래시 보고(Sentry)**: 로그인한 앱 안에서만 동작하며 `userInfo`, 쿠키, HTTP 헤더/본문, URL 쿼리 매개변수, 콘솔 브레드크럼은 끄고 인용된 텍스트는 가립니다. DSN이 없는 로컬/자체 호스팅 빌드는 아무것도 보내지 않습니다. (Hub 서버 측 오류는 호스팅 서비스 운영을 위해 계속 서버 측에서 보고됩니다.)
+- **자사 진단(xMatrix Hub → Cloudflare Analytics Engine)**: 시작 시간(`/api/observable/startup-timing`), 온보딩 단계 수(`/api/observable/onboarding-step`), 데스크톱 daemon 시작 실패(`/api/observable/desktop-daemon-failure`), CLI 재연결 샘플(`/api/observable/client-metrics`). 식별자는 서버에서 키 기반 HMAC-SHA-256으로 가명 처리되며 메시지나 명령 본문은 포함되지 않습니다.
+
+### 베타와 안정 버전의 기본값
+
+| | 안정 버전 앱과 CLI | 베타 버전 앱과 CLI |
+| --- | --- | --- |
+| 직접 켬 | 보냄 | 보냄 |
+| 직접 끔, 또는 Do Not Track, Global Privacy Control, `XMATRIX_TELEMETRY=0` | 보내지 않음 | 보내지 않음 |
+| 선택 없음. 가입 국가**와** 현재 국가가 모두 EU, EEA, 영국, 스위스 밖 | 보내지 않음 | 보냄(끄는 링크가 있는 한 줄 안내 표시) |
+| 선택 없음. 어느 한 국가가 EU, EEA, 영국, 스위스이거나 알 수 없음 | 보내지 않음 | 보내지 않음. 체크되지 않은 「Send diagnostics to help improve the beta」 상자 표시 |
+
+행은 위에서부터 순서대로 적용됩니다. 직접 켠 경우에는 Do Not Track이나 Global Privacy Control이 켜져 있어도 존중됩니다. 그 상자를 체크하거나 설정의 스위치를 바꾸는 것(또는 `xmatrix config telemetry on|off`)만 선택으로 봅니다. 안내를 닫는 것은 선택이 아니며, xMatrix가 설정을 대신 바꾸지 않습니다.
+
+**지역 판단 방법.** 클라이언트에는 믿을 만한 위치 정보가 없으므로(시간대와 언어는 사용자 설정) Hub가 알려 줍니다:
+
+- **가입 지역.** 계정을 만들 때 Hub는 Cloudflare가 알려 주는 그 요청의 국가로부터 사전 동의가 필요한 국가인지 여부만 기록합니다. 국가나 IP 주소는 저장하지 않으며 이후 요청으로 바뀌지 않습니다. 기존 계정은 처음 베타를 사용할 때 기록됩니다. 계정을 삭제하면 함께 삭제됩니다.
+- **현재 지역.** 보낼 때마다 클라이언트는 현재 연결에 대해 Hub가 준 10분 이내의 답을 사용합니다. 더 오래되었으면 진단 데이터가 없는 작은 요청으로 Hub에 다시 묻습니다. 조회가 실패하거나 시간 초과되거나 국가를 알 수 없으면 보내지 않습니다. 따라서 동의가 필요한 국가로 이동하면 기본 전송은 10분 안에 멈춥니다.
 
 ### 진단 및 오류 보고 켜기/끄기
 
-- **Web, Desktop, iOS, Android**: **Settings → Legal and privacy**에서 **Send diagnostics and crash reports**를 전환합니다(기본 꺼짐). 데스크톱에서는 로컬 데몬의 `telemetry` 설정도 함께 동기화됩니다.
-- **CLI 및 데몬**: 기본 꺼짐입니다. `xmatrix config telemetry on` 또는 `XMATRIX_TELEMETRY=1`로 켜고, `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` 또는 `DO_NOT_TRACK=1`로 끌 수 있습니다.
+- **웹, 데스크톱, iOS, Android**: **Settings → Legal and privacy**에서 **Send diagnostics and crash reports**를 전환합니다. 선택은 계정에 저장되어 모든 클라이언트가 따릅니다. 데스크톱에서는 이 스위치가 로컬 daemon의 `telemetry` 설정도 바꿉니다.
+- **데스크톱 시작 실패 카드**: 진단이 꺼져 있어도 daemon 시작 실패 카드에서 **Send failure report**를 한 번 눌러 가려진 실패 정보를 보낼 수 있습니다.
+- **CLI와 daemon**: `xmatrix config telemetry on` 또는 `XMATRIX_TELEMETRY=1`로 켜고, `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0`, `DO_NOT_TRACK=1`로 끕니다. `xmatrix config telemetry on|off`는 선택을 계정에도 저장합니다.
 
 ## 법적 문서
 
