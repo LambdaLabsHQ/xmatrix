@@ -359,7 +359,7 @@ expiry and clears only when a Run on that registration (or on the refused scope)
 replies successfully (`clearRegistrationAccountHold`). The Agents page shows an account
 billing hold as the provider refusing requests (`quota.account.allowed: false`), never as
 a used-up window. Cursor refusals held at account level before the scoped form existed
-were rewritten to the `API`-scope hold by contract migration 0274. Stopping the read of a
+were rewritten to the `API`-scope hold by contract migration 0275. Stopping the read of a
 harness's sign-in (`quota_access_off`, or an inventory reporting `not_granted`) drops
 every window read under that grant, including those stored beside a refusal hold, and
 pushes the owner's pages the pool as it now stands. A start or turn refused as signed
