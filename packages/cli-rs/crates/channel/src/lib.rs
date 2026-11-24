@@ -13,13 +13,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use colored::Colorize;
+use futures_util::future::join;
+use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use xmatrix_cli_args::{ChannelCommand, ChannelVisibilityState, SpaceCommand, WorktreeState};
 use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_marker};
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::human_connection::{HumanConnectionClient, HumanConnectionEvent};
-use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy};
+use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy, MEDIA_FETCH_CONCURRENCY};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
 use xmatrix_cli_core::route_key;
 use xmatrix_cli_core::text_input::{self, TextRoutes, TextSource};
@@ -2466,8 +2468,13 @@ async fn daemon_cached_channel_history(
 }
 
 async fn cmd_channel_history(hub_url: &str, token: &str, channel_id: &str) -> error::Result<()> {
-    let messages = load_full_channel_history(hub_url, token, channel_id).await?;
-    let threads = match load_channel_read_context(hub_url, token, channel_id).await {
+    let (messages_result, context_result) = join(
+        load_full_channel_history(hub_url, token, channel_id),
+        load_channel_read_context(hub_url, token, channel_id),
+    )
+    .await;
+    let messages = messages_result?;
+    let threads = match context_result {
         Ok(context) => {
             println!("{}", context.text);
             context.threads
@@ -3025,19 +3032,18 @@ async fn materialize_history_image_attachments(
     token: &str,
     messages: &[protocol::ChannelMessage],
 ) -> HashMap<(String, String), PathBuf> {
-    let mut local = HashMap::new();
+    let mut seen = HashSet::new();
+    let mut targets = Vec::new();
     for message in messages {
         let Some(attachments) = message.attachments.as_deref() else {
             continue;
         };
         for attachment in attachments {
-            if !attachment.data_url.is_empty() {
-                continue;
-            }
-            if attachment
-                .url
-                .as_deref()
-                .is_some_and(|value| !value.is_empty())
+            if !attachment.data_url.is_empty()
+                || attachment
+                    .url
+                    .as_deref()
+                    .is_some_and(|value| !value.is_empty())
             {
                 continue;
             }
@@ -3054,7 +3060,16 @@ async fn materialize_history_image_attachments(
             if channel_id.is_empty() || message_id.is_empty() || attachment.id.is_empty() {
                 continue;
             }
-            match download_message_attachment_product_media(
+            let key = (message.message_id.clone(), attachment.id.clone());
+            if seen.insert(key.clone()) {
+                targets.push((key, channel_id, message_id, attachment));
+            }
+        }
+    }
+    let mut local = HashMap::with_capacity(targets.len());
+    let mut downloads = stream::iter(targets)
+        .map(|(key, channel_id, message_id, attachment)| async move {
+            let result = download_message_attachment_product_media(
                 hub_url,
                 token,
                 channel_id,
@@ -3064,19 +3079,22 @@ async fn materialize_history_image_attachments(
                 &attachment.mime_type,
                 &attachment.name,
             )
-            .await
-            {
-                Ok(path) => {
-                    local.insert((message.message_id.clone(), attachment.id.clone()), path);
-                }
-                Err(err) => {
-                    eprintln!(
-                        "{} failed to materialize attachment {} ({}): {err}",
-                        "⚠".yellow().bold(),
-                        attachment.name,
-                        attachment.id
-                    );
-                }
+            .await;
+            (key, attachment, result)
+        })
+        .buffer_unordered(MEDIA_FETCH_CONCURRENCY);
+    while let Some((key, attachment, result)) = downloads.next().await {
+        match result {
+            Ok(path) => {
+                local.insert(key, path);
+            }
+            Err(err) => {
+                eprintln!(
+                    "{} failed to materialize attachment {} ({}): {err}",
+                    "⚠".yellow().bold(),
+                    attachment.name,
+                    attachment.id
+                );
             }
         }
     }
@@ -4141,5 +4159,131 @@ mod tests {
             super::shell_quote("https://example.com/attachment?token=one'two"),
             "'https://example.com/attachment?token=one'\\''two'"
         );
+    }
+
+    #[tokio::test]
+    async fn materialize_history_image_attachments_downloads_concurrently() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::sync::{Arc, Barrier};
+
+        let _guard = TEST_ENV_LOCK.lock().unwrap();
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let cache_root = std::env::temp_dir().join(format!(
+            "xmatrix-history-parallel-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let previous_config = std::env::var_os("XMATRIX_CONFIG_DIR");
+        unsafe {
+            std::env::set_var("XMATRIX_CONFIG_DIR", &cache_root);
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let hub = format!("http://{}", listener.local_addr().unwrap());
+        let barrier = Arc::new(Barrier::new(2));
+        let server = std::thread::spawn(move || {
+            let mut workers = Vec::new();
+            for _ in 0..2 {
+                let (mut socket, _) = listener.accept().unwrap();
+                let barrier = Arc::clone(&barrier);
+                workers.push(std::thread::spawn(move || {
+                    use std::io::{BufRead, Read};
+                    socket
+                        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                        .unwrap();
+                    let mut reader = std::io::BufReader::new(socket.try_clone().unwrap());
+                    let mut headers = String::new();
+                    loop {
+                        let mut line = String::new();
+                        reader.read_line(&mut line).unwrap();
+                        let end = line == "\r\n";
+                        headers.push_str(&line);
+                        if end {
+                            break;
+                        }
+                    }
+                    let len = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    let mut req_body = vec![0; len];
+                    reader.read_exact(&mut req_body).unwrap();
+                    let payload: serde_json::Value = serde_json::from_slice(&req_body).unwrap();
+                    let body = match payload["attachmentId"].as_str().unwrap() {
+                        "att-a" => b"png-bytes-a!".as_slice(),
+                        "att-b" => b"png-bytes-b!".as_slice(),
+                        other => panic!("unexpected attachment {other}"),
+                    };
+                    // Both requests must be in flight simultaneously or this barrier times out.
+                    barrier.wait();
+                    write!(
+                        socket,
+                        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .unwrap();
+                    socket.write_all(body).unwrap();
+                }));
+            }
+            for worker in workers {
+                worker.join().unwrap();
+            }
+        });
+
+        let messages = vec![
+            history_message(
+                "msg-a",
+                "ch-par",
+                1,
+                String::new(),
+                ChannelAttachment {
+                    channel_id: Some("ch-par".into()),
+                    message_id: Some("msg-a".into()),
+                    ..attachment_fixture::image_attachment("att-a", "a.png", "image/png", 12)
+                },
+                "2026-11-24T20:00:00Z",
+            ),
+            history_message(
+                "msg-b",
+                "ch-par",
+                2,
+                String::new(),
+                ChannelAttachment {
+                    channel_id: Some("ch-par".into()),
+                    message_id: Some("msg-b".into()),
+                    ..attachment_fixture::image_attachment("att-b", "b.png", "image/png", 12)
+                },
+                "2026-11-24T20:00:01Z",
+            ),
+        ];
+
+        let local = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::materialize_history_image_attachments(&hub, "test-token", &messages),
+        )
+        .await
+        .expect("concurrent attachment downloads must not deadlock on the 2-way barrier");
+        server.join().unwrap();
+
+        assert_eq!(
+            std::fs::read(&local[&("msg-a".into(), "att-a".into())]).unwrap(),
+            b"png-bytes-a!"
+        );
+        assert_eq!(
+            std::fs::read(&local[&("msg-b".into(), "att-b".into())]).unwrap(),
+            b"png-bytes-b!"
+        );
+
+        unsafe {
+            match previous_config {
+                Some(value) => std::env::set_var("XMATRIX_CONFIG_DIR", value),
+                None => std::env::remove_var("XMATRIX_CONFIG_DIR"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&cache_root);
     }
 }

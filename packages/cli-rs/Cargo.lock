@@ -3237,6 +3237,7 @@ name = "xmatrix-cli-channel"
 version = "0.0.0"
 dependencies = [
  "colored",
+ "futures-util",
  "reqwest",
  "rustls",
  "serde",
@@ -3297,6 +3298,7 @@ name = "xmatrix-cli-memory"
 version = "0.0.0"
 dependencies = [
  "colored",
+ "futures-util",
  "rustls",
  "serde",
  "serde_json",
