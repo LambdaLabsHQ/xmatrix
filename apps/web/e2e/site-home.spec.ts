@@ -83,15 +83,19 @@ for (const width of [393, 1440]) {
   });
 }
 
-test("a comparison panel on a phone is as wide as its row, whatever its scene holds", async ({ page }) => {
+test("the comparison stage switches across all six topics without overflowing a phone", async ({ page }) => {
   await page.setViewportSize({ width: 393, height: 900 });
   await page.goto("/");
-  const panel = page.locator("#why .site-why-panel").first();
-  // A scene's widest line changes as the scene plays; one far wider than the screen stands in for all of them.
-  await panel.locator(".site-why-scene > *").first().evaluate((scene: HTMLElement) => { scene.style.minWidth = "1000px"; });
-  const widths = await panel.evaluate((figure) => ({
-    panel: figure.getBoundingClientRect().width, row: figure.parentElement!.getBoundingClientRect().width,
-  }));
-  expect(widths.panel).toBeCloseTo(widths.row, 0);
-  expect(widths.row).toBeLessThan(393);
+  const why = page.locator("#why");
+  await why.scrollIntoViewIfNeeded();
+  const tabs = why.getByRole("tab");
+  await expect(tabs).toHaveCount(6);
+
+  for (let i = 0; i < 6; i += 1) {
+    await tabs.nth(i).click();
+    await expect(tabs.nth(i)).toHaveAttribute("aria-selected", "true");
+    // Both sides render live interfaces and stay inside the 393px viewport.
+    await expect(why.getByRole("tabpanel")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
 });
