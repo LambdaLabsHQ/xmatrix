@@ -138,7 +138,7 @@ integration("Cursor's pre-scope account billing holds become the API-scope hold,
         ('owner',$1,0,'2026-11-19T21:57:20Z','2027-11-19T21:57:20Z','daemon',NULL,'{"billingRefusal":true}'::jsonb)`,
       [`registration:m1:${harness}`]);
     }
-    const migration = await readFile(new URL("../migrations/0274_contract_cursor_billing_holds_scoped.sql", import.meta.url), "utf8");
+    const migration = await readFile(new URL("../migrations/0275_contract_cursor_billing_holds_scoped.sql", import.meta.url), "utf8");
     const row = async harness => (await sql(`SELECT ${QUOTA_COLUMNS} FROM control.registration_quota_observations
       WHERE owner_user_id='owner' AND quota_pool_id=$1`, [`registration:m1:${harness}`])).rows[0];
     for (let run = 0; run < 2; run++) await sql(`BEGIN; ${migration} COMMIT;`);
