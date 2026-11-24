@@ -1,6 +1,6 @@
 import { channelActivityOf, channelActivityLine, isAddressableAgentInstance, isRetiredPlanActivity, type ChannelMessage,
   type ChannelSummarySource, type InstanceRecord, type PageDocument } from "@xmatrix/protocol";
-import { renderAgentTurnMessage, type AgentTurnReader } from "./agent-turn-message";
+import { browserPageLine, renderAgentTurnMessage, type AgentTurnReader } from "./agent-turn-message";
 
 /**
  * What a newly launched Agent reads before its first turn: the conversation it
@@ -73,6 +73,9 @@ function renderHistoryEntry(message: ChannelMessage, readAt: string | undefined)
     entry += `  [attachment] ${attachment.name} (${attachment.mimeType}, ${attachment.size} bytes) — run ` +
       `\`xmatrix channel history ${message.channelId}\` to save it locally and read it from the printed \`local:\` path\n`;
   }
+  // Written in the Chrome side panel: tell a newly launched Agent which page the sender was viewing.
+  const pageLine = browserPageLine(message.metadata);
+  if (pageLine) entry += `  ${pageLine}\n`;
   return entry;
 }
 

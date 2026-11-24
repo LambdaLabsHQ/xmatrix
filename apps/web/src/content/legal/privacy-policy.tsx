@@ -89,8 +89,14 @@ export function PrivacyPolicyContent() {
             <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code> or{" "}
             <code className="font-mono text-xs">xmatrix config telemetry on</code> (suppressed
             when <code className="font-mono text-xs">DO_NOT_TRACK=1</code> or{" "}
-            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> is set). Operational
-            diagnostics are designed not to contain message or command bodies; see our{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> is set). Each
+            diagnostic event has a declared set of fields, and each field may hold only a fixed
+            value, a number, true or false, a version, a short code, or an opaque identifier; an event with any
+            other field or value is refused. Client errors are reported by their class, code, and
+            code locations, never by their message. The one exception is the redacted startup
+            output you choose to send from a desktop failure card. Server-side Hub error reports
+            keep the server&apos;s own error message with quoted values, email addresses, URL
+            queries, home-directory paths, and token-shaped strings removed. See our{" "}
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and Local Privacy guide
             </Link>
@@ -166,8 +172,7 @@ export function PrivacyPolicyContent() {
           <p>
             <strong className="text-foreground">Which files.</strong> For an AI tool you registered
             as an Agent on a computer, the xMatrix daemon on that computer may read that tool&apos;s
-            own sign-in: for example Codex&apos;s{" "}
-            <code className="font-mono text-xs">~/.codex/auth.json</code>, Grok&apos;s{" "}
+            own sign-in: for example Grok&apos;s{" "}
             <code className="font-mono text-xs">~/.grok/auth.json</code>, Claude Code&apos;s{" "}
             <code className="font-mono text-xs">~/.claude/.credentials.json</code> or keychain entry,
             Cursor&apos;s or OpenCode&apos;s <code className="font-mono text-xs">auth.json</code> or
@@ -175,7 +180,10 @@ export function PrivacyPolicyContent() {
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and local privacy guide
             </Link>
-            . It never reads the login of a tool you did not register.
+            . It never reads the login of a tool you did not register. Codex is not read this way:
+            the daemon asks Codex itself, through the Codex session already running or a briefly
+            started <code className="font-mono text-xs">codex app-server</code>, and Codex answers
+            with its own sign-in. xMatrix opens no Codex login file.
           </p>
           <p>
             <strong className="text-foreground">Why.</strong> To ask that provider how much of your
@@ -191,9 +199,9 @@ export function PrivacyPolicyContent() {
             provider still serves the account, and a prepaid balance where applicable.
           </p>
           <p>
-            <strong className="text-foreground">How to turn it off.</strong> One switch stops both the
-            file reads and the provider requests on that computer: Desktop Settings → Legal and
-            privacy → Local provider quota probes, or{" "}
+            <strong className="text-foreground">How to turn it off.</strong> One switch stops the
+            file reads, the Codex app-server requests and the provider requests on that computer:
+            Desktop Settings → Legal and privacy → Local provider quota probes, or{" "}
             <code className="font-mono text-xs">xmatrix config quotaProbes off</code>, or the
             environment variable{" "}
             <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code>. With it off,

@@ -15,7 +15,7 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 
 ## 本地服务商额度探测
 
-**一句话说明：** 为了显示你已注册的 AI 工具还剩多少额度，xMatrix daemon 会读取这些工具在你电脑上的登录文件（例如 `~/.codex/auth.json`），并直接向对应服务商查询。从这些文件读到的任何内容（令牌、账号 ID、文件内容或文件指纹）都不会发送给 xMatrix；Hub 只收到归一化后的额度结果。同一个开关可同时停止读取文件和向服务商发请求（见下方「如何关闭本地额度探测」）。
+**一句话说明：** 为了显示你已注册的 AI 工具还剩多少额度，xMatrix daemon 会读取这些工具在你电脑上的登录文件（例如 `~/.grok/auth.json`），并直接向对应服务商查询。Codex 例外：xMatrix 直接询问 Codex 本身（正在运行的 Codex 会话，或短暂启动的 `codex app-server`），不打开任何 Codex 登录文件。从这些文件读到的任何内容（令牌、账号 ID、文件内容或文件指纹）都不会发送给 xMatrix；Hub 只收到归一化后的额度结果。同一个开关可同时停止读取文件、向 Codex app-server 发请求和向服务商发请求（见下方「如何关闭本地额度探测」）。
 
 当你在本机注册了受支持的智能体工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）时，xMatrix 可在 `xmatrix agent list` 与 Agents 页面展示订阅剩余额度，并供 `@auto` 自动避开已用尽的账号。
 
@@ -24,7 +24,7 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 | 工具 | 仅在本地内存读取的存储位置 | 由你本机直连的原厂接口 |
 | --- | --- | --- |
 | Claude Code | macOS 钥匙串（`Claude Code-credentials`）或 `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
-| Codex | `$CODEX_HOME/auth.json` 或 `~/.codex/auth.json` | `https://chatgpt.com/backend-api/wham/usage` |
+| Codex | 不读取：调用 Codex 自己的 app-server 方法 `account/rateLimits/read`（正在运行的会话或短暂启动的 `codex app-server`） | 由 Codex 使用其自身登录处理 |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS 钥匙串（`cursor-access-token`）或 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` 或 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` 或 OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` 或 ChatGPT `wham/usage` |
@@ -50,7 +50,7 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-如仅关闭 Antigravity 额度探测，可设 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。关闭后，xMatrix 在预检、启动/重连与限额恢复等所有路径下均不再读取任何本地服务商凭据或查询原厂额度接口。
+如仅关闭 Antigravity 额度探测，可设 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。关闭后，xMatrix 在预检、启动/重连与限额恢复等所有路径下均不再读取任何本地服务商凭据、启动 `codex app-server` 或询问 Codex 会话，也不查询原厂额度接口。
 
 ## 客户端诊断与崩溃报告
 
@@ -58,8 +58,17 @@ xMatrix 不使用广告 Cookie、跨站追踪、会话录屏，也不集成 Post
 
 **所有地区的可选客户端诊断与浏览器崩溃报告默认全部关闭（显式 Opt-in）。** 未登录的官网营销页、文档页与法律条款页绝不加载 Sentry。除非你主动开启（或在桌面端后台服务启动失败卡片上手动点击「发送失败报告」），客户端不会主动上报诊断数据：
 
-- **错误与崩溃报告（Sentry）**：仅在已登录应用内且你主动开启后生效，严格关闭用户信息、Cookie、HTTP 头/请求体、URL 查询参数与控制台面包屑，并对错误文本中的引用内容脱敏；未配置 DSN 的本地或自托管构建不发送任何报告。（Hub 服务端自身故障仍在服务端上报以保障托管服务运行。）
-- **第一方诊断指标（xMatrix Hub → Cloudflare Analytics Engine）**：仅在主动开启后发送启动耗时（`/api/observable/startup-timing`）、新手引导步骤计数（`/api/observable/onboarding-step`）、桌面端 daemon 启动失败原因（`/api/observable/desktop-daemon-failure`）与 CLI 网络重连样本（`/api/observable/client-metrics`）。标识符在服务端通过密钥 HMAC-SHA-256 假名化，不包含消息或命令正文。
+- **错误与崩溃报告（Sentry）**：仅在已登录应用内且你主动开启后生效，只发送错误的类型、错误自带的代码（如有）以及调用栈中的代码位置；错误消息、面包屑、URL、Cookie、HTTP 头、请求体与用户信息一律不发送。未配置 DSN 的本地或自托管构建不发送任何报告。（Hub 服务端自身故障仍在服务端上报以保障托管服务运行，见下文。）
+- **第一方诊断指标（xMatrix Hub → Cloudflare Analytics Engine）**：仅在主动开启后发送启动耗时（`/api/observable/startup-timing`）、新手引导步骤计数（`/api/observable/onboarding-step`）、桌面端 daemon 启动失败原因（`/api/observable/desktop-daemon-failure`）与 CLI 网络重连样本（`/api/observable/client-metrics`）。标识符在服务端通过密钥 HMAC-SHA-256 假名化。
+
+### 诊断事件可以包含什么
+
+每个诊断事件都有一组声明好的字段，客户端生成时校验一次，Hub 接收时再校验一次。字段只能是列表中的固定值、数字、true/false、版本号、不透明标识符，或形如 `websocket_connect_failed` 的短代码（小写字母、数字、`_` 与 `-`）。只要出现未声明的字段或超出字段范围的值，整个事件就会被拒绝，而不是被截断成合规形状，因此你写下的文字没有任何字段可以夹带。错误只按类型和代码上报，绝不包含错误消息。
+
+只有以下两条路径会携带文字：
+
+- **桌面端启动失败卡片上的「发送失败报告」**：CLI 的最后几行输出，桌面应用会先在你的机器上脱敏（主目录、邮箱地址、URL 查询参数以及任何形似令牌或密钥的内容都会被替换）。卡片会先向你展示这些行，只有你点击按钮才会发送；诊断开启时自动发送的报告只包含失败阶段、退出码、平台与应用版本。
+- **Hub 服务端错误报告**：服务端自身的错误消息，其中引用的值、邮箱地址、URL 查询参数、主目录路径与形似令牌的字符串都会被移除。日志附带的字段只有在是数字、true/false 或不透明标识符时才会上报。
 
 ### 如何开启或关闭诊断与崩溃报告
 

@@ -1,595 +1,408 @@
-//! Codex / ChatGPT quota, read from the wham usage endpoint so the Agents panel
-//! can show 5h/1w windows while the agent is idle or mid-turn.
+//! Codex / ChatGPT account quota, read through Codex's own app-server method
+//! `account/rateLimits/read` (openai/codex#5302).
+//!
+//! Codex resolves and refreshes its own sign-in, so xMatrix never opens the
+//! Codex credential file or calls a ChatGPT backend endpoint itself. A running
+//! Codex session asks the app-server it already holds (the runtime sends
+//! [`ACCOUNT_RATE_LIMITS_METHOD`] and parses the result with
+//! [`codex_account_usage_from_response`]); a pre-launch probe briefly starts
+//! `codex app-server` for one config home, makes the same request, and stops it.
+//!
+//! The response is the account's quota. It shares the `primary`/`secondary`
+//! window shape with the per-thread `rateLimits` snapshots a session streams,
+//! but those snapshots are never parsed as account quota: only the answer to
+//! this request is, so one account yields one meter no matter how many Codex
+//! threads run on it.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use serde_json::Value;
-use sha2::{Digest, Sha256};
+use colored::Colorize;
+use serde_json::{Map, Value};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::cache::KeyedProviderUsageCache;
-use super::windows::{
-    append_quota_usages, normalized_quota_percent, prefer_codex_quota_windows,
-    quota_percent_from_usage_fields, rate_limit_window_label,
-};
-use crate::fields::{first_f64, first_reset_at, first_string};
-use crate::host::{lowercase_hex, provider_client};
+use super::windows::{credit_balance, normalized_quota_percent, rate_limit_window_label};
+use crate::fields::{first_f64, first_reset_at};
 use crate::usage::{LlmQuotaAccount, LlmQuotaCredits, LlmQuotaUsage, LlmUsage, has_llm_usage};
 
-pub(crate) const CODEX_CHATGPT_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+/// The app-server request that answers the signed-in account's rate limits.
+pub const ACCOUNT_RATE_LIMITS_METHOD: &str = "account/rateLimits/read";
 
-static CODEX_CHATGPT_USAGE: KeyedProviderUsageCache =
+/// First Codex release whose app-server answers [`ACCOUNT_RATE_LIMITS_METHOD`].
+pub const MIN_ACCOUNT_RATE_LIMITS_VERSION: (u64, u64, u64) = (0, 48, 0);
+
+/// First Codex release that accepts request params on the method
+/// (`excludeResetCreditDetails`). Older releases reject any params object.
+const MIN_ACCOUNT_RATE_LIMITS_PARAMS_VERSION: (u64, u64, u64) = (0, 154, 0);
+
+/// Bound on one pre-launch probe: app-server start, handshake, and the
+/// provider read it makes on our behalf.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a probe app-server gets to exit on stdin EOF before it is killed.
+const PROBE_EXIT_GRACE: Duration = Duration::from_secs(2);
+const MAX_PROBE_LINE_BYTES: usize = 1024 * 1024;
+
+const INITIALIZE_ID: u64 = 1;
+const RATE_LIMITS_ID: u64 = 2;
+
+static CODEX_ACCOUNT_USAGE: KeyedProviderUsageCache =
     KeyedProviderUsageCache::new(Duration::from_secs(120), Duration::from_secs(60));
 
-fn codex_home_dir() -> Option<PathBuf> {
-    std::env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
-}
+static LOGGED_UNSUPPORTED_VERSION: AtomicBool = AtomicBool::new(false);
 
-/// The cache key is the exact config home plus a content fingerprint of the
-/// `auth.json` snapshot, so two Profiles that resolve to different accounts
-/// never share a reading and a rotated `auth.json` at one path is not answered
-/// from the previous account.
-fn codex_quota_cache_key(home: &Path, auth_fingerprint: &str) -> String {
-    let base = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
-    format!("{}\u{0}{auth_fingerprint}", base.to_string_lossy())
-}
+/// A Codex release as `(major, minor, patch)`.
+pub type CodexVersion = (u64, u64, u64);
 
-/// A one-way fingerprint of the exact `auth.json` bytes that produced the
-/// token. It is used only as an in-memory cache key; the raw file and the digest
-/// are never logged or sent. Deriving it from the same snapshot removes the race
-/// between reading auth and reading file metadata, and a content swap that
-/// preserves the file timestamp still changes the key.
-fn codex_auth_content_fingerprint(raw: &str) -> String {
-    lowercase_hex(&Sha256::digest(raw.as_bytes()))
-}
-
-/// The ChatGPT access token, optional account id, and content fingerprint read
-/// from one `auth.json` snapshot in this exact home. A missing or unreadable
-/// file is a miss, never a fallback to another Profile's home.
-struct CodexAuthSnapshot {
-    access_token: String,
-    account_id: Option<String>,
-    content_fingerprint: String,
-}
-
-fn codex_chatgpt_auth_snapshot_in(home: &Path) -> Option<CodexAuthSnapshot> {
-    let raw = std::fs::read_to_string(home.join("auth.json")).ok()?;
-    let value: Value = serde_json::from_str(&raw).ok()?;
-    let root = value.as_object()?;
-    let tokens = root
-        .get("tokens")
-        .and_then(Value::as_object)
-        .unwrap_or(root);
-    let access_token = first_string(tokens, &["access_token", "accessToken", "token", "access"])?;
-    let account_id = first_string(tokens, &["account_id", "accountId"])
-        .or_else(|| first_string(root, &["account_id", "accountId"]));
-    Some(CodexAuthSnapshot {
-        access_token,
-        account_id,
-        content_fingerprint: codex_auth_content_fingerprint(&raw),
-    })
-}
-
-/// Codex ChatGPT subscription windows from `/backend-api/wham/usage`, read from
-/// one explicit config home. Prefer this over waiting for app-server
-/// rate-limit snapshots so Agents UI can show 5h/1w while the agent is idle or
-/// mid-turn.
-///
-/// The home is passed in rather than taken from the process environment: a
-/// pre-launch reader must read the same account the spawn would use, and two
-/// Profiles on one host must not share one cache slot.
-pub(crate) async fn read_codex_chatgpt_usage_for_home(
-    home: &Path,
-    force: bool,
-) -> Option<LlmUsage> {
-    if super::quota_probes_disabled() {
-        return None;
-    }
-    read_codex_usage_from_endpoint(home, force, CODEX_CHATGPT_USAGE_URL).await
-}
-
-// The production entrypoint fixes the provider URL. The private seam lets
-// tests exercise HTTP/auth/cache behavior against loopback without real keys.
-async fn read_codex_usage_from_endpoint(
-    home: &Path,
-    force: bool,
-    endpoint: &str,
-) -> Option<LlmUsage> {
-    // Resolve the account snapshot before consulting the cache: a rotated
-    // `auth.json` at the same path must not reuse the previous account's
-    // reading, and a home without auth is a miss that must not touch another
-    // account's slot.
-    let snapshot = codex_chatgpt_auth_snapshot_in(home)?;
-    let key = codex_quota_cache_key(home, &snapshot.content_fingerprint);
-    if let Some(cached) = CODEX_CHATGPT_USAGE.hit_unless_forced(&key, force) {
-        return cached;
-    }
-    let value = fetch_wham_usage_json(
-        &key,
-        "codex",
-        &snapshot.access_token,
-        snapshot.account_id.as_deref(),
-        endpoint,
-    )
-    .await?;
-
-    // The request may outlive an account switch at the same config home.
-    // Reject that response before caching or returning it to the daemon; the
-    // credential fingerprint stays local and is never part of the wire schema.
-    if codex_chatgpt_auth_snapshot_in(home)?.content_fingerprint != snapshot.content_fingerprint {
-        return None;
-    }
-
-    store_wham_usage(&key, &value)
-}
-
-/// One bounded `wham/usage` request for a ChatGPT access token.
-async fn fetch_wham_usage_json(
-    cache_key: &str,
-    label: &str,
-    access_token: &str,
-    account_id: Option<&str>,
-    endpoint: &str,
-) -> Option<Value> {
-    let mut request = provider_client()
-        .get(endpoint)
-        .header(
-            reqwest::header::AUTHORIZATION,
-            format!("Bearer {access_token}"),
-        )
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .header(reqwest::header::USER_AGENT, "xmatrix-cli");
-    if let Some(account_id) = account_id {
-        request = request.header("ChatGPT-Account-Id", account_id);
-    }
-    CODEX_CHATGPT_USAGE
-        .fetch_json(cache_key, label, request)
-        .await
-}
-
-/// Parse a `wham/usage` body, stamp it, and remember it under `cache_key`.
-fn store_wham_usage(cache_key: &str, value: &Value) -> Option<LlmUsage> {
-    // This endpoint is the account-level quota authority. Restrict parsing to
-    // its wham envelope rather than accepting any rate-limit-like nested
-    // object that could resemble an app-server session snapshot.
-    let mut usage = codex_wham_usage_from_value(value);
-    if let Some(usage) = usage.as_mut() {
-        usage.quota_observed_at = super::observed_now();
-    }
-    CODEX_CHATGPT_USAGE.store(cache_key, usage.clone());
-    usage
-}
-
-/// Backwards-compatible entry point used by the Codex runtime: resolve the
-/// process `CODEX_HOME` (or `~/.codex`) exactly as before, then read that home.
-pub async fn read_codex_chatgpt_usage(force: bool) -> Option<LlmUsage> {
-    if super::quota_probes_disabled() {
-        return None;
-    }
-    let home = codex_home_dir()?;
-    read_codex_chatgpt_usage_for_home(&home, force).await
-}
-
-pub(crate) fn codex_wham_usage_from_value(value: &Value) -> Option<LlmUsage> {
-    let mut best = LlmUsage::default();
-    append_quota_usages(
-        &mut best.quota_usages,
-        codex_wham_quota_usages(value.as_object()?),
+/// The Codex release that answered `initialize`, from its `userAgent`
+/// (`<client>/<codex version> (<os>) ...`). A source build reports `0.0.0`,
+/// which says nothing about its protocol, so it reads as unknown.
+pub fn codex_version_from_initialize(result: &Value) -> Option<CodexVersion> {
+    let agent = result.get("userAgent").and_then(Value::as_str)?;
+    let product = agent.split_whitespace().next()?;
+    let (_, version) = product.rsplit_once('/')?;
+    let core = version.split(['-', '+']).next()?;
+    let mut parts = core.split('.').map(|part| part.parse::<u64>().ok());
+    let parsed = (
+        parts.next()??,
+        parts.next()??,
+        parts.next().flatten().unwrap_or(0),
     );
-    prefer_codex_quota_windows(&mut best.quota_usages);
-    if best.quota_usages.is_some() {
-        best.quota_source = Some("provider_api".to_string());
-        best.quota_account = codex_wham_account(value);
-    }
-    if has_llm_usage(&best) {
-        Some(best)
-    } else {
-        None
-    }
+    (parsed != (0, 0, 0)).then_some(parsed)
 }
 
-/// Whether ChatGPT still serves the account, from the same `wham/usage` read.
-/// `rate_limit.allowed` turns false as soon as the plan windows are used up,
-/// even while `credits` keep serving requests; the account refuses only when
-/// no credits are left or an overage or spend limit is reached.
-fn codex_wham_account(value: &Value) -> Option<LlmQuotaAccount> {
-    let reached = |pointer: &str| value.pointer(pointer).and_then(Value::as_bool) == Some(true);
-    let credits_serve = (reached("/credits/has_credits") || reached("/credits/unlimited"))
-        && !reached("/credits/overage_limit_reached")
-        && !reached("/spend_control/reached");
-    let allowed = value
-        .pointer("/rate_limit/allowed")
-        .and_then(Value::as_bool)
-        .map(|allowed| allowed || credits_serve);
-    let credits = value
-        .get("credits")
-        .and_then(Value::as_object)
-        .and_then(|credits| {
-            let unlimited = credits.get("unlimited").and_then(Value::as_bool) == Some(true);
-            let has_credits = credits.get("has_credits").and_then(Value::as_bool) == Some(true);
-            (has_credits || unlimited).then(|| LlmQuotaCredits {
-                balance: credits
-                    .get("balance")
-                    .and_then(|balance| match balance {
-                        Value::String(text) => text.trim().parse::<f64>().ok(),
-                        other => other.as_f64(),
-                    })
-                    .filter(|balance| balance.is_finite() && *balance >= 0.0),
-                currency: None,
-                unlimited,
-            })
-        });
-    (allowed.is_some() || credits.is_some()).then_some(LlmQuotaAccount { allowed, credits })
+/// Whether an app-server of `version` answers [`ACCOUNT_RATE_LIMITS_METHOD`].
+/// An unknown version is asked: a refusal is an ordinary failed read. A known
+/// older release is skipped with one log line per process.
+pub fn account_rate_limits_supported(version: Option<CodexVersion>) -> bool {
+    let Some(version) = version else {
+        return true;
+    };
+    if version >= MIN_ACCOUNT_RATE_LIMITS_VERSION {
+        return true;
+    }
+    if !LOGGED_UNSUPPORTED_VERSION.swap(true, Ordering::Relaxed) {
+        let (major, minor, patch) = version;
+        let (min_major, min_minor, min_patch) = MIN_ACCOUNT_RATE_LIMITS_VERSION;
+        eprintln!(
+            "{} Codex {major}.{minor}.{patch} has no {ACCOUNT_RATE_LIMITS_METHOD}; Codex quota \
+             is not read until Codex is updated to {min_major}.{min_minor}.{min_patch} or newer",
+            "⚠".yellow().bold(),
+        );
+    }
+    false
 }
 
-/// Parse ChatGPT Codex `wham/usage` style rate-limit windows.
-/// Shape: `{ rate_limit: { primary_window: { used_percent, limit_window_seconds, reset_at }, secondary_window } }`.
-/// App-server session snapshots use `primary`/`secondary` + `windowDurationMins`
-/// and must not be accepted here: those values are per-session and jump when
-/// more than one Codex thread is live.
-pub fn codex_wham_quota_usages(map: &serde_json::Map<String, Value>) -> Vec<LlmQuotaUsage> {
-    if let Some(rate_limit) = map.get("rate_limit").and_then(Value::as_object) {
-        return codex_wham_rate_limit_object(rate_limit);
-    }
-    if map.contains_key("primary_window") || map.contains_key("secondary_window") {
-        return codex_wham_rate_limit_object(map);
-    }
-    Vec::new()
-}
-
-fn codex_wham_rate_limit_object(map: &serde_json::Map<String, Value>) -> Vec<LlmQuotaUsage> {
-    if !map.contains_key("primary_window") && !map.contains_key("secondary_window") {
-        return Vec::new();
-    }
-    let mut quotas = Vec::new();
-    for key in ["primary_window", "secondary_window"] {
-        let Some(window) = map.get(key).and_then(Value::as_object) else {
-            continue;
-        };
-        if let Some(quota) = codex_wham_window_quota(window) {
-            quotas.push(quota);
+/// Params for [`ACCOUNT_RATE_LIMITS_METHOD`]: a background read skips the
+/// reset-credit detail lookup where the release supports saying so, and sends
+/// none to older releases, which refuse any params object.
+pub fn account_rate_limits_params(version: Option<CodexVersion>) -> Value {
+    match version {
+        Some(version) if version >= MIN_ACCOUNT_RATE_LIMITS_PARAMS_VERSION => {
+            serde_json::json!({ "excludeResetCreditDetails": true })
         }
+        _ => Value::Null,
     }
-    quotas
 }
 
-fn codex_wham_window_quota(window: &serde_json::Map<String, Value>) -> Option<LlmQuotaUsage> {
-    let percent = first_f64(window, &["used_percent", "usedPercent", "percent", "pct"])
-        .or_else(|| quota_percent_from_usage_fields(window))?;
-    let duration_seconds = first_f64(
+/// The account quota in an `account/rateLimits/read` result, stamped as
+/// observed now.
+///
+/// Shape (camelCase since the method shipped; snake_case window fields are
+/// accepted for the earliest releases): `{ rateLimits: { primary, secondary,
+/// credits, spendControlReached, rateLimitReachedType }, rateLimitsByLimitId:
+/// { codex: { ... } }, ordinaryUsageAllowed }`. The `codex` bucket is the
+/// Codex meter when the multi-bucket view is present; otherwise the
+/// single-bucket `rateLimits`. Only the result envelope is accepted, never a
+/// bare window snapshot.
+pub fn codex_account_usage_from_response(response: &Value) -> Option<LlmUsage> {
+    let root = response.as_object()?;
+    let snapshot = root
+        .get("rateLimitsByLimitId")
+        .and_then(|buckets| buckets.get("codex"))
+        .and_then(Value::as_object)
+        .or_else(|| root.get("rateLimits").and_then(Value::as_object))?;
+    let quota_usages: Vec<LlmQuotaUsage> = ["primary", "secondary"]
+        .into_iter()
+        .filter_map(|key| snapshot.get(key).and_then(Value::as_object))
+        .filter_map(codex_window_quota)
+        .collect();
+    if quota_usages.is_empty() {
+        return None;
+    }
+    let mut usage = LlmUsage {
+        quota_source: Some("provider_api".to_string()),
+        quota_usages: Some(quota_usages),
+        quota_account: codex_account(root, snapshot),
+        quota_observed_at: super::observed_now(),
+        ..LlmUsage::default()
+    };
+    super::windows::prefer_codex_quota_windows(&mut usage.quota_usages);
+    has_llm_usage(&usage).then_some(usage)
+}
+
+fn codex_window_quota(window: &Map<String, Value>) -> Option<LlmQuotaUsage> {
+    let percent = first_f64(window, &["usedPercent", "used_percent"])?;
+    let minutes = first_f64(
         window,
-        &[
-            "limit_window_seconds",
-            "limitWindowSeconds",
-            "window_duration_seconds",
-            "windowDurationSeconds",
-        ],
+        &["windowDurationMins", "window_minutes", "windowMinutes"],
     )?;
-    let label = rate_limit_window_label(duration_seconds / 60.0)?;
     Some(LlmQuotaUsage {
-        label: Some(label),
+        label: Some(rate_limit_window_label(minutes)?),
         window: Some("Codex".to_string()),
         used: None,
         limit: None,
         remaining: None,
         percent: normalized_quota_percent(Some(percent), None, None),
-        reset_at: first_reset_at(window, &["reset_at", "resetAt", "resets_at", "resetsAt"]),
+        reset_at: first_reset_at(window, &["resetsAt", "resets_at"]),
         scope: None,
     })
+}
+
+/// Whether the account still serves requests. `ordinaryUsageAllowed` turns
+/// false once the plan windows are used up, while credits keep serving; the
+/// account refuses only when no credits are left, a spend limit is reached, or
+/// the backend names a workspace credit or usage limit as the block.
+fn codex_account(
+    root: &Map<String, Value>,
+    snapshot: &Map<String, Value>,
+) -> Option<LlmQuotaAccount> {
+    let flag = |map: &Map<String, Value>, key: &str| map.get(key).and_then(Value::as_bool);
+    let credits_map = snapshot.get("credits").and_then(Value::as_object);
+    let unlimited = credits_map.and_then(|map| flag(map, "unlimited")) == Some(true);
+    let has_credits = credits_map.and_then(|map| flag(map, "hasCredits")) == Some(true);
+    let workspace_blocked = snapshot
+        .get("rateLimitReachedType")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind.starts_with("workspace_"));
+    let credits_serve = (has_credits || unlimited)
+        && flag(snapshot, "spendControlReached") != Some(true)
+        && !workspace_blocked;
+    let allowed = flag(root, "ordinaryUsageAllowed").map(|allowed| allowed || credits_serve);
+    let credits = (has_credits || unlimited).then(|| LlmQuotaCredits {
+        balance: credit_balance(credits_map.and_then(|map| map.get("balance"))),
+        currency: None,
+        unlimited,
+    });
+    (allowed.is_some() || credits.is_some()).then_some(LlmQuotaAccount { allowed, credits })
+}
+
+fn resolve_codex_program() -> Option<PathBuf> {
+    which::which("codex").ok()
+}
+
+/// The cache slot for one Codex login: the exact config home, or the process
+/// `CODEX_HOME` (Codex's default home when unset).
+fn codex_quota_cache_key(home: Option<&Path>) -> String {
+    match home {
+        Some(home) => {
+            let base = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+            format!("home\u{0}{}", base.to_string_lossy())
+        }
+        None => format!(
+            "process\u{0}{}",
+            std::env::var_os("CODEX_HOME")
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        ),
+    }
+}
+
+/// The account quota of one Codex login, asked of a short-lived
+/// `codex app-server`. `home` binds the probe to that config home
+/// (`CODEX_HOME`), so a pre-launch read sees the account a spawn with that home
+/// would bill; `None` inherits the process environment.
+pub async fn read_codex_account_usage(home: Option<&Path>, force: bool) -> Option<LlmUsage> {
+    read_codex_account_usage_unless(
+        super::quota_probes_disabled(),
+        resolve_codex_program,
+        home,
+        force,
+    )
+    .await
+}
+
+/// The disabled switch is decided before Codex is even looked up, so a
+/// disabled machine never starts a process.
+async fn read_codex_account_usage_unless(
+    disabled: bool,
+    resolve_program: impl FnOnce() -> Option<PathBuf>,
+    home: Option<&Path>,
+    force: bool,
+) -> Option<LlmUsage> {
+    if disabled {
+        return None;
+    }
+    let program = resolve_program()?;
+    read_codex_account_usage_with_program(&program, home, force, PROBE_TIMEOUT).await
+}
+
+async fn read_codex_account_usage_with_program(
+    program: &Path,
+    home: Option<&Path>,
+    force: bool,
+    timeout: Duration,
+) -> Option<LlmUsage> {
+    let key = codex_quota_cache_key(home);
+    if let Some(cached) = CODEX_ACCOUNT_USAGE.hit_unless_forced(&key, force) {
+        return cached;
+    }
+    CODEX_ACCOUNT_USAGE
+        .single_flight(&key, || async {
+            let usage = probe_account_rate_limits(program, home, timeout)
+                .await
+                .as_ref()
+                .and_then(codex_account_usage_from_response);
+            CODEX_ACCOUNT_USAGE.store(&key, usage.clone());
+            usage
+        })
+        .await
+}
+
+fn probe_command(program: &Path, home: Option<&Path>) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(program);
+    command
+        .arg("app-server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    if let Some(home) = home {
+        command.env("CODEX_HOME", home);
+    }
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
+/// Start `codex app-server`, complete the `initialize` handshake, ask
+/// [`ACCOUNT_RATE_LIMITS_METHOD`], and stop the server. The result object, or
+/// `None` on an older release, a refusal, a timeout, or an exit.
+async fn probe_account_rate_limits(
+    program: &Path,
+    home: Option<&Path>,
+    timeout: Duration,
+) -> Option<Value> {
+    let mut child = probe_command(program, home).spawn().ok()?;
+    let mut stdin = child.stdin.take()?;
+    let stdout = child.stdout.take()?;
+    let exchange = async {
+        let mut lines = BufReader::new(stdout).lines();
+        write_json_line(
+            &mut stdin,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": INITIALIZE_ID,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": { "name": "xmatrix", "version": env!("CARGO_PKG_VERSION") },
+                },
+            }),
+        )
+        .await?;
+        let initialized = read_result(&mut lines, INITIALIZE_ID).await?;
+        let version = codex_version_from_initialize(&initialized);
+        if !account_rate_limits_supported(version) {
+            return None;
+        }
+        write_json_line(
+            &mut stdin,
+            &serde_json::json!({ "jsonrpc": "2.0", "method": "initialized" }),
+        )
+        .await?;
+        let mut request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": RATE_LIMITS_ID,
+            "method": ACCOUNT_RATE_LIMITS_METHOD,
+        });
+        let params = account_rate_limits_params(version);
+        if !params.is_null() {
+            request["params"] = params;
+        }
+        write_json_line(&mut stdin, &request).await?;
+        read_result(&mut lines, RATE_LIMITS_ID).await
+    };
+    let result = tokio::time::timeout(timeout, exchange).await.ok().flatten();
+    // Close stdin so the app-server exits on its own, then make sure it is gone.
+    drop(stdin);
+    if tokio::time::timeout(PROBE_EXIT_GRACE, child.wait())
+        .await
+        .is_err()
+    {
+        let _ = child.kill().await;
+    }
+    result
+}
+
+async fn write_json_line(stdin: &mut tokio::process::ChildStdin, value: &Value) -> Option<()> {
+    let mut line = serde_json::to_vec(value).ok()?;
+    line.push(b'\n');
+    stdin.write_all(&line).await.ok()?;
+    stdin.flush().await.ok()
+}
+
+/// The `result` of response `id`, skipping notifications and other messages.
+/// An error response or the end of output is `None`.
+async fn read_result(
+    lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    id: u64,
+) -> Option<Value> {
+    while let Some(line) = lines.next_line().await.ok()? {
+        if line.len() > MAX_PROBE_LINE_BYTES {
+            continue;
+        }
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        if message.get("id").and_then(Value::as_u64) != Some(id) || message.get("method").is_some()
+        {
+            continue;
+        }
+        return message.get("result").cloned();
+    }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn provider_http_read_preserves_cache_time_and_rotated_account_binding() {
-        use std::io::Write;
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let endpoint = format!("http://{}/usage", listener.local_addr().unwrap());
-        let home = unique_temp_home("http-rotation");
-        std::fs::create_dir_all(&home).unwrap();
-        let server_home = home.clone();
-        let server = std::thread::spawn(move || {
-            for (account, percent) in [("alpha", 100), ("beta", 20), ("gamma", 0), ("delta", 100)] {
-                let (mut stream, headers) =
-                    super::super::read_fixture_http_request(&listener, "provider request missing");
-                assert!(headers.contains(&format!("authorization: bearer fixture-{account}\r\n")));
-                assert!(headers.contains(&format!("chatgpt-account-id: {account}\r\n")));
-                if account == "gamma" {
-                    // Deterministically rotate after the old account's request
-                    // arrives but before its apparently healthy response.
-                    std::fs::write(
-                        server_home.join("auth.json"),
-                        r#"{"tokens":{"access_token":"fixture-delta","account_id":"delta"}}"#,
-                    )
-                    .unwrap();
-                }
-                let body = serde_json::json!({"rate_limit":{"primary_window":{
-                    "used_percent":percent,"limit_window_seconds":18000,"reset_at":1900000000
-                }}})
-                .to_string();
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
-            }
+    /// A real `account/rateLimits/read` result (Codex 0.172.0, account id
+    /// removed), with the 5-hour primary and weekly secondary windows.
+    fn sample_response() -> Value {
+        let snapshot = serde_json::json!({
+            "limitId": "codex",
+            "primary": { "usedPercent": 3, "windowDurationMins": 300, "resetsAt": 1795559834 },
+            "secondary": { "usedPercent": 41, "windowDurationMins": 10080, "resetsAt": 1796146634 },
+            "credits": { "hasCredits": true, "unlimited": false, "balance": "137.5" },
+            "individualLimit": null,
+            "spendControlReached": false,
+            "planType": "plus",
+            "rateLimitReachedType": null
         });
-        let set_account = |account: &str| {
-            std::fs::write(
-                home.join("auth.json"),
-                serde_json::json!({"tokens":{"access_token":format!("fixture-{account}"),
-                "account_id":account}})
-                .to_string(),
-            )
-            .unwrap()
-        };
-        set_account("alpha");
-        let first = read_codex_usage_from_endpoint(&home, false, &endpoint)
-            .await
-            .unwrap();
-        assert_eq!(first.quota_source.as_deref(), Some("provider_api"));
-        assert_eq!(first.quota_usages.as_ref().unwrap()[0].percent, Some(100.0));
-        assert!(first.quota_observed_at.is_some());
-        let cached = read_codex_usage_from_endpoint(&home, false, &endpoint)
-            .await
-            .unwrap();
-        assert_eq!(cached.quota_observed_at, first.quota_observed_at);
-        set_account("beta");
-        let second = read_codex_usage_from_endpoint(&home, false, &endpoint)
-            .await
-            .unwrap();
-        assert_eq!(second.quota_usages.as_ref().unwrap()[0].percent, Some(20.0));
-        set_account("gamma");
-        assert!(
-            read_codex_usage_from_endpoint(&home, false, &endpoint)
-                .await
-                .is_none(),
-            "an in-flight response for the previous account must not escape"
-        );
-        let switched = read_codex_usage_from_endpoint(&home, false, &endpoint)
-            .await
-            .unwrap();
-        assert_eq!(
-            switched.quota_usages.as_ref().unwrap()[0].percent,
-            Some(100.0)
-        );
-        server.join().unwrap();
-        std::fs::remove_dir_all(home).unwrap();
-    }
-
-    #[tokio::test]
-    async fn the_login_file_reaches_only_the_provider_request() {
-        use std::io::Write;
-        let (token, account, refresh, id_token) = (
-            "sentinel-codex-access",
-            "sentinel-codex-account",
-            "sentinel-codex-refresh",
-            "sentinel-codex-id-token",
-        );
-        let home = unique_temp_home("containment");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(
-            home.join("auth.json"),
-            serde_json::json!({"tokens": {"access_token": token, "account_id": account,
-                "refresh_token": refresh, "id_token": id_token}})
-            .to_string(),
-        )
-        .unwrap();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
-        let endpoint = format!("http://{}/usage", listener.local_addr().unwrap());
-        let server = std::thread::spawn(move || {
-            let (mut stream, headers) =
-                super::super::read_fixture_http_request(&listener, "provider request missing");
-            // The provider's own usage request is the one place the login goes,
-            // and it carries only what that request needs.
-            assert!(headers.contains(&format!("authorization: bearer {token}\r\n")));
-            assert!(headers.contains(&format!("chatgpt-account-id: {account}\r\n")));
-            assert!(!headers.contains(refresh) && !headers.contains(id_token));
-            let body = serde_json::json!({
-                "rate_limit": {"allowed": true, "primary_window": {
-                    "used_percent": 40, "limit_window_seconds": 18000, "reset_at": 1900000000}},
-                "credits": {"has_credits": true, "balance": "12.5"},
-            })
-            .to_string();
-            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
-        });
-        let usage = read_codex_usage_from_endpoint(&home, true, &endpoint)
-            .await
-            .expect("reading");
-        server.join().unwrap();
-        assert!(
-            usage.quota_account.is_some(),
-            "the account part is read too"
-        );
-        super::super::assert_reading_holds_nothing_of_the_login(
-            &usage,
-            &home,
-            &[token, account, refresh, id_token],
-        );
-        std::fs::remove_dir_all(home).unwrap();
-    }
-
-    fn unique_temp_home(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
-        std::env::temp_dir().join(format!(
-            "xmatrix-codex-home-{name}-{}-{nanos}",
-            std::process::id()
-        ))
+        serde_json::json!({
+            "ordinaryUsageAllowed": true,
+            "rateLimits": snapshot.clone(),
+            "rateLimitsByLimitId": { "codex": snapshot },
+            "rateLimitResetCredits": { "availableCount": 1, "credits": null },
+            "rateLimitUpsell": null
+        })
     }
 
     #[test]
-    fn cache_key_separates_homes_and_accounts() {
-        let a = PathBuf::from("accounts/alpha");
-        let b = PathBuf::from("accounts/beta");
-        assert_ne!(
-            codex_quota_cache_key(&a, "account:1"),
-            codex_quota_cache_key(&b, "account:1")
-        );
-        assert_ne!(
-            codex_quota_cache_key(&a, "account:1"),
-            codex_quota_cache_key(&a, "account:2")
-        );
-        assert_eq!(
-            codex_quota_cache_key(&a, "account:1"),
-            codex_quota_cache_key(&a, "account:1")
-        );
-    }
-
-    #[test]
-    fn content_fingerprint_tracks_the_snapshot() {
-        let first = codex_auth_content_fingerprint(r#"{"tokens":{"access_token":"t1"}}"#);
-        let same = codex_auth_content_fingerprint(r#"{"tokens":{"access_token":"t1"}}"#);
-        let different = codex_auth_content_fingerprint(r#"{"tokens":{"access_token":"t2"}}"#);
-        assert_eq!(first, same);
-        assert_ne!(first, different);
-        assert_eq!(first.len(), 64, "sha256 hex");
-    }
-
-    #[test]
-    fn rotated_auth_json_changes_the_cache_key() {
-        let home = unique_temp_home("rotated");
-        std::fs::create_dir_all(&home).expect("home");
-        std::fs::write(
-            home.join("auth.json"),
-            r#"{"tokens":{"access_token":"t1","account_id":"account-a"}}"#,
-        )
-        .expect("first auth");
-        let first = codex_chatgpt_auth_snapshot_in(&home).expect("first snapshot");
-        let first_key = codex_quota_cache_key(&home, &first.content_fingerprint);
-
-        std::fs::write(
-            home.join("auth.json"),
-            r#"{"tokens":{"access_token":"t2","account_id":"account-b"}}"#,
-        )
-        .expect("second auth");
-        let second = codex_chatgpt_auth_snapshot_in(&home).expect("second snapshot");
-        let second_key = codex_quota_cache_key(&home, &second.content_fingerprint);
-
-        assert_ne!(first_key, second_key);
-        std::fs::remove_dir_all(&home).ok();
-    }
-
-    #[test]
-    fn same_path_same_mtime_different_account_is_isolated() {
-        let home = unique_temp_home("same-mtime");
-        std::fs::create_dir_all(&home).expect("home");
-        let path = home.join("auth.json");
-        std::fs::write(
-            &path,
-            r#"{"tokens":{"access_token":"t1","account_id":"account-a"}}"#,
-        )
-        .expect("first auth");
-        let modified = std::fs::metadata(&path)
-            .expect("metadata")
-            .modified()
-            .expect("mtime");
-        let first = codex_chatgpt_auth_snapshot_in(&home).expect("first snapshot");
-
-        // Replace the account while preserving the file timestamp: the
-        // fingerprint must still change because it comes from the content
-        // snapshot, not from metadata.
-        {
-            use std::io::Write as _;
-            let mut file = std::fs::File::create(&path).expect("rewrite auth");
-            file.write_all(br#"{"tokens":{"access_token":"t2","account_id":"account-b"}}"#)
-                .expect("write auth");
-            file.set_modified(modified).expect("restore mtime");
-        }
-        assert_eq!(
-            std::fs::metadata(&path)
-                .expect("metadata")
-                .modified()
-                .expect("mtime"),
-            modified
-        );
-        let second = codex_chatgpt_auth_snapshot_in(&home).expect("second snapshot");
-
-        assert_ne!(
-            codex_quota_cache_key(&home, &first.content_fingerprint),
-            codex_quota_cache_key(&home, &second.content_fingerprint)
-        );
-        std::fs::remove_dir_all(&home).ok();
-    }
-
-    #[test]
-    fn auth_snapshot_comes_only_from_the_given_home() {
-        let empty = unique_temp_home("empty");
-        let configured = unique_temp_home("configured");
-        std::fs::create_dir_all(&empty).expect("empty home");
-        std::fs::create_dir_all(&configured).expect("configured home");
-        std::fs::write(
-            configured.join("auth.json"),
-            r#"{"tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}"#,
-        )
-        .expect("auth fixture");
-
-        // A home without auth.json is a miss and must not fall back to another
-        // Profile's home (the fixture next to it).
-        assert!(codex_chatgpt_auth_snapshot_in(&empty).is_none());
-        let snapshot = codex_chatgpt_auth_snapshot_in(&configured).expect("configured snapshot");
-        assert_eq!(snapshot.access_token, "fixture-token");
-        assert_eq!(snapshot.account_id.as_deref(), Some("fixture-account"));
-
-        std::fs::remove_dir_all(&empty).ok();
-        std::fs::remove_dir_all(&configured).ok();
-    }
-
-    #[test]
-    fn codex_wham_usage_extracts_primary_and_secondary_windows() {
-        let payload = serde_json::json!({
-            "plan_type": "pro",
-            "rate_limit": {
-                "allowed": true,
-                "limit_reached": false,
-                "primary_window": {
-                    "used_percent": 40,
-                    "limit_window_seconds": 604800,
-                    "reset_after_seconds": 540609,
-                    "reset_at": 1784487804
-                },
-                "secondary_window": {
-                    "used_percent": 12.5,
-                    "limit_window_seconds": 18000,
-                    "reset_at": 1784012345
-                }
-            }
-        });
-
-        let quotas = super::super::assert_provider_window_labels(
-            codex_wham_usage_from_value(&payload).unwrap(),
-            &["5h", "1w"],
-        );
-        assert_eq!(quotas[0].window.as_deref(), Some("Codex"));
-        assert_eq!(quotas[0].percent, Some(12.5));
-        assert_eq!(quotas[0].reset_at.as_deref(), Some("1784012345"));
-        assert_eq!(quotas[1].percent, Some(40.0));
-        assert_eq!(quotas[1].reset_at.as_deref(), Some("1784487804"));
-    }
-
-    #[test]
-    fn codex_wham_usage_keeps_whether_credits_still_serve_a_used_up_week() {
-        let payload = serde_json::json!({
-            "plan_type": "pro",
-            "rate_limit": {
-                "allowed": false,
-                "limit_reached": true,
-                "primary_window": { "used_percent": 100, "limit_window_seconds": 604800, "reset_at": 1791631680 }
-            },
-            "credits": {
-                "has_credits": true,
-                "unlimited": false,
-                "overage_limit_reached": false,
-                "balance": "137.5"
-            },
-            "spend_control": { "reached": false, "individual_limit": null }
-        });
-        let usage = codex_wham_usage_from_value(&payload).unwrap();
-        assert_eq!(usage.quota_usages.unwrap()[0].percent, Some(100.0));
+    fn account_read_yields_one_codex_meter_with_5h_and_1w_windows() {
+        let usage = codex_account_usage_from_response(&sample_response()).unwrap();
+        assert!(usage.quota_observed_at.is_some());
+        let quotas = super::super::assert_provider_window_labels(usage.clone(), &["5h", "1w"]);
+        assert!(quotas.iter().all(|q| q.window.as_deref() == Some("Codex")));
+        assert_eq!(quotas[0].percent, Some(3.0));
+        assert_eq!(quotas[0].reset_at.as_deref(), Some("1795559834"));
+        assert_eq!(quotas[1].percent, Some(41.0));
         assert_eq!(
             usage.quota_account,
             Some(LlmQuotaAccount {
@@ -601,88 +414,346 @@ mod tests {
                 }),
             })
         );
+    }
 
-        let refused = serde_json::json!({
-            "rate_limit": {
-                "allowed": false,
-                "limit_reached": true,
-                "primary_window": { "used_percent": 100, "limit_window_seconds": 604800 }
-            },
-            "credits": { "has_credits": false, "unlimited": false, "balance": "0" }
+    #[test]
+    fn codex_bucket_wins_over_the_single_bucket_view() {
+        let mut response = sample_response();
+        response["rateLimits"]["primary"]["usedPercent"] = 90.into();
+        response["rateLimitsByLimitId"]["other_model"] = serde_json::json!({
+            "primary": { "usedPercent": 77, "windowDurationMins": 300 }
         });
+        let quotas = codex_account_usage_from_response(&response)
+            .unwrap()
+            .quota_usages
+            .unwrap();
+        assert_eq!(quotas.len(), 2, "one account meter, not one per bucket");
+        assert_eq!(quotas[0].percent, Some(3.0));
+
+        let mut single = sample_response();
+        single
+            .as_object_mut()
+            .unwrap()
+            .remove("rateLimitsByLimitId");
+        single["rateLimits"]["primary"]["usedPercent"] = 90.into();
+        let quotas = codex_account_usage_from_response(&single)
+            .unwrap()
+            .quota_usages
+            .unwrap();
+        assert_eq!(quotas[0].percent, Some(90.0));
+    }
+
+    #[test]
+    fn earliest_release_snake_case_windows_parse() {
+        // Codex 0.48.0 serialized the snapshot without camelCase renames.
+        let response = serde_json::json!({
+            "rateLimits": {
+                "primary": { "used_percent": 12.5, "window_minutes": 300, "resets_at": 1784012345 },
+                "secondary": { "used_percent": 40.0, "window_minutes": 10080, "resets_at": 1784487804 }
+            }
+        });
+        let usage = codex_account_usage_from_response(&response).unwrap();
         assert_eq!(
-            codex_wham_usage_from_value(&refused).unwrap().quota_account,
-            Some(LlmQuotaAccount {
-                allowed: Some(false),
-                credits: None
-            })
+            usage.quota_account, None,
+            "no account flags in that release"
         );
+        let quotas = super::super::assert_provider_window_labels(usage, &["5h", "1w"]);
+        assert_eq!(quotas[0].percent, Some(12.5));
+        assert_eq!(quotas[1].reset_at.as_deref(), Some("1784487804"));
+    }
 
-        let spend_capped = serde_json::json!({
-            "rate_limit": {
-                "allowed": false,
-                "limit_reached": true,
-                "primary_window": { "used_percent": 100, "limit_window_seconds": 604800 }
-            },
-            "credits": { "has_credits": true, "unlimited": false, "overage_limit_reached": false, "balance": "5" },
-            "spend_control": { "reached": true }
-        });
-        assert_eq!(
-            codex_wham_usage_from_value(&spend_capped)
+    #[test]
+    fn used_up_plan_windows_stay_allowed_only_while_credits_serve() {
+        let blocked = |patch: Value| {
+            let mut response = sample_response();
+            response
+                .as_object_mut()
+                .unwrap()
+                .remove("rateLimitsByLimitId");
+            response["ordinaryUsageAllowed"] = false.into();
+            response["rateLimits"]["primary"]["usedPercent"] = 100.into();
+            for (key, value) in patch.as_object().unwrap() {
+                response["rateLimits"][key] = value.clone();
+            }
+            codex_account_usage_from_response(&response)
                 .unwrap()
                 .quota_account
                 .unwrap()
-                .allowed,
+        };
+        assert_eq!(blocked(serde_json::json!({})).allowed, Some(true));
+        assert_eq!(
+            blocked(serde_json::json!({ "spendControlReached": true })).allowed,
             Some(false)
+        );
+        assert_eq!(
+            blocked(serde_json::json!({
+                "rateLimitReachedType": "workspace_member_credits_depleted"
+            }))
+            .allowed,
+            Some(false)
+        );
+        let no_credits = blocked(serde_json::json!({
+            "credits": { "hasCredits": false, "unlimited": false, "balance": "0" }
+        }));
+        assert_eq!(no_credits.allowed, Some(false));
+        assert_eq!(no_credits.credits, None);
+    }
+
+    #[test]
+    fn bare_window_snapshots_are_not_an_account_read() {
+        // A per-thread snapshot is the inner object, not the read's envelope.
+        let thread_snapshot = serde_json::json!({
+            "primary": { "usedPercent": 12, "windowDurationMins": 300 },
+            "secondary": { "usedPercent": 34, "windowDurationMins": 10080 }
+        });
+        assert!(codex_account_usage_from_response(&thread_snapshot).is_none());
+        assert!(codex_account_usage_from_response(&serde_json::json!({})).is_none());
+        assert!(
+            codex_account_usage_from_response(&serde_json::json!({ "rateLimits": {} })).is_none()
         );
     }
 
     #[test]
-    fn codex_wham_usage_rejects_app_server_session_rate_limits() {
-        // Session snapshots share a `rate_limit` wrapper but use primary/secondary
-        // and minute windows. Accepting them made each Codex thread publish its own
-        // meter and the Agents list jumped whenever another session heartbeated.
-        let payload = serde_json::json!({
-            "rate_limit": {
-                "primary": { "usedPercent": 12, "windowDurationMins": 300 },
-                "secondary": { "usedPercent": 34, "windowDurationMins": 10080 }
-            }
-        });
-        assert!(codex_wham_usage_from_value(&payload).is_none());
+    fn version_gate_reads_initialize_user_agent() {
+        let init = |agent: &str| serde_json::json!({ "userAgent": agent });
+        assert_eq!(
+            codex_version_from_initialize(&init(
+                "xmatrix/0.172.0 (Ubuntu 24.4.0; x86_64) unknown (xmatrix; 0.0.0)"
+            )),
+            Some((0, 172, 0))
+        );
+        assert_eq!(
+            codex_version_from_initialize(&init("codex_cli_rs/0.48.0-alpha.2 (Mac OS 15.0)")),
+            Some((0, 48, 0))
+        );
+        assert_eq!(
+            codex_version_from_initialize(&init("xmatrix/0.0.0 (Linux)")),
+            None
+        );
+        assert_eq!(codex_version_from_initialize(&serde_json::json!({})), None);
 
-        let mixed = serde_json::json!({
-            "rateLimits": {
-                "primary": { "usedPercent": 94, "windowDurationMins": 300 },
-                "secondary": { "usedPercent": 22, "windowDurationMins": 10080 }
-            },
-            "rateLimitsByLimitId": {
-                "codex": {
-                    "primary": { "usedPercent": 94, "windowDurationMins": 300 },
-                    "secondary": { "usedPercent": 22, "windowDurationMins": 10080 }
-                }
-            }
-        });
-        assert!(codex_wham_usage_from_value(&mixed).is_none());
+        assert!(!account_rate_limits_supported(Some((0, 47, 9))));
+        assert!(account_rate_limits_supported(Some((0, 48, 0))));
+        assert!(account_rate_limits_supported(None));
+        assert_eq!(account_rate_limits_params(Some((0, 48, 0))), Value::Null);
+        assert_eq!(account_rate_limits_params(None), Value::Null);
+        assert_eq!(
+            account_rate_limits_params(Some((0, 172, 0))),
+            serde_json::json!({ "excludeResetCreditDetails": true })
+        );
     }
 
     #[test]
-    fn codex_wham_usage_handles_weekly_only_primary_window() {
-        let payload = serde_json::json!({
-            "rate_limit": {
-                "primary_window": {
-                    "used_percent": 40,
-                    "limit_window_seconds": 604800,
-                    "reset_at": 1784487804
-                },
-                "secondary_window": null
-            }
-        });
+    fn cache_key_separates_homes_from_the_process_login() {
+        let a = PathBuf::from("accounts/alpha");
+        let b = PathBuf::from("accounts/beta");
+        assert_ne!(
+            codex_quota_cache_key(Some(&a)),
+            codex_quota_cache_key(Some(&b))
+        );
+        assert_eq!(
+            codex_quota_cache_key(Some(&a)),
+            codex_quota_cache_key(Some(&a))
+        );
+        assert_ne!(codex_quota_cache_key(Some(&a)), codex_quota_cache_key(None));
+    }
 
-        let usage = codex_wham_usage_from_value(&payload).unwrap();
-        let quotas = usage.quota_usages.unwrap();
-        assert_eq!(quotas.len(), 1);
-        assert_eq!(quotas[0].label.as_deref(), Some("1w"));
-        assert_eq!(quotas[0].window.as_deref(), Some("Codex"));
-        assert_eq!(quotas[0].percent, Some(40.0));
+    #[cfg(unix)]
+    mod unix_app_server_tests {
+        use super::*;
+
+        fn unique_temp_dir(name: &str) -> PathBuf {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "xmatrix-codex-quota-{name}-{}-{nanos}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).expect("temp dir");
+            dir
+        }
+
+        /// A stand-in `codex` that speaks the app-server handshake on stdio,
+        /// records each message it receives and its `CODEX_HOME`, and answers
+        /// as release `version`.
+        fn fake_codex(dir: &Path, version: &str, response: &Value) -> PathBuf {
+            let log = dir.join("received");
+            let script = format!(
+                r#"#!/bin/sh
+[ "$1" = "app-server" ] || exit 2
+printf 'CODEX_HOME=%s\n' "$CODEX_HOME" >> "{log}"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "{log}"
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '%s\n' '{{"method":"configWarning","params":{{}}}}'
+      printf '%s\n' '{{"id":1,"result":{{"userAgent":"xmatrix/{version} (Linux) unknown"}}}}' ;;
+    *'"method":"account/rateLimits/read"'*)
+      printf '%s\n' '{{"method":"account/updated","params":{{}}}}'
+      printf '%s\n' '{{"id":2,"result":{response}}}' ;;
+  esac
+done
+"#,
+                log = log.display(),
+                response = response,
+            );
+            let path = dir.join("codex");
+            crate::quota::write_test_executable(&path, &script);
+            path
+        }
+
+        fn received(dir: &Path) -> String {
+            std::fs::read_to_string(dir.join("received")).unwrap_or_default()
+        }
+
+        #[tokio::test]
+        async fn probe_asks_the_app_server_for_the_home_without_credential_files() {
+            let dir = unique_temp_dir("probe");
+            // The home holds no credential file: Codex owns its sign-in, and
+            // the reader neither needs nor opens one.
+            let home = dir.join("home");
+            std::fs::create_dir_all(&home).unwrap();
+            let program = fake_codex(&dir, "0.172.0", &sample_response());
+
+            let usage = read_codex_account_usage_with_program(
+                &program,
+                Some(&home),
+                true,
+                Duration::from_secs(10),
+            )
+            .await
+            .expect("account usage");
+            let quotas = super::super::super::assert_provider_window_labels(usage, &["5h", "1w"]);
+            assert_eq!(quotas[1].percent, Some(41.0));
+
+            let log = received(&dir);
+            assert!(
+                log.contains(&format!("CODEX_HOME={}\n", home.display())),
+                "{log}"
+            );
+            assert!(log.contains(r#""method":"initialized""#), "{log}");
+            assert!(
+                log.contains(r#""method":"account/rateLimits/read","params":{"excludeResetCreditDetails":true}"#),
+                "{log}"
+            );
+            // A cached reading answers without starting the app-server again.
+            std::fs::remove_file(dir.join("received")).unwrap();
+            assert!(
+                read_codex_account_usage_with_program(
+                    &program,
+                    Some(&home),
+                    false,
+                    Duration::from_secs(10)
+                )
+                .await
+                .is_some()
+            );
+            assert_eq!(received(&dir), "");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn the_reader_opens_no_codex_login_file() {
+            let dir = unique_temp_dir("no-login-file");
+            let home = dir.join("home");
+            std::fs::create_dir_all(&home).unwrap();
+            // Codex's login file is a FIFO with no writer: opening it for
+            // reading blocks forever, so a reader that touched it never
+            // returns. The stand-in app-server does not open it either.
+            let status = std::process::Command::new("mkfifo")
+                .arg(home.join("auth.json"))
+                .status()
+                .expect("mkfifo");
+            assert!(status.success());
+            let program = fake_codex(&dir, "0.172.0", &sample_response());
+
+            let (done, finished) = std::sync::mpsc::channel();
+            let (thread_home, thread_program) = (home.clone(), program.clone());
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime");
+                let usage = rt.block_on(read_codex_account_usage_with_program(
+                    &thread_program,
+                    Some(&thread_home),
+                    true,
+                    Duration::from_secs(10),
+                ));
+                let _ = done.send(usage);
+            });
+            let usage = finished
+                .recv_timeout(Duration::from_secs(20))
+                .expect("the reader blocked: it opened the Codex login file");
+            assert!(usage.is_some());
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[tokio::test]
+        async fn disabled_probes_never_start_codex() {
+            let dir = unique_temp_dir("disabled");
+            let program = fake_codex(&dir, "0.172.0", &sample_response());
+            let resolved = std::sync::atomic::AtomicBool::new(false);
+            let usage = read_codex_account_usage_unless(
+                true,
+                || {
+                    resolved.store(true, Ordering::Relaxed);
+                    Some(program.clone())
+                },
+                Some(&dir),
+                true,
+            )
+            .await;
+            assert!(usage.is_none());
+            assert!(!resolved.load(Ordering::Relaxed), "codex was looked up");
+            assert_eq!(received(&dir), "", "codex was started");
+
+            let enabled =
+                read_codex_account_usage_unless(false, || Some(program.clone()), Some(&dir), true)
+                    .await;
+            assert!(enabled.is_some());
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[tokio::test]
+        async fn older_release_is_never_asked_the_method() {
+            let dir = unique_temp_dir("old");
+            let home = dir.join("home");
+            std::fs::create_dir_all(&home).unwrap();
+            let program = fake_codex(&dir, "0.47.0", &sample_response());
+
+            assert!(
+                read_codex_account_usage_with_program(
+                    &program,
+                    Some(&home),
+                    true,
+                    Duration::from_secs(10)
+                )
+                .await
+                .is_none()
+            );
+            let log = received(&dir);
+            assert!(log.contains(r#""method":"initialize""#), "{log}");
+            assert!(!log.contains(ACCOUNT_RATE_LIMITS_METHOD), "{log}");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[tokio::test]
+        async fn unanswered_probe_times_out_and_stops_the_server() {
+            let dir = unique_temp_dir("hang");
+            let program = dir.join("codex");
+            crate::quota::write_test_executable(&program, "#!/bin/sh\nexec sleep 30\n");
+
+            let started = std::time::Instant::now();
+            assert!(
+                probe_account_rate_limits(&program, None, Duration::from_millis(300))
+                    .await
+                    .is_none()
+            );
+            assert!(started.elapsed() < Duration::from_secs(5));
+            std::fs::remove_dir_all(&dir).ok();
+        }
     }
 }

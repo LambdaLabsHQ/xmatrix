@@ -2,7 +2,6 @@
 
 use serde_json::{Map, Value};
 
-use crate::fields::first_f64;
 use crate::usage::LlmQuotaUsage;
 
 /// Providers report percentages with no absolute budget. Their admission and
@@ -109,20 +108,15 @@ pub(crate) fn normalized_quota_percent(
     reported.filter(|percent| percent.is_finite() && *percent >= 0.0)
 }
 
-/// A percent derived from `limit` with `used` (or `remaining`), when the
-/// window reports amounts instead of a percent.
-pub(crate) fn quota_percent_from_usage_fields(map: &Map<String, Value>) -> Option<f64> {
-    let limit = first_f64(map, &["limit", "max", "maximum", "quota", "total"])?;
-    if limit <= 0.0 {
-        return None;
-    }
-    if let Some(used) = first_f64(map, &["used", "usage", "current", "consumed"]) {
-        return Some((used / limit) * 100.0);
-    }
-    if let Some(remaining) = first_f64(map, &["remaining", "available", "left"]) {
-        return Some(((limit - remaining) / limit) * 100.0);
-    }
-    None
+/// A prepaid credit balance as a provider reports it (a decimal string or a
+/// number); negative or non-finite values are not a balance.
+pub(crate) fn credit_balance(balance: Option<&Value>) -> Option<f64> {
+    balance
+        .and_then(|balance| match balance {
+            Value::String(text) => text.trim().parse::<f64>().ok(),
+            other => other.as_f64(),
+        })
+        .filter(|balance| balance.is_finite() && *balance >= 0.0)
 }
 
 fn quota_usage_key(quota: &LlmQuotaUsage) -> String {

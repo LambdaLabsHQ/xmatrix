@@ -92,6 +92,18 @@ test("the comparison stage advances on vertical scroll and switches tabs without
   await expect(tabs).toHaveCount(6);
   await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
 
+  // Task checkboxes in the live document comparison stay vertically centered with their text.
+  await expect(why.locator("li.page-task").first()).toBeVisible();
+  const taskDeltas = await why.evaluate((section) =>
+    [...section.querySelectorAll<HTMLElement>("li.page-task")].map((li) => {
+      const input = li.querySelector<HTMLElement>("input")!.getBoundingClientRect();
+      const label = (li.querySelector<HTMLElement>("strong") ?? li.querySelector<HTMLElement>("p")!).getBoundingClientRect();
+      return Math.abs((label.top + label.bottom) / 2 - (input.top + input.bottom) / 2);
+    }),
+  );
+  expect(taskDeltas.length).toBeGreaterThanOrEqual(3);
+  for (const delta of taskDeltas) expect(delta).toBeLessThanOrEqual(1.5);
+
   // Scrolling vertically through the comparison runway keeps the stage sticky, advances the topic, and slides the wood bar.
   const bounds = await why.evaluate((section) => {
     const track = section.querySelector<HTMLElement>(".relative")!;
@@ -106,15 +118,21 @@ test("the comparison stage advances on vertical scroll and switches tabs without
   await expect(why.getByRole("tabpanel")).toBeVisible();
   const stickyState = await why.evaluate((section) => {
     const sticky = section.querySelector<HTMLElement>(".sticky")!;
+    const title = section.querySelector<HTMLElement>("#why-title")!;
     const tablist = section.querySelector<HTMLElement>('[role="tablist"]')!;
     return {
       top: Math.round(sticky.getBoundingClientRect().top),
+      titleTop: Math.round(title.getBoundingClientRect().top),
+      stageBottom: Math.round(sticky.getBoundingClientRect().bottom),
       tabScrollLeft: Math.round(tablist.scrollLeft),
       overflow: document.documentElement.scrollWidth > window.innerWidth,
     };
   });
   expect(stickyState.top).toBeGreaterThanOrEqual(48);
   expect(stickyState.top).toBeLessThanOrEqual(120);
+  expect(stickyState.titleTop).toBeGreaterThanOrEqual(48);
+  expect(stickyState.titleTop).toBeLessThanOrEqual(120);
+  expect(stickyState.stageBottom).toBeLessThanOrEqual(844);
   expect(stickyState.tabScrollLeft).toBeGreaterThan(0);
   expect(stickyState.overflow).toBe(false);
 

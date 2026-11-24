@@ -15,7 +15,7 @@ Para mantener estable un equipo conectado tras reinstalaciones bajo tu cuenta, e
 
 ## Consultas locales de cuota de proveedores
 
-**En resumen:** para mostrar cuánta cuota les queda a las herramientas de IA que registraste, el daemon de xMatrix lee los archivos de inicio de sesión de esas herramientas en tu equipo (por ejemplo `~/.codex/auth.json`) y consulta directamente a cada proveedor. Nada de lo que lee de esos archivos (token, id de cuenta, contenido o huella del archivo) se envía a xMatrix; el Hub solo recibe la respuesta de cuota normalizada. Un único interruptor detiene tanto la lectura de archivos como las solicitudes al proveedor (consulta «Desactivar consultas locales de cuota» más abajo).
+**En resumen:** para mostrar cuánta cuota les queda a las herramientas de IA que registraste, el daemon de xMatrix lee los archivos de inicio de sesión de esas herramientas en tu equipo (por ejemplo `~/.grok/auth.json`) y consulta directamente a cada proveedor. Codex es la excepción: xMatrix pregunta al propio Codex, a través de la sesión de Codex en curso o de un `codex app-server` iniciado brevemente, y no abre ningún archivo de inicio de sesión de Codex. Nada de lo que lee de esos archivos (token, id de cuenta, contenido o huella del archivo) se envía a xMatrix; el Hub solo recibe la respuesta de cuota normalizada. Un único interruptor detiene la lectura de archivos, las solicitudes al app-server de Codex y las solicitudes al proveedor (consulta «Desactivar consultas locales de cuota» más abajo).
 
 Cuando registras un agente compatible (Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai o Antigravity), xMatrix puede mostrar la cuota restante en `xmatrix agent list` y en la vista Agents, y permitir que `@auto` evite cuentas agotadas.
 
@@ -24,7 +24,7 @@ Para consultar la cuota restante directamente en tu proveedor sin ejecutar un tu
 | Agente | Almacén local leído (solo en memoria) | Endpoint del proveedor consultado desde tu equipo |
 | --- | --- | --- |
 | Claude Code | Llavero de macOS (`Claude Code-credentials`) o `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
-| Codex | `$CODEX_HOME/auth.json` o `~/.codex/auth.json` | `https://chatgpt.com/backend-api/wham/usage` |
+| Codex | Ninguno: el método `account/rateLimits/read` del propio app-server de Codex (la sesión en curso o un `codex app-server` iniciado brevemente) | Lo gestiona Codex con su propio inicio de sesión |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, llavero de macOS (`cursor-access-token`) o `auth.json` de Cursor | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` o `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` o `auth.json` de OpenCode | `https://opencode.ai/zen/go/v1/usage` o `wham/usage` de ChatGPT |
@@ -48,7 +48,7 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-Para desactivar solo Antigravity, define `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. Al desactivarlas, xMatrix no lee almacenes locales de credenciales ni consulta endpoints de uso en ninguna ruta.
+Para desactivar solo Antigravity, define `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. Al desactivarlas, xMatrix no lee almacenes locales de credenciales, no inicia `codex app-server` ni pregunta a una sesión de Codex, ni consulta endpoints de uso en ninguna ruta.
 
 ## Diagnósticos del cliente e informes de errores
 
@@ -56,8 +56,17 @@ xMatrix no usa cookies publicitarias, rastreo entre sitios, grabación de sesion
 
 **Los diagnósticos opcionales del cliente y los informes de fallos del navegador están desactivados por defecto en todas las regiones (opt-in explícito).** Las páginas públicas de marketing, documentación y avisos legales nunca cargan Sentry. Solo se envían si decides activarlos (o si haces clic en **Send failure report** en una tarjeta de fallo de inicio del daemon):
 
-- **Informes de errores y fallos (Sentry):** solo cuando un usuario con sesión iniciada los activa; sin información de usuario, cookies, cabeceras/cuerpos HTTP, parámetros de consulta URL ni breadcrumbs de consola, y con textos entrecomillados censurados. Las compilaciones locales o autoalojadas sin DSN no envían nada.
-- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** solo cuando están activados, envían tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave; nunca incluyen contenido de mensajes ni comandos.
+- **Informes de errores y fallos (Sentry):** solo cuando un usuario con sesión iniciada los activa, se envían la clase del error, su código si lo tiene y las ubicaciones de código de su pila. Nunca se envían el mensaje del error, breadcrumbs, URL, cookies, cabeceras, cuerpos de petición ni datos del usuario. Las compilaciones locales o autoalojadas sin DSN no envían nada. (Los errores del Hub en el servidor se siguen informando desde el servidor para operar el servicio alojado; ver más abajo.)
+- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** solo cuando están activados, envían tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave.
+
+### Qué puede contener un evento de diagnóstico
+
+Cada evento de diagnóstico tiene un conjunto declarado de campos, que se comprueba cuando el cliente lo crea y otra vez cuando el Hub lo recibe. Un campo solo puede contener un valor fijo de una lista, un número, true o false, una versión, un identificador opaco o un código corto como `websocket_connect_failed` (minúsculas, dígitos, `_` y `-`). Un evento con cualquier otro campo, o con un valor fuera de su campo, se rechaza entero en lugar de recortarse, así que el texto que escribes no tiene campo por el que viajar. Los errores se informan por su clase y su código, nunca por su mensaje.
+
+Solo dos caminos llevan texto:
+
+- **Send failure report en una tarjeta de fallo de inicio del escritorio:** las últimas líneas de la CLI, que la App de escritorio censura antes en tu equipo (directorio personal, direcciones de correo, parámetros de consulta URL y cualquier cosa con forma de token o clave). La tarjeta te muestra esas líneas antes de enviarlas y solo se envían al pulsar el botón; el informe automático enviado con los diagnósticos activados solo lleva la etapa del fallo, el código de salida, la plataforma y la versión de la App.
+- **Informes de errores del Hub en el servidor:** el propio mensaje de error del servidor, sin valores entrecomillados, direcciones de correo, parámetros de consulta URL, rutas del directorio personal ni cadenas con forma de token. Los datos registrados junto al error solo se informan cuando son números, true/false o identificadores opacos.
 
 ### Activar o desactivar diagnósticos e informes de errores
 

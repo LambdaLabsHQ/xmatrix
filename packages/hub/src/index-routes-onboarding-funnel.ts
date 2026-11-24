@@ -54,11 +54,12 @@ export function onboardingStepDataPoint(event: OnboardingFunnelEvent, userId: st
 
 /** index1 the person's keyed hash; blob1 `desktop`, blob2 the platform, blob3
  * `daemon_start_failed`, blob4 the stage, blob5 the App version, blob11 the
- * CLI's last lines; double3 the exit code (-1 when there was none). */
+ * CLI's last lines when the person sent them from the failure card (empty for
+ * the automatic report); double3 the exit code (-1 when there was none). */
 export async function desktopDaemonFailureDataPoint(report: DesktopDaemonFailureReport, userId: string, hashKey: string | undefined) {
   const point = await diagnosticsDataPoint({ userId, hashKey, routeGroup: "desktop", eventType: "daemon_start_failed",
     clientKind: report.platform, reason: report.stage, status: report.appVersion });
-  return { ...point, blobs: [...point.blobs ?? [], report.detail], doubles: [...point.doubles ?? [], report.exitCode ?? -1] };
+  return { ...point, blobs: [...point.blobs ?? [], report.detail ?? ""], doubles: [...point.doubles ?? [], report.exitCode ?? -1] };
 }
 
 /** index1 the person's keyed hash; blob1 `startup`, blob2 the device, blob3

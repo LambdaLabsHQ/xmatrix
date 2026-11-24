@@ -45,31 +45,14 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
         latest_goal.clone(),
     );
 
-    // Seed account-level Codex 5h/1w quotas from ChatGPT wham/usage beside the
-    // app-server's start, never ahead of it: the start does not wait on the
-    // provider. The app-server's session-local rate limits are not an account
-    // usage source. After this the quota is read when a turn ends, not on a
-    // timer.
-    let (latest_usage, app) = tokio::join!(
-        async {
-            if xmatrix_cli_core::config::quota_probes_disabled() {
-                None
-            } else {
-                read_codex_chatgpt_usage(false).await
-            }
-        },
-        spawn_initialized_codex_app(
-            cmd,
-            cwd,
-            &agent,
-            resume_session_key.as_deref(),
-            resume_requested,
-        )
-    );
-    let mut app = app?;
-    if let Some(usage) = latest_usage.clone() {
-        send_presence(&relay, None, PresencePatch::usage(Some(usage)));
-    }
+    let mut app = spawn_initialized_codex_app(
+        cmd,
+        cwd,
+        &agent,
+        resume_session_key.as_deref(),
+        resume_requested,
+    )
+    .await?;
     if let Some(goal) = initial_goal.as_ref()
         && let Some(objective) = goal
             .objective
@@ -110,7 +93,24 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
         .current_effort()
         .and_then(clean_run_effort)
         .or(latest_effort);
-    app.install_parameter_schemas(crate::harness_parameters::discover_codex_parameters(cmd).await);
+    // Seed the account-level Codex 5h/1w quota from the app-server's
+    // `account/rateLimits/read` while the parameter schema export runs, so the
+    // start does not wait on the provider. After this the quota is read when a
+    // turn ends, not on a timer.
+    let (parameter_schemas, latest_usage) = tokio::join!(
+        crate::harness_parameters::discover_codex_parameters(cmd),
+        async {
+            if xmatrix_cli_core::config::quota_probes_disabled() {
+                None
+            } else {
+                app.read_account_usage().await
+            }
+        }
+    );
+    app.install_parameter_schemas(parameter_schemas);
+    if let Some(usage) = latest_usage.clone() {
+        send_presence(&relay, None, PresencePatch::usage(Some(usage)));
+    }
     let available_models = match app.list_models().await {
         Ok(models) => models,
         Err(err) => {
@@ -522,7 +522,7 @@ impl CodexRun<'_> {
         if xmatrix_cli_core::config::quota_probes_disabled() {
             return;
         }
-        if let Some(usage) = read_codex_chatgpt_usage(true).await {
+        if let Some(usage) = self.app.read_account_usage().await {
             self.latest_usage = Some(usage);
         }
     }

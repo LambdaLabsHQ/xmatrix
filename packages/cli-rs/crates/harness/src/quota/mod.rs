@@ -75,7 +75,7 @@ pub enum Provider {
     /// Claude Code / Claude.ai subscription 5h and 1w windows, asked of
     /// Claude Code (`get_usage`).
     Claude,
-    /// Codex ChatGPT subscription windows (`wham/usage`).
+    /// Codex ChatGPT subscription windows (app-server `account/rateLimits/read`).
     Codex,
     /// Cursor Agent billing-cycle and Auto/API buckets.
     Cursor,
@@ -136,9 +136,9 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::Claude, Account::DefaultLogin) => {
             claude::read_claude_usage_for_default_account(force).await
         }
-        (Provider::Codex, Account::Process) => codex::read_codex_chatgpt_usage(force).await,
+        (Provider::Codex, Account::Process) => codex::read_codex_account_usage(None, force).await,
         (Provider::Codex, Account::Home(home)) => {
-            codex::read_codex_chatgpt_usage_for_home(&home, force).await
+            codex::read_codex_account_usage(Some(&home), force).await
         }
         (Provider::Cursor, Account::Process | Account::DefaultLogin) => {
             cursor::read_cursor_period_usage(force).await
@@ -247,6 +247,14 @@ fn assert_reading_holds_nothing_of_the_login(
     }
 }
 
+/// Write `script` to `path` as an executable stand-in for a provider CLI.
+#[cfg(all(test, unix))]
+pub(crate) fn write_test_executable(path: &std::path::Path, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, script).expect("write test executable");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+}
+
 #[cfg(test)]
 fn assert_provider_window_labels(
     usage: LlmUsage,
@@ -345,9 +353,10 @@ mod tests {
             .enable_all()
             .build()
             .expect("tokio runtime");
-        let codex = rt.block_on(codex::read_codex_chatgpt_usage(true));
+        let codex = rt.block_on(codex::read_codex_account_usage(None, true));
         let grok = rt.block_on(grok::read_grok_build_billing_usage(true));
-        let codex = codex.expect("codex wham usage should resolve with local auth");
+        let codex =
+            codex.expect("codex account/rateLimits/read should resolve with the local sign-in");
         let grok = grok.expect("grok billing usage should resolve with local auth");
         let codex_q = codex.quota_usages.as_ref().expect("codex quotas");
         let grok_q = grok.quota_usages.as_ref().expect("grok quotas");

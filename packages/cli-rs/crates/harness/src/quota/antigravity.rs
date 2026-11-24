@@ -896,7 +896,6 @@ mod tests {
     #[cfg(unix)]
     mod unix_cli_tests {
         use super::*;
-        use std::os::unix::fs::PermissionsExt;
 
         fn unique_temp_dir(name: &str) -> PathBuf {
             let nanos = std::time::SystemTime::now()
@@ -913,10 +912,7 @@ mod tests {
 
         fn write_fake_agy(dir: &Path, script: &str) -> PathBuf {
             let path = dir.join("agy");
-            std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).expect("write fake agy");
-            let mut perms = std::fs::metadata(&path).expect("meta").permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&path, perms).expect("chmod");
+            crate::quota::write_test_executable(&path, &format!("#!/bin/sh\n{script}\n"));
             path
         }
 
