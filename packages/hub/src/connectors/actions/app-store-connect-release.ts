@@ -146,12 +146,12 @@ function metadata(statement: { target: string; text: string }): Record<string, s
 
 export const APP_STORE_CONNECT_RELEASE_ACTIONS: Record<string, ConnectorAction> = {
   create_version: appAction("write", statement => {
-    const usage = "name an app and the new version: <com.example.app> <1.2.0> [release=manual|after_approval]";
+    const usage = "name an app and the new version: <com.example.app> <1.2.0> [release=after_approval|manual]";
     const app = bundleId(statement.target);
     const [word = "", ...rest] = statement.text.trim().split(/\s+/u);
     const ref = versionRef(word), options = keyedOptions(rest.join(" "), ["release"], usage);
     if (!app || !ref || typeof options === "string") return usage;
-    const release = RELEASE_TYPES[options.get("release") ?? "manual"];
+    const release = RELEASE_TYPES[options.get("release") ?? "after_approval"];
     return release ? { app, ...ref, release } : usage;
   }, async ({ api, app, input }) => {
     const { rows } = await appVersions(api, app.id, input.platform);

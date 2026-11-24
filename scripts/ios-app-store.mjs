@@ -248,13 +248,13 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
 
   if (!target) {
     target = (await api.request("/v1/appStoreVersions", "POST", {
-      type: "appStoreVersions", attributes: { platform: "IOS", versionString: version, releaseType: "MANUAL", copyright: metadata.copyright },
+      type: "appStoreVersions", attributes: { platform: "IOS", versionString: version, releaseType: "AFTER_APPROVAL", copyright: metadata.copyright },
       relationships: { app: relation("apps", appId), build: relation("builds", build.id) },
     })).data;
   } else {
     await api.request(`/v1/appStoreVersions/${target.id}`, "PATCH", {
       type: "appStoreVersions", id: target.id,
-      attributes: { versionString: version, copyright: metadata.copyright },
+      attributes: { versionString: version, releaseType: "AFTER_APPROVAL", copyright: metadata.copyright },
       relationships: { build: relation("builds", build.id) },
     });
   }
