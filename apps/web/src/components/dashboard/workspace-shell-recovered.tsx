@@ -765,6 +765,9 @@ export function appendOutgoingTimelineItems(
       replyTo: message.replyTo,
       attachments: outgoingAttachments(message),
       ...(message.uploads?.length ? { uploads: message.uploads } : {}),
+      // What the message carries shows while it is sending too: the page it was written on (browser-page.ts) does
+      // not appear only once the Hub has it.
+      ...(message.metadata ? { metadata: message.metadata } : {}),
       sentAt: message.sentAt,
       face,
       own: true,
