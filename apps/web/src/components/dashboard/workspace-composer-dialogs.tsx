@@ -118,7 +118,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { leaveOutEmbedBrowserPage, showEmbedWebPage } from "@/lib/extension-embed";
+import { leaveOutEmbedBrowserPage, openWebPageLink } from "@/lib/extension-embed";
 import { useEmbedBrowserPage } from "./use-extension-companion";
 
 import { Face } from "@/components/dashboard/face";
@@ -2029,11 +2029,8 @@ export const ChannelDetails = memo(function ChannelDetails({
             <div className="space-y-1">
               {webPages.map((page) => (
                 <a key={page.href} href={page.href} target="_blank" rel="noreferrer" title={page.href}
-                  // In the side panel, back to the tab showing the page, not a new tab.
-                  onClick={(event) => {
-                    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                    if (showEmbedWebPage(page.href)) event.preventDefault();
-                  }}
+                  // Switch back to the tab showing the page (side panel or Web app with the extension), not a new tab.
+                  onClick={(event) => openWebPageLink(event, page.href)}
                   className="flex min-w-0 items-start gap-2 rounded-md px-1 py-1 hover:bg-foreground/5">
                   <Globe aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0">

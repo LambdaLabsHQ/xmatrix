@@ -67,13 +67,22 @@ export function extensionPagesPolicy(hubOrigin) {
  */
 export function shippedManifest(manifest, { release, unpacked = false, hubUrl }) {
   const { version, versionName } = chromeVersion(release);
-  const { key, ...rest } = manifest;
+  const { key, externally_connectable: connectable, ...rest } = manifest;
   const hubOrigin = new URL(hubUrl ?? manifest.host_permissions[0]).origin;
+  const externallyConnectable = connectable
+    ? {
+      ...connectable,
+      matches: unpacked
+        ? [...connectable.matches, "http://localhost/*", "http://127.0.0.1/*"]
+        : connectable.matches,
+    }
+    : undefined;
   return {
     ...rest,
     version,
     version_name: versionName,
     ...(unpacked ? { key } : {}),
+    ...(externallyConnectable ? { externally_connectable: externallyConnectable } : {}),
     host_permissions: [`${hubOrigin}/*`],
     content_security_policy: { extension_pages: extensionPagesPolicy(hubOrigin) },
   };

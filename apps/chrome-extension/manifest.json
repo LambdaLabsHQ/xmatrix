@@ -30,6 +30,12 @@
   "web_accessible_resources": [
     { "resources": ["app/ask.html"], "matches": ["https://*/*", "http://*/*"] }
   ],
+  "externally_connectable": {
+    "matches": [
+      "https://xmatrix.sh/*",
+      "https://beta.xmatrix.sh/*"
+    ]
+  },
   "commands": {
     "_execute_action": {
       "suggested_key": { "default": "Alt+Shift+X" },

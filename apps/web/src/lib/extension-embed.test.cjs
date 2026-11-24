@@ -168,9 +168,53 @@ test("a web page the person wrote from is brought back in its own tab, and only 
     message: { protocol: "xmatrix-embed/1", type: "show-page", href: "https://x.com/daniel/status/1" } });
   assert.equal(embed.showEmbedWebPage("javascript:alert(1)"), false);
   assert.equal(win.parent.posted.length, 1);
-  // Outside the side panel the card stays a plain link.
+
+  // Outside the side panel, without Chrome extension runtime, the card stays a plain link.
   globalThis.window = frameWindow("https://evil.example");
   assert.equal(embed.showEmbedWebPage("https://x.com/daniel/status/1"), false);
+
+  // In the Web app on Chrome with the extension installed, it asks the extension over externally_connectable.
+  const sent = [];
+  const opened = [];
+  let replyWith = { ok: true };
+  let lastError;
+  const webWin = {
+    parent: null,
+    location: { origin: "https://xmatrix.sh", ancestorOrigins: [] },
+    open: (...args) => opened.push(args),
+    chrome: {
+      runtime: {
+        get lastError() { return lastError; },
+        sendMessage(extensionId, message, callback) {
+          sent.push({ extensionId, message });
+          callback(replyWith);
+        },
+      },
+    },
+  };
+  webWin.parent = webWin;
+  globalThis.window = webWin;
+
+  assert.equal(embed.showEmbedWebPage("https://x.com/daniel/status/1"), true);
+  assert.deepEqual(sent.at(-1), {
+    extensionId: "kaickfjmldmlelnfijaahialjpnebnak",
+    message: { protocol: "xmatrix-embed/1", type: "show-page", href: "https://x.com/daniel/status/1" },
+  });
+  assert.equal(opened.length, 0);
+
+  // If the extension is missing or older (lastError), fall back to opening a new tab.
+  lastError = { message: "Could not establish connection." };
+  replyWith = undefined;
+  assert.equal(embed.showEmbedWebPage("https://x.com/daniel/status/2"), true);
+  assert.deepEqual(opened, [["https://x.com/daniel/status/2", "_blank", "noopener,noreferrer"]]);
+
+  // Plain left-click prevents navigation when handled; modifier clicks keep the native link.
+  lastError = undefined;
+  replyWith = { ok: true };
+  let prevented = 0;
+  embed.openWebPageLink({ button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault: () => { prevented += 1; } }, "https://x.com/daniel/status/3");
+  embed.openWebPageLink({ button: 0, metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, preventDefault: () => { prevented += 1; } }, "https://x.com/daniel/status/3");
+  assert.equal(prevented, 1);
 });
 
 // Each message written in the side panel carries the page beside it (browser-page.ts).

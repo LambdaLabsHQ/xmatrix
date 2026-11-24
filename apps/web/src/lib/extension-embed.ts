@@ -19,7 +19,7 @@
  */
 import { browserPageMetadata, browserPageOf, CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AuthUser, type SerializedChannel } from "@xmatrix/protocol";
 import canonicalVersion from "../../../../version.json" with { type: "json" };
-import { EXTENSION_EMBED_ORIGINS } from "./extension-embed-origins";
+import { EXTENSION_EMBED_ORIGINS, EXTENSION_ID } from "./extension-embed-origins";
 
 const PROTOCOL = "xmatrix-embed/1";
 /** The platform this app names itself as when it runs in the extension. */
@@ -391,17 +391,58 @@ export function answerEmbedBrowserReadApproval(requestId: string, allow: boolean
   if (parent) postToParent(parent, { type: "browser-read-approval", requestId, allow });
 }
 
+type ChromeExternalRuntime = {
+  lastError?: { message?: string };
+  sendMessage: (
+    extensionId: string,
+    message: Record<string, unknown>,
+    callback: (response?: { ok?: boolean }) => void,
+  ) => void;
+};
+
+function browserExtensionRuntime(): ChromeExternalRuntime | null {
+  if (typeof window === "undefined") return null;
+  const runtime = (window as unknown as { chrome?: { runtime?: Partial<ChromeExternalRuntime> } }).chrome?.runtime;
+  return typeof runtime?.sendMessage === "function" ? (runtime as ChromeExternalRuntime) : null;
+}
+
 /**
- * Brings a web page the person wrote from back into view, from the panel: the
- * tab already showing it (this panel's own tab first), not a new one (Daniel
- * 2026-11-24). The extension opens a tab only when no tab shows it any more.
- * False outside the side panel, where the caller opens it as a link.
+ * Brings a web page the person wrote from back into view: the tab already
+ * showing it (this panel's own tab first), not a new one (Daniel 2026-11-24).
+ * Works both inside the Chrome extension side panel (via postMessage) and in
+ * the xMatrix Web app on Chrome when the extension is installed (via
+ * externally_connectable). Falls back to opening a new tab when the extension
+ * is absent or no tab shows the page any more.
  */
 export function showEmbedWebPage(href: string): boolean {
+  const clean = webAddress(href);
+  if (!clean) return false;
   const parent = extensionEmbedParent();
-  if (!parent || !webAddress(href)) return false;
-  postToParent(parent, { type: "show-page", href });
-  return true;
+  if (parent) {
+    postToParent(parent, { type: "show-page", href: clean });
+    return true;
+  }
+  const runtime = browserExtensionRuntime();
+  if (!runtime) return false;
+  try {
+    runtime.sendMessage(EXTENSION_ID, { protocol: PROTOCOL, type: "show-page", href: clean }, (response) => {
+      if (runtime.lastError || !response?.ok) {
+        window.open(clean, "_blank", "noopener,noreferrer");
+      }
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Plain left-click handler for a "Web page" link: switches back to the person's tab when possible. */
+export function openWebPageLink(
+  event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; preventDefault: () => void },
+  href: string,
+) {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  if (showEmbedWebPage(href)) event.preventDefault();
 }
 
 /** Opens an address in a browser tab of its own, from the panel. */
