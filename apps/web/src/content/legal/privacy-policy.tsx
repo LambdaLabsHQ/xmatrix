@@ -172,8 +172,7 @@ export function PrivacyPolicyContent() {
           <p>
             <strong className="text-foreground">Which files.</strong> For an AI tool you registered
             as an Agent on a computer, the xMatrix daemon on that computer may read that tool&apos;s
-            own sign-in: for example Codex&apos;s{" "}
-            <code className="font-mono text-xs">~/.codex/auth.json</code>, Grok&apos;s{" "}
+            own sign-in: for example Grok&apos;s{" "}
             <code className="font-mono text-xs">~/.grok/auth.json</code>, Claude Code&apos;s{" "}
             <code className="font-mono text-xs">~/.claude/.credentials.json</code> or keychain entry,
             Cursor&apos;s or OpenCode&apos;s <code className="font-mono text-xs">auth.json</code> or
@@ -181,7 +180,10 @@ export function PrivacyPolicyContent() {
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and local privacy guide
             </Link>
-            . It never reads the login of a tool you did not register.
+            . It never reads the login of a tool you did not register. Codex is not read this way:
+            the daemon asks Codex itself, through the Codex session already running or a briefly
+            started <code className="font-mono text-xs">codex app-server</code>, and Codex answers
+            with its own sign-in. xMatrix opens no Codex login file.
           </p>
           <p>
             <strong className="text-foreground">Why.</strong> To ask that provider how much of your
@@ -197,9 +199,9 @@ export function PrivacyPolicyContent() {
             provider still serves the account, and a prepaid balance where applicable.
           </p>
           <p>
-            <strong className="text-foreground">How to turn it off.</strong> One switch stops both the
-            file reads and the provider requests on that computer: Desktop Settings → Legal and
-            privacy → Local provider quota probes, or{" "}
+            <strong className="text-foreground">How to turn it off.</strong> One switch stops the
+            file reads, the Codex app-server requests and the provider requests on that computer:
+            Desktop Settings → Legal and privacy → Local provider quota probes, or{" "}
             <code className="font-mono text-xs">xmatrix config quotaProbes off</code>, or the
             environment variable{" "}
             <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code>. With it off,

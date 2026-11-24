@@ -10,20 +10,25 @@
 //! login` → OpenAI → ChatGPT), the account quota is the ChatGPT subscription's
 //! own 5h/1w windows. OpenCode stores that OAuth login under the `openai` entry
 //! of the same `auth.json`, so the reader asks ChatGPT's `wham/usage` with it,
-//! exactly as the Codex reader does for a Codex login.
+//! the endpoint behind the ChatGPT subscription windows.
 //!
 //! ACP `usage_update` notifications already carry the session's context usage
 //! and cost; this reader adds the account-level quota windows that the generic
 //! ACP path otherwise cannot see.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde_json::Value;
 
-use super::windows::percent_window;
-use crate::fields::{first_f64, first_string};
+use super::cache::KeyedProviderUsageCache;
+use super::windows::{
+    append_quota_usages, credit_balance, normalized_quota_percent, percent_window,
+    prefer_codex_quota_windows, quota_percent_from_usage_fields, rate_limit_window_label,
+};
+use crate::fields::{first_f64, first_reset_at, first_string};
 use crate::host::{home_dir_path, provider_client};
-use crate::usage::LlmUsage;
+use crate::usage::{LlmQuotaAccount, LlmQuotaCredits, LlmQuotaUsage, LlmUsage, has_llm_usage};
 
 // Only the OpenCode Go subscription exposes windowed account quota. OpenCode
 // Zen is pay-as-you-go with no equivalent endpoint, so it has no reader here.
@@ -100,7 +105,7 @@ pub async fn read_opencode_chatgpt_usage(force: bool) -> Option<LlmUsage> {
         return None;
     }
     let auth = opencode_auth_file()?;
-    read_opencode_chatgpt_usage_from(&auth, force, super::codex::CODEX_CHATGPT_USAGE_URL).await
+    read_opencode_chatgpt_usage_from(&auth, force, CHATGPT_WHAM_USAGE_URL).await
 }
 
 async fn read_opencode_chatgpt_usage_from(
@@ -113,7 +118,7 @@ async fn read_opencode_chatgpt_usage_from(
         "opencode-openai\u{0}{}",
         login.account_id.as_deref().unwrap_or("")
     );
-    super::codex::read_chatgpt_wham_usage_with_token(
+    read_chatgpt_wham_usage_with_token(
         &key,
         &login.access_token,
         login.account_id.as_deref(),
@@ -121,6 +126,173 @@ async fn read_opencode_chatgpt_usage_from(
         endpoint,
     )
     .await
+}
+
+/// ChatGPT's subscription usage endpoint, asked with OpenCode's own stored
+/// ChatGPT OAuth login.
+const CHATGPT_WHAM_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+
+static CHATGPT_WHAM_USAGE: KeyedProviderUsageCache =
+    KeyedProviderUsageCache::new(Duration::from_secs(120), Duration::from_secs(60));
+
+/// One bounded `wham/usage` request for a ChatGPT access token.
+async fn fetch_wham_usage_json(
+    cache_key: &str,
+    label: &str,
+    access_token: &str,
+    account_id: Option<&str>,
+    endpoint: &str,
+) -> Option<Value> {
+    let mut request = provider_client()
+        .get(endpoint)
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {access_token}"),
+        )
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::USER_AGENT, "xmatrix-cli");
+    if let Some(account_id) = account_id {
+        request = request.header("ChatGPT-Account-Id", account_id);
+    }
+    CHATGPT_WHAM_USAGE
+        .fetch_json(cache_key, label, request)
+        .await
+}
+
+/// Parse a `wham/usage` body, stamp it, and remember it under `cache_key`.
+fn store_wham_usage(cache_key: &str, value: &Value) -> Option<LlmUsage> {
+    // This endpoint is the account-level quota authority. Restrict parsing to
+    // its wham envelope rather than accepting any rate-limit-like nested
+    // object that could resemble an app-server session snapshot.
+    let mut usage = chatgpt_wham_usage_from_value(value);
+    if let Some(usage) = usage.as_mut() {
+        usage.quota_observed_at = super::observed_now();
+    }
+    CHATGPT_WHAM_USAGE.store(cache_key, usage.clone());
+    usage
+}
+
+/// ChatGPT subscription windows for OpenCode's stored ChatGPT OAuth token.
+/// `cache_key` must identify the account so two logins never share one slot;
+/// the token itself is never part of the key.
+async fn read_chatgpt_wham_usage_with_token(
+    cache_key: &str,
+    access_token: &str,
+    account_id: Option<&str>,
+    force: bool,
+    endpoint: &str,
+) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
+    if let Some(cached) = CHATGPT_WHAM_USAGE.hit_unless_forced(cache_key, force) {
+        return cached;
+    }
+    let value =
+        fetch_wham_usage_json(cache_key, "chatgpt", access_token, account_id, endpoint).await?;
+    store_wham_usage(cache_key, &value)
+}
+
+fn chatgpt_wham_usage_from_value(value: &Value) -> Option<LlmUsage> {
+    let mut best = LlmUsage::default();
+    append_quota_usages(
+        &mut best.quota_usages,
+        chatgpt_wham_quota_usages(value.as_object()?),
+    );
+    prefer_codex_quota_windows(&mut best.quota_usages);
+    if best.quota_usages.is_some() {
+        best.quota_source = Some("provider_api".to_string());
+        best.quota_account = chatgpt_wham_account(value);
+    }
+    if has_llm_usage(&best) {
+        Some(best)
+    } else {
+        None
+    }
+}
+
+/// Whether ChatGPT still serves the account, from the same `wham/usage` read.
+/// `rate_limit.allowed` turns false as soon as the plan windows are used up,
+/// even while `credits` keep serving requests; the account refuses only when
+/// no credits are left or an overage or spend limit is reached.
+fn chatgpt_wham_account(value: &Value) -> Option<LlmQuotaAccount> {
+    let reached = |pointer: &str| value.pointer(pointer).and_then(Value::as_bool) == Some(true);
+    let credits_serve = (reached("/credits/has_credits") || reached("/credits/unlimited"))
+        && !reached("/credits/overage_limit_reached")
+        && !reached("/spend_control/reached");
+    let allowed = value
+        .pointer("/rate_limit/allowed")
+        .and_then(Value::as_bool)
+        .map(|allowed| allowed || credits_serve);
+    let credits = value
+        .get("credits")
+        .and_then(Value::as_object)
+        .and_then(|credits| {
+            let unlimited = credits.get("unlimited").and_then(Value::as_bool) == Some(true);
+            let has_credits = credits.get("has_credits").and_then(Value::as_bool) == Some(true);
+            (has_credits || unlimited).then(|| LlmQuotaCredits {
+                balance: credit_balance(credits.get("balance")),
+                currency: None,
+                unlimited,
+            })
+        });
+    (allowed.is_some() || credits.is_some()).then_some(LlmQuotaAccount { allowed, credits })
+}
+
+/// Parse ChatGPT Codex `wham/usage` style rate-limit windows.
+/// Shape: `{ rate_limit: { primary_window: { used_percent, limit_window_seconds, reset_at }, secondary_window } }`.
+/// App-server session snapshots use `primary`/`secondary` + `windowDurationMins`
+/// and must not be accepted here: those values are per-session and jump when
+/// more than one Codex thread is live.
+fn chatgpt_wham_quota_usages(map: &serde_json::Map<String, Value>) -> Vec<LlmQuotaUsage> {
+    if let Some(rate_limit) = map.get("rate_limit").and_then(Value::as_object) {
+        return chatgpt_wham_rate_limit_object(rate_limit);
+    }
+    if map.contains_key("primary_window") || map.contains_key("secondary_window") {
+        return chatgpt_wham_rate_limit_object(map);
+    }
+    Vec::new()
+}
+
+fn chatgpt_wham_rate_limit_object(map: &serde_json::Map<String, Value>) -> Vec<LlmQuotaUsage> {
+    if !map.contains_key("primary_window") && !map.contains_key("secondary_window") {
+        return Vec::new();
+    }
+    let mut quotas = Vec::new();
+    for key in ["primary_window", "secondary_window"] {
+        let Some(window) = map.get(key).and_then(Value::as_object) else {
+            continue;
+        };
+        if let Some(quota) = chatgpt_wham_window_quota(window) {
+            quotas.push(quota);
+        }
+    }
+    quotas
+}
+
+fn chatgpt_wham_window_quota(window: &serde_json::Map<String, Value>) -> Option<LlmQuotaUsage> {
+    let percent = first_f64(window, &["used_percent", "usedPercent", "percent", "pct"])
+        .or_else(|| quota_percent_from_usage_fields(window))?;
+    let duration_seconds = first_f64(
+        window,
+        &[
+            "limit_window_seconds",
+            "limitWindowSeconds",
+            "window_duration_seconds",
+            "windowDurationSeconds",
+        ],
+    )?;
+    let label = rate_limit_window_label(duration_seconds / 60.0)?;
+    Some(LlmQuotaUsage {
+        label: Some(label),
+        window: Some("Codex".to_string()),
+        used: None,
+        limit: None,
+        remaining: None,
+        percent: normalized_quota_percent(Some(percent), None, None),
+        reset_at: first_reset_at(window, &["reset_at", "resetAt", "resets_at", "resetsAt"]),
+        scope: None,
+    })
 }
 
 /// Which account an OpenCode model draws on, from its `provider/model` id.
@@ -414,5 +586,154 @@ mod tests {
             }))
             .is_none()
         );
+    }
+
+    #[test]
+    fn chatgpt_wham_usage_extracts_primary_and_secondary_windows() {
+        let payload = serde_json::json!({
+            "plan_type": "pro",
+            "rate_limit": {
+                "allowed": true,
+                "limit_reached": false,
+                "primary_window": {
+                    "used_percent": 40,
+                    "limit_window_seconds": 604800,
+                    "reset_after_seconds": 540609,
+                    "reset_at": 1784487804
+                },
+                "secondary_window": {
+                    "used_percent": 12.5,
+                    "limit_window_seconds": 18000,
+                    "reset_at": 1784012345
+                }
+            }
+        });
+
+        let quotas = crate::quota::assert_provider_window_labels(
+            chatgpt_wham_usage_from_value(&payload).unwrap(),
+            &["5h", "1w"],
+        );
+        assert_eq!(quotas[0].window.as_deref(), Some("Codex"));
+        assert_eq!(quotas[0].percent, Some(12.5));
+        assert_eq!(quotas[0].reset_at.as_deref(), Some("1784012345"));
+        assert_eq!(quotas[1].percent, Some(40.0));
+        assert_eq!(quotas[1].reset_at.as_deref(), Some("1784487804"));
+    }
+
+    #[test]
+    fn chatgpt_wham_usage_keeps_whether_credits_still_serve_a_used_up_week() {
+        let payload = serde_json::json!({
+            "plan_type": "pro",
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": { "used_percent": 100, "limit_window_seconds": 604800, "reset_at": 1791631680 }
+            },
+            "credits": {
+                "has_credits": true,
+                "unlimited": false,
+                "overage_limit_reached": false,
+                "balance": "137.5"
+            },
+            "spend_control": { "reached": false, "individual_limit": null }
+        });
+        let usage = chatgpt_wham_usage_from_value(&payload).unwrap();
+        assert_eq!(usage.quota_usages.unwrap()[0].percent, Some(100.0));
+        assert_eq!(
+            usage.quota_account,
+            Some(LlmQuotaAccount {
+                allowed: Some(true),
+                credits: Some(LlmQuotaCredits {
+                    balance: Some(137.5),
+                    currency: None,
+                    unlimited: false
+                }),
+            })
+        );
+
+        let refused = serde_json::json!({
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": { "used_percent": 100, "limit_window_seconds": 604800 }
+            },
+            "credits": { "has_credits": false, "unlimited": false, "balance": "0" }
+        });
+        assert_eq!(
+            chatgpt_wham_usage_from_value(&refused)
+                .unwrap()
+                .quota_account,
+            Some(LlmQuotaAccount {
+                allowed: Some(false),
+                credits: None
+            })
+        );
+
+        let spend_capped = serde_json::json!({
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": { "used_percent": 100, "limit_window_seconds": 604800 }
+            },
+            "credits": { "has_credits": true, "unlimited": false, "overage_limit_reached": false, "balance": "5" },
+            "spend_control": { "reached": true }
+        });
+        assert_eq!(
+            chatgpt_wham_usage_from_value(&spend_capped)
+                .unwrap()
+                .quota_account
+                .unwrap()
+                .allowed,
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn chatgpt_wham_usage_rejects_app_server_session_rate_limits() {
+        // Session snapshots share a `rate_limit` wrapper but use primary/secondary
+        // and minute windows. Accepting them made each Codex thread publish its own
+        // meter and the Agents list jumped whenever another session heartbeated.
+        let payload = serde_json::json!({
+            "rate_limit": {
+                "primary": { "usedPercent": 12, "windowDurationMins": 300 },
+                "secondary": { "usedPercent": 34, "windowDurationMins": 10080 }
+            }
+        });
+        assert!(chatgpt_wham_usage_from_value(&payload).is_none());
+
+        let mixed = serde_json::json!({
+            "rateLimits": {
+                "primary": { "usedPercent": 94, "windowDurationMins": 300 },
+                "secondary": { "usedPercent": 22, "windowDurationMins": 10080 }
+            },
+            "rateLimitsByLimitId": {
+                "codex": {
+                    "primary": { "usedPercent": 94, "windowDurationMins": 300 },
+                    "secondary": { "usedPercent": 22, "windowDurationMins": 10080 }
+                }
+            }
+        });
+        assert!(chatgpt_wham_usage_from_value(&mixed).is_none());
+    }
+
+    #[test]
+    fn chatgpt_wham_usage_handles_weekly_only_primary_window() {
+        let payload = serde_json::json!({
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 40,
+                    "limit_window_seconds": 604800,
+                    "reset_at": 1784487804
+                },
+                "secondary_window": null
+            }
+        });
+
+        let usage = chatgpt_wham_usage_from_value(&payload).unwrap();
+        let quotas = usage.quota_usages.unwrap();
+        assert_eq!(quotas.len(), 1);
+        assert_eq!(quotas[0].label.as_deref(), Some("1w"));
+        assert_eq!(quotas[0].window.as_deref(), Some("Codex"));
+        assert_eq!(quotas[0].percent, Some(40.0));
     }
 }

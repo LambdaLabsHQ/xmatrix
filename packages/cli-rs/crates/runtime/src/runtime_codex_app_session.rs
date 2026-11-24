@@ -50,6 +50,8 @@ struct CodexAppSession {
     process_tree: process_tree::ProcessTreeGuard,
     child: Child,
     next_id: u64,
+    /// The Codex release that answered `initialize`, when it said.
+    codex_version: Option<codex_quota::CodexVersion>,
     thread_id: Option<String>,
     current_model: Option<String>,
     current_effort: Option<String>,
@@ -1107,6 +1109,7 @@ impl CodexAppSession {
             process_tree,
             child,
             next_id: 1,
+            codex_version: None,
             thread_id: None,
             current_model: None,
             current_effort: None,
@@ -2213,6 +2216,30 @@ impl CodexAppSession {
         self.current_effort.as_deref()
     }
 
+    /// The signed-in account's quota, asked of this app-server with
+    /// `account/rateLimits/read`. Codex reads its own credentials; the
+    /// per-thread rate-limit snapshots a turn streams are never used as the
+    /// account meter. `None` on a release without the method, an account
+    /// without ChatGPT windows, or no answer in time.
+    async fn read_account_usage(&mut self) -> Option<protocol::LlmUsage> {
+        const ACCOUNT_READ_TIMEOUT: Duration = Duration::from_secs(10);
+        if !codex_quota::account_rate_limits_supported(self.codex_version) {
+            return None;
+        }
+        let params = codex_quota::account_rate_limits_params(self.codex_version);
+        let read = self.request(codex_quota::ACCOUNT_RATE_LIMITS_METHOD, params);
+        match tokio::time::timeout(ACCOUNT_READ_TIMEOUT, read).await {
+            Ok(Ok(result)) => codex_quota::codex_account_usage_from_response(&result),
+            Ok(Err(err)) => {
+                if std::env::var_os("XMATRIX_CODEX_QUOTA_DEBUG").is_some() {
+                    eprintln!("{} codex quota {err}", "⚠".yellow().bold());
+                }
+                None
+            }
+            Err(_) => None,
+        }
+    }
+
     async fn next_message(&mut self) -> Option<Value> {
         let message = self.inbox.next().await?;
         self.observe_parameter_notification(&message);
@@ -2225,19 +2252,21 @@ impl CodexAppSession {
         resume_session_key: Option<&str>,
         resume_requested: bool,
     ) -> error::Result<()> {
-        self.request(
-            "initialize",
-            serde_json::json!({
-                "clientInfo": {
-                    "name": "xmatrix",
-                    "version": xmatrix_cli_core::version::current(),
-                },
-                "capabilities": {
-                    "experimentalApi": true,
-                },
-            }),
-        )
-        .await?;
+        let initialized = self
+            .request(
+                "initialize",
+                serde_json::json!({
+                    "clientInfo": {
+                        "name": "xmatrix",
+                        "version": xmatrix_cli_core::version::current(),
+                    },
+                    "capabilities": {
+                        "experimentalApi": true,
+                    },
+                }),
+            )
+            .await?;
+        self.codex_version = codex_quota::codex_version_from_initialize(&initialized);
         self.notify("initialized").await?;
 
         let resume_thread_id = resume_requested
