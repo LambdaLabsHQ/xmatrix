@@ -1,9 +1,10 @@
 /*
- * A deployment can serve the marketing site at its own origin (`web.siteOrigin`
- * in the deploy profile) beside the app's. Only the site's own pages answer
- * there; sign-in and every signed-in surface live at the app origin, whose
- * cookie domain the site origin is outside of, so every other path is sent
- * there. Unknown paths go to the app origin too, where everything still works.
+ * A deployment can serve the marketing site at its own origin beside the app's
+ * (`web.siteOrigin` in the deploy profile; `web.beta.siteOrigin` for the beta
+ * Web, beside the beta app's). Only the site's own pages answer there; sign-in
+ * and every signed-in surface live at the app origin, whose cookie domain the
+ * site origin is outside of, so every other path is sent there. Unknown paths
+ * go to the app origin too, where everything still works.
  */
 
 /** Exact paths of the site's pages and files. */
