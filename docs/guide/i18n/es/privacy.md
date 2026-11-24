@@ -15,7 +15,7 @@ Para mantener estable un equipo conectado tras reinstalaciones bajo tu cuenta, e
 
 ## Consultas locales de cuota de proveedores
 
-**En resumen:** para mostrar cuánta cuota les queda a las herramientas de IA que registraste, el daemon de xMatrix lee los archivos de inicio de sesión de esas herramientas en tu equipo (por ejemplo `~/.codex/auth.json`) y consulta directamente a cada proveedor. Nada de lo que lee de esos archivos (token, id de cuenta, contenido o huella del archivo) se envía a xMatrix; el Hub solo recibe la respuesta de cuota normalizada. Un único interruptor detiene tanto la lectura de archivos como las solicitudes al proveedor (consulta «Desactivar consultas locales de cuota» más abajo).
+**En resumen:** para mostrar cuánta cuota les queda a las herramientas de IA que registraste, el daemon de xMatrix lee los archivos de inicio de sesión de esas herramientas en tu equipo (por ejemplo `~/.grok/auth.json`) y consulta directamente a cada proveedor. Codex es la excepción: xMatrix pregunta al propio Codex, a través de la sesión de Codex en curso o de un `codex app-server` iniciado brevemente, y no abre ningún archivo de inicio de sesión de Codex. Nada de lo que lee de esos archivos (token, id de cuenta, contenido o huella del archivo) se envía a xMatrix; el Hub solo recibe la respuesta de cuota normalizada. Un único interruptor detiene la lectura de archivos, las solicitudes al app-server de Codex y las solicitudes al proveedor (consulta «Desactivar consultas locales de cuota» más abajo).
 
 Cuando registras un agente compatible (Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai o Antigravity), xMatrix puede mostrar la cuota restante en `xmatrix agent list` y en la vista Agents, y permitir que `@auto` evite cuentas agotadas.
 
@@ -24,7 +24,7 @@ Para consultar la cuota restante directamente en tu proveedor sin ejecutar un tu
 | Agente | Almacén local leído (solo en memoria) | Endpoint del proveedor consultado desde tu equipo |
 | --- | --- | --- |
 | Claude Code | Llavero de macOS (`Claude Code-credentials`) o `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
-| Codex | `$CODEX_HOME/auth.json` o `~/.codex/auth.json` | `https://chatgpt.com/backend-api/wham/usage` |
+| Codex | Ninguno: el método `account/rateLimits/read` del propio app-server de Codex (la sesión en curso o un `codex app-server` iniciado brevemente) | Lo gestiona Codex con su propio inicio de sesión |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, llavero de macOS (`cursor-access-token`) o `auth.json` de Cursor | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` o `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` o `auth.json` de OpenCode | `https://opencode.ai/zen/go/v1/usage` o `wham/usage` de ChatGPT |
@@ -48,21 +48,47 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-Para desactivar solo Antigravity, define `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. Al desactivarlas, xMatrix no lee almacenes locales de credenciales ni consulta endpoints de uso en ninguna ruta.
+Para desactivar solo Antigravity, define `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. Al desactivarlas, xMatrix no lee almacenes locales de credenciales, no inicia `codex app-server` ni pregunta a una sesión de Codex, ni consulta endpoints de uso en ninguna ruta.
 
 ## Diagnósticos del cliente e informes de errores
 
 xMatrix no usa cookies publicitarias, rastreo entre sitios, grabación de sesiones ni SDKs de analítica de comportamiento de terceros (como PostHog, Google Analytics o Cloudflare Web Analytics).
 
-**Los diagnósticos opcionales del cliente y los informes de fallos del navegador están desactivados por defecto en todas las regiones (opt-in explícito).** Las páginas públicas de marketing, documentación y avisos legales nunca cargan Sentry. Solo se envían si decides activarlos (o si haces clic en **Send failure report** en una tarjeta de fallo de inicio del daemon):
+Los diagnósticos opcionales del cliente y los informes de fallos del navegador están **desactivados por defecto en las apps y la CLI estables**; los valores por defecto de la beta se describen en la tabla. Las páginas de marketing, documentación y legales sin sesión nunca cargan Sentry. Qué se envía cuando los diagnósticos están activados:
 
-- **Informes de errores y fallos (Sentry):** solo cuando un usuario con sesión iniciada los activa; sin información de usuario, cookies, cabeceras/cuerpos HTTP, parámetros de consulta URL ni breadcrumbs de consola, y con textos entrecomillados censurados. Las compilaciones locales o autoalojadas sin DSN no envían nada.
-- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** solo cuando están activados, envían tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave; nunca incluyen contenido de mensajes ni comandos.
+- **Informes de errores y fallos (Sentry):** solo dentro de la app con sesión iniciada, se envían la clase del error, su código si lo tiene y las ubicaciones de código de su pila. Nunca se envían el mensaje del error, breadcrumbs, URL, cookies, cabeceras, cuerpos de petición ni datos del usuario. Las compilaciones locales o autoalojadas sin DSN no envían nada. (Los errores del Hub en el servidor se siguen informando desde el servidor para operar el servicio alojado; ver más abajo.)
+- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** envían tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave.
+
+### Qué puede contener un evento de diagnóstico
+
+Cada evento de diagnóstico tiene un conjunto declarado de campos, que se comprueba cuando el cliente lo crea y otra vez cuando el Hub lo recibe. Un campo solo puede contener un valor fijo de una lista, un número, true o false, una versión, un identificador opaco o un código corto como `websocket_connect_failed` (minúsculas, dígitos, `_` y `-`). Un evento con cualquier otro campo, o con un valor fuera de su campo, se rechaza entero en lugar de recortarse, así que el texto que escribes no tiene campo por el que viajar. Los errores se informan por su clase y su código, nunca por su mensaje.
+
+Solo dos caminos llevan texto:
+
+- **Send failure report en una tarjeta de fallo de inicio del escritorio:** las últimas líneas de la CLI, que la App de escritorio censura antes en tu equipo (directorio personal, direcciones de correo, parámetros de consulta URL y cualquier cosa con forma de token o clave). La tarjeta te muestra esas líneas antes de enviarlas y solo se envían al pulsar el botón; el informe automático enviado con los diagnósticos activados solo lleva la etapa del fallo, el código de salida, la plataforma y la versión de la App.
+- **Informes de errores del Hub en el servidor:** el propio mensaje de error del servidor, sin valores entrecomillados, direcciones de correo, parámetros de consulta URL, rutas del directorio personal ni cadenas con forma de token. Los datos registrados junto al error solo se informan cuando son números, true/false o identificadores opacos.
+
+### Valores por defecto: beta y estable
+
+| | Apps y CLI estables | Apps y CLI beta |
+| --- | --- | --- |
+| Los activaste | Se envían | Se envían |
+| Los desactivaste, o Do Not Track, Global Privacy Control o `XMATRIX_TELEMETRY=0` | No se envían | No se envían |
+| Sin elección; país de registro **y** país actual fuera de la UE, el EEE, el Reino Unido y Suiza | No se envían | Se envían, tras un aviso de una línea con enlace para desactivarlos |
+| Sin elección; alguno de los dos países en la UE, el EEE, el Reino Unido o Suiza, o desconocido | No se envían | No se envían; se ofrece la casilla sin marcar **Send diagnostics to help improve the beta** |
+
+Las filas se aplican en orden: una activación explícita se respeta aunque Do Not Track o Global Privacy Control estén activos. Solo marcar esa casilla o cambiar el interruptor en Ajustes (o `xmatrix config telemetry on|off`) cuenta como elección. Cerrar el aviso no es una elección, y xMatrix nunca cambia tu ajuste por ti.
+
+**Cómo se decide la región.** Tus clientes no tienen una ubicación fiable propia (la zona horaria y el idioma son ajustes), así que se la indica el Hub:
+
+- **Región de registro.** Al crear tu cuenta, el Hub registra, a partir del país que Cloudflare indica para esa solicitud, si es un país que exige consentimiento previo. Solo se guarda esa categoría, nunca el país ni tu dirección IP, y ninguna solicitud posterior la cambia. Las cuentas anteriores la obtienen la primera vez que usan una versión beta. Se elimina con tu cuenta.
+- **Región actual.** Antes de cada envío, el cliente usa la respuesta del Hub para su conexión actual, con un máximo de 10 minutos; si es más antigua, vuelve a preguntar con una pequeña solicitud que no lleva diagnósticos. Si la consulta falla, agota el tiempo o el país es desconocido, no se envía nada. Así, al entrar en un país que exige consentimiento, el envío por defecto se detiene en 10 minutos como máximo.
 
 ### Activar o desactivar diagnósticos e informes de errores
 
-- **Web, escritorio, iOS y Android:** abre **Settings → Legal and privacy** y cambia **Send diagnostics and crash reports** (desactivado por defecto). En escritorio, este interruptor también actualiza `telemetry` en el daemon local.
+- **Web, escritorio, iOS y Android:** abre **Settings → Legal and privacy** y cambia **Send diagnostics and crash reports**. Tu elección se guarda en tu cuenta y todos los clientes la siguen. En escritorio, este interruptor también actualiza el ajuste `telemetry` del daemon local.
 - **CLI y daemon:** desactivados por defecto; actívalos con `xmatrix config telemetry on` o `XMATRIX_TELEMETRY=1`, y desactívalos con `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`.
+- **CLI y daemon:** actívalos con `xmatrix config telemetry on` o `XMATRIX_TELEMETRY=1`, y desactívalos con `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`. `xmatrix config telemetry on|off` también guarda la elección en tu cuenta.
 
 ## Documentos legales
 

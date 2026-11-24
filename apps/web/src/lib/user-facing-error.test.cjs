@@ -5,6 +5,8 @@ require("../components/dashboard/typescript-require.cjs").installTypeScriptRequi
 
 const { XMatrixApiError, unexpectedResponse } = require("./query/api-client.ts");
 const { UserFacingProblem, describeError, userErrorMessage } = require("./user-facing-error.ts");
+const { parseClientDefectReport } = require("@xmatrix/protocol");
+const { capturedDiagnosticPosts } = require("./diagnostic-posts-test-capture.cjs");
 
 const action = "Couldn't load transfer proposals";
 const api = (input) => new XMatrixApiError({ message: "Request failed (500)", status: 500, ...input });
@@ -91,35 +93,9 @@ test("an internal failure carries the Hub's report so a person can quote it", as
   });
 });
 
-test("a browser defect report keeps the message shape but not what it quoted", () => {
-  const { redactDefectMessage } = require("./client-defect-report.ts");
-  assert.equal(redactDefectMessage(`Unexpected token 'h', "hello secret" is not valid JSON`),
-    "Unexpected token '…', \"…\" is not valid JSON");
-});
-
-/** Runs the test in a page and collects the defect reports it would send. */
-function capturedDefectReports(t, { diagnosticsEnabled = true } = {}) {
-  const previousWindow = global.window;
-  global.window = {
-    localStorage: {
-      getItem: (key) => (diagnosticsEnabled && key === "xmatrix:diagnostics-enabled" ? "true" : null),
-    },
-  };
-  t.after(() => {
-    if (previousWindow === undefined) delete global.window;
-    else global.window = previousWindow;
-  });
-  const sent = [];
-  t.mock.method(global, "fetch", async (_url, init) => {
-    sent.push(JSON.parse(init.body));
-    return new Response(null, { status: 202 });
-  });
-  return sent;
-}
-
 test("browser defect forwarding stays silent by default until diagnostics are opted in", async (t) => {
   const { reportClientDefect } = require("./client-defect-report.ts");
-  const sent = capturedDefectReports(t, { diagnosticsEnabled: false });
+  const sent = capturedDiagnosticPosts(t, { diagnosticsEnabled: false });
   reportClientDefect("Couldn't load default-off", new Error("Silent when not opted in"));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(sent.length, 0);
@@ -127,13 +103,13 @@ test("browser defect forwarding stays silent by default until diagnostics are op
 
 test("browser defect forwarding preserves the first Safari and Firefox frame for the Worker parser", async (t) => {
   const { reportClientDefect } = require("./client-defect-report.ts");
-  const sent = capturedDefectReports(t);
+  const sent = capturedDiagnosticPosts(t);
   for (const [engine, stack] of [
     ["Safari", "load@https://xmatrix.sh/app.js:10:20"],
     ["Firefox", "load@https://xmatrix.sh/app.js:10:20\n@https://xmatrix.sh/index.js:1:2"],
-    ["Chrome", "Error: Request Canceled\n    at load (https://xmatrix.sh/app.js:10:20)"],
+    ["Chrome", "Error: SENTINEL private message body\n    at load (https://xmatrix.sh/app.js:10:20)"],
   ]) {
-    const error = new Error("Request Canceled");
+    const error = new Error("SENTINEL private message body");
     error.stack = stack;
     reportClientDefect("Couldn't load " + engine, error);
   }
@@ -144,10 +120,11 @@ test("browser defect forwarding preserves the first Safari and Firefox frame for
   const { nodeStackLineParser } = reportingRequire("@sentry/core/server");
   const parseWorkerStack = createStackParser(nodeStackLineParser());
   for (const body of sent) {
-    assert.equal(body.message, "Request Canceled");
+    // Privacy contract: what the error said never leaves the browser, only its class and code locations.
+    assert.ok(!JSON.stringify(body).includes("SENTINEL"));
+    assert.ok(parseClientDefectReport({ ...body, action: "That didn't work" }), "the Worker accepts what the browser sends");
     assert.match(body.stack, /^    at load \(https:\/\/xmatrix\.sh\/app\.js:10:20\)/);
-    assert.doesNotMatch(body.stack, /Error: Request Canceled/);
-    const frames = parseWorkerStack(body.name + ": " + body.message + "\n" + body.stack);
+    const frames = parseWorkerStack(body.name + ": \n" + body.stack);
     assert.equal(frames.at(-1).filename, "https://xmatrix.sh/app.js");
     assert.equal(frames.at(-1).lineno, 10);
     assert.equal(frames.at(-1).colno, 20);
@@ -156,7 +133,7 @@ test("browser defect forwarding preserves the first Safari and Firefox frame for
 
 test("a specific headline is shown, and only its action from the closed set is reported", async (t) => {
   t.mock.method(console, "error", () => {});
-  const sent = capturedDefectReports(t);
+  const sent = capturedDiagnosticPosts(t);
   assert.equal(userErrorMessage(new TypeError("Cannot read properties of undefined"), "Couldn't connect the app",
     "Couldn't connect private-account"),
   "Couldn't connect private-account. Something went wrong. Try again, and report it if it keeps happening.");

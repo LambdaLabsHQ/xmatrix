@@ -83,14 +83,31 @@ export function PrivacyPolicyContent() {
             operate, secure, and troubleshoot the Services. Optional client-side diagnostics—startup
             timing, first-party onboarding step counts, CLI network reconnect samples, automatic
             desktop daemon startup failure reports, and scrubbed browser Sentry error reports—are{" "}
-            <strong className="text-foreground">off by default</strong> across all regions and are
-            sent only when a signed-in user opts in under Settings → Legal and privacy, submits a
-            desktop failure report from the failure card, or enables CLI network diagnostics via{" "}
-            <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code> or{" "}
-            <code className="font-mono text-xs">xmatrix config telemetry on</code> (suppressed
-            when <code className="font-mono text-xs">DO_NOT_TRACK=1</code> or{" "}
-            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> is set). Operational
-            diagnostics are designed not to contain message or command bodies; see our{" "}
+            <strong className="text-foreground">off by default</strong> in the stable apps and CLI. In
+            beta builds they are on by default only where both the country your account signed up from
+            and the country your current connection comes from (as reported by Cloudflare) are outside
+            the European Union, the European Economic Area, the United Kingdom, and Switzerland, and
+            only after a short notice that links to the off switch; there they rest on our legitimate
+            interest in fixing defects in pre-release software. Anywhere else, or where the country
+            cannot be determined, beta builds send nothing until you tick the unticked opt-in box or
+            turn the setting on. To apply this rule we record, once, whether your account was created
+            from a country that requires prior consent (a single category, not the country or your IP
+            address); it is deleted with your account. Your explicit choice, and when you made it, is
+            stored with your account. Unless you have opted in, diagnostics are not sent when you turn
+            them off, when your browser sends Do Not Track or Global Privacy Control, or when{" "}
+            <code className="font-mono text-xs">DO_NOT_TRACK=1</code> is set for the CLI. You can opt in
+            under Settings → Legal and privacy, with{" "}
+            <code className="font-mono text-xs">xmatrix config telemetry on</code> or{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code>, or by sending a desktop
+            failure report from the failure card;{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> always turns them off. Each
+            diagnostic event has a declared set of fields, and each field may hold only a fixed
+            value, a number, true or false, a version, a short code, or an opaque identifier; an event with any
+            other field or value is refused. Client errors are reported by their class, code, and
+            code locations, never by their message. The one exception is the redacted startup
+            output you choose to send from a desktop failure card. Server-side Hub error reports
+            keep the server&apos;s own error message with quoted values, email addresses, URL
+            queries, home-directory paths, and token-shaped strings removed. See our{" "}
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and Local Privacy guide
             </Link>
@@ -166,8 +183,7 @@ export function PrivacyPolicyContent() {
           <p>
             <strong className="text-foreground">Which files.</strong> For an AI tool you registered
             as an Agent on a computer, the xMatrix daemon on that computer may read that tool&apos;s
-            own sign-in: for example Codex&apos;s{" "}
-            <code className="font-mono text-xs">~/.codex/auth.json</code>, Grok&apos;s{" "}
+            own sign-in: for example Grok&apos;s{" "}
             <code className="font-mono text-xs">~/.grok/auth.json</code>, Claude Code&apos;s{" "}
             <code className="font-mono text-xs">~/.claude/.credentials.json</code> or keychain entry,
             Cursor&apos;s or OpenCode&apos;s <code className="font-mono text-xs">auth.json</code> or
@@ -175,7 +191,10 @@ export function PrivacyPolicyContent() {
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and local privacy guide
             </Link>
-            . It never reads the login of a tool you did not register.
+            . It never reads the login of a tool you did not register. Codex is not read this way:
+            the daemon asks Codex itself, through the Codex session already running or a briefly
+            started <code className="font-mono text-xs">codex app-server</code>, and Codex answers
+            with its own sign-in. xMatrix opens no Codex login file.
           </p>
           <p>
             <strong className="text-foreground">Why.</strong> To ask that provider how much of your
@@ -191,9 +210,9 @@ export function PrivacyPolicyContent() {
             provider still serves the account, and a prepaid balance where applicable.
           </p>
           <p>
-            <strong className="text-foreground">How to turn it off.</strong> One switch stops both the
-            file reads and the provider requests on that computer: Desktop Settings → Legal and
-            privacy → Local provider quota probes, or{" "}
+            <strong className="text-foreground">How to turn it off.</strong> One switch stops the
+            file reads, the Codex app-server requests and the provider requests on that computer:
+            Desktop Settings → Legal and privacy → Local provider quota probes, or{" "}
             <code className="font-mono text-xs">xmatrix config quotaProbes off</code>, or the
             environment variable{" "}
             <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code>. With it off,

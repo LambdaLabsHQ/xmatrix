@@ -17,6 +17,8 @@ import {
   type StackFrame,
 } from "@sentry/core";
 import { nodeStackLineParser, ServerRuntimeClient } from "@sentry/core/server";
+import { isDiagnosticId } from "./diagnostic-events.js";
+import { serverErrorReport } from "./error-report-contract.js";
 
 /** Where a Worker reports errors: the deployment's DSN and release. */
 export type ErrorReportingTarget = {
@@ -47,19 +49,25 @@ function scalar(value: unknown): string | undefined {
     ? String(value) : undefined;
 }
 
+/** A logged fact that may title a report: a number, true/false or an opaque id, never prose. */
+function fact(value: unknown): string | undefined {
+  return typeof value === "number" || typeof value === "boolean" || isDiagnosticId(value) ? String(value) : undefined;
+}
+
 /**
  * One logged line as its report's title. A Worker logs a sentence and an
  * object of facts (`console.error("… rejection", { code, status })`); joined
  * as strings the object reads `[object Object]`, so every failure logged under
- * one sentence looked the same. The object's scalar fields are spelled out
- * instead; nested values stay in the report's arguments.
+ * one sentence looked the same. The object's fields that are numbers,
+ * true/false or opaque ids are spelled out instead; text fields and nested
+ * values are not reported (error-report-contract.ts).
  */
 export function consoleLine(args: readonly unknown[]): string {
   const parts = args.map((arg) => {
     if (!arg || typeof arg !== "object" || Array.isArray(arg)) return scalar(arg) ?? "";
     return Object.entries(arg).map(([key, value]) => {
       const text = Array.isArray(value)
-        ? value.map(scalar).filter((item) => item !== undefined).join(",") : scalar(value);
+        ? value.map(fact).filter((item) => item !== undefined).join(",") : fact(value);
       return text === undefined || text === "" ? "" : `${key}=${text}`;
     }).filter(Boolean).join(" ");
   });
@@ -100,9 +108,11 @@ function prepareErrorReport(event: ErrorEvent, hint: EventHint): ErrorEvent {
 
 /**
  * Opens error reporting for this Worker isolate; without a DSN nothing is
- * ever sent. A report carries the error, its stack, the component and the
- * release. Nothing instruments bindings, requests or callers, and only
- * `console.error` lines are reported, as the failures the Worker logged.
+ * ever sent. A report carries the error's class and scrubbed message, its
+ * stack, the component, the release and the operation and ids its reporter
+ * named (`serverErrorReport`). Nothing instruments bindings, requests or
+ * callers, and only `console.error` lines are reported, as the failures the
+ * Worker logged.
  */
 export function startErrorReporting({ dsn, release, component }: ErrorReportingTarget): void {
   if (!dsn || reporting) return;
@@ -114,7 +124,8 @@ export function startErrorReporting({ dsn, release, component }: ErrorReportingT
     runtime: { name: "cloudflare" },
     dataCollection: { userInfo: false, cookies: false, httpHeaders: false, httpBodies: [], urlQueryParams: false },
     stackParser: workerStackParser,
-    beforeSend: prepareErrorReport,
+    // The report leaves as the contract's allowlisted shape, its text scrubbed.
+    beforeSend: (event, hint) => serverErrorReport(prepareErrorReport(event, hint)),
     integrations: [
       dedupeIntegration(),
       linkedErrorsIntegration(),

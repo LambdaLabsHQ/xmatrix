@@ -15,7 +15,7 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 
 ## 本地服務商額度探測
 
-**一句話說明：** 為了顯示你已註冊的 AI 工具還剩多少額度，xMatrix daemon 會讀取這些工具在你電腦上的登入檔案（例如 `~/.codex/auth.json`），並直接向對應服務商查詢。從這些檔案讀到的任何內容（權杖、帳號 ID、檔案內容或檔案指紋）都不會傳送給 xMatrix；Hub 只收到正規化後的額度結果。同一個開關可同時停止讀取檔案與向服務商發出請求（見下方「關閉本地額度探測」）。
+**一句話說明：** 為了顯示你已註冊的 AI 工具還剩多少額度，xMatrix daemon 會讀取這些工具在你電腦上的登入檔案（例如 `~/.grok/auth.json`），並直接向對應服務商查詢。Codex 例外：xMatrix 直接詢問 Codex 本身（正在執行的 Codex 工作階段，或短暫啟動的 `codex app-server`），不開啟任何 Codex 登入檔案。從這些檔案讀到的任何內容（權杖、帳號 ID、檔案內容或檔案指紋）都不會傳送給 xMatrix；Hub 只收到正規化後的額度結果。同一個開關可同時停止讀取檔案、向 Codex app-server 發出請求與向服務商發出請求（見下方「關閉本地額度探測」）。
 
 當你在本機註冊受支援的代理工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）時，xMatrix 可在 `xmatrix agent list` 與 Agents 頁面顯示訂閱剩餘額度，並供 `@auto` 避開已用盡的帳號。
 
@@ -24,7 +24,7 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 | 工具 | 僅於本機記憶體讀取的位置 | 由本機直連的原廠端點 |
 | --- | --- | --- |
 | Claude Code | macOS 鑰匙圈（`Claude Code-credentials`）或 `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
-| Codex | `$CODEX_HOME/auth.json` 或 `~/.codex/auth.json` | `https://chatgpt.com/backend-api/wham/usage` |
+| Codex | 不讀取：呼叫 Codex 自己的 app-server 方法 `account/rateLimits/read`（正在執行的工作階段或短暫啟動的 `codex app-server`） | 由 Codex 使用其自身登入處理 |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS 鑰匙圈（`cursor-access-token`）或 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` 或 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` 或 OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` 或 ChatGPT `wham/usage` |
@@ -48,21 +48,47 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-若僅關閉 Antigravity 探測，可設定 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。關閉後，xMatrix 在所有路徑下均不會讀取本機服務商憑證或查詢原廠額度端點。
+若僅關閉 Antigravity 探測，可設定 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。關閉後，xMatrix 在所有路徑下均不會讀取本機服務商憑證、啟動 `codex app-server` 或詢問 Codex 工作階段，也不查詢原廠額度端點。
 
 ## 用戶端診斷與當機回報
 
 xMatrix 不使用廣告 Cookie、跨站追蹤、工作階段錄影，也未整合 PostHog、Google Analytics 或 Cloudflare Web Analytics 等第三方行為分析 SDK。
 
-**所有地區的可選用戶端診斷與瀏覽器當機回報皆預設關閉（明確 Opt-in）。** 未登入的行銷、文件與法律頁面絕不載入 Sentry；除非你主動開啟（或在桌面端啟動失敗卡片上點擊「送出失敗報告」），用戶端不會主動送出診斷資訊：
+選用的用戶端診斷與瀏覽器當機回報**在穩定版應用程式與 CLI 中預設關閉**；Beta 版的預設規則見下表。未登入的行銷頁、文件頁與法律條款頁絕不載入 Sentry。診斷開啟時傳送的內容：
 
-- **錯誤與當機回報（Sentry）**：僅於登入應用內主動開啟後運作，停用使用者資訊、Cookie、HTTP 標頭/內容、URL 查詢參數與主控台麵包屑，並遮蔽錯誤訊息中引用的內容；未設定 DSN 的本機或自託管建置不送出任何回報。
-- **第一方診斷指標（xMatrix Hub → Cloudflare Analytics Engine）**：僅於主動開啟後回報啟動耗時（`/api/observable/startup-timing`）、新手引導步驟計數（`/api/observable/onboarding-step`）、桌面端 daemon 啟動失敗資訊（`/api/observable/desktop-daemon-failure`）與 CLI 網路重連樣本（`/api/observable/client-metrics`）。識別碼於伺服器端以金鑰 HMAC-SHA-256 假名化，不含訊息或命令內容。
+- **錯誤與當機回報（Sentry）**：僅於登入應用內運作，只送出錯誤的類別、錯誤本身的代碼（如有）以及堆疊中的程式碼位置；錯誤訊息、麵包屑、URL、Cookie、HTTP 標頭、請求內容與使用者資訊一律不送出。未設定 DSN 的本機或自託管建置不送出任何回報。（Hub 伺服器端自身錯誤仍於伺服器端回報以維持託管服務運作，見下文。）
+- **第一方診斷指標（xMatrix Hub → Cloudflare Analytics Engine）**：回報啟動耗時（`/api/observable/startup-timing`）、新手引導步驟計數（`/api/observable/onboarding-step`）、桌面端 daemon 啟動失敗資訊（`/api/observable/desktop-daemon-failure`）與 CLI 網路重連樣本（`/api/observable/client-metrics`）。識別碼於伺服器端以金鑰 HMAC-SHA-256 假名化。
+
+### 診斷事件可以包含什麼
+
+每個診斷事件都有一組宣告好的欄位，用戶端建立時檢查一次，Hub 接收時再檢查一次。欄位只能是清單中的固定值、數字、true/false、版本號、不透明識別碼，或像 `websocket_connect_failed` 這樣的短代碼（小寫字母、數字、`_` 與 `-`）。只要出現未宣告的欄位或超出欄位範圍的值，整個事件就會被拒絕，而不是被截成合規的樣子，因此你寫下的文字沒有任何欄位可以夾帶。錯誤只以類別與代碼回報，絕不包含錯誤訊息。
+
+只有以下兩條路徑會攜帶文字：
+
+- **桌面端啟動失敗卡片上的「送出失敗報告」**：CLI 的最後幾行輸出，桌面應用程式會先在你的電腦上遮蔽（家目錄、電子郵件地址、URL 查詢參數以及任何看似權杖或金鑰的內容都會被替換）。卡片會先顯示這些內容，只有你按下按鈕才會送出；開啟診斷時自動送出的回報只包含失敗階段、結束代碼、平台與應用程式版本。
+- **Hub 伺服器端錯誤回報**：伺服器自身的錯誤訊息，其中引用的值、電子郵件地址、URL 查詢參數、家目錄路徑與看似權杖的字串都會被移除。記錄附帶的欄位只有在是數字、true/false 或不透明識別碼時才會回報。
+
+### Beta 版與穩定版的預設行為
+
+| | 穩定版應用程式與 CLI | Beta 版應用程式與 CLI |
+| --- | --- | --- |
+| 你已主動開啟 | 傳送 | 傳送 |
+| 你已主動關閉，或開啟 Do Not Track、Global Privacy Control，或設定 `XMATRIX_TELEMETRY=0` | 不傳送 | 不傳送 |
+| 未作選擇；註冊地**與**目前所在國家都不在歐盟、歐洲經濟區、英國與瑞士 | 不傳送 | 傳送，並顯示一行附關閉連結的提示 |
+| 未作選擇；任一國家在歐盟、歐洲經濟區、英國或瑞士，或無法判斷 | 不傳送 | 不傳送；顯示未勾選的「Send diagnostics to help improve the beta」核取方塊 |
+
+各列依序適用：主動開啟即使在 Do Not Track 或 Global Privacy Control 開啟時也會被尊重。只有勾選該核取方塊或在設定中切換開關（或 `xmatrix config telemetry on|off`）才算你的選擇；關閉提示不算選擇，xMatrix 也不會替你變更設定。
+
+**如何判斷地區。** 用戶端本身沒有可靠的位置資訊（時區與語言都是使用者設定），因此由 Hub 告知：
+
+- **註冊地區。** 建立帳號時，Hub 依 Cloudflare 回報的該請求所在國家，記錄它是否屬於需要事先同意的國家。只儲存這個類別，不儲存國家或 IP 位址，之後的請求也不會改寫它。較早建立的帳號會在第一次使用 Beta 版時記錄。刪除帳號時一併刪除。
+- **目前地區。** 每次傳送前，用戶端使用 Hub 對目前連線的答覆，且不超過 10 分鐘；超過時會向 Hub 發出一個不含任何診斷資料的小請求重新詢問。若查詢失敗、逾時或國家不明，就不傳送。因此進入需要同意的國家後，預設傳送最多 10 分鐘內停止。
 
 ### 開啟或關閉診斷與當機回報
 
-- **Web、桌面端、iOS 與 Android**：前往 **Settings → Legal and privacy** 切換 **Send diagnostics and crash reports**（預設關閉）；桌面端會同步更新本機 daemon 的 `telemetry` 設定。
+- **Web、桌面版、iOS 與 Android**：前往 **Settings → Legal and privacy**，切換 **Send diagnostics and crash reports**。你的選擇儲存在帳號上，所有用戶端都會遵循。在桌面版中，此開關也會同步更新本機 daemon 的 `telemetry` 設定。
 - **CLI 與 daemon**：預設關閉；可透過 `xmatrix config telemetry on` 或 `XMATRIX_TELEMETRY=1` 開啟，並隨時以 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 關閉。
+- **CLI 與 daemon**：以 `xmatrix config telemetry on` 或 `XMATRIX_TELEMETRY=1` 開啟；以 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 關閉。`xmatrix config telemetry on|off` 也會把選擇儲存到帳號。
 
 ## 法律文件
 

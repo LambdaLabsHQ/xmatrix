@@ -2,9 +2,9 @@
 
 import { useCallback, useRef } from "react";
 import {
-  WEB_PROXY_ROUTES, type OnboardingDevice, type OnboardingFunnelEvent, type OnboardingFunnelStep, type OnboardingSurface,
+  parseOnboardingFunnelEvent, WEB_PROXY_ROUTES, type OnboardingDevice, type OnboardingFunnelEvent, type OnboardingFunnelStep, type OnboardingSurface,
 } from "@xmatrix/protocol";
-import { isDiagnosticsEnabled } from "@/lib/diagnostics-preference";
+import { diagnosticsMaySendNow } from "@/lib/diagnostics-preference";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 
@@ -65,11 +65,15 @@ export function onboardingDevice(): OnboardingDevice {
 
 /** Counts one step of bringing agents in (docs/architecture/first-space.md).
  * Nothing waits on it, and a step that goes uncounted changes nothing the
- * person sees. */
+ * person sees. Only a step that is its declared fields leaves (protocol
+ * diagnostic-events). */
 export function recordOnboardingStep(token: string | null | undefined, event: Omit<OnboardingFunnelEvent, "device">): void {
-  if (!token || !isDiagnosticsEnabled()) return;
-  void xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_onboarding_step, token, method: "POST",
-    body: { ...event, device: onboardingDevice() } })
+  if (!token) return;
+  const body = parseOnboardingFunnelEvent({ ...event, device: onboardingDevice() });
+  if (!body) return;
+  void diagnosticsMaySendNow().then((send) => send
+    ? xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_onboarding_step, token, method: "POST", body })
+    : undefined)
     .catch((error: unknown) => console.warn("[xmatrix] onboarding step not counted", error));
 }
 

@@ -8,7 +8,7 @@ use std::time::Duration;
 use xmatrix_cli_agent::ensure_local_daemon_started;
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
-use xmatrix_cli_core::{auth, config, daemon_auth, http};
+use xmatrix_cli_core::{auth, config, daemon_auth, http, telemetry_consent};
 use xmatrix_cli_update::{
     UpdateHintTarget, default_cli_release_api_url, warn_if_cli_update_available,
 };
@@ -48,6 +48,12 @@ pub async fn cmd_login(
         user.email.dimmed()
     );
     println!("  Hub: {}", session.hub_url.dimmed());
+    if telemetry_consent::telemetry_on_by_default(&session.hub_url, &session.token).await {
+        println!(
+            "  This beta sends diagnostics to help fix bugs. Turn off: {}",
+            "xmatrix config telemetry off".bold()
+        );
+    }
     // A setup command names a new machine after its hostname instead of asking.
     let hostname = connect.map(|_| auth::local_hostname());
     xmatrix_cli_core::machine_naming::ensure_machine_name(

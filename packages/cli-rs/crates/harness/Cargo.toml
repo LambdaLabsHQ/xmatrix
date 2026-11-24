@@ -18,7 +18,6 @@ categories = ["api-bindings", "development-tools"]
 
 [dependencies]
 colored = { workspace = true }
-dirs = { workspace = true }
 reqwest = { workspace = true, features = ["json", "rustls-no-provider"] }
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 serde = { workspace = true, features = ["derive"] }
@@ -27,6 +26,7 @@ base64 = { workspace = true }
 sha2 = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
+which = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }

@@ -73,7 +73,6 @@ for (const appleFailure of [
 ]) {
   test(`Apple authorization failure preserves its boundary and native evidence: ${appleFailure}`, async ({ page }) => {
     await openAsPhoneApp(page, { inPlace: true, appleFailure });
-    await page.addInitScript(() => window.localStorage.setItem("xmatrix:diagnostics-enabled", "true"));
     const reports: Record<string, string>[] = [];
     let exchanges = 0;
     await page.route("**/api/client-defects", async route => {
@@ -92,12 +91,9 @@ for (const appleFailure of [
       expect(reports).toHaveLength(0);
     } else {
       await expect(page.getByText(/Couldn't sign you in/u)).toBeVisible();
-      await expect.poll(() => reports.length).toBe(1);
-      expect(reports[0].action).toBe("Couldn't sign you in");
-      expect(reports[0].message).toBe(`Apple sign-in native authorization failed: ${appleFailure}`);
-      expect(reports[0].stack).toContain("/_next/static/");
-      expect(reports[0].stack).not.toContain("/login:1:30");
       await expect(page.getByText(appleFailure, { exact: true })).toHaveCount(0);
+      // Signed out there is no account, so no consent to send under: nothing is reported.
+      expect(reports).toHaveLength(0);
     }
     expect(exchanges).toBe(0);
   });

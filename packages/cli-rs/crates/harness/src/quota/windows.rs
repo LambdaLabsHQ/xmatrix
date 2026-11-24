@@ -109,6 +109,17 @@ pub(crate) fn normalized_quota_percent(
     reported.filter(|percent| percent.is_finite() && *percent >= 0.0)
 }
 
+/// A prepaid credit balance as a provider reports it (a decimal string or a
+/// number); negative or non-finite values are not a balance.
+pub(crate) fn credit_balance(balance: Option<&Value>) -> Option<f64> {
+    balance
+        .and_then(|balance| match balance {
+            Value::String(text) => text.trim().parse::<f64>().ok(),
+            other => other.as_f64(),
+        })
+        .filter(|balance| balance.is_finite() && *balance >= 0.0)
+}
+
 /// A percent derived from `limit` with `used` (or `remaining`), when the
 /// window reports amounts instead of a percent.
 pub(crate) fn quota_percent_from_usage_fields(map: &Map<String, Value>) -> Option<f64> {

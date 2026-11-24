@@ -3420,7 +3420,6 @@ version = "0.0.0"
 dependencies = [
  "base64",
  "colored",
- "dirs",
  "reqwest",
  "rustls",
  "serde",
@@ -3428,6 +3427,7 @@ dependencies = [
  "sha2 0.11.0",
  "time",
  "tokio",
+ "which",
 ]
 
 [[package]]

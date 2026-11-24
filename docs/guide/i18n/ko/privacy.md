@@ -15,14 +15,14 @@ xMatrix는 호스팅 협업 Hub와 사용자 머신에서 실행되는 Rust 로�
 
 ## 로컬 공급자 할당량 조회
 
-**요약:** 등록한 AI 도구의 남은 할당량을 보여 주기 위해 xMatrix daemon은 컴퓨터에 있는 해당 도구 자체의 로그인 파일(예: `~/.codex/auth.json`)을 읽고 각 공급자에게 직접 조회합니다. 이 파일에서 읽은 내용(토큰, 계정 ID, 파일 내용, 파일 지문)은 xMatrix로 전송되지 않으며, Hub는 정규화된 할당량 결과만 받습니다. 하나의 스위치로 파일 읽기와 공급자 요청을 모두 중지할 수 있습니다(아래 「로컬 할당량 조회 끄기」 참고).
+**요약:** 등록한 AI 도구의 남은 할당량을 보여 주기 위해 xMatrix daemon은 컴퓨터에 있는 해당 도구 자체의 로그인 파일(예: `~/.grok/auth.json`)을 읽고 각 공급자에게 직접 조회합니다. Codex는 예외로, xMatrix는 실행 중인 Codex 세션이나 잠시 실행한 `codex app-server`를 통해 Codex 자체에 묻고 Codex 로그인 파일은 열지 않습니다. 이 파일에서 읽은 내용(토큰, 계정 ID, 파일 내용, 파일 지문)은 xMatrix로 전송되지 않으며, Hub는 정규화된 할당량 결과만 받습니다. 하나의 스위치로 파일 읽기, Codex app-server 요청, 공급자 요청을 모두 중지할 수 있습니다(아래 「로컬 할당량 조회 끄기」 참고).
 
 등록된 하네스(Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai, Antigravity 등)의 남은 구독 할당량을 `xmatrix agent list`와 Agents 화면에 표시하고 `@auto` 라우팅이 한도 초과 계정을 피할 수 있도록, 로컬 데몬이 등록된 도구의 로컬 자격 증명 저장소를 메모리 내에서 읽어 해당 공급자 엔드포인트에 직접 조회할 수 있습니다.
 
 | 하네스 | 로컬 메모리에서만 읽는 위치 | 기기에서 직접 조회하는 공급자 API |
 | --- | --- | --- |
 | Claude Code | macOS 키체인(`Claude Code-credentials`) 또는 `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
-| Codex | `$CODEX_HOME/auth.json` 또는 `~/.codex/auth.json` | `https://chatgpt.com/backend-api/wham/usage` |
+| Codex | 읽지 않음: Codex 자체 app-server 메서드 `account/rateLimits/read`(실행 중인 세션 또는 잠시 실행한 `codex app-server`) | Codex가 자체 로그인으로 처리 |
 | Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, macOS 키체인(`cursor-access-token`), 또는 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` 또는 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` 또는 OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` 또는 ChatGPT `wham/usage` |
@@ -46,21 +46,47 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-Antigravity만 끄려면 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`을 설정하세요. 비활성화하면 모든 경로에서 로컬 자격 증명 저장소를 읽거나 공급자 API를 호출하지 않습니다.
+Antigravity만 끄려면 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`을 설정하세요. 비활성화하면 모든 경로에서 로컬 자격 증명 저장소를 읽거나, `codex app-server`를 실행하거나 Codex 세션에 묻거나, 공급자 API를 호출하지 않습니다.
 
 ## 클라이언트 진단 및 오류 보고
 
 xMatrix는 광고 쿠키, 크로스사이트 추적, 세션 리플레이, PostHog·Google Analytics·Cloudflare Web Analytics 같은 서드파티 행동 분석 SDK를 사용하지 않습니다.
 
-**모든 지역에서 선택적 클라이언트 진단과 브라우저 오류 보고는 기본적으로 꺼져 있습니다(명시적 옵트인).** 로그인하지 않은 마케팅·문서·법적 페이지에서는 Sentry를 로드하지 않으며, 사용자가 직접 켜거나 데스크톱 시작 실패 카드에서 수동 전송을 클릭한 경우에만 전송됩니다:
+선택적 클라이언트 진단과 브라우저 오류 보고는 **안정 버전 앱과 CLI에서 기본적으로 꺼져 있습니다**. 베타 버전의 기본값은 아래 표와 같습니다. 로그인하지 않은 마케팅, 문서, 법적 문서 페이지는 Sentry를 불러오지 않습니다. 진단이 켜져 있을 때 보내는 내용:
 
-- **오류 및 충돌 보고(Sentry)**: 로그인된 앱에서 옵트인한 경우에만 전송되며, 사용자 정보, 쿠키, HTTP 헤더/본문, URL 쿼리, 콘솔 브레드크럼을 비활성화하고 인용 문자열을 마스킹합니다. DSN이 없는 로컬/셀프호스트 빌드에서는 전송하지 않습니다.
-- **퍼스트파티 진단(xMatrix Hub → Cloudflare Analytics Engine)**: 옵트인한 경우에만 시작 시간(`/api/observable/startup-timing`), 온보딩 단계 수(`/api/observable/onboarding-step`), 데스크톱 데몬 시작 실패 정보(`/api/observable/desktop-daemon-failure`), CLI 재연결 샘플(`/api/observable/client-metrics`)을 전송합니다. 식별자는 서버 키 기반 HMAC-SHA-256으로 가명화되며 메시지나 명령 본문은 포함되지 않습니다.
+- **오류 및 충돌 보고(Sentry)**: 로그인된 앱에서만 오류의 클래스, 오류 자체의 코드(있는 경우), 스택의 코드 위치만 전송합니다. 오류 메시지, 브레드크럼, URL, 쿠키, HTTP 헤더, 요청 본문, 사용자 정보는 전송하지 않습니다. DSN이 없는 로컬/셀프호스트 빌드에서는 전송하지 않습니다. (Hub 서버 측 오류는 호스팅 서비스 운영을 위해 서버 측에서 보고됩니다. 아래 참조.)
+- **퍼스트파티 진단(xMatrix Hub → Cloudflare Analytics Engine)**: 시작 시간(`/api/observable/startup-timing`), 온보딩 단계 수(`/api/observable/onboarding-step`), 데스크톱 데몬 시작 실패 정보(`/api/observable/desktop-daemon-failure`), CLI 재연결 샘플(`/api/observable/client-metrics`)을 전송합니다. 식별자는 서버 키 기반 HMAC-SHA-256으로 가명화됩니다.
+
+### 진단 이벤트에 담길 수 있는 것
+
+모든 진단 이벤트에는 선언된 필드가 있으며, 클라이언트가 만들 때 한 번, Hub가 받을 때 다시 한 번 검사합니다. 필드에는 목록의 고정 값, 숫자, true/false, 버전, 불투명 식별자, 또는 `websocket_connect_failed` 같은 짧은 코드(소문자, 숫자, `_`, `-`)만 담을 수 있습니다. 선언되지 않은 필드나 범위를 벗어난 값이 하나라도 있으면 이벤트 전체가 거부되며 잘라서 통과시키지 않습니다. 따라서 사용자가 쓴 글이 실려 갈 필드가 없습니다. 오류는 클래스와 코드로만 보고하며 메시지는 포함하지 않습니다.
+
+글을 담는 경로는 다음 두 가지뿐입니다:
+
+- **데스크톱 시작 실패 카드의 「실패 보고서 보내기」**: CLI의 마지막 몇 줄로, 데스크톱 앱이 사용자의 기기에서 먼저 마스킹합니다(홈 디렉터리, 이메일 주소, URL 쿼리, 토큰이나 키처럼 보이는 문자열을 대체). 카드는 보내기 전에 이 내용을 보여 주며 버튼을 눌렀을 때만 전송합니다. 진단이 켜져 있을 때의 자동 보고에는 실패 단계, 종료 코드, 플랫폼, 앱 버전만 담깁니다.
+- **Hub 서버 측 오류 보고**: 서버 자체의 오류 메시지로, 인용된 값, 이메일 주소, URL 쿼리, 홈 디렉터리 경로, 토큰처럼 보이는 문자열은 제거됩니다. 로그에 덧붙은 항목은 숫자, true/false, 불투명 식별자일 때만 보고됩니다.
+
+### 베타와 안정 버전의 기본값
+
+| | 안정 버전 앱과 CLI | 베타 버전 앱과 CLI |
+| --- | --- | --- |
+| 직접 켬 | 보냄 | 보냄 |
+| 직접 끔, 또는 Do Not Track, Global Privacy Control, `XMATRIX_TELEMETRY=0` | 보내지 않음 | 보내지 않음 |
+| 선택 없음. 가입 국가**와** 현재 국가가 모두 EU, EEA, 영국, 스위스 밖 | 보내지 않음 | 보냄(끄는 링크가 있는 한 줄 안내 표시) |
+| 선택 없음. 어느 한 국가가 EU, EEA, 영국, 스위스이거나 알 수 없음 | 보내지 않음 | 보내지 않음. 체크되지 않은 「Send diagnostics to help improve the beta」 상자 표시 |
+
+행은 위에서부터 순서대로 적용됩니다. 직접 켠 경우에는 Do Not Track이나 Global Privacy Control이 켜져 있어도 존중됩니다. 그 상자를 체크하거나 설정의 스위치를 바꾸는 것(또는 `xmatrix config telemetry on|off`)만 선택으로 봅니다. 안내를 닫는 것은 선택이 아니며, xMatrix가 설정을 대신 바꾸지 않습니다.
+
+**지역 판단 방법.** 클라이언트에는 믿을 만한 위치 정보가 없으므로(시간대와 언어는 사용자 설정) Hub가 알려 줍니다:
+
+- **가입 지역.** 계정을 만들 때 Hub는 Cloudflare가 알려 주는 그 요청의 국가로부터 사전 동의가 필요한 국가인지 여부만 기록합니다. 국가나 IP 주소는 저장하지 않으며 이후 요청으로 바뀌지 않습니다. 기존 계정은 처음 베타를 사용할 때 기록됩니다. 계정을 삭제하면 함께 삭제됩니다.
+- **현재 지역.** 보낼 때마다 클라이언트는 현재 연결에 대해 Hub가 준 10분 이내의 답을 사용합니다. 더 오래되었으면 진단 데이터가 없는 작은 요청으로 Hub에 다시 묻습니다. 조회가 실패하거나 시간 초과되거나 국가를 알 수 없으면 보내지 않습니다. 따라서 동의가 필요한 국가로 이동하면 기본 전송은 10분 안에 멈춥니다.
 
 ### 진단 및 오류 보고 켜기/끄기
 
-- **Web, Desktop, iOS, Android**: **Settings → Legal and privacy**에서 **Send diagnostics and crash reports**를 전환합니다(기본 꺼짐). 데스크톱에서는 로컬 데몬의 `telemetry` 설정도 함께 동기화됩니다.
+- **웹, 데스크톱, iOS, Android**: **Settings → Legal and privacy**에서 **Send diagnostics and crash reports**를 전환합니다. 선택은 계정에 저장되어 모든 클라이언트가 따릅니다. 데스크톱에서는 이 스위치가 로컬 daemon의 `telemetry` 설정도 바꿉니다.
 - **CLI 및 데몬**: 기본 꺼짐입니다. `xmatrix config telemetry on` 또는 `XMATRIX_TELEMETRY=1`로 켜고, `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` 또는 `DO_NOT_TRACK=1`로 끌 수 있습니다.
+- **CLI와 daemon**: `xmatrix config telemetry on` 또는 `XMATRIX_TELEMETRY=1`로 켜고, `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0`, `DO_NOT_TRACK=1`로 끕니다. `xmatrix config telemetry on|off`는 선택을 계정에도 저장합니다.
 
 ## 법적 문서
 
