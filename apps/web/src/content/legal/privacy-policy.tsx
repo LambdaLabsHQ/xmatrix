@@ -86,8 +86,8 @@ export function PrivacyPolicyContent() {
             <strong className="text-foreground">off by default</strong> in the stable apps and CLI. In
             beta builds they are on by default only where both the country your account signed up from
             and the country your current connection comes from (as reported by Cloudflare) are outside
-            the European Union, the European Economic Area, the United Kingdom, and Switzerland, and
-            only after a short notice that links to the off switch; there they rest on our legitimate
+            the European Union, the European Economic Area, the United Kingdom, and Switzerland, with
+            a short notice that links to privacy settings; there they rest on our legitimate
             interest in fixing defects in pre-release software. Anywhere else, or where the country
             cannot be determined, beta builds send nothing until you tick the unticked opt-in box or
             turn the setting on. To apply this rule we record, once, whether your account was created

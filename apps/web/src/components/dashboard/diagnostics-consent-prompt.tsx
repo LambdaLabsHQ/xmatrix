@@ -14,20 +14,30 @@ import {
   refreshDiagnosticsConsent,
   subscribeDiagnosticsPreference,
 } from "@/lib/diagnostics-preference";
+import { cn } from "@/lib/utils";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { hubReadResponse } from "@/lib/query/hub-read";
 
 /**
  * Connects the diagnostics gate to this session's Hub, re-reads it whenever
- * the live connection comes back, and shows the beta's one-time prompt: a
- * notice that diagnostics are on (where they may be on by default), or an
- * unticked opt-in checkbox (where they need consent). The stable build shows
- * nothing; its switch is in Settings → Legal and privacy.
+ * the live connection comes back, and renders the beta's one-time in-flow
+ * footer bar: a calm disclosure that beta diagnostics are active (where they
+ * may be on by default), or an unticked opt-in checkbox (where prior consent
+ * is required). Sits in normal flex flow at the bottom of `<main>` so it never
+ * overlaps channels, messages, or navigation. The stable build shows nothing;
+ * its switch is in Settings → Legal and privacy.
  */
-export function DiagnosticsConsentPrompt({ token, onOpenSettings }: {
+export function DiagnosticsConsentPrompt({
+  token,
+  onOpenSettings,
+  mobileDockVisible = false,
+  mobileFabVisible = false,
+}: {
   token: string | null | undefined;
   onOpenSettings: () => void;
+  mobileDockVisible?: boolean;
+  mobileFabVisible?: boolean;
 }) {
   useEffect(() => {
     if (!token) return;
@@ -67,18 +77,34 @@ export function DiagnosticsConsentPrompt({ token, onOpenSettings }: {
   const [saving, setSaving] = useState(false);
   if (prompt === "none" || diagnosticsPromptDismissed(prompt)) return null;
 
+  const barClass = cn(
+    "flex w-full shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-t border-border/60 bg-background/95 px-4 py-2 text-xs text-muted-foreground",
+    mobileDockVisible
+      ? "mb-[var(--app-mobile-dock-band,0px)] md:mb-0"
+      : "pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] md:pb-2",
+    mobileFabVisible && "pr-[calc(var(--mobile-horizontal-padding,1rem)+4.75rem)] md:pr-4",
+  );
+
   if (prompt === "notice") {
     return (
-      <div className="pointer-events-none absolute left-1/2 top-[calc(52px+env(safe-area-inset-top,0px)+48px)] z-[60] w-max max-w-[calc(100%-2rem)] -translate-x-1/2"
-        role="status" data-testid="diagnostics-notice">
-        <span className="app-paper-tile pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 text-[0.8125rem]">
-          <span>
-            This beta sends diagnostics to help fix bugs.{" "}
-            <button type="button" className="underline underline-offset-2" onClick={onOpenSettings}>Turn off</button>
-          </span>
-          <button type="button" aria-label="Dismiss" className="opacity-60 hover:opacity-100"
-            onClick={() => dismissDiagnosticsPrompt("notice")}>
-            <X className="size-3.5" aria-hidden />
+      <div className={barClass} role="status" data-testid="diagnostics-notice">
+        <span className="min-w-0 leading-snug">
+          This beta shares diagnostics to help improve xMatrix.
+        </span>
+        <span className="inline-flex shrink-0 items-center gap-3">
+          <button
+            type="button"
+            className="underline underline-offset-2 transition-colors hover:text-foreground"
+            onClick={onOpenSettings}
+          >
+            Privacy settings
+          </button>
+          <button
+            type="button"
+            className="font-semibold text-foreground transition-opacity hover:opacity-80"
+            onClick={() => dismissDiagnosticsPrompt("notice")}
+          >
+            Got it
           </button>
         </span>
       </div>
@@ -97,16 +123,27 @@ export function DiagnosticsConsentPrompt({ token, onOpenSettings }: {
   }
 
   return (
-    <div className="pointer-events-none absolute left-1/2 top-[calc(52px+env(safe-area-inset-top,0px)+48px)] z-[60] w-max max-w-[calc(100%-2rem)] -translate-x-1/2"
-      data-testid="diagnostics-opt-in">
-      <span className="app-paper-tile pointer-events-auto inline-flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 text-[0.8125rem]">
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={ticked} onChange={(event) => setTicked(event.target.checked)} />
-          Send diagnostics to help improve the beta
-        </label>
-        <button type="button" className="font-semibold underline underline-offset-2" disabled={saving}
-          onClick={() => void save()}>
+    <div className={barClass} data-testid="diagnostics-opt-in">
+      <label className="inline-flex min-w-0 items-center gap-2 leading-snug text-foreground">
+        <input type="checkbox" checked={ticked} onChange={(event) => setTicked(event.target.checked)} />
+        Send diagnostics to help improve the beta
+      </label>
+      <span className="inline-flex shrink-0 items-center gap-2.5">
+        <button
+          type="button"
+          className="font-semibold text-foreground underline underline-offset-2 disabled:opacity-50"
+          disabled={saving}
+          onClick={() => void save()}
+        >
           Done
+        </button>
+        <button
+          type="button"
+          aria-label="Dismiss"
+          className="opacity-60 transition-opacity hover:opacity-100"
+          onClick={() => dismissDiagnosticsPrompt("opt-in")}
+        >
+          <X className="size-3.5" aria-hidden />
         </button>
       </span>
     </div>
