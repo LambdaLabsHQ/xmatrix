@@ -12,7 +12,6 @@
 //!
 //! See `README.md` for the boundary and what is not yet extracted.
 
-mod claude_credentials;
 pub mod fields;
 mod host;
 pub mod quota;

@@ -14,22 +14,19 @@
 //! Antigravity's ACP model catalog so one pool's exhaustion never stops models
 //! in another pool.
 
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use colored::Colorize;
 use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
 use super::cache::KeyedProviderUsageCache;
+use super::cli::{self, CliVersion};
 use super::windows::percent_window;
 use crate::fields::first_string;
-use crate::host::{home_dir_path, lowercase_hex};
+use crate::host::home_dir_path;
 use crate::usage::{LlmQuotaUsage, LlmUsage};
 
 /// Environment variables that make an `agy` spawn bill something other than
@@ -48,10 +45,8 @@ pub const ANTIGRAVITY_QUOTA_DISABLE_ENV: &str = "XMATRIX_DISABLE_ANTIGRAVITY_QUO
 
 /// First `agy` release that answers read-only `-p "/usage" --output-format json`
 /// non-interactively without starting an LLM turn or spending tokens.
-const MIN_PRINT_USAGE_CLI_VERSION: (u64, u64, u64) = (1, 1, 11);
-const AGY_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
+const MIN_PRINT_USAGE_CLI_VERSION: CliVersion = (1, 1, 11);
 const AGY_USAGE_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_VERSION_STDOUT_BYTES: usize = 4 * 1024;
 const MAX_USAGE_STDOUT_BYTES: usize = 256 * 1024;
 const MAX_USAGE_STDERR_BYTES: usize = 32 * 1024;
 
@@ -86,21 +81,6 @@ impl AntigravityQuotaStore {
 /// frequent `agy` subprocess invocations.
 static ANTIGRAVITY_QUOTA: AntigravityQuotaStore =
     AntigravityQuotaStore::new(Duration::from_secs(180), Duration::from_secs(60));
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct BinaryFingerprint {
-    path: PathBuf,
-    modified: Option<SystemTime>,
-    len: u64,
-}
-
-#[derive(Clone, Debug)]
-struct CachedCliVersion {
-    fingerprint: BinaryFingerprint,
-    version: (u64, u64, u64),
-}
-
-static AGY_VERSION_CACHE: OnceLock<Mutex<Option<CachedCliVersion>>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AgyEnvMode {
@@ -140,40 +120,20 @@ fn debug_report(detail: &str) {
     }
 }
 
-fn fingerprint(raw: &str) -> String {
-    lowercase_hex(&Sha256::digest(raw.as_bytes()))
-}
-
 fn cache_key_for_mode(
     mode: AgyEnvMode,
     env: &(dyn Fn(&str) -> Option<String> + Sync),
     home: Option<&Path>,
 ) -> String {
-    let home_part = home
-        .map(|path| path.to_string_lossy().into_owned())
-        .unwrap_or_default();
     match mode {
-        AgyEnvMode::DefaultLogin => format!("default\u{0}{home_part}"),
-        AgyEnvMode::Process => {
-            let mut parts = vec!["process".to_string(), home_part];
-            for key in ANTIGRAVITY_LOGIN_OVERRIDE_KEYS {
-                let value = env(key)
-                    .map(|raw| raw.trim().to_string())
-                    .filter(|trimmed| !trimmed.is_empty());
-                match value {
-                    Some(raw) if *key == "ANTIGRAVITY_APP_DATA_DIR" => {
-                        parts.push(format!("{key}={raw}"));
-                    }
-                    Some(raw) => {
-                        // Hash in-process override values so credentials never
-                        // sit verbatim in cache keys.
-                        parts.push(format!("{key}#{}", fingerprint(&raw)));
-                    }
-                    None => {}
-                }
-            }
-            parts.join("\u{0}")
-        }
+        AgyEnvMode::DefaultLogin => cli::login_cache_key("default", home, &[], &[], env),
+        AgyEnvMode::Process => cli::login_cache_key(
+            "process",
+            home,
+            ANTIGRAVITY_LOGIN_OVERRIDE_KEYS,
+            &["ANTIGRAVITY_APP_DATA_DIR"],
+            env,
+        ),
     }
 }
 
@@ -269,147 +229,31 @@ async fn read_antigravity_quota_with_program(
 }
 
 fn configure_agy_command(program: &Path, home: Option<&Path>) -> tokio::process::Command {
-    let mut command = tokio::process::Command::new(program);
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env("AGY_CLI_DISABLE_AUTO_UPDATE", "true")
-        .kill_on_drop(true);
-    if let Some(home) = home.filter(|path| path.is_dir()) {
-        command.current_dir(home);
-    }
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    let mut command = cli::probe_command(program, home);
+    command.env("AGY_CLI_DISABLE_AUTO_UPDATE", "true");
     command
 }
 
 fn resolve_agy_program() -> Option<PathBuf> {
-    if let Some(path_var) = std::env::var_os("PATH")
-        && let Some(found) = find_agy_in_paths(&path_var)
-    {
-        return Some(found);
-    }
+    let mut fallbacks = Vec::new();
     #[cfg(not(windows))]
     if let Some(home) = home_dir_path() {
-        let local_bin = home.join(".local").join("bin").join("agy");
-        if local_bin.is_file() {
-            return Some(local_bin);
-        }
+        fallbacks.push(home.join(".local").join("bin").join("agy"));
     }
     #[cfg(windows)]
     if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-        let install_bin = PathBuf::from(local_app_data)
-            .join("agy")
-            .join("bin")
-            .join("agy.exe");
-        if install_bin.is_file() {
-            return Some(install_bin);
-        }
+        fallbacks.push(
+            PathBuf::from(local_app_data)
+                .join("agy")
+                .join("bin")
+                .join("agy.exe"),
+        );
     }
-    None
-}
-
-fn find_agy_in_paths(path_var: &OsStr) -> Option<PathBuf> {
-    #[cfg(windows)]
-    const CANDIDATES: &[&str] = &["agy.exe", "agy.cmd", "agy.bat", "agy"];
-    #[cfg(not(windows))]
-    const CANDIDATES: &[&str] = &["agy"];
-
-    for dir in std::env::split_paths(path_var) {
-        if dir.as_os_str().is_empty() {
-            continue;
-        }
-        for name in CANDIDATES {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
-}
-
-fn binary_fingerprint(program: &Path) -> Option<BinaryFingerprint> {
-    let metadata = std::fs::metadata(program).ok()?;
-    Some(BinaryFingerprint {
-        path: program.to_path_buf(),
-        modified: metadata.modified().ok(),
-        len: metadata.len(),
-    })
-}
-
-fn cached_cli_version(fingerprint: &BinaryFingerprint) -> Option<(u64, u64, u64)> {
-    let cache = AGY_VERSION_CACHE.get_or_init(|| Mutex::new(None));
-    let guard = cache.lock().ok()?;
-    guard
-        .as_ref()
-        .filter(|entry| entry.fingerprint == *fingerprint)
-        .map(|entry| entry.version)
-}
-
-fn store_cli_version(fingerprint: BinaryFingerprint, version: (u64, u64, u64)) {
-    let cache = AGY_VERSION_CACHE.get_or_init(|| Mutex::new(None));
-    if let Ok(mut guard) = cache.lock() {
-        *guard = Some(CachedCliVersion {
-            fingerprint,
-            version,
-        });
-    }
-}
-
-fn parse_cli_semver(raw: &str) -> Option<(u64, u64, u64)> {
-    raw.split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
-        .find_map(|token| {
-            let mut parts = token.split('.');
-            let major = parts.next()?.parse::<u64>().ok()?;
-            let minor = parts.next()?.parse::<u64>().ok()?;
-            let patch = parts.next()?.parse::<u64>().ok()?;
-            if parts.next().is_some() {
-                return None;
-            }
-            Some((major, minor, patch))
-        })
-}
-
-async fn read_agy_version(program: &Path, home: Option<&Path>) -> Option<(u64, u64, u64)> {
-    let fingerprint = binary_fingerprint(program);
-    if let Some(fp) = fingerprint.as_ref()
-        && let Some(cached) = cached_cli_version(fp)
-    {
-        return Some(cached);
-    }
-    let mut command = configure_agy_command(program, home);
-    command.arg("--version").stderr(Stdio::null());
-    let mut child = command.spawn().ok()?;
-    let stdout = child.stdout.take()?;
-    let read = async {
-        let mut bytes = Vec::new();
-        let mut limited = stdout.take((MAX_VERSION_STDOUT_BYTES + 1) as u64);
-        let (read_res, status_res) = tokio::join!(limited.read_to_end(&mut bytes), child.wait());
-        read_res.ok()?;
-        let status = status_res.ok()?;
-        if !status.success() || bytes.len() > MAX_VERSION_STDOUT_BYTES {
-            return None;
-        }
-        let text = String::from_utf8(bytes).ok()?;
-        parse_cli_semver(&text)
-    };
-    let version = tokio::time::timeout(AGY_VERSION_TIMEOUT, read)
-        .await
-        .ok()
-        .flatten()?;
-    if let Some(fp) = fingerprint {
-        store_cli_version(fp, version);
-    }
-    Some(version)
+    cli::resolve_program("agy", &fallbacks)
 }
 
 async fn agy_supports_print_usage(program: &Path, home: Option<&Path>) -> bool {
-    match read_agy_version(program, home).await {
+    match cli::cli_version(program, home).await {
         Some(version) if version >= MIN_PRINT_USAGE_CLI_VERSION => true,
         Some((major, minor, patch)) => {
             debug_report(&format!(
@@ -965,6 +809,7 @@ mod tests {
 
     #[test]
     fn semver_and_disable_switch_parsing() {
+        use super::super::cli::parse_cli_semver;
         assert_eq!(parse_cli_semver("1.5.14\n"), Some((1, 5, 14)));
         assert_eq!(parse_cli_semver("agy 1.1.11"), Some((1, 1, 11)));
         assert!(parse_cli_semver("1.1.10").unwrap() < MIN_PRINT_USAGE_CLI_VERSION);
@@ -1042,7 +887,7 @@ mod tests {
             assert!(
                 !process_envs
                     .iter()
-                    .any(|(k, v)| *k == OsStr::new(key) && v.is_none()),
+                    .any(|(k, v)| *k == std::ffi::OsStr::new(key) && v.is_none()),
                 "Process mode must inherit {key}"
             );
         }
@@ -1054,7 +899,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         fn unique_temp_dir(name: &str) -> PathBuf {
-            let nanos = SystemTime::now()
+            let nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("clock")
                 .as_nanos();

@@ -17,6 +17,7 @@ use crate::usage::LlmUsage;
 pub mod antigravity;
 mod cache;
 pub mod claude;
+mod cli;
 pub mod codex;
 pub mod cursor;
 pub mod deepseek;
@@ -71,7 +72,8 @@ pub(crate) fn observed_provider_quotas(
 pub enum Provider {
     /// Google Antigravity (`agy`) Gemini and Claude/GPT model pools.
     Antigravity,
-    /// Claude Code / Claude.ai subscription 5h and 1w windows.
+    /// Claude Code / Claude.ai subscription 5h and 1w windows, asked of
+    /// Claude Code (`get_usage`).
     Claude,
     /// Codex ChatGPT subscription windows (`wham/usage`).
     Codex,
@@ -81,7 +83,7 @@ pub enum Provider {
     DeepSeek,
     /// Grok Build credits (weekly or monthly).
     Grok,
-    /// OpenCode Go 5h/1w/1mo windows.
+    /// OpenCode Go 5h/1w/1mo windows, asked of `opencode serve`.
     OpenCode,
     /// Z.ai / Zhipu coding-plan windows.
     Zai,
@@ -101,7 +103,7 @@ pub enum Account {
     Home(PathBuf),
     /// The provider CLI's default login, ignoring token/config overrides in
     /// the environment. Supported by [`Provider::Antigravity`],
-    /// [`Provider::Claude`] (keychain, then `~/.claude/.credentials.json`), and
+    /// [`Provider::Claude`] (a `claude` started without them), and
     /// [`Provider::Cursor`].
     DefaultLogin,
 }
@@ -130,11 +132,9 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::Antigravity, Account::DefaultLogin) => {
             antigravity::read_antigravity_quota_usage_for_default_account(force).await
         }
-        (Provider::Claude, Account::Process) => {
-            claude::read_claude_oauth_rate_limit_usage(force).await
-        }
+        (Provider::Claude, Account::Process) => claude::read_claude_usage(force).await,
         (Provider::Claude, Account::DefaultLogin) => {
-            claude::read_claude_oauth_usage_for_default_account(force).await
+            claude::read_claude_usage_for_default_account(force).await
         }
         (Provider::Codex, Account::Process) => codex::read_codex_chatgpt_usage(force).await,
         (Provider::Codex, Account::Home(home)) => {
@@ -148,7 +148,7 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::Grok, Account::Home(home)) => {
             grok::read_grok_build_billing_usage_for_home(&home, force).await
         }
-        (Provider::OpenCode, Account::Process) => opencode::read_opencode_zen_usage(force).await,
+        (Provider::OpenCode, Account::Process) => opencode::read_opencode_go_usage(force).await,
         (Provider::Zai, Account::Process) => zai::read_zai_coding_plan_quota_usage(force).await,
         (
             Provider::Antigravity

@@ -162,28 +162,6 @@ fn store_wham_usage(cache_key: &str, value: &Value) -> Option<LlmUsage> {
     usage
 }
 
-/// ChatGPT subscription windows for a token held outside a Codex config home
-/// (OpenCode stores its own ChatGPT OAuth login). `cache_key` must identify the
-/// account so two logins never share one slot; the token itself is never part
-/// of the key.
-pub(crate) async fn read_chatgpt_wham_usage_with_token(
-    cache_key: &str,
-    access_token: &str,
-    account_id: Option<&str>,
-    force: bool,
-    endpoint: &str,
-) -> Option<LlmUsage> {
-    if super::quota_probes_disabled() {
-        return None;
-    }
-    if let Some(cached) = CODEX_CHATGPT_USAGE.hit_unless_forced(cache_key, force) {
-        return cached;
-    }
-    let value =
-        fetch_wham_usage_json(cache_key, "chatgpt", access_token, account_id, endpoint).await?;
-    store_wham_usage(cache_key, &value)
-}
-
 /// Backwards-compatible entry point used by the Codex runtime: resolve the
 /// process `CODEX_HOME` (or `~/.codex`) exactly as before, then read that home.
 pub async fn read_codex_chatgpt_usage(force: bool) -> Option<LlmUsage> {
