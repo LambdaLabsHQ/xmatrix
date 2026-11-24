@@ -81,6 +81,8 @@ export type ComposerInputAuthorityProps = ComposerContextFields & {
   onFieldClick?: (field: ComposerField) => void;
   onFieldPaste?: (event: ClipboardEvent, field: ComposerField) => void;
   sendTitle?: string;
+  /** Icon inside the primary send button; defaults to the upward send arrow for chat timelines. */
+  sendIcon?: ReactNode;
   formClassName?: string;
   shellClassName?: string;
   fieldRef?: React.RefObject<ComposerField | null>;
@@ -147,6 +149,7 @@ function ComposerInputSurface({
   onFieldClick,
   onFieldPaste,
   sendTitle,
+  sendIcon,
   formClassName,
   shellClassName,
   fieldRef: fieldRefProp,
@@ -444,7 +447,7 @@ function ComposerInputSurface({
             {sending ? (
               <AnimatedIcon icon={Loader2} className="size-5 animate-spin" />
             ) : (
-              <ArrowUp className="size-5" strokeWidth={2.5} />
+              sendIcon ?? <ArrowUp className="size-5" strokeWidth={2.5} />
             )}
           </button>
         </div>
