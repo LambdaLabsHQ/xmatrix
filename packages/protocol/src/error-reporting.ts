@@ -18,7 +18,7 @@ import {
 } from "@sentry/core";
 import { nodeStackLineParser, ServerRuntimeClient } from "@sentry/core/server";
 import { isDiagnosticId } from "./diagnostic-events.js";
-import { serverErrorReport } from "./error-report-contract.js";
+import { isCodeIdentifierList, serverErrorReport } from "./error-report-contract.js";
 
 /** Where a Worker reports errors: the deployment's DSN and release. */
 export type ErrorReportingTarget = {
@@ -49,9 +49,13 @@ function scalar(value: unknown): string | undefined {
     ? String(value) : undefined;
 }
 
-/** A logged fact that may title a report: a number, true/false or an opaque id, never prose. */
+/**
+ * A logged fact that may title a report: a number, true/false, an opaque id or
+ * a list of code identifiers (`origin=load,Store.refresh`), never prose.
+ */
 function fact(value: unknown): string | undefined {
-  return typeof value === "number" || typeof value === "boolean" || isDiagnosticId(value) ? String(value) : undefined;
+  return typeof value === "number" || typeof value === "boolean" || isDiagnosticId(value) || isCodeIdentifierList(value)
+    ? String(value) : undefined;
 }
 
 /**

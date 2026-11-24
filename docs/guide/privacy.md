@@ -68,7 +68,7 @@ Every diagnostic event has a declared set of fields, checked when the client bui
 Two paths carry text, and only these:
 
 - **Send failure report on a desktop startup failure card:** the CLI's last lines, which the desktop App redacts on your machine first (home directory, email addresses, URL queries and anything shaped like a token or key are replaced). The card shows you exactly these lines before you send them, and they are sent only when you press the button; the automatic report sent when diagnostics are on carries only the failure's stage, exit code, platform and App version.
-- **Server-side Hub error reports:** the server's own error message, with quoted values, email addresses, URL queries, home-directory paths and token-shaped strings removed. Logged details are reported only when they are numbers, true/false or opaque identifiers.
+- **Server-side Hub error reports:** the server's own error message, with quoted values, email addresses, URL queries, home-directory paths and token-shaped strings removed. Logged details are reported only when they are numbers, true/false, opaque identifiers or lists of code function names. The Hub's own operational evidence (database attempts, release-watch and Durable Object failures, deadlock wait graphs) is reported only in its declared shape: phases, codes, error classes, statuses, durations and code names, with any other field dropped.
 
 ### Beta and stable defaults
 

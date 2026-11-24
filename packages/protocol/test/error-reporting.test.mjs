@@ -94,6 +94,8 @@ test("a logged line is titled with the facts it logged, not [object Object] (XMA
 test("a logged line spells out numbers, booleans and ids, never text fields or nested values", () => {
   assert.equal(consoleLine(["failed", { errorClass: "TypeError", origin: ["a", "b"], nested: { secret: 1 }, empty: "",
     body: "hello from a person" }]), "failed errorClass=TypeError origin=a,b");
+  assert.equal(consoleLine(["failed", { origin: "load,Store.refresh", body: "hello,from a person" }]),
+    "failed origin=load,Store.refresh");
   assert.equal(consoleLine(["plain line"]), "plain line");
   assert.equal(consoleLine(["x", { text: "y".repeat(1000) }]), "x");
 });
