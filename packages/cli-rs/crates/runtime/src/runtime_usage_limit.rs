@@ -6,10 +6,10 @@
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use xmatrix_harness::quota::{self, Account, Provider, ReadOptions};
+use xmatrix_harness::LlmUsage;
 #[cfg(test)]
 use xmatrix_harness::LlmQuotaUsage;
-use xmatrix_harness::LlmUsage;
-use xmatrix_harness::quota::{self, Account, Provider, ReadOptions};
 
 /// The provider account behind this Instance cannot run another turn until
 /// `resets_at` (RFC 3339, UTC) when the provider said when.
@@ -191,16 +191,12 @@ mod tests {
         );
         assert_eq!(report.resets_at.as_deref(), Some("2026-11-19T18:00:00Z"));
         assert_eq!(report.quota_scope_reason, None);
-        assert!(
-            report.usage.is_some(),
-            "the reading travels for Hub attribution"
-        );
+        assert!(report.usage.is_some(), "the reading travels for Hub attribution");
     }
 
     #[test]
     fn usage_limit_report_marks_missing_reset_time_and_failed_reads() {
-        let missing_reset =
-            usage_limit_report(UsageLimit::default(), Ok(reading(0.0, 55.0, 100.0)));
+        let missing_reset = usage_limit_report(UsageLimit::default(), Ok(reading(0.0, 55.0, 100.0)));
         assert_eq!(missing_reset.resets_at, None);
         assert_eq!(missing_reset.quota_scope_reason, Some("no_reset_time"));
         assert!(missing_reset.usage.is_some());

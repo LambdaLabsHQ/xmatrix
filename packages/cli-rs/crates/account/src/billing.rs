@@ -268,15 +268,13 @@ mod tests {
             "403 Forbidden",
             "500 Internal Server Error",
         ] {
-            assert!(
-                serve_once(
-                    status,
-                    r#"{"error":"billing unavailable"}"#,
-                    Query::SpaceStatus("space-1".into())
-                )
-                .await
-                .is_err()
-            );
+            assert!(serve_once(
+                status,
+                r#"{"error":"billing unavailable"}"#,
+                Query::SpaceStatus("space-1".into())
+            )
+            .await
+            .is_err());
         }
         assert!(
             serve_once("200 OK", "not json", Query::SpaceStatus("space-1".into()))

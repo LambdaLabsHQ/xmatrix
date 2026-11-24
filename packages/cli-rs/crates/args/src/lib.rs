@@ -498,12 +498,10 @@ mod tests {
 
     #[test]
     fn billing_readonly_commands_parse() {
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix", "billing", "space", "status", "--space", "space-1", "--json"
-            ])
-            .is_ok()
-        );
+        assert!(Cli::try_parse_from([
+            "xmatrix", "billing", "space", "status", "--space", "space-1", "--json"
+        ])
+        .is_ok());
         assert!(Cli::try_parse_from(["xmatrix", "billing", "space", "status"]).is_err());
         assert!(Cli::try_parse_from(["xmatrix", "billing", "open"]).is_ok());
     }
@@ -580,17 +578,15 @@ mod tests {
         let cli = Cli::try_parse_from(["xmatrix", "--profile", "isolated", "status"])
             .expect("profile selector should parse");
         assert_eq!(cli.profile.as_deref(), Some("isolated"));
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "--profile",
-                "isolated",
-                "--hub-url",
-                "https://hub.example",
-                "status",
-            ])
-            .is_err()
-        );
+        assert!(Cli::try_parse_from([
+            "xmatrix",
+            "--profile",
+            "isolated",
+            "--hub-url",
+            "https://hub.example",
+            "status",
+        ])
+        .is_err());
     }
 
     #[test]
@@ -1036,21 +1032,19 @@ mod tests {
                 .is_ok()
         );
         for role in ["outbound", "inbound"] {
-            assert!(
-                Cli::try_parse_from([
-                    "xmatrix",
-                    "channel",
-                    "move",
-                    "tree",
-                    "--proposal",
-                    "proposal",
-                    "--source-space",
-                    "source",
-                    "--ack",
-                    role
-                ])
-                .is_ok()
-            );
+            assert!(Cli::try_parse_from([
+                "xmatrix",
+                "channel",
+                "move",
+                "tree",
+                "--proposal",
+                "proposal",
+                "--source-space",
+                "source",
+                "--ack",
+                role
+            ])
+            .is_ok());
         }
         for args in [
             vec![
@@ -1074,14 +1068,12 @@ mod tests {
                 "source",
             ],
         ] {
-            assert!(
-                Cli::try_parse_from(
-                    ["xmatrix", "channel", "move", "tree"]
-                        .into_iter()
-                        .chain(args)
-                )
-                .is_err()
-            );
+            assert!(Cli::try_parse_from(
+                ["xmatrix", "channel", "move", "tree"]
+                    .into_iter()
+                    .chain(args)
+            )
+            .is_err());
         }
     }
 
@@ -1107,14 +1099,12 @@ mod tests {
         assert_eq!(channel_id, "channel-1");
         assert_eq!(space.as_deref(), Some("space-2"));
         for args in [vec!["--parent", "parent-1"], vec!["--root"], vec![]] {
-            assert!(
-                Cli::try_parse_from(
-                    ["xmatrix", "channel", "move", "channel-1"]
-                        .into_iter()
-                        .chain(args)
-                )
-                .is_err()
-            );
+            assert!(Cli::try_parse_from(
+                ["xmatrix", "channel", "move", "channel-1"]
+                    .into_iter()
+                    .chain(args)
+            )
+            .is_err());
         }
     }
 
@@ -1279,52 +1269,44 @@ mod tests {
 
     #[test]
     fn metadata_history_and_restore_have_bounded_explicit_revision_arguments() {
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "channel",
-                "metadata-history",
-                "c",
-                "--revision",
-                "0"
-            ])
-            .is_ok()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "channel",
-                "metadata-history",
-                "c",
-                "--limit",
-                "101"
-            ])
-            .is_err()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "channel",
-                "metadata-restore",
-                "c",
-                "--revision",
-                "0"
-            ])
-            .is_err()
-        );
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "channel",
-                "metadata-restore",
-                "c",
-                "--revision",
-                "0",
-                "--expected-revision",
-                "2"
-            ])
-            .is_ok()
-        );
+        assert!(Cli::try_parse_from([
+            "xmatrix",
+            "channel",
+            "metadata-history",
+            "c",
+            "--revision",
+            "0"
+        ])
+        .is_ok());
+        assert!(Cli::try_parse_from([
+            "xmatrix",
+            "channel",
+            "metadata-history",
+            "c",
+            "--limit",
+            "101"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "xmatrix",
+            "channel",
+            "metadata-restore",
+            "c",
+            "--revision",
+            "0"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "xmatrix",
+            "channel",
+            "metadata-restore",
+            "c",
+            "--revision",
+            "0",
+            "--expected-revision",
+            "2"
+        ])
+        .is_ok());
     }
 }
 
@@ -2473,18 +2455,16 @@ mod invocation_diagnostic_args_tests {
         assert!(
             Cli::try_parse_from(["xmatrix", "diagnose", "channel", "--decision-evidence"]).is_err()
         );
-        assert!(
-            Cli::try_parse_from([
-                "xmatrix",
-                "diagnose",
-                "channel",
-                "--message",
-                "message",
-                "--decision-evidence",
-                "--run"
-            ])
-            .is_err()
-        );
+        assert!(Cli::try_parse_from([
+            "xmatrix",
+            "diagnose",
+            "channel",
+            "--message",
+            "message",
+            "--decision-evidence",
+            "--run"
+        ])
+        .is_err());
     }
 
     #[test]
@@ -2501,10 +2481,15 @@ mod invocation_diagnostic_args_tests {
             })
         ));
         assert!(Cli::try_parse_from(["xmatrix", "diagnose", "channel", "--limit", "101"]).is_err());
-        assert!(
-            Cli::try_parse_from(["xmatrix", "diagnose", "id", "--run", "--message", "message"])
-                .is_err()
-        );
+        assert!(Cli::try_parse_from([
+            "xmatrix",
+            "diagnose",
+            "id",
+            "--run",
+            "--message",
+            "message"
+        ])
+        .is_err());
     }
 
     #[test]

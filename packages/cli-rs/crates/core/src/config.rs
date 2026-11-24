@@ -111,7 +111,11 @@ pub struct CliConfig {
     )]
     pub quota_access: std::collections::BTreeMap<String, xmatrix_harness::quota::SignInReadGrant>,
     /// Whether the local CLI/daemon may send pseudonymized client network diagnostics (off by default).
-    #[serde(rename = "telemetry", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "telemetry",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub telemetry: Option<bool>,
 }
 
@@ -139,7 +143,10 @@ pub fn quota_probes_disabled_with(
     config.quota_probes == Some(false)
 }
 
-pub fn telemetry_disabled_with(config: &CliConfig, env: impl Fn(&str) -> Option<String>) -> bool {
+pub fn telemetry_disabled_with(
+    config: &CliConfig,
+    env: impl Fn(&str) -> Option<String>,
+) -> bool {
     if let Some(raw) = env(TELEMETRY_ENV)
         && let Some(enabled) = parse_bool_setting(&raw)
     {
