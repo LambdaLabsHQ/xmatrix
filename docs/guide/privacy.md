@@ -58,13 +58,22 @@ xMatrix does not use advertising cookies, cross-site tracking, session replay, o
 
 **Optional client diagnostics and browser crash reporting are off by default across all regions.** Unauthenticated marketing, docs, and legal pages never load Sentry. Nothing is sent from your clients unless you explicitly opt in (or click **Send failure report** on a desktop daemon startup failure card):
 
-- **Error and crash reports (Sentry):** when opted in inside the signed-in app, uncaught browser errors and defects are sent with `userInfo`, `cookies`, `httpHeaders`, `httpBodies`, `urlQueryParams`, and console breadcrumbs disabled, and quoted text redacted. Self-hosted/local builds without a DSN send nothing. (Server-side Hub errors remain reported server-side to operate the hosted service.)
-- **First-party diagnostics (xMatrix Hub → Cloudflare Analytics Engine):** when opted in, clients send startup timing (`/api/observable/startup-timing`), onboarding setup step counts (`/api/observable/onboarding-step`), desktop daemon startup failures (`/api/observable/desktop-daemon-failure`), and CLI reconnect samples (`/api/observable/client-metrics`). Identifiers are pseudonymized server-side with a keyed HMAC-SHA-256 secret; no message or command bodies are included.
+- **Error and crash reports (Sentry):** when opted in inside the signed-in app, uncaught browser errors and defects are sent as the error's class, its code when it has one, and the code locations of its stack. The error's message, breadcrumbs, URLs, cookies, headers, request bodies and user details are never sent. Self-hosted/local builds without a DSN send nothing. (Server-side Hub errors remain reported server-side to operate the hosted service; see below.)
+- **First-party diagnostics (xMatrix Hub → Cloudflare Analytics Engine):** when opted in, clients send startup timing (`/api/observable/startup-timing`), onboarding setup step counts (`/api/observable/onboarding-step`), desktop daemon startup failures (`/api/observable/desktop-daemon-failure`), and CLI reconnect samples (`/api/observable/client-metrics`). Identifiers are pseudonymized server-side with a keyed HMAC-SHA-256 secret.
+
+### What a diagnostic event may contain
+
+Every diagnostic event has a declared set of fields, checked when the client builds it and again when the Hub receives it. A field may hold only a fixed value from a list, a number, true or false, a version, an opaque identifier, or a short code such as `websocket_connect_failed` (lowercase letters, digits, `_` and `-`). An event with any other field, or a value outside its field, is refused whole rather than trimmed into shape, so text you wrote has no field to travel in. Errors are reported by their class and code, never by their message.
+
+Two paths carry text, and only these:
+
+- **Send failure report on a desktop startup failure card:** the CLI's last lines, which the desktop App redacts on your machine first (home directory, email addresses, URL queries and anything shaped like a token or key are replaced). The card shows you exactly these lines before you send them, and they are sent only when you press the button; the automatic report sent when diagnostics are on carries only the failure's stage, exit code, platform and App version.
+- **Server-side Hub error reports:** the server's own error message, with quoted values, email addresses, URL queries, home-directory paths and token-shaped strings removed. Logged details are reported only when they are numbers, true/false or opaque identifiers.
 
 ### Opting in or turning diagnostics off
 
 - **Web, Desktop, iOS, and Android:** open **Settings → Legal and privacy** and toggle **Send diagnostics and crash reports** (off by default). On Desktop, this switch also updates the local daemon's `telemetry` setting.
-- **Desktop startup failure card:** even with diagnostics off, you can choose **Send failure report** once on a daemon startup failure card to share the redacted failure details.
+- **Desktop startup failure card:** even with diagnostics off, you can choose **Send failure report** once on a daemon startup failure card to share the redacted failure details shown on the card.
 - **CLI and daemon:** off by default; opt in with `xmatrix config telemetry on` or `XMATRIX_TELEMETRY=1`, and turn off with `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0`, or `DO_NOT_TRACK=1`.
 
 ## Legal documents

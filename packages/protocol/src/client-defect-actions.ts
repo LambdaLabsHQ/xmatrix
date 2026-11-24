@@ -1,3 +1,5 @@
+import { parseDiagnosticEvent, type DiagnosticEvent, type DiagnosticEventSchema } from "./diagnostic-events.js";
+
 /**
  * What a person was doing when the browser failed: the headline `describeError`
  * shows and the one fact a browser defect report carries about it. The set is
@@ -142,6 +144,25 @@ const CLIENT_DEFECT_ACTIONS = [
 export type ClientDefectAction = typeof CLIENT_DEFECT_ACTIONS[number];
 
 const ACTIONS: ReadonlySet<string> = new Set(CLIENT_DEFECT_ACTIONS);
+
+/**
+ * The declared fields of one browser defect report (diagnostic-events.ts):
+ * the action from the closed set, the error's class, its code when it has
+ * one and its stack as code locations. What the error said is not a field.
+ */
+const CLIENT_DEFECT_EVENT = {
+  action: { kind: "enum", values: CLIENT_DEFECT_ACTIONS },
+  name: { kind: "errorClass" },
+  code: { kind: "code", optional: true },
+  stack: { kind: "stack", maxFrames: 15 },
+} as const satisfies DiagnosticEventSchema;
+
+export type ClientDefectReport = DiagnosticEvent<typeof CLIENT_DEFECT_EVENT>;
+
+/** One defect as a browser sends it; anything else is not reported. */
+export function parseClientDefectReport(value: unknown): ClientDefectReport | undefined {
+  return parseDiagnosticEvent(CLIENT_DEFECT_EVENT, value);
+}
 
 /** The action `value` names exactly, or undefined. */
 export function clientDefectAction(value: unknown): ClientDefectAction | undefined {

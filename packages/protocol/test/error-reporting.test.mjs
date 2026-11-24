@@ -91,11 +91,30 @@ test("a logged line is titled with the facts it logged, not [object Object] (XMA
   assert.doesNotMatch(JSON.stringify([event.message, event.exception]), /\[object Object\]/u);
 });
 
-test("a logged line spells out scalar fields and leaves nested values to the report's arguments", () => {
-  assert.equal(consoleLine(["failed", { errorClass: "TypeError", origin: ["a", "b"], nested: { secret: 1 }, empty: "" }]),
-    "failed errorClass=TypeError origin=a,b");
+test("a logged line spells out numbers, booleans and ids, never text fields or nested values", () => {
+  assert.equal(consoleLine(["failed", { errorClass: "TypeError", origin: ["a", "b"], nested: { secret: 1 }, empty: "",
+    body: "hello from a person" }]), "failed errorClass=TypeError origin=a,b");
   assert.equal(consoleLine(["plain line"]), "plain line");
-  assert.equal(consoleLine(["x", { text: "y".repeat(1000) }]).length, 400);
+  assert.equal(consoleLine(["x", { text: "y".repeat(1000) }]), "x");
+});
+
+// Privacy contract (docs/guide/privacy.md): what a person wrote, a path under
+// their home or an email never reaches Sentry from a Worker, however a failure
+// carries it: logged beside a sentence, quoted in an error, or in a nested object.
+test("a Worker report never carries message text, home paths or emails it was handed", async () => {
+  sent.length = 0;
+  const sentinel = "SENTINEL private message body";
+  console.error("Message append failed", { channelId: "channel:1", body: sentinel, nested: { body: sentinel } });
+  reportError(new Error(`insert failed: "${sentinel}" by ada@example.com in /Users/ada/notes Key (body)=(${sentinel})`),
+    { operation: "POST /api/messages", ids: { channelId: "channel:1", note: sentinel } });
+  await sendErrorReports();
+  const wire = sent.map(({ body }) => body).join("\n");
+  assert.equal(events().length, 2);
+  for (const leaked of ["SENTINEL", "ada@example.com", "/Users/ada"]) assert.ok(!wire.includes(leaked), leaked);
+  // What triage needs still arrives: the sentence, the ids, the operation and the error's shape.
+  assert.match(wire, /Message append failed channelId=channel:1/u);
+  assert.match(wire, /insert failed: \\"…\\" by <email> in \/Users\/…\/notes Key …/u);
+  assert.match(wire, /"operation":"POST \/api\/messages"/u);
 });
 
 // The platform can transport an Error without its originating JavaScript stack.
