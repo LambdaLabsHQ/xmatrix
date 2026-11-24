@@ -9,7 +9,7 @@ const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const scriptSource = fs.readFileSync(scriptPath, "utf8");
 
 /** Runs the real content script in a lightweight DOM harness to test its placement contract. */
-function mountSelectionScript({ width = 1280, height = 800 } = {}) {
+function mountSelectionScript({ width = 1280, height = 800, initialPageState = null } = {}) {
   const windowListeners = new Map();
   const documentListeners = new Map();
   const runtimeListeners = [];
@@ -44,10 +44,14 @@ function mountSelectionScript({ width = 1280, height = 800 } = {}) {
     Math,
     String,
     Boolean,
+    Promise,
     chrome: {
       runtime: {
         getURL: (relative) => `https://ext-id.invalid/${relative}`,
-        sendMessage: async () => ({ ok: true }),
+        sendMessage: async (msg) => {
+          if (msg?.type === "askPageState" && initialPageState) return { ok: true, value: initialPageState };
+          return { ok: true };
+        },
         onMessage: {
           addListener: (fn) => runtimeListeners.push(fn),
           removeListener: (fn) => {
@@ -119,11 +123,21 @@ function mountSelectionScript({ width = 1280, height = 800 } = {}) {
     openFromContextMenu(message) {
       for (const listener of runtimeListeners) listener(message);
     },
+    sendExtensionMessage(message) {
+      for (const listener of runtimeListeners) listener(message);
+    },
     ready() {
       sendFromFrame({ type: "ready" });
     },
     reportSize(size) {
       sendFromFrame({ type: "size", ...size });
+    },
+    sendFromFrame,
+    scroll() {
+      dispatch(documentListeners, "scroll", {});
+    },
+    clickOutside() {
+      dispatch(documentListeners, "mousedown", { target: {} });
     },
     resizeViewport(nextWidth, nextHeight) {
       sandbox.innerWidth = nextWidth;
@@ -205,4 +219,66 @@ test("context-menu Ask about this page opens below near the top-right corner", (
   harness.reportSize({ width: 520, height: 120, topInset: 24, bottomInset: 44, leftInset: 32, rightInset: 32 });
   assert.equal(parseFloat(harness.frame().style.top) + 24, 24);
   assert.equal(parseFloat(harness.frame().style.left) + 520 - 32, 1272, "visible capsule hugs right edge with 8px margin");
+});
+
+test("inline thread stays open on page scroll and minimizes to a right-edge dock tab on click-away", async () => {
+  const harness = mountSelectionScript({ width: 1280, height: 800 });
+  await harness.select("selected sentence", { top: 120, bottom: 144, left: 200, width: 180, height: 24 });
+  harness.ready();
+  harness.reportSize({ width: 504, height: 88, topInset: 12, bottomInset: 24, leftInset: 12, rightInset: 12 });
+
+  // Enter expands in place into thread mode.
+  harness.sendFromFrame({ type: "mode", mode: "thread" });
+  harness.reportSize({ width: 504, height: 360, topInset: 12, bottomInset: 24, leftInset: 12, rightInset: 12 });
+  assert.equal(harness.frame().style.visibility, "visible");
+
+  // Scrolling the page does NOT close an active inline thread.
+  harness.scroll();
+  assert.equal(harness.frame().style.visibility, "visible");
+
+  // Clicking outside minimizes the active thread to the right-edge dock tab instead of hiding completely.
+  harness.clickOutside();
+  assert.equal(harness.lastPosted().xmatrixAsk, "dock");
+  harness.reportSize({ width: 72, height: 80, topInset: 16, bottomInset: 20, leftInset: 24, rightInset: 0 });
+  assert.equal(harness.frame().style.right, "0px");
+  assert.equal(harness.frame().style.left, "auto");
+  assert.equal(harness.frame().style.visibility, "visible");
+
+  // Clicking outside or scrolling never dismisses the right-edge dock tab.
+  harness.clickOutside();
+  harness.scroll();
+  assert.equal(harness.frame().style.visibility, "visible");
+});
+
+test("shows the right-edge dock tab when the side panel closes on a page with an active thread, and hides it when open", async () => {
+  const harness = mountSelectionScript({ width: 1280, height: 800 });
+  // Side panel closes on a page that has a thread -> dock tab appears.
+  harness.sendExtensionMessage({ type: "panel-state", open: false, hasThread: true });
+  harness.ready();
+  assert.equal(harness.lastPosted().xmatrixAsk, "dock");
+  harness.reportSize({ width: 72, height: 80, topInset: 16, bottomInset: 20, leftInset: 24, rightInset: 0 });
+  assert.equal(harness.frame().style.right, "0px");
+  assert.equal(harness.frame().style.visibility, "visible");
+
+  // Side panel opens -> dock tab hides, and new text selections switch to compact quote mode.
+  harness.sendExtensionMessage({ type: "panel-state", open: true, hasThread: true });
+  assert.equal(harness.frame().style.visibility, "hidden");
+
+  await harness.select("quoted passage", { top: 200, bottom: 224, left: 160, width: 180, height: 24 });
+  const prepared = harness.lastPosted();
+  assert.equal(prepared.xmatrixAsk, "prepared");
+  assert.equal(prepared.mode, "quote");
+});
+
+test("mounts directly into right-edge dock when page already has a thread and panel is closed", async () => {
+  const harness = mountSelectionScript({
+    width: 1280,
+    height: 800,
+    initialPageState: { panelOpen: false, hasThread: true },
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.ok(harness.frame(), "iframe is mounted automatically for right-edge dock");
+  harness.ready();
+  assert.equal(harness.lastPosted().xmatrixAsk, "dock");
 });
