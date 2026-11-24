@@ -1891,12 +1891,16 @@ pub enum ChannelCommand {
         /// Emoji to toggle, for example 👍
         emoji: String,
     },
-    /// Subscribe a conversation to a pull request: its CI verdict, reviews,
-    /// comments and merge then arrive there as messages
+    /// Subscribe a conversation to a pull request (its CI verdict, reviews,
+    /// comments and merge) or to a GitHub Actions workflow run (its verdict
+    /// when it completes): they arrive there as messages, so nothing polls
+    /// GitHub
     Subscribe {
         /// Channel ID or xmatrix.sh channel URL
         channel_id: String,
-        /// The pull request's URL, https://github.com/<owner>/<repo>/pull/<n>
+        /// The pull request's URL, https://github.com/<owner>/<repo>/pull/<n>,
+        /// or the workflow run's, https://github.com/<owner>/<repo>/actions/runs/<id>
+        #[arg(value_name = "URL")]
         pull_request: String,
     },
     /// Delete (recall) a message you sent
