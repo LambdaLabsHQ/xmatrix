@@ -4,6 +4,7 @@ export const HARNESS_ACTION_LABELS: Record<HarnessAction, string> = {
   install: "Install", update: "Update", uninstall: "Uninstall", auto_update_on: "Enable automatic updates",
   auto_update_off: "Disable automatic updates", refresh: "Refresh inventory", release: "Check for a new release",
   login_start: "Sign in", login_finish: "Finish sign-in", login_cancel: "Cancel sign-in", check: "Check sign-in",
+  quota_access_on: "Allow reading its sign-in for quota", quota_access_off: "Stop reading its sign-in for quota",
 };
 
 /** A connected daemon picks an action up within seconds of its wake. */

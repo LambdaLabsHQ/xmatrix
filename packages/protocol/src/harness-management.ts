@@ -71,6 +71,12 @@ export interface HarnessManagement {
   autoUpdate: HarnessAutoUpdate;
   /** Absent means no official sign-in the daemon can drive remotely. */
   login?: HarnessLogin;
+  /**
+   * How xMatrix may learn this harness's quota without an official interface.
+   * `sign_in_grant`: by reading the harness's own local sign-in, only after
+   * the machine's owner allows it there (`quota_access_on`), per machine.
+   */
+  quotaRead?: "sign_in_grant";
   /** Official registry that publishes this harness; absent means its latest version is not knowable. */
   latest?: { kind: "npm" | "pypi"; package: string };
   sources: string[];
@@ -93,6 +99,9 @@ export interface HarnessInventoryItem {
   login?: HarnessLoginState;
   /** Why a harness started the way a launch starts it refused to open a session, in its own words. */
   loginDetail?: string;
+  /** For a harness whose quota is read only under its owner's grant: whether
+   * this machine has one (`probes_off`: every quota probe is off there). */
+  quotaAccess?: HarnessQuotaAccess;
   /** When this item alone was probed again after the inventory's `capturedAt`, by an action on it
    * such as a sign-in. Absent, the item is as old as the inventory. */
   observedAt?: string;
@@ -107,6 +116,8 @@ export function harnessItemObservedAt(inventory: HarnessInventory, item: Harness
 
 export const HARNESS_LOGIN_STATES = ["signed_in", "signed_out", "unknown"] as const;
 export type HarnessLoginState = typeof HARNESS_LOGIN_STATES[number];
+export const HARNESS_QUOTA_ACCESS_STATES = ["granted", "not_granted", "probes_off"] as const;
+export type HarnessQuotaAccess = typeof HARNESS_QUOTA_ACCESS_STATES[number];
 
 /** Observations only: never registration, admission, or update authorization. */
 export interface HarnessInventory {
@@ -137,6 +148,7 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
         !STATUSES.has(item.probeStatus)) return undefined;
     if (item.autoUpdate !== undefined && !AUTO_UPDATE_STATES.has(item.autoUpdate as string)) return undefined;
     if (item.login !== undefined && !(HARNESS_LOGIN_STATES as readonly unknown[]).includes(item.login)) return undefined;
+    if (item.quotaAccess !== undefined && !(HARNESS_QUOTA_ACCESS_STATES as readonly unknown[]).includes(item.quotaAccess)) return undefined;
     for (const [key, max] of [["path", 4096], ["version", 128], ["latestVersion", 128], ["loginDetail", 300]] as const) {
       if (item[key] !== undefined && (typeof item[key] !== "string" ||
           item[key].length === 0 || item[key].length > max || hasControlCharacter(item[key]))) return undefined;
@@ -153,6 +165,7 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
       ...(item.autoUpdate === undefined ? {} : { autoUpdate: item.autoUpdate as HarnessInventoryItem["autoUpdate"] }),
       ...(item.login === undefined ? {} : { login: item.login as HarnessLoginState }),
       ...(item.loginDetail === undefined || item.login !== "signed_out" ? {} : { loginDetail: item.loginDetail as string }),
+      ...(item.quotaAccess === undefined ? {} : { quotaAccess: item.quotaAccess as HarnessQuotaAccess }),
       ...(typeof item.observedAt === "string" && TIMESTAMP.test(item.observedAt) && Number.isFinite(Date.parse(item.observedAt))
         ? { observedAt: item.observedAt } : {}),
     });
@@ -174,9 +187,12 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
  * `check` asks the one preset's program, now, whether it is installed and
  * signed in, and answers with what it says (`item`): a page that shows a
  * sign-in asks when it is looked at, since only the program knows.
+ * `quota_access_on` / `quota_access_off` allow or stop xMatrix reading the
+ * preset's local sign-in on that machine to show its quota, for a preset with
+ * no official quota interface (`management.quotaRead`).
  */
 export const HARNESS_ACTIONS = ["install", "update", "uninstall", "auto_update_on", "auto_update_off", "refresh", "release",
-  "login_start", "login_finish", "login_cancel", "check"] as const;
+  "login_start", "login_finish", "login_cancel", "check", "quota_access_on", "quota_access_off"] as const;
 export type HarnessAction = typeof HARNESS_ACTIONS[number];
 export const MACHINE_HARNESS_ACTION_CAPABILITY = "machine_harness_action_v1";
 /** Cursor updates must bind the vendor launcher, never an unrelated `agent` on PATH. */
@@ -191,6 +207,9 @@ export const MACHINE_HARNESS_LOGIN_CAPABILITY = "machine_harness_login_v1";
 export const MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY = "machine_harness_login_start_cancel_v1";
 /** A daemon without it cannot parse a `check` command, so none is issued or leased to it. */
 export const MACHINE_HARNESS_CHECK_CAPABILITY = "machine_harness_check_v1";
+/** A daemon without it cannot parse a `quota_access_*` command, so none is issued or leased to it. */
+export const MACHINE_HARNESS_QUOTA_ACCESS_CAPABILITY = "machine_harness_quota_access_v1";
+export const HARNESS_QUOTA_ACCESS_ACTIONS: readonly HarnessAction[] = ["quota_access_on", "quota_access_off"];
 export const HARNESS_LOGIN_ACTIONS: readonly HarnessAction[] = ["login_start", "login_finish", "login_cancel"];
 /** A harness action no daemon claimed within this long expires and never runs later. */
 export const HARNESS_ACTION_CLAIM_TTL_MS = 10 * 60_000;
@@ -350,6 +369,9 @@ export function harnessActionAvailable(management: HarnessManagement | undefined
     case "login_finish":
     case "login_cancel":
       return management.login !== undefined;
+    case "quota_access_on":
+    case "quota_access_off":
+      return management.quotaRead === "sign_in_grant";
     case "auto_update_on":
     case "auto_update_off":
       return management.autoUpdate.controls.length > 0 ||

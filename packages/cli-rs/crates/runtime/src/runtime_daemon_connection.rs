@@ -326,6 +326,9 @@ async fn execute_leased_harness_action(
         action,
         machine_daemon_connection::HarnessAction::Refresh
             | machine_daemon_connection::HarnessAction::Check
+            // Setting a grant on or off again leaves it as it is.
+            | machine_daemon_connection::HarnessAction::QuotaAccessOn
+            | machine_daemon_connection::HarnessAction::QuotaAccessOff
     ) {
         runtime_daemon_harness_action::execute(&preset_id, action).await
     } else {
@@ -2026,6 +2029,9 @@ pub(crate) const DAEMON_CAPABILITIES: &[&str] = &[
     "machine_harness_login_start_cancel_v1",
     // The daemon asks one harness, now, whether it is signed in (`check`).
     "machine_harness_check_v1",
+    // The owner allows or stops reading a harness's sign-in for its quota
+    // (`quota_access_on` / `quota_access_off`), and the inventory says which.
+    "machine_harness_quota_access_v1",
     // A stop may push the Run's whole checkout to a handoff branch.
     "machine_handoff_export_v1",
     // The owner lists and reclaims this machine's git worktrees.

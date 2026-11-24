@@ -15,7 +15,7 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 
 ## 本地服務商額度探測
 
-**一句話說明：** 為了顯示你已註冊的 AI 工具還剩多少額度，xMatrix daemon 會讀取這些工具在你電腦上的登入檔案（例如 `~/.grok/auth.json`），並直接向對應服務商查詢。Codex 例外：xMatrix 直接詢問 Codex 本身（正在執行的 Codex 工作階段，或短暫啟動的 `codex app-server`），不開啟任何 Codex 登入檔案。從這些檔案讀到的任何內容（權杖、帳號 ID、檔案內容或檔案指紋）都不會傳送給 xMatrix；Hub 只收到正規化後的額度結果。同一個開關可同時停止讀取檔案、向 Codex app-server 發出請求與向服務商發出請求（見下方「關閉本地額度探測」）。
+**一句話說明：** 為了顯示你已註冊的 AI 工具還剩多少額度，xMatrix daemon 會讀取這些工具在你電腦上的登入檔案（例如 `~/.grok/auth.json`），並直接向對應服務商查詢。Codex 例外：xMatrix 直接詢問 Codex 本身（正在執行的 Codex 工作階段，或短暫啟動的 `codex app-server`），不開啟任何 Codex 登入檔案。從這些檔案讀到的任何內容（權杖、帳號 ID、檔案內容或檔案指紋）都不會傳送給 xMatrix；Hub 只收到正規化後的額度結果。同一個開關可同時停止讀取檔案、向 Codex app-server 發出請求與向服務商發出請求（見下方「關閉本地額度探測」）。沒有官方額度介面的工具（如 Cursor），在你於那台電腦上允許之前完全不會被讀取（見下方「僅在你允許後才讀取的工具」）。
 
 當你在本機註冊受支援的代理工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）時，xMatrix 可在 `xmatrix agent list` 與 Agents 頁面顯示訂閱剩餘額度，並供 `@auto` 避開已用盡的帳號。
 
@@ -25,7 +25,7 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 | --- | --- | --- |
 | Claude Code | macOS 鑰匙圈（`Claude Code-credentials`）或 `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
 | Codex | 不讀取：呼叫 Codex 自己的 app-server 方法 `account/rateLimits/read`（正在執行的工作階段或短暫啟動的 `codex app-server`） | 由 Codex 使用其自身登入處理 |
-| Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS 鑰匙圈（`cursor-access-token`）或 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
+| Cursor（僅在你於那台電腦上允許後） | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS 鑰匙圈（`cursor-access-token`）或 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` 或 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` 或 OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` 或 ChatGPT `wham/usage` |
 | DeepSeek | `DEEPSEEK_API_KEY` 或 `$DSH_HOME` 憑證檔 | `https://api.deepseek.com/user/balance` |
@@ -37,6 +37,24 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 - 憑證僅留在本機行程記憶體中，**只傳送給對應服務商自己的額度端點**。
 - 本機 SHA-256 雜湊僅作記憶體快取鍵用來偵測帳號切換，**永不記錄於日誌，也永不上傳至 xMatrix**。
 - 傳送給 xMatrix Hub 的僅為正規化後的剩餘額度資訊（百分比、重設時間、帳號可用狀態與預付餘額）。
+
+### 僅在你允許後才讀取的工具
+
+Cursor 沒有官方的額度查詢介面：唯一的辦法是讀取 Cursor 為自己保存的登入憑證。這份憑證是給 Cursor 用的，xMatrix 不把它當作授權。在電腦擁有者允許之前，xMatrix 不會讀取那台電腦上 Cursor 的任何登入來源（macOS 鑰匙圈項目 `cursor-access-token`、Cursor 的 `auth.json`，以及環境中已設定的 `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`），Cursor 的額度顯示為**未知**；額度用盡仍會根據 Cursor 自己的錯誤訊息辨識。
+
+電腦擁有者可以在 Agents 或 Machines 檢視顯示 Cursor 額度的地方選擇 **Allow reading Cursor sign-in to show quota**，或在那台電腦上執行：
+
+```sh
+xmatrix config quotaAccess cursor on    # 允許
+xmatrix config quotaAccess cursor off   # 停止
+xmatrix config quotaAccess              # 查看本機已允許的工具
+```
+
+- 授權按電腦、按工具分別設定，預設關閉，並且獨立於額度探測開關：`quotaProbes` 開著不算授權。
+- 憑證只在那台電腦上讀取，只用於向 Cursor 查詢它自己的用量。憑證中的任何內容都不會離開那台電腦；Hub 只收到 Cursor 回報的用量以及是否已授權。
+- 授權綁定首次使用時登入的 Cursor 帳號，依據一個只保存在那台電腦 xMatrix 設定中、從不傳送的指紋。帳號或憑證一旦改變，授權即失效，最近的額度數字也會被刪除。
+- 隨時可以在同一位置、在 **Settings → Legal and privacy → Reading sign-ins for quota**，或用 `xmatrix config quotaAccess cursor off` 停止，下一次讀取即被拒絕。
+- 關閉本地額度探測（見下）優先於授權：即使已授權也什麼都不讀。
 
 ### 關閉本地額度探測
 

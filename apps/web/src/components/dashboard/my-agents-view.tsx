@@ -36,6 +36,7 @@ import { AgentHarnessDetail } from "./agent-harness-detail";
 import { useViewSelection } from "./url-query-state";
 import { agentHarnessSelectionId, type AgentListGroup } from "./agent-list-groups";
 import { agentBalanceReadings, agentUsageReadings } from "./agent-quota-usage";
+import { HarnessQuotaAccess } from "./harness-quota-access";
 import { HarnessSetUpSection, HarnessSignInSection } from "./harness-sign-in";
 import { DefaultModelSelect } from "./default-model-select";
 import { Face } from "./face";
@@ -259,8 +260,12 @@ export function AgentPaper({
               From the provider, checked {checked}. Updates while this page is open.
             </p>
           )}
+          {token && <div className="mt-3"><HarnessQuotaAccess bare hasReading target={registration} token={token}
+            userId={currentUserId} onChanged={() => void onRefetch()} /></div>}
         </ToolDetailSection>
       )}
+      {usage.length === 0 && token && <HarnessQuotaAccess target={registration} token={token} userId={currentUserId}
+        onChanged={() => void onRefetch()} />}
       {token && <HarnessSignInSection registration={registration} token={token} userId={currentUserId} />}
       {token && <HarnessSetUpSection registration={registration} token={token} userId={currentUserId} copy={copy} />}
       {registration.access && (

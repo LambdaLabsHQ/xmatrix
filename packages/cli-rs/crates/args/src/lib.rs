@@ -347,11 +347,18 @@ pub enum Commands {
         command: MigrateCommand,
     },
     /// Show or set config
+    ///
+    /// Local privacy switches: `quotaProbes on|off` (every provider quota
+    /// probe), `telemetry on|off`, and `quotaAccess <harness> on|off`: allow
+    /// xMatrix to read a harness's local sign-in on this computer to show its
+    /// quota, for a harness with no official quota interface (Cursor).
     Config {
         /// Key to show or set
         key: Option<String>,
-        /// Value to set
+        /// Value to set (for `quotaAccess`: the harness)
         value: Option<String>,
+        /// For `quotaAccess <harness>`: on or off
+        setting: Option<String>,
     },
     /// memory-fabric: generic channel annotations primitive (raw Hub API)
     Annotation {

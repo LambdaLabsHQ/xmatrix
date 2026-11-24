@@ -1008,7 +1008,11 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         Some(Commands::Migrate { command }) => {
             cmd_migrate(&hub_url, cli.token.as_deref(), command).await
         }
-        Some(Commands::Config { key, value }) => cmd_config(&hub_url, key, value).await,
+        Some(Commands::Config {
+            key,
+            value,
+            setting,
+        }) => cmd_config(&hub_url, key, value, setting).await,
         Some(Commands::Annotation { command }) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
             cmd_annotation(&hub_url, &token, command).await

@@ -15,7 +15,7 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 
 ## 本地服务商额度探测
 
-**一句话说明：** 为了显示你已注册的 AI 工具还剩多少额度，xMatrix daemon 会读取这些工具在你电脑上的登录文件（例如 `~/.grok/auth.json`），并直接向对应服务商查询。Codex 例外：xMatrix 直接询问 Codex 本身（正在运行的 Codex 会话，或短暂启动的 `codex app-server`），不打开任何 Codex 登录文件。从这些文件读到的任何内容（令牌、账号 ID、文件内容或文件指纹）都不会发送给 xMatrix；Hub 只收到归一化后的额度结果。同一个开关可同时停止读取文件、向 Codex app-server 发请求和向服务商发请求（见下方「如何关闭本地额度探测」）。
+**一句话说明：** 为了显示你已注册的 AI 工具还剩多少额度，xMatrix daemon 会读取这些工具在你电脑上的登录文件（例如 `~/.grok/auth.json`），并直接向对应服务商查询。Codex 例外：xMatrix 直接询问 Codex 本身（正在运行的 Codex 会话，或短暂启动的 `codex app-server`），不打开任何 Codex 登录文件。从这些文件读到的任何内容（令牌、账号 ID、文件内容或文件指纹）都不会发送给 xMatrix；Hub 只收到归一化后的额度结果。同一个开关可同时停止读取文件、向 Codex app-server 发请求和向服务商发请求（见下方「如何关闭本地额度探测」）。没有官方额度接口的工具（如 Cursor），在你于那台电脑上允许之前完全不会被读取（见下方「仅在你允许后才读取的工具」）。
 
 当你在本机注册了受支持的智能体工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）时，xMatrix 可在 `xmatrix agent list` 与 Agents 页面展示订阅剩余额度，并供 `@auto` 自动避开已用尽的账号。
 
@@ -25,7 +25,7 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 | --- | --- | --- |
 | Claude Code | macOS 钥匙串（`Claude Code-credentials`）或 `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
 | Codex | 不读取：调用 Codex 自己的 app-server 方法 `account/rateLimits/read`（正在运行的会话或短暂启动的 `codex app-server`） | 由 Codex 使用其自身登录处理 |
-| Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS 钥匙串（`cursor-access-token`）或 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
+| Cursor（仅在你于那台电脑上允许后） | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`、macOS 钥匙串（`cursor-access-token`）或 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` 或 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | `OPENCODE_API_KEY` 或 OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` 或 ChatGPT `wham/usage` |
 | DeepSeek | `DEEPSEEK_API_KEY` 或 `$DSH_HOME` 凭据文件 | `https://api.deepseek.com/user/balance` |
@@ -37,6 +37,24 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 - 凭据仅停留在本地进程内存中，**只发送给对应服务商自己的官方额度接口**。
 - 本地计算的 SHA-256 指纹仅作为进程内缓存键用来感知账号切换，**永不写入日志，也永不上传至 xMatrix**。
 - 上传给 xMatrix Hub 的只有归一化后的剩余额度信息（窗口百分比、重置时间、账号是否可用及预付余额）。
+
+### 仅在你允许后才读取的工具
+
+Cursor 没有官方的额度查询接口：唯一的办法是读取 Cursor 为自己保存的登录凭据。这份凭据是给 Cursor 用的，xMatrix 不把它当作授权。在电脑所有者允许之前，xMatrix 不会读取那台电脑上 Cursor 的任何登录来源（macOS 钥匙串项 `cursor-access-token`、Cursor 的 `auth.json`，以及环境中已设置的 `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`），Cursor 的额度显示为**未知**；额度用尽仍会根据 Cursor 自己的报错识别。
+
+电脑所有者可以在 Agents 或 Machines 视图显示 Cursor 额度的地方选择 **Allow reading Cursor sign-in to show quota**，或在那台电脑上运行：
+
+```sh
+xmatrix config quotaAccess cursor on    # 允许
+xmatrix config quotaAccess cursor off   # 停止
+xmatrix config quotaAccess              # 查看本机已允许的工具
+```
+
+- 授权按电脑、按工具分别设置，默认关闭，并且独立于额度探测开关：`quotaProbes` 开着不算授权。
+- 凭据只在那台电脑上读取，只用于向 Cursor 查询它自己的用量。凭据中的任何内容都不会离开那台电脑；Hub 只收到 Cursor 返回的用量以及是否已授权。
+- 授权绑定首次使用时登录的 Cursor 账号，依据一个只保存在那台电脑 xMatrix 配置中、从不发送的指纹。账号或凭据一旦变化，授权即失效，最近的额度数字也会被删除。
+- 随时可以在同一位置、在 **Settings → Legal and privacy → Reading sign-ins for quota**，或用 `xmatrix config quotaAccess cursor off` 停止，下一次读取即被拒绝。
+- 关闭本地额度探测（见下）优先于授权：即使已授权也什么都不读。
 
 ### 如何关闭本地额度探测
 

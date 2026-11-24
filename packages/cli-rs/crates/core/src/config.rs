@@ -101,6 +101,15 @@ pub struct CliConfig {
         default
     )]
     pub quota_probes: Option<bool>,
+    /// Per-harness grants to read a harness's local sign-in to show its quota,
+    /// for harnesses with no official quota interface (off by default; see
+    /// `quota_access`). Never sent anywhere: the Hub sees only granted or not.
+    #[serde(
+        rename = "quotaAccess",
+        skip_serializing_if = "std::collections::BTreeMap::is_empty",
+        default
+    )]
+    pub quota_access: std::collections::BTreeMap<String, xmatrix_harness::quota::SignInReadGrant>,
     /// This machine's explicit choice about CLI network diagnostics; unset defers to the
     /// account's choice and defaults (`telemetry_consent`).
     #[serde(rename = "telemetry", skip_serializing_if = "Option::is_none", default)]
@@ -735,7 +744,7 @@ pub(crate) async fn forget_legacy_machine_ids(adopted: &[String]) -> Result<()> 
     write_config(&config).await
 }
 
-async fn write_config(config: &CliConfig) -> Result<()> {
+pub(crate) async fn write_config(config: &CliConfig) -> Result<()> {
     let json = serde_json::to_string_pretty(config)?;
     write_private_json_atomically(&config_path(), json.as_bytes()).await
 }

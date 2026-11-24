@@ -14,6 +14,7 @@ use xmatrix_cli_core::error::{CliError, Result};
 use xmatrix_cli_core::machine_daemon_connection::{
     HarnessAction, HarnessActionResult, HarnessActionStatus,
 };
+use xmatrix_cli_core::quota_access;
 
 use crate::runtime_daemon_harness_inventory::{
     harness_command, inventory, probe, read_latest_version, resolve_launcher,
@@ -641,6 +642,12 @@ pub(crate) async fn execute(preset_id: &str, action: HarnessAction) -> HarnessAc
         checked.item = probed_item(preset).await;
         return checked;
     }
+    if matches!(
+        action,
+        HarnessAction::QuotaAccessOn | HarnessAction::QuotaAccessOff
+    ) {
+        return set_quota_access(preset_id, action, preset).await;
+    }
     if action == HarnessAction::Refresh {
         for preset in agent_presets() {
             read_latest_version(preset).await;
@@ -697,6 +704,40 @@ pub(crate) async fn execute(preset_id: &str, action: HarnessAction) -> HarnessAc
     };
     result.item = probed_item(preset).await;
     result
+}
+
+/// The owner allows (or stops) reading this harness's local sign-in on this
+/// machine to show its quota. Allowing reads once at once, so the grant binds
+/// to the sign-in present now; the answer carries the re-probed item, whose
+/// `quotaAccess` is how the Hub learns the new state.
+async fn set_quota_access(
+    preset_id: &str,
+    action: HarnessAction,
+    preset: Option<&'static AgentPreset>,
+) -> HarnessActionResult {
+    let on = action == HarnessAction::QuotaAccessOn;
+    let Some(preset) = preset else {
+        return result(preset_id, action, HarnessActionStatus::Unsupported);
+    };
+    let mut answer = match quota_access::set_quota_access(preset_id, on).await {
+        Err(error) => {
+            let unsupported = quota_access::quota_access_provider(preset_id).is_none();
+            let status = if unsupported {
+                HarnessActionStatus::Unsupported
+            } else {
+                HarnessActionStatus::Failed
+            };
+            with_tail(result(preset_id, action, status), &error.to_string())
+        }
+        Ok(state) => {
+            if state == quota_access::QuotaAccess::Granted {
+                quota_access::read_granted_quota(preset_id, true).await;
+            }
+            result(preset_id, action, HarnessActionStatus::Succeeded)
+        }
+    };
+    answer.item = probed_item(preset).await;
+    answer
 }
 
 /// `HarnessInventory` JSON from a local probe; no Hub involved.
@@ -794,6 +835,32 @@ async fn apply_release(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Hub and Web offer the grant for presets whose registry entry says
+    /// `quotaRead: sign_in_grant`; the daemon gates exactly the readers that
+    /// need one. A preset the UI offers but the daemon cannot grant, or one
+    /// read under a grant the UI never offers, would leave its quota unknown
+    /// with no way to allow it.
+    #[test]
+    fn the_registry_offers_a_grant_exactly_where_the_daemon_needs_one() {
+        let offered: BTreeSet<&str> = agent_presets()
+            .iter()
+            .filter(|preset| {
+                preset.management.as_ref().and_then(|m| m.quota_read)
+                    == Some(xmatrix_cli_agent::management::QuotaRead::SignInGrant)
+            })
+            .map(|preset| preset.id.as_str())
+            .collect();
+        let gated: BTreeSet<&str> = quota_access::quota_access_harnesses().collect();
+        assert_eq!(offered, gated);
+        assert!(gated.contains("cursor"));
+    }
+
+    #[tokio::test]
+    async fn a_preset_read_without_a_grant_refuses_one() {
+        let answer = execute("codex", HarnessAction::QuotaAccessOn).await;
+        assert_eq!(answer.status, HarnessActionStatus::Unsupported);
+    }
 
     #[test]
     #[cfg(unix)]

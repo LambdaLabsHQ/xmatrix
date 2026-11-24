@@ -3287,6 +3287,7 @@ dependencies = [
  "gethostname",
  "serde_json",
  "urlencoding",
+ "xmatrix-cli-agent",
  "xmatrix-cli-args",
  "xmatrix-cli-core",
  "xmatrix-repo-pool",
@@ -3419,6 +3420,7 @@ dependencies = [
 name = "xmatrix-harness"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "colored",
  "reqwest",
  "rustls",
