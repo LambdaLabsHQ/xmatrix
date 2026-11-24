@@ -11,6 +11,8 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 
 你的源代码、Git 历史、工作目录、模型工具历史与本地模型凭据均留在你自己控制的电脑上。xMatrix 绝不将本机模型 API Key 或 OAuth token 上传至 Hub，也不会读取第三方凭证文件来做跨机器身份归因或指纹关联。
 
+为保证同一台电脑在重装后仍稳定对应到你的账号下，本地 daemon 仅在本地将你的 xMatrix 用户 ID 与系统机器标识混合做 SHA-256 派生出按账号隔离的 `machineId`；原始硬件标识与未按账号隔离的机器指纹绝不上传至 Hub。
+
 ## 本地服务商额度探测
 
 当你在本机注册了受支持的智能体工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）时，xMatrix 可在 `xmatrix agent list` 与 Agents 页面展示订阅剩余额度，并供 `@auto` 自动避开已用尽的账号。
@@ -36,7 +38,7 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 
 ### 如何关闭本地额度探测
 
-可通过配置命令或环境变量在整台机器上关闭所有本地服务商额度探测：
+可在 **桌面 App → Settings → Legal and privacy → Local provider quota probes** 中关闭，或通过配置命令 / 环境变量在整台机器上关闭所有本地服务商额度探测：
 
 ```sh
 # 持久化本机配置
@@ -46,22 +48,22 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-如仅关闭 Antigravity 额度探测，可设 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。关闭后，xMatrix 不再读取任何本地服务商凭据或查询原厂额度接口。
+如仅关闭 Antigravity 额度探测，可设 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。关闭后，xMatrix 在预检、启动/重连与限额恢复等所有路径下均不再读取任何本地服务商凭据或查询原厂额度接口。
 
 ## 客户端诊断与崩溃报告
 
 xMatrix 不使用广告 Cookie、跨站追踪、会话录屏，也不集成 PostHog、Google Analytics 或 Cloudflare Web Analytics 等第三方行为分析 SDK。
 
-默认情况下，登录客户端会发送受限的运维诊断数据以定位故障与性能回退：
+**所有地区的可选客户端诊断与浏览器崩溃报告默认全部关闭（显式 Opt-in）。** 未登录的官网营销页、文档页与法律条款页绝不加载 Sentry。除非你主动开启（或在桌面端后台服务启动失败卡片上手动点击「发送失败报告」），客户端不会主动上报诊断数据：
 
-- **错误与崩溃报告（Sentry）**：严格关闭用户信息、Cookie、HTTP 头/请求体、URL 查询参数与控制台面包屑，并对错误文本中的引用内容脱敏；未配置 DSN 的本地或自托管构建不发送任何报告。
-- **第一方诊断指标（xMatrix Hub → Cloudflare Analytics Engine）**：启动耗时（`/api/observable/startup-timing`）、新手引导步骤计数（`/api/observable/onboarding-step`）、桌面端 daemon 启动失败原因（`/api/observable/desktop-daemon-failure`）与 CLI 网络重连样本（`/api/observable/client-metrics`）。标识符在服务端通过密钥 HMAC-SHA-256 假名化，不包含消息或命令正文。
+- **错误与崩溃报告（Sentry）**：仅在已登录应用内且你主动开启后生效，严格关闭用户信息、Cookie、HTTP 头/请求体、URL 查询参数与控制台面包屑，并对错误文本中的引用内容脱敏；未配置 DSN 的本地或自托管构建不发送任何报告。（Hub 服务端自身故障仍在服务端上报以保障托管服务运行。）
+- **第一方诊断指标（xMatrix Hub → Cloudflare Analytics Engine）**：仅在主动开启后发送启动耗时（`/api/observable/startup-timing`）、新手引导步骤计数（`/api/observable/onboarding-step`）、桌面端 daemon 启动失败原因（`/api/observable/desktop-daemon-failure`）与 CLI 网络重连样本（`/api/observable/client-metrics`）。标识符在服务端通过密钥 HMAC-SHA-256 假名化，不包含消息或命令正文。
 
-### 如何关闭诊断与崩溃报告
+### 如何开启或关闭诊断与崩溃报告
 
-- **Web、桌面端、iOS 与 Android**：前往 **Settings → Legal and privacy**，关闭 **Send diagnostics and crash reports**。
-- **浏览器隐私信号**：除非你在设置中显式重新开启，xMatrix 会自动遵循 **Do Not Track（DNT）** 与 **Global Privacy Control（GPC）**。
-- **CLI 与 daemon**：执行 `xmatrix config telemetry off`，或设置环境变量 `XMATRIX_TELEMETRY=0` / `DO_NOT_TRACK=1`。
+- **Web、桌面端、iOS 与 Android**：前往 **Settings → Legal and privacy**，切换 **Send diagnostics and crash reports**（默认关闭）。在桌面端中，该开关会同步更新内置本地 daemon 的 `telemetry` 配置。
+- **桌面端启动失败卡片**：即便诊断开关处于关闭状态，若后台服务启动失败，你仍可在失败卡片上按需点击一次 **发送失败报告**，仅上报该次脱敏后的失败信息。
+- **CLI 与 daemon**：默认关闭；如需开启可执行 `xmatrix config telemetry on` 或设 `XMATRIX_TELEMETRY=1`，随时可通过 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 关闭。
 
 ## 法律文件
 

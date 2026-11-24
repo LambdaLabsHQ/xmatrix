@@ -11,6 +11,8 @@ xMatrix combina un Hub colaborativo alojado con un daemon local en Rust que corr
 
 Tu código fuente, historial de Git, carpetas de trabajo, historial del proveedor y credenciales locales de modelos permanecen en tus propios equipos. xMatrix nunca sube tus claves API ni tokens OAuth locales al Hub, ni lee archivos de otras herramientas para vincular identidades entre máquinas.
 
+Para mantener estable un equipo conectado tras reinstalaciones bajo tu cuenta, el daemon deriva localmente un `machineId` aislado por propietario (`SHA-256` de tu ID de usuario y un identificador del sistema operativo); los identificadores de hardware sin procesar y las huellas sin aislar por cuenta nunca se envían al Hub.
+
 ## Consultas locales de cuota de proveedores
 
 Cuando registras un agente compatible (Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai o Antigravity), xMatrix puede mostrar la cuota restante en `xmatrix agent list` y en la vista Agents, y permitir que `@auto` evite cuentas agotadas.
@@ -36,28 +38,29 @@ Para consultar la cuota restante directamente en tu proveedor sin ejecutar un tu
 
 ### Desactivar consultas locales de cuota
 
+Desactívalas desde **Desktop Settings → Legal and privacy → Local provider quota probes**, o mediante CLI / variable de entorno:
+
 ```sh
 xmatrix config quotaProbes off
 # O mediante variable de entorno (tiene prioridad)
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-Para desactivar solo Antigravity, define `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. Al desactivarlas, xMatrix no lee almacenes locales de credenciales ni consulta endpoints de uso.
+Para desactivar solo Antigravity, define `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. Al desactivarlas, xMatrix no lee almacenes locales de credenciales ni consulta endpoints de uso en ninguna ruta.
 
 ## Diagnósticos del cliente e informes de errores
 
 xMatrix no usa cookies publicitarias, rastreo entre sitios, grabación de sesiones ni SDKs de analítica de comportamiento de terceros (como PostHog, Google Analytics o Cloudflare Web Analytics).
 
-Por defecto, los clientes con sesión iniciada envían diagnósticos operativos acotados para corregir fallos y regresiones de rendimiento:
+**Los diagnósticos opcionales del cliente y los informes de fallos del navegador están desactivados por defecto en todas las regiones (opt-in explícito).** Las páginas públicas de marketing, documentación y avisos legales nunca cargan Sentry. Solo se envían si decides activarlos (o si haces clic en **Send failure report** en una tarjeta de fallo de inicio del daemon):
 
-- **Informes de errores y fallos (Sentry):** sin información de usuario, cookies, cabeceras/cuerpos HTTP, parámetros de consulta URL ni breadcrumbs de consola, y con textos entrecomillados censurados. Las compilaciones locales o autoalojadas sin DSN no envían nada.
-- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave; nunca incluyen contenido de mensajes ni comandos.
+- **Informes de errores y fallos (Sentry):** solo cuando un usuario con sesión iniciada los activa; sin información de usuario, cookies, cabeceras/cuerpos HTTP, parámetros de consulta URL ni breadcrumbs de consola, y con textos entrecomillados censurados. Las compilaciones locales o autoalojadas sin DSN no envían nada.
+- **Diagnósticos propios (xMatrix Hub → Cloudflare Analytics Engine):** solo cuando están activados, envían tiempos de arranque (`/api/observable/startup-timing`), conteo de pasos de onboarding (`/api/observable/onboarding-step`), fallos de inicio del daemon de escritorio (`/api/observable/desktop-daemon-failure`) y muestras de reconexión CLI (`/api/observable/client-metrics`). Los identificadores se seudonimizan en el servidor con HMAC-SHA-256 con clave; nunca incluyen contenido de mensajes ni comandos.
 
-### Desactivar diagnósticos e informes de errores
+### Activar o desactivar diagnósticos e informes de errores
 
-- **Web, escritorio, iOS y Android:** abre **Settings → Legal and privacy** y desactiva **Send diagnostics and crash reports**.
-- **Señales del navegador:** xMatrix respeta automáticamente **Do Not Track (`DNT: 1`)** y **Global Privacy Control (GPC)** salvo que los reactives explícitamente en Settings.
-- **CLI y daemon:** ejecuta `xmatrix config telemetry off`, o define `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`.
+- **Web, escritorio, iOS y Android:** abre **Settings → Legal and privacy** y cambia **Send diagnostics and crash reports** (desactivado por defecto). En escritorio, este interruptor también actualiza `telemetry` en el daemon local.
+- **CLI y daemon:** desactivados por defecto; actívalos con `xmatrix config telemetry on` o `XMATRIX_TELEMETRY=1`, y desactívalos con `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`.
 
 ## Documentos legales
 

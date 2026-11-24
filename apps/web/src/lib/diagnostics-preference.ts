@@ -1,11 +1,10 @@
 /**
- * Client-side opt-out preference for optional diagnostics, startup timing,
+ * Client-side opt-in preference for optional diagnostics, startup timing,
  * onboarding step counts, and crash/error reporting.
  *
  * Stored in `localStorage` under a single key so Web, Desktop (Electron),
- * iOS, and Android shells all honor it consistently. When unset, respects
- * browser Do Not Track (`navigator.doNotTrack === "1"`) and Global Privacy
- * Control (`navigator.globalPrivacyControl === true`).
+ * iOS, and Android shells all honor it consistently. Off by default across
+ * all regions until the signed-in person explicitly enables it.
  */
 export const DIAGNOSTICS_STORAGE_KEY = "xmatrix:diagnostics-enabled";
 
@@ -39,7 +38,7 @@ function defaultEnv(): DiagnosticsPreferenceEnv {
   };
 }
 
-/** Whether optional client diagnostics and crash reporting may send events. */
+/** Whether optional client diagnostics and crash reporting may send events (off by default). */
 export function isDiagnosticsEnabled(env: DiagnosticsPreferenceEnv = defaultEnv()): boolean {
   let stored: string | null = null;
   try {
@@ -47,11 +46,7 @@ export function isDiagnosticsEnabled(env: DiagnosticsPreferenceEnv = defaultEnv(
   } catch {
     stored = null;
   }
-  if (stored === "false") return false;
-  if (stored === "true") return true;
-  if (env.globalPrivacyControl === true) return false;
-  if (env.doNotTrack === "1" || env.doNotTrack === "yes") return false;
-  return true;
+  return stored === "true";
 }
 
 /** Persists the person's explicit choice for this browser or native shell. */

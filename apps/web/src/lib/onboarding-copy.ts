@@ -108,6 +108,7 @@ const en = {
       ? "This computer didn't let xMatrix start its background service, so agents can't start here yet."
       : "xMatrix's background service stopped right after it started, so agents can't start here yet.",
   failureReported: "These details were sent to xMatrix so we can fix this.",
+  sendFailureReport: "Send failure report",
   tryingAgain: "Trying again…",
   detectedBy: "Detected by checking installed commands. Manage installed harnesses and their Space switches from Machines.",
   usedHere: "used on this machine",
@@ -248,6 +249,7 @@ const zh: OnboardingCopy = {
       ? "这台电脑没让 xMatrix 启动后台服务，所以 Agent 暂时还起不来。"
       : "xMatrix 的后台服务刚启动就停了，所以 Agent 暂时还起不来。",
   failureReported: "这些信息已经发给 xMatrix，我们会据此修复。",
+  sendFailureReport: "发送失败报告",
   tryingAgain: "正在重试…",
   detectedBy: "通过检查已安装的命令找到。在「Machines」里管理已安装的 Agent 和它们在各 Space 的开关。",
   usedHere: "在这台电脑上用过",

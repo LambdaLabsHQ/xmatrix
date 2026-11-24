@@ -73,6 +73,7 @@ for (const appleFailure of [
 ]) {
   test(`Apple authorization failure preserves its boundary and native evidence: ${appleFailure}`, async ({ page }) => {
     await openAsPhoneApp(page, { inPlace: true, appleFailure });
+    await page.addInitScript(() => window.localStorage.setItem("xmatrix:diagnostics-enabled", "true"));
     const reports: Record<string, string>[] = [];
     let exchanges = 0;
     await page.route("**/api/client-defects", async route => {

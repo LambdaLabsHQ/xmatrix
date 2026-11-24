@@ -51,6 +51,9 @@ fn claude_spawn_uses_default_login() -> bool {
 /// repeat the refusal), sharing one request with any other read of the same
 /// account. Hub attributes the scope from the refusal's reset time and reading.
 pub(crate) async fn resolve_claude_usage_limit(limit: UsageLimit) -> UsageLimitReport {
+    if xmatrix_cli_core::config::quota_probes_disabled() {
+        return usage_limit_report(limit, Err("quota_probes_disabled"));
+    }
     if !claude_spawn_uses_default_login() {
         return usage_limit_report(limit, Err("login_not_default"));
     }

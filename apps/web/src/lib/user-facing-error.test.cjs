@@ -98,9 +98,13 @@ test("a browser defect report keeps the message shape but not what it quoted", (
 });
 
 /** Runs the test in a page and collects the defect reports it would send. */
-function capturedDefectReports(t) {
+function capturedDefectReports(t, { diagnosticsEnabled = true } = {}) {
   const previousWindow = global.window;
-  global.window = {};
+  global.window = {
+    localStorage: {
+      getItem: (key) => (diagnosticsEnabled && key === "xmatrix:diagnostics-enabled" ? "true" : null),
+    },
+  };
   t.after(() => {
     if (previousWindow === undefined) delete global.window;
     else global.window = previousWindow;
@@ -112,6 +116,14 @@ function capturedDefectReports(t) {
   });
   return sent;
 }
+
+test("browser defect forwarding stays silent by default until diagnostics are opted in", async (t) => {
+  const { reportClientDefect } = require("./client-defect-report.ts");
+  const sent = capturedDefectReports(t, { diagnosticsEnabled: false });
+  reportClientDefect("Couldn't load default-off", new Error("Silent when not opted in"));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(sent.length, 0);
+});
 
 test("browser defect forwarding preserves the first Safari and Firefox frame for the Worker parser", async (t) => {
   const { reportClientDefect } = require("./client-defect-report.ts");

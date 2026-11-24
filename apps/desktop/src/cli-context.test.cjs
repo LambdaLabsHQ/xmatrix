@@ -113,3 +113,38 @@ test("only a replaced daemon process asks for the CLI context again", () => {
   assert.equal(changed(200), true, "a restarted daemon, e.g. after the CLI updated itself");
   assert.equal(changed(200), false);
 });
+
+test("local privacy settings read and write through xmatrix config", async () => {
+  const calls = [];
+  let state = { telemetry: false, quotaProbes: true };
+  const run = async (file, args) => {
+    calls.push({ file, args });
+    if (args.includes("telemetry") && args.includes("on")) state = { ...state, telemetry: true };
+    if (args.includes("quotaProbes") && args.includes("off")) state = { ...state, quotaProbes: false };
+    return { stdout: `${JSON.stringify(state, null, 2)}\n`, stderr: "" };
+  };
+  assert.deepEqual(
+    await cliContext.readCliPrivacySettings({ executable: "/bin/xmatrix", profileId: "p1", env: {}, run }),
+    { telemetry: false, quotaProbes: true },
+  );
+  assert.deepEqual(
+    await cliContext.writeCliPrivacySetting({
+      executable: "/bin/xmatrix",
+      profileId: "p1",
+      key: "quotaProbes",
+      enabled: false,
+      env: {},
+      run,
+    }),
+    { telemetry: false, quotaProbes: false },
+  );
+  assert.deepEqual(calls.map((c) => c.args), [
+    ["--profile", "p1", "config"],
+    ["--profile", "p1", "config", "quotaProbes", "off"],
+    ["--profile", "p1", "config"],
+  ]);
+  assert.equal(
+    await cliContext.readCliPrivacySettings({ executable: "/bin/xmatrix", env: {}, run: async () => { throw new Error("ENOENT"); } }),
+    null,
+  );
+});

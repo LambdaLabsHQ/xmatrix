@@ -15,14 +15,14 @@ function memoryStorage(initial = {}) {
   };
 }
 
-test("diagnostics are enabled by default and respect Do Not Track and Global Privacy Control", () => {
-  assert.equal(isDiagnosticsEnabled({ storage: memoryStorage() }), true);
+test("diagnostics are disabled by default across all environments (opt-in only)", () => {
+  assert.equal(isDiagnosticsEnabled({ storage: memoryStorage() }), false);
   assert.equal(isDiagnosticsEnabled({ storage: memoryStorage(), doNotTrack: "1" }), false);
   assert.equal(isDiagnosticsEnabled({ storage: memoryStorage(), doNotTrack: "yes" }), false);
   assert.equal(isDiagnosticsEnabled({ storage: memoryStorage(), globalPrivacyControl: true }), false);
 });
 
-test("explicit stored choice overrides browser signals and handles throwing storage", () => {
+test("only an explicit stored opt-in enables diagnostics and throwing storage stays off", () => {
   assert.equal(
     isDiagnosticsEnabled({
       storage: memoryStorage({ [DIAGNOSTICS_STORAGE_KEY]: "false" }),
@@ -44,6 +44,6 @@ test("explicit stored choice overrides browser signals and handles throwing stor
       throw new Error("storage blocked");
     },
   };
-  assert.equal(isDiagnosticsEnabled({ storage: throwingStorage }), true);
+  assert.equal(isDiagnosticsEnabled({ storage: throwingStorage }), false);
   assert.equal(isDiagnosticsEnabled({ storage: throwingStorage, globalPrivacyControl: true }), false);
 });

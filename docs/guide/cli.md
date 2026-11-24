@@ -162,5 +162,5 @@ xmatrix diagnose run:<run-id>                           # one run
 | `XMATRIX_CONFIG_DIR` | Where the session and configuration live. Defaults to `~/.config/xmatrix`. |
 | `XMATRIX_TOKEN` | A session token, instead of the stored login |
 | `XMATRIX_DISABLE_QUOTA_PROBES` | Set to `1` to disable all local provider quota probes (same as `xmatrix config quotaProbes off`). |
-| `XMATRIX_TELEMETRY` | Set to `0` to disable CLI client network diagnostics (same as `xmatrix config telemetry off`). |
-| `DO_NOT_TRACK` | Set to `1` to disable CLI client network diagnostics unless `XMATRIX_TELEMETRY=1` is set. |
+| `XMATRIX_TELEMETRY` | CLI client network diagnostics are off by default; set to `1` to opt in (same as `xmatrix config telemetry on`), or `0` to override a saved opt-in. |
+| `DO_NOT_TRACK` | Set to `1` to keep CLI client network diagnostics disabled even if opted in via config (unless `XMATRIX_TELEMETRY=1` is set). |

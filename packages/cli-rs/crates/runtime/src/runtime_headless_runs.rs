@@ -472,7 +472,9 @@ pub(crate) async fn run_claude_print_external(run: ExternalRun<'_>) -> error::Re
     // show an empty card until someone talks to it.
     let quota_relay = relay.clone();
     tokio::spawn(async move {
-        if let Some(usage) = read_claude_oauth_rate_limit_usage(false).await {
+        if !xmatrix_cli_core::config::quota_probes_disabled()
+            && let Some(usage) = read_claude_oauth_rate_limit_usage(false).await
+        {
             send_presence(&quota_relay, None, PresencePatch::usage(Some(usage)));
         }
     });
@@ -651,7 +653,11 @@ pub(crate) async fn run_claude_print_external(run: ExternalRun<'_>) -> error::Re
                         auto_join_channel_id.as_deref(),
                         &reconnected_agent,
                     );
-                    let usage = read_claude_oauth_rate_limit_usage(false).await;
+                    let usage = if xmatrix_cli_core::config::quota_probes_disabled() {
+                        None
+                    } else {
+                        read_claude_oauth_rate_limit_usage(false).await
+                    };
                     send_presence(
                         &relay,
                         Some("idle"),

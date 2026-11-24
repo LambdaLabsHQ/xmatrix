@@ -101,7 +101,7 @@ pub struct CliConfig {
         default
     )]
     pub quota_probes: Option<bool>,
-    /// Whether the local CLI/daemon may send anonymized client network diagnostics.
+    /// Whether the local CLI/daemon may send pseudonymized client network diagnostics (off by default).
     #[serde(
         rename = "telemetry",
         skip_serializing_if = "Option::is_none",
@@ -148,7 +148,7 @@ pub fn telemetry_disabled_with(
     {
         return true;
     }
-    config.telemetry == Some(false)
+    config.telemetry != Some(true)
 }
 
 pub fn load_config_sync() -> CliConfig {
@@ -1524,7 +1524,8 @@ mod tests {
         };
         let default_cfg = CliConfig::default();
         assert!(!quota_probes_disabled_with(&default_cfg, |_| None));
-        assert!(!telemetry_disabled_with(&default_cfg, |_| None));
+        // CLI network diagnostics are opt-in (off by default).
+        assert!(telemetry_disabled_with(&default_cfg, |_| None));
 
         assert!(quota_probes_disabled_with(&default_cfg, |k| {
             (k == QUOTA_PROBES_DISABLE_ENV).then(|| "1".to_string())
@@ -1535,11 +1536,24 @@ mod tests {
         assert!(telemetry_disabled_with(&default_cfg, |k| {
             (k == DO_NOT_TRACK_ENV).then(|| "1".to_string())
         }));
-        // Explicit XMATRIX_TELEMETRY=1 overrides DO_NOT_TRACK=1.
+        // Explicit XMATRIX_TELEMETRY=1 opts in and overrides DO_NOT_TRACK=1.
         assert!(!telemetry_disabled_with(&default_cfg, |k| match k {
             TELEMETRY_ENV => Some("1".to_string()),
             DO_NOT_TRACK_ENV => Some("1".to_string()),
             _ => None,
+        }));
+
+        let opt_in_cfg = CliConfig {
+            telemetry: Some(true),
+            ..CliConfig::default()
+        };
+        assert!(!telemetry_disabled_with(&opt_in_cfg, |_| None));
+        // DO_NOT_TRACK=1 disables even a saved opt-in unless XMATRIX_TELEMETRY=1 is set.
+        assert!(telemetry_disabled_with(&opt_in_cfg, |k| {
+            (k == DO_NOT_TRACK_ENV).then(|| "1".to_string())
+        }));
+        assert!(telemetry_disabled_with(&opt_in_cfg, |k| {
+            (k == TELEMETRY_ENV).then(|| "0".to_string())
         }));
 
         let opt_out_cfg = CliConfig {

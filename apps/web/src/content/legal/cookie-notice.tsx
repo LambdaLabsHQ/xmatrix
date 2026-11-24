@@ -80,16 +80,18 @@ export function CookieNoticeContent() {
         <p>
           xMatrix does not currently use advertising cookies, cross-site behavioral tracking,
           marketing-attribution cookies, session-replay tools, or third-party behavioral analytics
-          SDKs. Optional first-party startup timing, onboarding step counts, client network samples,
-          and scrubbed Sentry crash reports can be turned off anytime in Settings → Legal and privacy
-          (and automatically honor browser Do Not Track and Global Privacy Control signals). We
-          therefore do not display an advertising consent banner that would imply ad trackers are
-          active.
+          SDKs. Optional first-party startup timing, onboarding step counts, CLI reconnect samples,
+          and scrubbed browser Sentry crash reports are <strong className="text-foreground">off by default</strong>{" "}
+          across all regions; they run only when a signed-in user opts in under Settings → Legal
+          and privacy (or opts in for the CLI via <code className="font-mono text-xs">xmatrix config telemetry on</code>{" "}
+          or <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code>). Unauthenticated
+          marketing and legal pages never load Sentry. We therefore do not display an advertising
+          consent banner that would imply ad trackers are active.
         </p>
         <p>
-          Before activating a non-essential client-side technology, we will update this notice and our
-          data and vendor disclosures and, where required, provide equally accessible accept, refuse,
-          and withdrawal controls before that technology runs.
+          Before activating any non-essential client-side technology by default, we will update this
+          notice and our data and vendor disclosures and, where required, provide equally accessible
+          accept, refuse, and withdrawal controls before that technology runs.
         </p>
       </LegalSection>
 

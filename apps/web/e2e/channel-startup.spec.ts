@@ -336,8 +336,9 @@ test("the open app says it is offline while it is, and stops saying so when the 
   await expect(status).toHaveCount(0);
 });
 
-test("an app start reports how long each stage took, once", async ({ page }) => {
+test("an app start reports how long each stage took, once, when diagnostics are opted in", async ({ page }) => {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await page.addInitScript(() => window.localStorage.setItem("xmatrix:diagnostics-enabled", "true"));
   await fixtureJson(page, "startup-timing", "**/api/xmatrix/observable/startup-timing", null,
     { method: "POST", status: 204 });
   await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });

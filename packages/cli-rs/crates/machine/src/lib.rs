@@ -68,10 +68,10 @@ pub async fn cmd_config(
             config::set_telemetry_enabled(enabled).await?;
             if enabled {
                 println!(
-                    "CLI network diagnostics enabled (unless XMATRIX_TELEMETRY=0 or DO_NOT_TRACK=1 is set)."
+                    "CLI network diagnostics enabled (opt-in; still suppressed when XMATRIX_TELEMETRY=0 or DO_NOT_TRACK=1 is set)."
                 );
             } else {
-                println!("CLI network diagnostics disabled.");
+                println!("CLI network diagnostics disabled (off by default).");
             }
             return Ok(());
         }

@@ -11,6 +11,8 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 
 你的原始碼、Git 歷史、工作目錄、模型工具紀錄與本機模型憑證皆留在你自己控制的電腦上。xMatrix 絕不將本機模型 API Key 或 OAuth token 上傳至 Hub，也不會讀取第三方憑證檔來做跨機器身分歸因或指紋關聯。
 
+為確保同一台電腦重裝後仍穩定對應到你的帳號，本機 daemon 僅於本機將你的 xMatrix 使用者 ID 與系統機器識別碼混合做 SHA-256 派生出按帳號隔離的 `machineId`；原始硬體識別碼與未按帳號隔離的機器指紋絕不上傳至 Hub。
+
 ## 本地服務商額度探測
 
 當你在本機註冊受支援的代理工具（如 Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity）時，xMatrix 可在 `xmatrix agent list` 與 Agents 頁面顯示訂閱剩餘額度，並供 `@auto` 避開已用盡的帳號。
@@ -36,28 +38,29 @@ xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon
 
 ### 關閉本地額度探測
 
+可在 **桌面 App → Settings → Legal and privacy → Local provider quota probes** 中關閉，或透過命令／環境變數停用：
+
 ```sh
 xmatrix config quotaProbes off
 # 或設定環境變數（優先度更高）
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-若僅關閉 Antigravity 探測，可設定 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。關閉後，xMatrix 不會讀取任何本機服務商憑證或查詢原廠額度端點。
+若僅關閉 Antigravity 探測，可設定 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`。關閉後，xMatrix 在所有路徑下均不會讀取本機服務商憑證或查詢原廠額度端點。
 
 ## 用戶端診斷與當機回報
 
 xMatrix 不使用廣告 Cookie、跨站追蹤、工作階段錄影，也未整合 PostHog、Google Analytics 或 Cloudflare Web Analytics 等第三方行為分析 SDK。
 
-預設情況下，登入用戶端會回報受限的維運診斷資訊以協助除錯與效能改善：
+**所有地區的可選用戶端診斷與瀏覽器當機回報皆預設關閉（明確 Opt-in）。** 未登入的行銷、文件與法律頁面絕不載入 Sentry；除非你主動開啟（或在桌面端啟動失敗卡片上點擊「送出失敗報告」），用戶端不會主動送出診斷資訊：
 
-- **錯誤與當機回報（Sentry）**：停用使用者資訊、Cookie、HTTP 標頭/內容、URL 查詢參數與主控台麵包屑，並遮蔽錯誤訊息中引用的內容；未設定 DSN 的本機或自託管建置不送出任何回報。
-- **第一方診斷指標（xMatrix Hub → Cloudflare Analytics Engine）**：啟動耗時（`/api/observable/startup-timing`）、新手引導步驟計數（`/api/observable/onboarding-step`）、桌面端 daemon 啟動失敗資訊（`/api/observable/desktop-daemon-failure`）與 CLI 網路重連樣本（`/api/observable/client-metrics`）。識別碼於伺服器端以金鑰 HMAC-SHA-256 假名化，不含訊息或命令內容。
+- **錯誤與當機回報（Sentry）**：僅於登入應用內主動開啟後運作，停用使用者資訊、Cookie、HTTP 標頭/內容、URL 查詢參數與主控台麵包屑，並遮蔽錯誤訊息中引用的內容；未設定 DSN 的本機或自託管建置不送出任何回報。
+- **第一方診斷指標（xMatrix Hub → Cloudflare Analytics Engine）**：僅於主動開啟後回報啟動耗時（`/api/observable/startup-timing`）、新手引導步驟計數（`/api/observable/onboarding-step`）、桌面端 daemon 啟動失敗資訊（`/api/observable/desktop-daemon-failure`）與 CLI 網路重連樣本（`/api/observable/client-metrics`）。識別碼於伺服器端以金鑰 HMAC-SHA-256 假名化，不含訊息或命令內容。
 
-### 關閉診斷與當機回報
+### 開啟或關閉診斷與當機回報
 
-- **Web、桌面端、iOS 與 Android**：前往 **Settings → Legal and privacy** 關閉 **Send diagnostics and crash reports**。
-- **瀏覽器隱私訊號**：除非於設定中明確重新開啟，xMatrix 自動遵循 **Do Not Track（DNT）** 與 **Global Privacy Control（GPC）**。
-- **CLI 與 daemon**：執行 `xmatrix config telemetry off`，或設定 `XMATRIX_TELEMETRY=0` / `DO_NOT_TRACK=1`。
+- **Web、桌面端、iOS 與 Android**：前往 **Settings → Legal and privacy** 切換 **Send diagnostics and crash reports**（預設關閉）；桌面端會同步更新本機 daemon 的 `telemetry` 設定。
+- **CLI 與 daemon**：預設關閉；可透過 `xmatrix config telemetry on` 或 `XMATRIX_TELEMETRY=1` 開啟，並隨時以 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 關閉。
 
 ## 法律文件
 

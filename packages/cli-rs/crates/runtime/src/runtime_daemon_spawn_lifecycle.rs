@@ -2509,6 +2509,10 @@ async fn spawn_headless_agent(
         command.env_remove(key);
     }
     command.envs(&local_env);
+    if config::quota_probes_disabled() && !local_env.contains_key(config::QUOTA_PROBES_DISABLE_ENV)
+    {
+        command.env(config::QUOTA_PROBES_DISABLE_ENV, "1");
+    }
     command.env_remove("XMATRIX_TOKEN");
     command.env(
         "XMATRIX_OWNER_USER_ID",
