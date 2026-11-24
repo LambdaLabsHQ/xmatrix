@@ -55,7 +55,6 @@ const nextConfig: NextConfig = {
   async headers() {
     const connectSources = [
       "'self'",
-      "https://cloudflareinsights.com",
       "https://accounts.google.com/gsi/",
       ...configuredHubConnectSources(hubOrigin),
       ...(sentryDsn ? [new URL(sentryDsn).origin] : []),
@@ -68,7 +67,7 @@ const nextConfig: NextConfig = {
       // from its own package (src/extension-app), not from here.
       "frame-ancestors 'none'",
       "form-action 'self'",
-      `script-src 'self' 'unsafe-inline'${development ? " 'unsafe-eval'" : ""} https://static.cloudflareinsights.com https://accounts.google.com/gsi/client https://apis.google.com`,
+      `script-src 'self' 'unsafe-inline'${development ? " 'unsafe-eval'" : ""} https://accounts.google.com/gsi/client https://apis.google.com`,
       "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",
       // Google Identity Services and the Docs Picker use their official provider frames.
       "frame-src 'self' https://accounts.google.com/gsi/ https://docs.google.com",

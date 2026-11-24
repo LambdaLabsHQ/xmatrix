@@ -78,9 +78,20 @@ export function PrivacyPolicyContent() {
           <li>
             <strong className="text-foreground">Service and diagnostic information:</strong> IP
             address, browser and device type, operating system, application version, request time,
-            route or event category, response status, duration, counts, capacity, crash and error
-            information, and pseudonymized identifiers used to operate, secure, and troubleshoot the
+            route or event category, response status, duration, counts, capacity, startup timing,
+            first-party onboarding step progress, client network reconnect samples, desktop daemon
+            startup failure details, crash and error information (including reports sent to Sentry),
+            and keyed-HMAC pseudonymized identifiers used to operate, secure, and troubleshoot the
             Services. Operational diagnostics are designed not to contain message or command bodies.
+            You can turn off client diagnostics and crash reporting in Settings → Legal and privacy,
+            via browser Do Not Track / Global Privacy Control, or in the CLI via{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code>,{" "}
+            <code className="font-mono text-xs">DO_NOT_TRACK=1</code>, or{" "}
+            <code className="font-mono text-xs">xmatrix config telemetry off</code>; see our{" "}
+            <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
+              Telemetry and Local Privacy guide
+            </Link>
+            .
           </li>
           <li>
             <strong className="text-foreground">Support and communications:</strong> information you
@@ -137,9 +148,17 @@ export function PrivacyPolicyContent() {
           Local source files, raw terminal output, provider history, and working context remain on the
           connected computer unless a person, Agent, tool, connector, or requested feature sends them
           to a Channel, attachment, task, trace event, support request, model provider, or another
-          disclosed endpoint. A sandbox can restrict filesystem and long-lived credential access, but
-          current local sandbox support varies by platform and mode and does not enforce network egress.
-          A run configured without a supported sandbox does not receive that sandbox protection.
+          disclosed endpoint. When local provider quota probing is enabled for a harness you registered,
+          the daemon may read that tool&apos;s local credential store or OS keychain entry solely in
+          local memory to query that provider&apos;s own usage endpoint directly from your machine;
+          those credentials and local cache fingerprints are never sent to xMatrix, and only
+          normalized remaining-quota windows or balances are reported to the Hub for display and
+          routing. You can disable all local quota probes via{" "}
+          <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code> or{" "}
+          <code className="font-mono text-xs">xmatrix config quotaProbes off</code>. A sandbox can
+          restrict filesystem and long-lived credential access, but current local sandbox support
+          varies by platform and mode and does not enforce network egress. A run configured without a
+          supported sandbox does not receive that sandbox protection.
         </p>
         <p>
           Secret injection, privileged host commands, destructive changes, external publication,
@@ -253,8 +272,9 @@ export function PrivacyPolicyContent() {
             and grant rules;
           </li>
           <li>
-            to our service providers, including Cloudflare for infrastructure and Anthropic for the
-            MadeByRobot-selected management extraction that an authorized user invokes;
+            to our service providers, including Cloudflare for infrastructure, Sentry for scrubbed
+            error and crash reporting, and Anthropic for the MadeByRobot-selected management
+            extraction that an authorized user invokes;
           </li>
           <li>
             to Google or Stripe when you choose their authentication or payment flow, and to a model,

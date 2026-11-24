@@ -10,10 +10,12 @@ library:
   context, cost, and account-quota usage the same way for every harness.
 - **Account-quota probes.** These read what a provider says a login has left.
   Antigravity, Claude, Codex, Cursor, DeepSeek, Grok, OpenCode, and Z.ai have
-  readers, and Kimi has a parser. Antigravity delegates to the unmodified
+  readers, and Kimi has a parser. Set `XMATRIX_DISABLE_QUOTA_PROBES=1` to
+  disable all local provider quota probes globally so no provider credential
+  store or usage endpoint is touched. Antigravity delegates to the unmodified
   `agy -p "/usage" --output-format json` command instead of reading local OAuth
   token files or calling private Cloud Code endpoints directly (set
-  `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` to opt out).
+  `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` to opt out of Antigravity only).
 - **Record stream (planned).** Harness frames will be turned into one
   normalized record stream. See "Not yet extracted" below.
 

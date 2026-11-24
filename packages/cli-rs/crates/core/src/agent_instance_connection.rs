@@ -2931,6 +2931,9 @@ fn emit_client_network_samples(
     last_server_activity_age_ms: Option<u64>,
     reason: Option<String>,
 ) {
+    if crate::config::telemetry_disabled() {
+        return;
+    }
     let channels: Vec<String> = history_channels
         .lock()
         .map(|history| {

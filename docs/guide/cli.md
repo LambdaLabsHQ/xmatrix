@@ -161,3 +161,6 @@ xmatrix diagnose run:<run-id>                           # one run
 | `XMATRIX_PROFILE` | Which local connection profile to use, when you keep several accounts |
 | `XMATRIX_CONFIG_DIR` | Where the session and configuration live. Defaults to `~/.config/xmatrix`. |
 | `XMATRIX_TOKEN` | A session token, instead of the stored login |
+| `XMATRIX_DISABLE_QUOTA_PROBES` | Set to `1` to disable all local provider quota probes (same as `xmatrix config quotaProbes off`). |
+| `XMATRIX_TELEMETRY` | Set to `0` to disable CLI client network diagnostics (same as `xmatrix config telemetry off`). |
+| `DO_NOT_TRACK` | Set to `1` to disable CLI client network diagnostics unless `XMATRIX_TELEMETRY=1` is set. |

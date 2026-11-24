@@ -1025,7 +1025,11 @@ async fn run_zcode_app_external(run: ExternalRun<'_>) -> error::Result<()> {
         ));
     }
     write_current_run_status("zcode_app_starting", false, None);
-    let latest_usage = read_zai_coding_plan_quota_usage(false).await;
+    let latest_usage = if xmatrix_cli_core::config::quota_probes_disabled() {
+        None
+    } else {
+        read_zai_coding_plan_quota_usage(false).await
+    };
     if initial_message.is_some() {
         send_presence(
             &relay,
@@ -1283,7 +1287,9 @@ impl ZcodeRun<'_> {
     ) -> error::Result<()> {
         match turn {
             Ok(turn) => {
-                if let Some(usage) = read_zai_coding_plan_quota_usage(true).await {
+                if !xmatrix_cli_core::config::quota_probes_disabled()
+                    && let Some(usage) = read_zai_coding_plan_quota_usage(true).await
+                {
                     self.latest_usage = Some(usage);
                 }
                 self.latest_goal = turn.goal.clone();
@@ -3597,39 +3603,53 @@ impl AcpVendorConfig {
     }
 }
 
+fn gated_quota_future<Fut>(
+    read: Fut,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>>
+where
+    Fut: std::future::Future<Output = Option<protocol::LlmUsage>> + Send + 'static,
+{
+    Box::pin(async move {
+        if xmatrix_cli_core::config::quota_probes_disabled() {
+            return None;
+        }
+        read.await
+    })
+}
+
 fn grok_billing_quota_hook(
     force: bool,
     _model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
-    Box::pin(read_grok_build_billing_usage(force))
+    gated_quota_future(read_grok_build_billing_usage(force))
 }
 
 fn opencode_quota_hook(
     force: bool,
     model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
-    Box::pin(async move { read_opencode_usage_for_model(force, model.as_deref()).await })
+    gated_quota_future(async move { read_opencode_usage_for_model(force, model.as_deref()).await })
 }
 
 fn deepseek_quota_hook(
     force: bool,
     model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
-    Box::pin(async move { read_deepseek_balance_for_model(force, model.as_deref()).await })
+    gated_quota_future(async move { read_deepseek_balance_for_model(force, model.as_deref()).await })
 }
 
 fn cursor_quota_hook(
     force: bool,
     _model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
-    Box::pin(read_cursor_period_usage(force))
+    gated_quota_future(read_cursor_period_usage(force))
 }
 
 fn antigravity_quota_hook(
     force: bool,
     _model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
-    Box::pin(read_antigravity_quota_usage(force))
+    gated_quota_future(read_antigravity_quota_usage(force))
 }
 
 /// Normalizes a runtime command to a lowercase vendor stem ("kimi", "grok").

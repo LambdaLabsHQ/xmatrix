@@ -37,6 +37,9 @@ fn zai_coding_plan_api_key() -> Option<(String, &'static str)> {
 /// Z.ai / BigModel Coding Plan quota (used by ZCode Coding Plan stats).
 /// Auth header is the raw API key without a Bearer prefix (matches Z.ai monitor API).
 pub async fn read_zai_coding_plan_quota_usage(force: bool) -> Option<LlmUsage> {
+    if super::quota_probes_disabled() {
+        return None;
+    }
     if let Some(cached) = ZAI_QUOTA.hit_unless_forced(force) {
         return cached;
     }

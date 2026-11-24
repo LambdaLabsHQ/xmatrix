@@ -1,3 +1,4 @@
+import { isDiagnosticsEnabled } from "./lib/diagnostics-preference";
 import { earlyScriptLocation, isBrowserNoticeReport, isStaleBuild } from "./lib/error-noise";
 
 // The Desktop and iOS apps load this same Web app, so this also reports their
@@ -35,6 +36,7 @@ async function startErrorReporting(dsn: string) {
       return breadcrumb;
     },
     beforeSend(event, hint) {
+      if (!isDiagnosticsEnabled()) return null;
       // A reload fixes a stale build, and the failure screen offers it; neither is a defect to report.
       if (isStaleBuild(hint.originalException) || isBrowserNoticeReport(hint.originalException, event)) return null;
       if (event.request?.url) event.request = { url: pathOnly(event.request.url) };
@@ -58,7 +60,7 @@ async function startErrorReporting(dsn: string) {
   }
 }
 
-if (dsn) {
+if (dsn && isDiagnosticsEnabled()) {
   addEventListener("error", holdError);
   addEventListener("unhandledrejection", holdRejection);
   // A stale build cannot load the chunk; the page offers a reload for that.
