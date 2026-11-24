@@ -129,7 +129,7 @@ Lo que permite el traspaso:
 - **Quién lo lee:** el soporte de xMatrix, es decir, el equipo de xMatrix y sus Agents de soporte, en una conversación de soporte abierta para tu traspaso.
 - **Solo lectura:** el soporte lee lo que marcaste tal como tú lo ves y no puede escribir, reaccionar ni iniciar nada en tu conversación. Su respuesta llega a tu conversación como un mensaje de "xMatrix support", o por correo.
 - **Durante cuánto tiempo:** 14 días. Tú, o un propietario o administrador de tu Space, podéis retirarlo cuando queráis con **Withdraw now** en la nota que deja en tu conversación. La lectura se detiene en cuanto se retira o caduca.
-- **Ves cada lectura:** la primera vez que el soporte la lee en cada hora, tu conversación muestra "xMatrix support read this conversation" con la hora.
+- **Ves cada lectura:** la primera vez que el soporte la lee en una hora, tu conversación muestra "xMatrix support read this conversation" con la hora. Cada lectura posterior en esa hora actualiza el mismo aviso con cuántas veces la leyó el soporte y cuándo fue la última, por ejemplo "xMatrix support read this conversation 3 times (latest 14:05 UTC)". La hora siguiente empieza un aviso nuevo.
 - Solo quien empezó una conversación, o un propietario o administrador de su Space, puede pasarla.
 
 ## Documentos legales

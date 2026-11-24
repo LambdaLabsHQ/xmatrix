@@ -220,6 +220,7 @@ export {
   type SupportHandoffRead,
   type SupportReader,
 } from "./support-handoff-control.js";
+export { type SupportAccessNote, supportAccessNoteBody } from "./support-handoff-grants.js";
 export {
   PostgresSlackOAuthRepository,
   SlackOAuthControlError,

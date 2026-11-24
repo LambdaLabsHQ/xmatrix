@@ -338,8 +338,9 @@ export function PrivacyPolicyContent() {
           support read what I selected”. xMatrix support, meaning our team and its support Agents, may
           then read only what was selected, read-only, for 14 days. The user, or an owner or admin of
           their Space, may withdraw it at any time, and reading stops when it is withdrawn or expires.
-          Each first read in an hour is shown in the conversation, and support’s replies arrive there or
-          by email. Only the person who started the conversation, or an owner or admin of its Space,
+          Every read is shown in the conversation: one note an hour, updated with each further read in
+          that hour to give the number of reads and the time of the latest. Support’s replies arrive
+          there or by email. Only the person who started the conversation, or an owner or admin of its Space,
           can hand it over. Without a handoff, support staff and Agents do not read a customer’s
           conversations, and product analysis uses metadata only.
         </p>

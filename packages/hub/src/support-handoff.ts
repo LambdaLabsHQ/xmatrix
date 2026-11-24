@@ -1,4 +1,6 @@
-import { PostgresSupportHandoffRepository, type SupportReader } from "@xmatrix/db";
+import {
+  PostgresSupportHandoffRepository, type SupportAccessNote, supportAccessNoteBody, type SupportReader,
+} from "@xmatrix/db";
 import {
   parseSupportHandoffRequest, SUPPORT_HANDOFF_PARTS, supportHandoffRequestProblem,
   type SupportHandoff, type SupportHandoffPart,
@@ -7,7 +9,7 @@ import type { Context, Hono } from "hono";
 
 import { platformAdminSpaceId } from "./admin-platform-access";
 import type { AuthUser } from "./auth";
-import { channelMessageHistory } from "./channel-messages";
+import { channelMessageCommand, channelMessageHistory } from "./channel-messages";
 import { crossSpaceReadDatabase, runProof } from "./cross-space-read";
 import { boundedDeploymentSpaceId } from "./deployment-space-access";
 import { jsonErrors, requireAuth } from "./index-shared";
@@ -21,8 +23,8 @@ import type { Env } from "./types";
  * A person hands one of their conversations to the support Space: the Hub
  * records the grant, opens a support conversation there, and tells the
  * person's conversation. Support then reads only what the person ticked, as
- * them, while the grant is live; every first read in an hour is noted in the
- * person's conversation, and support's replies land there as "xMatrix support".
+ * them, while the grant is live; every read is shown in the person's
+ * conversation, one note an hour, and support's replies land there as "xMatrix support".
  * The repository decides every authorization; these routes name principals
  * and post the messages.
  */
@@ -100,20 +102,30 @@ async function postHandoffReceipt(env: Env, handoff: SupportHandoff): Promise<vo
 }
 
 /**
- * "xMatrix support read this conversation (time)", at most once an hour per
- * handoff. A note that fails to post never fails the read it reports.
+ * "xMatrix support read this conversation (time)": the hour's first read posts
+ * the note, and each later read in that hour edits the same note to say how
+ * many reads there were and when the latest was. A note that fails to post
+ * never fails the read it reports.
  */
-export async function postSupportAccessNote(env: Env, note: { channelId: string; at: string } | undefined,
+export async function postSupportAccessNote(env: Env, note: SupportAccessNote | undefined,
   input: { grantId: string; spaceId: string; ownerUserId: string }): Promise<void> {
   if (!note) return;
   try {
-    const key = `${input.grantId}:${note.at}`;
+    const messageId = `support-access:${input.grantId}:${note.notedAt}`.slice(0, 200);
+    const body = supportAccessNoteBody(note);
+    if (note.reads > 1) {
+      await channelMessageCommand(env, note.channelId, "edit-message", {
+        commandId: `support-access-edit:${input.grantId}:${note.latestAt}:${note.reads}`.slice(0, 200),
+        messageId, channelId: note.channelId, body, principal: { kind: "user", id: input.ownerUserId },
+      });
+      return;
+    }
     await appendHubCard(env, note.channelId, {
-      commandId: `support-access:${key}`.slice(0, 200), messageId: `support-access:${key}`.slice(0, 200),
+      commandId: messageId, messageId,
       channelId: note.channelId, messageKind: SUPPORT_ACCESS_MESSAGE_KIND, ...supportAuthor(input.ownerUserId),
-      body: `xMatrix support read this conversation (${note.at.slice(0, 16).replace("T", " ")} UTC).`,
+      body,
       residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
-        supportAccess: { grantId: input.grantId, spaceId: input.spaceId, readAt: note.at } } },
+        supportAccess: { grantId: input.grantId, spaceId: input.spaceId, readAt: note.notedAt } } },
     });
   } catch (error) {
     console.error("Support access note failed", { grantId: input.grantId,

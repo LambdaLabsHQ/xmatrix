@@ -10,7 +10,7 @@ import { requireChannelCapability } from "./channel-capability-policy.js";
 import {
   CrossSpaceReadError, PostgresCrossSpaceReadRepository, removeOldTerminalGrants, type CrossSpaceRunProof,
 } from "./cross-space-read-control.js";
-import { SUPPORT_COLUMNS, supportHandoff, useSupportGrant } from "./support-handoff-grants.js";
+import { SUPPORT_COLUMNS, type SupportAccessNote, supportHandoff, useSupportGrant } from "./support-handoff-grants.js";
 import { commandFields } from "./command-fields.js";
 
 /**
@@ -35,8 +35,8 @@ export type SupportReader = { kind: "user"; id: string } | { kind: "run"; proof:
 /** A read support may make now, as the person who handed the Channel over. */
 export interface SupportHandoffRead {
   handoff: SupportHandoff;
-  /** Set when this read is the first in an hour: the person's Channel is told. */
-  accessNote?: { channelId: string; at: string };
+  /** This hour's note in the person's Channel, counting this read. */
+  accessNote: SupportAccessNote;
   logExcerpt?: string;
   diagnostics?: SupportDiagnosticEvent[];
 }
@@ -227,7 +227,7 @@ export class PostgresSupportHandoffRepository extends PostgresCrossSpaceReadRepo
       }
       if (input.part !== "logs") await this.requireOwnerRead(tx, spaceId, use.channelId, use.ownerUserId);
       return { handoff: { ...handoff, readCount: handoff.readCount + 1 },
-        ...(use.accessNote ? { accessNote: use.accessNote } : {}),
+        accessNote: use.accessNote,
         ...(use.logExcerpt !== undefined ? { logExcerpt: use.logExcerpt } : {}),
         ...(input.part === "diagnostics" ? { diagnostics: await conversationDiagnostics(tx, spaceId, use.channelId) } : {}) };
     });
