@@ -10,6 +10,11 @@ import {
   githubSettledCheckSuiteSha,
   githubWebhookIssueNumbers,
 } from "./github-pull-request-subscription";
+import {
+  githubWebhookWorkflowRunId,
+  githubWorkflowRunEventMessage,
+  githubWorkflowRunSourceRef,
+} from "./github-workflow-run-subscription";
 import { wakeRestingInstances } from "./registration-launch-dispatch";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import type { Env } from "./types";
@@ -124,7 +129,10 @@ export async function dispatchProductGitHubWebhook(input: {
   const repositoryName = `${repository.owner}/${repository.repo}`;
   const issues = new Map(githubWebhookIssueNumbers(input.event, input.payload)
     .map((number) => [githubIssueSourceRef(repositoryName, number), number]));
-  const resolved = await resolveRoutes(input.env, installationId, [repository.sourceRef, ...issues.keys()], feature);
+  const runId = githubWebhookWorkflowRunId(input.event, input.payload);
+  const runSourceRef = runId === undefined ? undefined : githubWorkflowRunSourceRef(repositoryName, runId);
+  const resolved = await resolveRoutes(input.env, installationId,
+    [repository.sourceRef, ...issues.keys(), ...(runSourceRef ? [runSourceRef] : [])], feature);
   const delegated = new Map<string, Promise<boolean>>();
   for (const route of resolved) {
     if (!delegated.has(route.spaceId)) delegated.set(route.spaceId, delegatedTo(input.env, { spaceId: route.spaceId,
@@ -144,6 +152,36 @@ export async function dispatchProductGitHubWebhook(input: {
     const batch = routes.slice(offset, offset + 8);
     const results = await Promise.all(batch.map(async (route): Promise<number> => {
       const principal = { kind: "user" as const, id: route.authorityRootUserId };
+      /* A followed workflow run says only its verdict, and the verdict ends the relation. */
+      if (route.sourceKind === "workflow_run") {
+        if (route.sourceRef !== runSourceRef) return 0;
+        const said = githubWorkflowRunEventMessage({ event: input.event, payload: input.payload, repository });
+        if (!said) return 0;
+        try {
+          if (!await githubContentAllowedInChannel(exposure, { repositoryPublic, channelId: route.channelId,
+            userId: route.authorityRootUserId })) return 0;
+          const messageId = `app:github:run:${runId}:${route.channelId}`.slice(0, 200);
+          const response = await append(input.env, route.channelId, {
+            commandId: `product:github-webhook:run:${runId}:${route.channelId}`.slice(0, 200),
+            messageId, channelId: route.channelId, body: said.body, principal, appAuthorId: "github",
+          });
+          if (!response.ok) return 0;
+          await wake(input.env, { commandId: `resting-wake:${messageId}`.slice(0, 200), channelId: route.channelId,
+            sourceMessageId: messageId, prompt: said.body }).catch((error: unknown) => {
+            console.error("Resting Instance wake failed", { channelId: route.channelId, messageId,
+              error: error instanceof Error ? error.message : String(error) });
+          });
+          return 1;
+        } finally {
+          await command(input.env, "remove-relation", {
+            commandId: `product:github-workflow-run:${input.delivery}:${route.channelId}:remove`.slice(0, 200),
+            relationId: route.relationId, principal,
+          }).catch((error: unknown) => {
+            console.error("Workflow run subscription end failed", { channelId: route.channelId,
+              error: error instanceof Error ? error.message : String(error) });
+          });
+        }
+      }
       const number = route.sourceKind === "issue" ? issues.get(route.sourceRef) : undefined;
       if (route.sourceKind === "issue" &&
           (number === undefined || !githubIssueSubscriptionCurrent(input.event, input.payload, route.createdAt))) return 0;
