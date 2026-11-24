@@ -104,15 +104,17 @@ export function normalizeScope(requested, channel = "beta") {
   return COMPONENTS.filter((item) => items.includes(item));
 }
 
-// Rust, Kotlin and Swift reach only a dev channel or TestFlight on a beta.
-// Their analyses sit with the client suites and run on the stable train.
+// Rust, Kotlin and Swift reach only a dev channel or TestFlight on a beta,
+// and their analyses are the long ones: the daily scan reads them, not the
+// scan of each push to main.
 const STABLE_ONLY_CODEQL_LANGUAGES = new Set(["rust", "java-kotlin", "swift"]);
 
 /**
- * The CodeQL languages a train scans before it ships `scope`. Hub, Web and
- * Desktop JavaScript and TypeScript, plus the workflows that release the
- * train, are scanned on every channel. Rust, Kotlin and Swift are scanned
- * only when `channel` is stable.
+ * The CodeQL languages scanned for `scope` (.github/workflows/codeql.yml; no
+ * release train waits for them). Hub, Web and Desktop JavaScript and
+ * TypeScript, plus the workflows, are scanned for either channel, which is
+ * what each push to main scans. Rust, Kotlin and Swift are scanned only when
+ * `channel` is stable, which is what the daily scan reads.
  */
 export function codeqlLanguages(scope, channel) {
   if (channel !== "beta" && channel !== "stable") {
@@ -125,8 +127,8 @@ export function codeqlLanguages(scope, channel) {
 
 // Test code never ships, so no analysis reads it.
 const CODEQL_TEST_PATHS = Object.freeze(["**/*.test.*", "**/*.spec.*", "**/test/**", "**/tests/**", "**/e2e/**", "**/__tests__/**"]);
-// The JavaScript and TypeScript analysis is the gates' longest job, so it runs
-// as two halves side by side: the Web app, and everything else. Each half
+// The JavaScript and TypeScript analysis is the longest of a push's scans, so
+// it runs as two halves side by side: the Web app, and everything else. Each half
 // uploads to its own alert category; together they read all of it. Other
 // languages are analysed whole.
 const CODEQL_PARTS = Object.freeze({
@@ -142,11 +144,9 @@ function codeqlConfig({ paths = [], ignore = [] }) {
 }
 
 /**
- * The CodeQL analyses a train runs before it ships `scope` on `channel`:
- * its languages (codeqlLanguages), each whole or in its parts, with the alert
- * category each uploads to and its configuration. The configuration comes from
- * the train's own revision, not the source it scans, so a stable of an older
- * beta reads the same paths and still selects client languages.
+ * The CodeQL analyses for `scope` on `channel`: its languages
+ * (codeqlLanguages), each whole or in its parts, with the alert category each
+ * uploads to and its configuration.
  */
 export function codeqlAnalyses(scope, channel) {
   return codeqlLanguages(scope, channel).flatMap((language) => (CODEQL_PARTS[language] ?? [{ part: "all" }]).map((part) => ({
@@ -539,7 +539,6 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
   output("tag", tag);
   output("channel", channel);
   output("source_sha", sourceSha);
-  output("codeql_analyses", JSON.stringify(codeqlAnalyses(scope, channel)));
   output("intents", intents.map((intent) => intent.id).join(","));
 }
 
@@ -664,11 +663,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const [command, ...rest] = process.argv.slice(2);
   try {
     if (command === "plan") await plan(process.cwd());
-    else if (command === "intent") {
+    else if (command === "codeql") {
+      // The scan of a push to main, or the full daily one (codeql.yml).
+      if (rest[0] !== "push" && rest[0] !== "full") throw new Error("codeql takes push or full");
+      console.log(JSON.stringify(codeqlAnalyses(COMPONENTS, rest[0] === "full" ? "stable" : "beta")));
+    } else if (command === "intent") {
       const [runId, channel, components, candidate = "", bump = ""] = rest;
       await intent(process.cwd(), { runId, channel, components, candidate, bump });
     } else {
-      console.error("Usage: node scripts/release-train.mjs <plan|intent <run-id> <beta|stable> <components> [candidate bump]>");
+      console.error("Usage: node scripts/release-train.mjs <plan|codeql <push|full>|intent <run-id> <beta|stable> <components> [candidate bump]>");
       process.exit(2);
     }
   } catch (error) {
