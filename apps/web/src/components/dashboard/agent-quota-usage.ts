@@ -68,6 +68,8 @@ function accountReadings(account: NonNullable<AgentRegistrationLiveState["quota"
 
 function windowReadings(quota: NonNullable<AgentRegistrationLiveState["quota"]>, now: number): MeterReading[] {
   const windows = currentRoutingQuotaWindows(quota.windows, now);
+  // A provider refusing the account (a billing hold) has used up no window.
+  if (!windows.length && quota.account?.allowed === false) return [];
   if (!windows.length) {
     // A reading from before windows were stored: only its tightest share is known.
     const used = 100 - quota.remainingPercent;

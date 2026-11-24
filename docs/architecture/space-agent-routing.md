@@ -356,7 +356,13 @@ the scope that Run actually ran. A signed-out candidate returns to unnamed `@aut
 newer harness inventory check reports `signed_in` or a Run on that registration
 replies; a billing refusal holds without a time-based 1-hour
 expiry and clears only when a Run on that registration (or on the refused scope)
-replies successfully (`clearRegistrationAccountHold`). A start or turn refused as signed
+replies successfully (`clearRegistrationAccountHold`). The Agents page shows an account
+billing hold as the provider refusing requests (`quota.account.allowed: false`), never as
+a used-up window. Cursor refusals held at account level before the scoped form existed
+were rewritten to the `API`-scope hold by contract migration 0274. Stopping the read of a
+harness's sign-in (`quota_access_off`, or an inventory reporting `not_granted`) drops
+every window read under that grant, including those stored beside a refusal hold, and
+pushes the owner's pages the pool as it now stands. A start or turn refused as signed
 out (`AGENT_SIGNED_OUT_LIFECYCLE_REASON`) is answered where it failed with a
 sign-in notice (`HARNESS_SIGNED_OUT_NOTICE_KIND`): when an `@auto` summon never
 answered, the message still falls back once (`dispatchStartupFallback`) or via

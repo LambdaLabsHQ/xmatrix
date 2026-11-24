@@ -65,6 +65,7 @@ function cellAttention(brief: string): string {
   if (brief === "Not set up on its machine") return "Set up";
   if (brief === "Out of quota · window unavailable") return "Out of quota";
   if (brief === "Out of balance") return "No balance";
+  if (brief === "Provider refusing requests") return "Refused";
   return brief.replace(/ limit reached$/u, " limit");
 }
 

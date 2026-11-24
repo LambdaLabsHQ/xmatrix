@@ -169,6 +169,23 @@ test("harness actions are capability gated, carry no command, and complete throu
       result: { presetId: "claude", action: "update", status: "succeeded", exitCode: 0 } } });
 });
 
+// Stopping the read of a harness's sign-in drops its reading in the
+// completion's transaction; the owner's open pages learn it from the same push
+// a probe's readings use, not at their next poll or reload.
+test("a harness action that dropped a reading tells the owner's pages, and one that did not stays quiet", async () => {
+  const requestId = "harness:00000000-0000-4000-8000-000000000001";
+  const capable = { ...session, capabilities: ["machine_harness_action_v1"] };
+  const response = { type: "machine_harness_action_result", requestId, result: { presetId: "cursor",
+    action: "quota_access_off", status: "succeeded", item: { id: "cursor", installed: true, quotaAccess: "not_granted" } } };
+  for (const [answer, told] of [[{ registrationQuotaChanged: true }, 1], [{}, 0]]) {
+    const changed = [];
+    const port = authorityPort({ commands: recordingCommands([], () => answer),
+      quotaChanged: async (route) => { changed.push(route); } });
+    await port.execute(capable, response);
+    assert.deepEqual(changed, told ? [{ ownerUserId: "user-1", machineId: "machine-1" }] : []);
+  }
+});
+
 test("sleep commands are capability gated and complete through the lease", async () => {
   const requestId = "sleep:00000000-0000-4000-8000-000000000000";
   const run = { runId: "run-1", executionKey: "execution-1", instanceId: "instance-1" };

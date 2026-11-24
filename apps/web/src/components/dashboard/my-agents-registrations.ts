@@ -83,6 +83,8 @@ export function registrationActivity(registration: AgentRegistrationSummary, opt
   // A prepaid account the provider refuses, or with no money left, cannot take work.
   if (live?.balance && (live.balance.allowed === false || live.balance.amount <= 0)) return say("attention", "Out of balance", 2);
   const quota = live?.quota;
+  // The provider refused its account (it asked for payment): no window explains it.
+  if (quota?.account?.allowed === false) return say("attention", "Provider refusing requests", 2);
   if (quota && quota.remainingPercent < 1) {
     const windows = currentRoutingQuotaWindows(quota.windows, options.now ?? Date.now());
     const labels = [...new Set(windows.filter(window => window.usedPercent > 99)

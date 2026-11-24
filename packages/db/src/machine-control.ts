@@ -623,6 +623,8 @@ export class PostgresMachineControlRepository {
       input.eventType ?? null, JSON.stringify({ target: { ownerUserId, machineId, hostId, daemonId } }), at], maxRows: 0 });
       let runLifecycleChannelId: string | undefined;
       let runLifecycleChannelIds: string[] = [];
+      // Pools whose last reading went with a grant this command reported gone.
+      let quotaCleared = completion?.quotaCleared ?? 0;
       if (typeof payload.runId === "string" && payload.runId.trim()) {
         const routes = await tx.query<QueryResultRow>({ name: "machine_control_run_route_read_v2", text: `SELECT
           channel_id FROM data.machine_run_routes WHERE run_id=$1 AND owner_user_id=$2
@@ -655,7 +657,7 @@ export class PostgresMachineControlRepository {
         // An invalid one is dropped rather than failing the Run snapshot it rides on.
         const harnesses = payload.harnessInventory === undefined ? undefined
           : parseHarnessInventory(payload.harnessInventory);
-        if (harnesses) await clearUngrantedRegistrationQuota(tx, { ownerUserId, machineId,
+        if (harnesses) quotaCleared += await clearUngrantedRegistrationQuota(tx, { ownerUserId, machineId,
           harnesses: ungrantedHarnesses(harnesses.items) });
         if (harnesses) await tx.query({ name: "machine_harness_inventory_observation_v1", text: `UPDATE
           data.machine_daemons SET metadata_json=jsonb_set(metadata_json,'{harnesses}',$3::jsonb)
@@ -710,6 +712,7 @@ export class PostgresMachineControlRepository {
         ...(runLifecycleChannelId ? { runLifecycleChannelId } : {}),
         ...(runLifecycleChannelIds.length ? { runLifecycleChannelIds } : {}),
         ...(terminalEvent ? { runTerminalReportRecorded: true } : {}),
+        ...(quotaCleared ? { registrationQuotaChanged: true } : {}),
         ...(completion?.stopPurpose
           ? { runLifecycleStopPurpose: completion.stopPurpose }
           : {}) };
@@ -1652,7 +1655,7 @@ export class PostgresMachineControlRepository {
         throw new MachineControlError("idempotency_mismatch", 409,
           "Machine completion replay differs from the durable result");
       }
-      return { reused: true, ...completionFacts(String(prior.command_type),
+      return { reused: true, quotaCleared: 0, ...completionFacts(String(prior.command_type),
         prior.payload_json as Record<string, unknown>, payload) };
     }
     const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch, "complete",
@@ -1673,16 +1676,15 @@ export class PostgresMachineControlRepository {
       await recordRegistrationQuotaProbeResult(tx, { ownerUserId, machineId, hostId,
         issued: parseRoutingQuotaProbeRequest(issued.probe), result: payload.probe, now: Date.now() });
     }
-    if (exact.command.command_type === "harness_action" && status === "completed") {
-      await recordHarnessActionInventory(tx, { ownerUserId, machineId, hostId,
-        result: parseHarnessActionResult(payload.result, issuedHarnessAction(issued)), at });
-    }
+    const quotaCleared = exact.command.command_type === "harness_action" && status === "completed"
+      ? (await recordHarnessActionInventory(tx, { ownerUserId, machineId, hostId,
+        result: parseHarnessActionResult(payload.result, issuedHarnessAction(issued)), at })).quotaCleared : 0;
     if (exact.command.command_type === "harness_action" && issued.code !== undefined) {
       // A pasted sign-in code is spent once the daemon answered; do not keep it.
       await tx.query({ name: "machine_harness_login_code_drop_v1", text: `UPDATE data.machine_daemon_commands
         SET payload_json=payload_json-'code' WHERE command_id=$1`, values: [exact.controlId], maxRows: 0 });
     }
-    return { reused: false, ...completionFacts(String(exact.command.command_type), issued, payload) };
+    return { reused: false, quotaCleared, ...completionFacts(String(exact.command.command_type), issued, payload) };
   }
 
   private async retry(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,

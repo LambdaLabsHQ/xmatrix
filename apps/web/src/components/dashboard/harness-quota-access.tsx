@@ -109,16 +109,43 @@ function QuotaAccessConsent({ program, lacking, machineName, busy, onAnswer }: {
   );
 }
 
+/** The daemons as listed, with the machine's confirmed answer for one harness written in. */
+export function withConfirmedQuotaAccess<T extends DaemonView>(daemons: readonly T[] | undefined,
+  machineId: string | undefined, harness: string, state: HarnessQuotaAccess): T[] | undefined {
+  return daemons?.map((daemon) => {
+    const inventory = daemon.machineId === machineId ? parseHarnessInventory(daemon.metadata.harnesses) : undefined;
+    if (!inventory?.items.some((item) => item.id === harness)) return daemon;
+    const items = inventory.items.map((item) => item.id === harness ? { ...item, quotaAccess: state } : item);
+    return { ...daemon, metadata: { ...daemon.metadata, harnesses: { ...inventory, items } } };
+  });
+}
+
+/**
+ * Allowing and stopping read the same way: the change shows at once while the
+ * machine makes it, the machine's answer is what then stands, and the readings
+ * it kept or dropped come from the Hub's push and a fresh read of the Agents.
+ */
 function useQuotaAccessChange(token: string, userId: string, onChanged?: () => void) {
   const queryClient = useQueryClient();
+  const daemonsKey = xmatrixQueryKeys.domain({ userId }, "machine-daemons", []);
   return useMutation({
     mutationFn: (input: { daemon: DaemonView | undefined; harness: string; on: boolean }) =>
       changeQuotaAccess(token, input.daemon, input.harness, input.on),
+    onSuccess: (state, input) => {
+      if (state) queryClient.setQueryData<DaemonView[]>(daemonsKey, (daemons) =>
+        withConfirmedQuotaAccess(daemons, input.daemon?.machineId, input.harness, state));
+    },
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons", []) });
+      void queryClient.invalidateQueries({ queryKey: daemonsKey });
+      void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain({ userId }, "agent-registration-catalog") });
       onChanged?.();
     },
   });
+}
+
+/** What the grant reads as: the change being made, until the machine answers. */
+export function shownQuotaAccess(confirmed: HarnessQuotaAccess | undefined, pendingOn: boolean | undefined) {
+  return pendingOn === undefined ? confirmed : pendingOn ? "granted" : "not_granted";
 }
 
 /**
@@ -139,23 +166,27 @@ export function HarnessQuotaAccess({ target, token, userId, hasReading = false, 
   const change = useQuotaAccessChange(token, userId, onChanged);
   const [asking, setAsking] = useState(false);
   if (!view.offered) return null;
-  const granted = view.state === "granted";
-  if (hasReading && !view.canChange) return null;
+  const state = shownQuotaAccess(view.state, change.isPending ? change.variables?.on : undefined);
+  const granted = state === "granted";
+  // Numbers beside an ungranted harness are not a reading of it: its quota is unknown.
+  const shownReading = hasReading && granted;
+  if (shownReading && !view.canChange) return null;
   const run = (on: boolean) => change.mutate({ daemon: view.daemon, harness: target.key.harness, on });
   const body = (
-    <div className="space-y-2 text-sm" data-testid="harness-quota-access" data-state={view.state ?? "unknown"}>
+    <div className="space-y-2 text-sm" data-testid="harness-quota-access" data-state={state ?? "unknown"}
+      aria-busy={change.isPending || undefined}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {!hasReading && <p>
+        {!shownReading && <p>
           <span className="font-semibold">Quota: Unknown</span>
-          {view.state === "probes_off"
+          {state === "probes_off"
             ? <span className="text-muted-foreground"> · quota probes are off on {target.machineName}</span>
             : granted && view.expired
               ? <span className="text-muted-foreground"> · {view.program}&apos;s sign-in has expired; sign in to {view.program} again</span>
               : !granted && <span className="text-muted-foreground"> · {view.lacking} has no official quota interface</span>}
         </p>}
-        {hasReading && granted && <p className="text-muted-foreground">
+        {shownReading && <p className="text-muted-foreground">
           Read from {view.program}&apos;s sign-in on {target.machineName}, which never leaves it.</p>}
-        {view.canChange && view.state !== "probes_off" && (granted
+        {view.canChange && state !== "probes_off" && (granted
           ? <Button size="sm" variant="outline" disabled={change.isPending || Boolean(view.blocker)}
             onClick={() => run(false)}>
             {change.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}Stop reading
