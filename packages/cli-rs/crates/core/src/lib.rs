@@ -52,6 +52,7 @@ pub mod protocol;
 pub mod read_through;
 pub mod route_key;
 pub mod space_ref;
+pub mod telemetry_consent;
 pub mod text_input;
 pub mod version;
 pub mod websocket;

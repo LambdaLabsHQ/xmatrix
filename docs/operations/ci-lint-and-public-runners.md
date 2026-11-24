@@ -206,21 +206,28 @@ client runs that client's language. Recovery is a CI-validated forward release
 that puts the language back on the beta list. Do not cancel a train to change
 its scan, and do not treat an alert as a skipped gate.
 
-CLI release builds run both macOS architectures in parallel on isolated hosted
-`macos-26` (Apple Silicon) VMs: `aarch64-apple-darwin` natively and
-`x86_64-apple-darwin` cross-compiled. Both targets verify their Mach-O
-architecture (`lipo -archs`), Developer ID signature, and exact `--version`
-output (via Rosetta `arch -x86_64` for the Intel binary) before upload. If
-GitHub's Apple Silicon pool experiences capacity constraints, moving the Intel
-target back to `macos-26-intel` is a one-line workflow revert. The standard
-pools are free for public repositories
+CLI release builds run both macOS architectures sequentially on a single hosted
+`macos-26` (Apple Silicon) VM: `aarch64-apple-darwin` natively and
+`x86_64-apple-darwin` cross-compiled, each with its own restored per-target
+`kache` store (`macos-arm64`, then `macos-x64`) and one isolated Developer ID
+signing keychain. Running both on two concurrent `macos-26` VMs hit GitHub's
+Apple Silicon pool capacity and cancelled the second VM after 15 minutes while
+the first completed in ~2 minutes. Consolidating both architectures onto one
+`macos-26` VM halves Apple Silicon runner demand in both `cli-build.yml` and
+`cli-release-cache.yml` while keeping total macOS build time near 2.5–3 minutes
+(faster than `macos-26-intel` and below the parallel Web/Hub/iOS stages). Both
+targets verify their Mach-O architecture (`lipo -archs`), Developer ID
+signature, and exact `--version` output (via Rosetta `arch -x86_64` for the
+Intel binary) before uploading their separate R2 release parts (`macos-arm64`
+and `macos-x64`). The standard pools are free for public repositories
 ([GitHub runner reference](https://docs.github.com/en/enterprise-cloud%40latest/actions/reference/runners/github-hosted-runners)).
 Desktop stays on Apple Silicon because its signed ARM app must actually start
 before publication; moving its build to Intel would drop that native probe.
-When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS builds remain serialized
-across architectures and release runs because runner services can share the
-user's Keychain search list. Signing identities, per-build isolated keychains,
-artifact verification and publication gates use the same paths in both fleets.
+When `XMATRIX_RUNNER_FLEET=self-hosted`, macOS release runs remain serialized
+across runs because runner services can share the user's Keychain search list,
+and the shared persistent `kache` directory is never wiped between targets.
+Signing identities, per-build isolated keychains, artifact verification and
+publication gates use the same paths in both fleets.
 
 Migration evidence is a beta whose Intel and ARM CLI builds each report the
 pinned compiler, pass their executable version and Developer ID probes, and

@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { DESKTOP_DAEMON_FAILURE_DETAIL_MAX, parseDesktopDaemonFailureReport, WEB_PROXY_ROUTES, type DesktopDaemonFailure } from "@xmatrix/protocol";
-import { isDiagnosticsEnabled } from "@/lib/diagnostics-preference";
+import { diagnosticsMaySendNow } from "@/lib/diagnostics-preference";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 
 /** Per failure and per kind: the automatic report never stands in for the person's own. */
@@ -30,7 +30,7 @@ export function reportDesktopDaemonFailure(
   const key = failureKey(failure);
   const explicit = options?.explicit === true;
   const attempt = `${explicit ? "sent" : "automatic"}\n${key}`;
-  if (!token || (!explicit && !isDiagnosticsEnabled()) || reported.has(attempt)) return;
+  if (!token || reported.has(attempt)) return;
   reported.add(attempt);
   // Only a report that is its declared fields leaves (protocol diagnostic-events).
   const report = parseDesktopDaemonFailureReport({
@@ -41,16 +41,25 @@ export function reportDesktopDaemonFailure(
     ...(explicit ? { detail: failure.detail.slice(0, DESKTOP_DAEMON_FAILURE_DETAIL_MAX) } : {}),
   });
   if (!report) return;
-  void xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_desktop_daemon_failure, token, method: "POST", body: report })
-    .then(() => {
-      if (!explicit) return;
-      delivered.add(key);
-      for (const listener of listeners) listener();
-    }, (error: unknown) => {
-      // Not sent: a later showing of the same failure may try again.
+  // A report the person sends from the failure card is their own act; an
+  // automatic one goes only where diagnostics may be sent now.
+  const allowed = explicit ? Promise.resolve(true) : diagnosticsMaySendNow();
+  void allowed.then((send) => {
+    if (!send) {
       reported.delete(attempt);
-      console.warn("[xmatrix] daemon start failure not reported", error);
-    });
+      return;
+    }
+    return xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_desktop_daemon_failure, token, method: "POST", body: report })
+      .then(() => {
+        if (!explicit) return;
+        delivered.add(key);
+        for (const listener of listeners) listener();
+      }, (error: unknown) => {
+        // Not sent: a later showing of the same failure may try again.
+        reported.delete(attempt);
+        console.warn("[xmatrix] daemon start failure not reported", error);
+      });
+  });
 }
 
 /** Whether the Hub has this failure, so the App may say it was sent. */

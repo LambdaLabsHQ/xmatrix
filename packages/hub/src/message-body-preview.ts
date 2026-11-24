@@ -1,4 +1,4 @@
-import { withoutDiscussionHeads } from "@xmatrix/protocol";
+import { postgresJsonText, sliceCodeUnitsSafe, withoutDiscussionHeads } from "@xmatrix/protocol";
 
 /**
  * The one-line, 240-character body shown in Channel and Space previews. A
@@ -8,6 +8,6 @@ import { withoutDiscussionHeads } from "@xmatrix/protocol";
  */
 export function compactMessageBodyPreview(body: string, label: (text: string) => string = (text) => text): string {
   // Labels go in before the cut, so a cut never lands inside a locator.
-  const normalized = label(withoutDiscussionHeads(body) || body).trim().replace(/\s+/gu, " ");
-  return normalized.length > 240 ? `${normalized.slice(0, 237)}...` : normalized;
+  const normalized = postgresJsonText(label(withoutDiscussionHeads(body) || body).trim().replace(/\s+/gu, " "));
+  return normalized.length > 240 ? `${sliceCodeUnitsSafe(normalized, 237)}...` : normalized;
 }

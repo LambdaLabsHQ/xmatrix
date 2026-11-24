@@ -13,6 +13,13 @@ import { requireAuth } from "./index-shared";
 import { requireHumanAuth, requestErrorStatus } from "./index-shared";
 import { readStoredProfile, updateStoredProfile } from "./human-profile-store";
 import { syncHumanProfile } from "./human-profile-sync";
+import {
+  parseDiagnosticsChoice,
+  readDiagnosticsConsent,
+  recordDiagnosticsChoice,
+  requestDiagnosticsRegime,
+  requestFromPersonsConnection,
+} from "./diagnostics-consent";
 
 export function registerIndexRoutesHumanProfile(app: Hono<{ Bindings: Env }>): void {
   app.patch(HUB_ROUTES.me_profile, async (c) => {
@@ -89,4 +96,38 @@ export function registerIndexRoutesHumanProfile(app: Hono<{ Bindings: Env }>): v
     }
   });
 
+  // Read before every diagnostics send whose last answer is stale: small, and
+  // asked straight from the page where it can be, so the edge sees the
+  // person's own connection (direct-read-cors.ts).
+  app.get(HUB_ROUTES.me_diagnostics, async (c) => {
+    try {
+      const authUser = await requireAuth(c.req.raw, c.env);
+      const state = await readDiagnosticsConsent(c.env, authUser.id, requestDiagnosticsRegime(c.req.raw), {
+        // Recorded only from the person's own connection, never a relayed one.
+        recordMissingRegime: c.req.query("build") === "beta" && requestFromPersonsConnection(c.req.raw),
+      });
+      if (!state) return c.json({ code: "account_not_found", message: "Account not found" }, 404);
+      return c.json(state, 200, { "cache-control": "private, no-store" });
+    } catch (error) {
+      return c.json({ code: "diagnostics_read_failed", message: (error as Error).message }, requestErrorStatus(error));
+    }
+  });
+  // Only the person's own explicit act writes here: ticking the opt-in box or
+  // turning the switch. Defaults and dismissed notices never do.
+  app.put(HUB_ROUTES.me_diagnostics, async (c) => {
+    try {
+      const authUser = requireHumanAuth(await requireAuth(c.req.raw, c.env));
+      let body: unknown;
+      try { body = await c.req.json<unknown>(); }
+      catch { return c.json({ code: "invalid_json", message: "Request body must be valid JSON" }, 400); }
+      const choice = parseDiagnosticsChoice((body as { choice?: unknown } | null)?.choice);
+      if (!choice) return c.json({ code: "invalid_choice", message: "choice must be opted-in or opted-out" }, 400);
+      if (!await recordDiagnosticsChoice(c.env, authUser.id, choice)) {
+        return c.json({ code: "account_not_found", message: "Account not found" }, 404);
+      }
+      return c.json({ choice }, 200, { "cache-control": "private, no-store" });
+    } catch (error) {
+      return c.json({ code: "diagnostics_choice_failed", message: (error as Error).message }, requestErrorStatus(error));
+    }
+  });
 }

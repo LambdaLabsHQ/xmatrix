@@ -1,4 +1,5 @@
 import { withoutDiscussionHeads } from "./discussion-head.js";
+import { postgresJsonText, sliceCodeUnitsSafe } from "./field-validation.js";
 
 /**
  * A conversation's name until xMatrix names it from what it is about: the
@@ -8,13 +9,13 @@ import { withoutDiscussionHeads } from "./discussion-head.js";
  */
 export function automaticConversationName(body: string): string {
   const said = withoutDiscussionHeads(body) || body;
-  const line = said.split("\n").map((value) => value
+  const line = postgresJsonText(said.split("\n").map((value) => value
     .replace(/[@＠][^\s]+/gu, "")
     .replace(/[`*_#>[\]()]/gu, "")
     .replace(/\s+/gu, " ")
-    .trim()).find(Boolean) ?? "";
+    .trim()).find(Boolean) ?? "");
   if (line.length <= 60) return line || "New conversation";
-  const cut = line.slice(0, 60);
+  const cut = sliceCodeUnitsSafe(line, 60);
   const space = cut.lastIndexOf(" ");
   return `${space > 30 ? cut.slice(0, space) : cut}…`;
 }

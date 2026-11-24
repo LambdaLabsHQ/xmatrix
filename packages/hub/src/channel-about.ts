@@ -1,6 +1,6 @@
 import { ControlError } from "@xmatrix/db";
 import { spaceLanguage, type SpaceLanguage } from "./space-language";
-import { automaticConversationName, splitDiscussionHead, utf8ByteLength, withoutDiscussionHeads, type TextTaskResult } from "@xmatrix/protocol";
+import { automaticConversationName, postgresJsonText, splitDiscussionHead, utf8ByteLength, withoutDiscussionHeads, type TextTaskResult } from "@xmatrix/protocol";
 import { mangledChannelAboutText } from "./channel-about-text";
 import { channelMessageHistory } from "./channel-messages";
 import { channelSpaceId, configureChannel, getChannel, getSpace, type SpacesDependencies } from "./spaces";
@@ -59,13 +59,14 @@ type HistoryMessage = {
 const SENDER_KINDS: Record<string, string> = { user: "person", agent: "Agent", app: "app", system: "xMatrix" };
 
 function messageText(message: HistoryMessage): string | null {
-  const body = typeof message.body === "string" ? message.body.trim() : "";
+  const body = typeof message.body === "string" ? postgresJsonText(message.body).trim() : "";
   if (!body) return null;
   const characters = [...body];
   const text = characters.length > MESSAGE_MAX_CHARACTERS
     ? `${characters.slice(0, MESSAGE_MAX_CHARACTERS).join("")} …` : body;
   const sequence = Number(message.sequence);
-  const who = typeof message.from?.label === "string" && message.from.label.trim() ? message.from.label.trim() : "Someone";
+  const who = typeof message.from?.label === "string" && postgresJsonText(message.from.label).trim()
+    ? postgresJsonText(message.from.label).trim() : "Someone";
   const kind = SENDER_KINDS[String(message.from?.kind)] ?? "person";
   const sent = typeof message.sentAt === "string" ? ` · ${message.sentAt.slice(0, 16).replace("T", " ")} UTC` : "";
   const replies = Number(message.threadSummary?.replyCount);
@@ -80,7 +81,7 @@ function messageText(message: HistoryMessage): string | null {
  */
 export function channelAboutInput(channel: { name: string; summary?: string }, messages: readonly HistoryMessage[]):
   { text: string; throughSequence: number } | null {
-  const head = `Name: ${channel.name}\nSummary: ${channel.summary?.trim() || "(none)"}\n`;
+  const head = `Name: ${postgresJsonText(channel.name)}\nSummary: ${postgresJsonText(channel.summary ?? "").trim() || "(none)"}\n`;
   let bytes = utf8ByteLength(head);
   const carried: string[] = [];
   let throughSequence = 0;

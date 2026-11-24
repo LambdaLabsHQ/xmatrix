@@ -82,9 +82,14 @@ export function CookieNoticeContent() {
           marketing-attribution cookies, session-replay tools, or third-party behavioral analytics
           SDKs. Optional first-party startup timing, onboarding step counts, CLI reconnect samples,
           and scrubbed browser Sentry crash reports are <strong className="text-foreground">off by default</strong>{" "}
-          across all regions; they run only when a signed-in user opts in under Settings → Legal
+          in the stable apps and CLI; they run only when a signed-in user opts in under Settings → Legal
           and privacy (or opts in for the CLI via <code className="font-mono text-xs">xmatrix config telemetry on</code>{" "}
-          or <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code>). Unauthenticated
+          or <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code>). Beta builds turn them on by
+          default, with a one-line notice linking to the off switch, only where both your signup country
+          and your current country are outside the EU, EEA, UK and Switzerland; elsewhere a beta shows an
+          unticked opt-in box and sends nothing unless you tick it. Do Not Track and Global Privacy
+          Control turn them off. The signed-in app keeps which diagnostics notice you dismissed in local
+          storage; dismissing it is not a choice and changes nothing. Unauthenticated
           marketing and legal pages never load Sentry. We therefore do not display an advertising
           consent banner that would imply ad trackers are active.
         </p>

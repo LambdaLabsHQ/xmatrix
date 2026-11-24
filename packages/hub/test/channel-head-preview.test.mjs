@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { channelHeadPreview } from "../src/channel-head-preview.ts";
+import { compactMessageBodyPreview } from "../src/message-body-preview.ts";
 import { pageConversation } from "../src/page-conversations.ts";
 
 const head = {
@@ -45,4 +46,11 @@ test("a page's conversation preview names who wrote it by the ids its message ca
   const person = pageConversation({ ...conversation, head: { ...head, authorKind: "user", authorId: "u-1",
     payloadBundleBase64: null, legacyBody: "hi", preview: null } });
   assert.deepEqual(person.lastMessage.from, { kind: "user", label: "u-1", userId: "u-1", identityId: "user:u-1" });
+});
+
+test("compact message previews never tear a surrogate pair at the 240-code-unit cut or keep NUL", () => {
+  const preview = compactMessageBodyPreview(`${"a".repeat(236)}🚀after`);
+  assert.equal(preview, `${"a".repeat(236)}...`);
+  assert.doesNotMatch(JSON.stringify(preview), /\\u[dD][89a-fA-F][0-9a-fA-F]{2}|\\u0000/u);
+  assert.equal(compactMessageBodyPreview("hi\u0000\ud83d 🚀"), "hi\uFFFD 🚀");
 });

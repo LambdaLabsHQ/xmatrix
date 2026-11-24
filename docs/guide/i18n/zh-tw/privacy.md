@@ -54,10 +54,10 @@ export XMATRIX_DISABLE_QUOTA_PROBES=1
 
 xMatrix 不使用廣告 Cookie、跨站追蹤、工作階段錄影，也未整合 PostHog、Google Analytics 或 Cloudflare Web Analytics 等第三方行為分析 SDK。
 
-**所有地區的可選用戶端診斷與瀏覽器當機回報皆預設關閉（明確 Opt-in）。** 未登入的行銷、文件與法律頁面絕不載入 Sentry；除非你主動開啟（或在桌面端啟動失敗卡片上點擊「送出失敗報告」），用戶端不會主動送出診斷資訊：
+選用的用戶端診斷與瀏覽器當機回報**在穩定版應用程式與 CLI 中預設關閉**；Beta 版的預設規則見下表。未登入的行銷頁、文件頁與法律條款頁絕不載入 Sentry。診斷開啟時傳送的內容：
 
-- **錯誤與當機回報（Sentry）**：僅於登入應用內主動開啟後運作，只送出錯誤的類別、錯誤本身的代碼（如有）以及堆疊中的程式碼位置；錯誤訊息、麵包屑、URL、Cookie、HTTP 標頭、請求內容與使用者資訊一律不送出。未設定 DSN 的本機或自託管建置不送出任何回報。（Hub 伺服器端自身錯誤仍於伺服器端回報以維持託管服務運作，見下文。）
-- **第一方診斷指標（xMatrix Hub → Cloudflare Analytics Engine）**：僅於主動開啟後回報啟動耗時（`/api/observable/startup-timing`）、新手引導步驟計數（`/api/observable/onboarding-step`）、桌面端 daemon 啟動失敗資訊（`/api/observable/desktop-daemon-failure`）與 CLI 網路重連樣本（`/api/observable/client-metrics`）。識別碼於伺服器端以金鑰 HMAC-SHA-256 假名化。
+- **錯誤與當機回報（Sentry）**：僅於登入應用內運作，只送出錯誤的類別、錯誤本身的代碼（如有）以及堆疊中的程式碼位置；錯誤訊息、麵包屑、URL、Cookie、HTTP 標頭、請求內容與使用者資訊一律不送出。未設定 DSN 的本機或自託管建置不送出任何回報。（Hub 伺服器端自身錯誤仍於伺服器端回報以維持託管服務運作，見下文。）
+- **第一方診斷指標（xMatrix Hub → Cloudflare Analytics Engine）**：回報啟動耗時（`/api/observable/startup-timing`）、新手引導步驟計數（`/api/observable/onboarding-step`）、桌面端 daemon 啟動失敗資訊（`/api/observable/desktop-daemon-failure`）與 CLI 網路重連樣本（`/api/observable/client-metrics`）。識別碼於伺服器端以金鑰 HMAC-SHA-256 假名化。
 
 ### 診斷事件可以包含什麼
 
@@ -68,10 +68,27 @@ xMatrix 不使用廣告 Cookie、跨站追蹤、工作階段錄影，也未整�
 - **桌面端啟動失敗卡片上的「送出失敗報告」**：CLI 的最後幾行輸出，桌面應用程式會先在你的電腦上遮蔽（家目錄、電子郵件地址、URL 查詢參數以及任何看似權杖或金鑰的內容都會被替換）。卡片會先顯示這些內容，只有你按下按鈕才會送出；開啟診斷時自動送出的回報只包含失敗階段、結束代碼、平台與應用程式版本。
 - **Hub 伺服器端錯誤回報**：伺服器自身的錯誤訊息，其中引用的值、電子郵件地址、URL 查詢參數、家目錄路徑與看似權杖的字串都會被移除。記錄附帶的欄位只有在是數字、true/false 或不透明識別碼時才會回報。
 
+### Beta 版與穩定版的預設行為
+
+| | 穩定版應用程式與 CLI | Beta 版應用程式與 CLI |
+| --- | --- | --- |
+| 你已主動開啟 | 傳送 | 傳送 |
+| 你已主動關閉，或開啟 Do Not Track、Global Privacy Control，或設定 `XMATRIX_TELEMETRY=0` | 不傳送 | 不傳送 |
+| 未作選擇；註冊地**與**目前所在國家都不在歐盟、歐洲經濟區、英國與瑞士 | 不傳送 | 傳送，並顯示一行附關閉連結的提示 |
+| 未作選擇；任一國家在歐盟、歐洲經濟區、英國或瑞士，或無法判斷 | 不傳送 | 不傳送；顯示未勾選的「Send diagnostics to help improve the beta」核取方塊 |
+
+各列依序適用：主動開啟即使在 Do Not Track 或 Global Privacy Control 開啟時也會被尊重。只有勾選該核取方塊或在設定中切換開關（或 `xmatrix config telemetry on|off`）才算你的選擇；關閉提示不算選擇，xMatrix 也不會替你變更設定。
+
+**如何判斷地區。** 用戶端本身沒有可靠的位置資訊（時區與語言都是使用者設定），因此由 Hub 告知：
+
+- **註冊地區。** 建立帳號時，Hub 依 Cloudflare 回報的該請求所在國家，記錄它是否屬於需要事先同意的國家。只儲存這個類別，不儲存國家或 IP 位址，之後的請求也不會改寫它。較早建立的帳號會在第一次使用 Beta 版時記錄。刪除帳號時一併刪除。
+- **目前地區。** 每次傳送前，用戶端使用 Hub 對目前連線的答覆，且不超過 10 分鐘；超過時會向 Hub 發出一個不含任何診斷資料的小請求重新詢問。若查詢失敗、逾時或國家不明，就不傳送。因此進入需要同意的國家後，預設傳送最多 10 分鐘內停止。
+
 ### 開啟或關閉診斷與當機回報
 
-- **Web、桌面端、iOS 與 Android**：前往 **Settings → Legal and privacy** 切換 **Send diagnostics and crash reports**（預設關閉）；桌面端會同步更新本機 daemon 的 `telemetry` 設定。
+- **Web、桌面版、iOS 與 Android**：前往 **Settings → Legal and privacy**，切換 **Send diagnostics and crash reports**。你的選擇儲存在帳號上，所有用戶端都會遵循。在桌面版中，此開關也會同步更新本機 daemon 的 `telemetry` 設定。
 - **CLI 與 daemon**：預設關閉；可透過 `xmatrix config telemetry on` 或 `XMATRIX_TELEMETRY=1` 開啟，並隨時以 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 關閉。
+- **CLI 與 daemon**：以 `xmatrix config telemetry on` 或 `XMATRIX_TELEMETRY=1` 開啟；以 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 關閉。`xmatrix config telemetry on|off` 也會把選擇儲存到帳號。
 
 ## 法律文件
 

@@ -22,4 +22,7 @@ test("the page's document is handed over as it reads, cut when it is longer than
   const long = pageSummaryInput(`# Plan\n\n${"字".repeat(200_000)}`);
   assert.ok(new TextEncoder().encode(long).length <= 256 * 1024);
   assert.ok(long.startsWith("# Plan\n\n字"));
+  const emojiCut = pageSummaryInput(`${"🚀".repeat(70_000)}\u0000\ud83d`);
+  assert.ok(new TextEncoder().encode(emojiCut).length <= 256 * 1024);
+  assert.doesNotMatch(JSON.stringify(emojiCut), /\\u0000|\\u[dD][89a-fA-F][0-9a-fA-F]{2}/u);
 });

@@ -3,7 +3,7 @@
 import {
   parseStartupTimingReport, STARTUP_TIMING_MAX_MS, WEB_PROXY_ROUTES, type StartupCache, type StartupTimingStage,
 } from "@xmatrix/protocol";
-import { isDiagnosticsEnabled } from "@/lib/diagnostics-preference";
+import { diagnosticsMaySendNow } from "@/lib/diagnostics-preference";
 import { onboardingDevice } from "@/lib/onboarding-funnel";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 
@@ -30,10 +30,12 @@ export function markStartup(stage: StartupTimingStage): void {
  * on screen.
  */
 export function reportStartupTiming(token: string | null | undefined, cache: StartupCache): void {
-  if (reported || !token || !isDiagnosticsEnabled()) return;
+  if (reported || !token) return;
   const report = parseStartupTimingReport({ device: onboardingDevice(), cache, ...reached });
   if (!report) return;
   reported = true;
-  void xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_startup_timing, token, method: "POST", body: report })
+  void diagnosticsMaySendNow().then((send) => send
+    ? xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_startup_timing, token, method: "POST", body: report })
+    : undefined)
     .catch((error: unknown) => console.warn("[xmatrix] startup timing not counted", error));
 }

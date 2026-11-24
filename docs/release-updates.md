@@ -1,5 +1,26 @@
 # Release Updates
 
+## Unreleased: build both macOS CLI architectures on one Apple Silicon runner
+
+After #1880 moved hosted `macos-x64` CLI builds onto `macos-26`, requesting two
+concurrent `macos-26` VMs per release (and per `cli-release-cache.yml` push)
+hit GitHub's hosted Apple Silicon pool capacity: 6 of 46 CLI releases (including
+four consecutive `web,cli` releases on 2026-11-24, `4.11.1-beta.18`–`beta.21`)
+failed because the second `macos-26` job sat unallocated for 15 minutes and was
+cancelled while the first `macos-26` job finished in ~2 minutes. Both
+`cli-build.yml` and `cli-release-cache.yml` now build `aarch64-apple-darwin`
+(`macos-arm64`) and `x86_64-apple-darwin` (`macos-x64`) sequentially on a single
+`macos-26` VM, resetting the ephemeral `kache` store between targets via
+`.github/scripts/reset-kache-store.sh` so each target retains its full per-part
+cache budget without cross-eviction (self-hosted runners keep their persistent
+store untouched). Both binaries still undergo isolated Developer ID signing,
+`verify-macos-cli-signature.sh`, `lipo -archs` architecture checks, exact
+`--version` verification (via Rosetta `arch -x86_64` for Intel), and separate
+R2 release-part uploads (`macos-arm64` and `macos-x64`). CI / release
+infrastructure only; no binary format, signing identity, or client behavior
+change. Recovery is a CI-validated forward release restoring separate matrix
+entries (or moving `macos-x64` to `macos-26-intel`).
+
 ## Unreleased: Google Cloud results are deleted at 29 days and at disconnect
 
 Google Cloud's General Service Terms §17 (GCP Access Tools, effective 2027-01-01) forbid keeping information obtained through its APIs, such as costs, IAM and architecture, for more than 30 days or after the tool is disconnected. `@gcp` receipts were Channel messages kept forever, execution summaries kept their first 1,000 characters, and private originals stayed in storage for up to 61 days. A provider manifest can now declare `resultRetentionDays`, and `gcp` declares 29. The Space's retention clock, the one that already expires private results, deletes what the provider returned at that age. Receipts and Monitoring incident messages become delete tombstones, execution summaries and reasons are cleared, and private originals are physically deleted right away, without the 31-day upload safety window. Disconnecting Google Cloud deletes all of it at once. A connected Space keeps using it without reconnecting; only results older than 29 days disappear. Receipts and `xmatrix connector list` tell Agents not to copy results into Pages or memory. Results already past 29 days are deleted once the new Hub runs. Hub/DB only, no migration. Recovery is a CI-validated beta reverting this change; tombstoned results cannot be restored.
