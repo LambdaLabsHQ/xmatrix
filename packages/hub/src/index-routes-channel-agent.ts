@@ -254,8 +254,12 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
       if (!catalog.ok && authUser.agentRun && (familyOfChannelId || spaceId)) {
         // Outside its own Space an Agent lists only what its owner's grant
         // covers, as its owner: one granted Channel family, or a granted Space.
-        const granted = await crossSpaceRetryOwner(c.env, authUser.agentRun,
-          familyOfChannelId ? { channelId: familyOfChannelId } : { spaceId: spaceId! }, catalog.response);
+        // A Channel family is also what a support handoff of its messages shows
+        // above them, so the handoff covers it, uncounted.
+        const granted = familyOfChannelId
+          ? await crossSpaceRetryOwner(c.env, authUser.agentRun, { channelId: familyOfChannelId },
+            catalog.response, "messages", true)
+          : await crossSpaceRetryOwner(c.env, authUser.agentRun, { spaceId: spaceId! }, catalog.response);
         catalog = granted instanceof Response ? { ok: false, response: granted }
           : await readCatalog(granted.owner, granted.spaceId);
       }
