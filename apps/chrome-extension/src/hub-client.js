@@ -223,11 +223,12 @@ export async function createConversation(deps, token, { spaceId, name, memberNam
  * the same send land once; `launch` starts the Agents it mentions, as the web
  * composer does.
  */
-export async function sendMessage(deps, token, { channelId, body, clientMessageId, invocationSelections }) {
+export async function sendMessage(deps, token, { channelId, body, clientMessageId, invocationSelections, metadata }) {
   const json = await request(deps, `/api/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     token,
-    body: { body, clientMessageId, launch: true, ...(invocationSelections ? { invocationSelections } : {}) },
+    body: { body, clientMessageId, launch: true, ...(invocationSelections ? { invocationSelections } : {}),
+      ...(metadata ? { metadata } : {}) },
   });
   return { messageId: json.message?.messageId ?? clientMessageId };
 }
