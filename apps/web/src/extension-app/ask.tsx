@@ -72,7 +72,20 @@ async function ask<T>(type: string, args?: unknown): Promise<T> {
 }
 
 /** The framing page places and hides the frame; it learns nothing else. */
-function tellFrame(message: { type: "ready" } | { type: "size"; width: number; height: number } | { type: "close" }) {
+function tellFrame(
+  message:
+    | { type: "ready" }
+    | {
+        type: "size";
+        width: number;
+        height: number;
+        topInset: number;
+        bottomInset: number;
+        leftInset: number;
+        rightInset: number;
+      }
+    | { type: "close" },
+) {
   window.parent.postMessage({ xmatrixAsk: true, ...message }, "*");
 }
 
@@ -107,6 +120,8 @@ function ComposerStage({ children }: { children: ReactNode }) {
 function Surface() {
   // Each selection is a new question: the composer starts over with its passage.
   const [round, setRound] = useState(0);
+  const [placement, setPlacement] = useState<"above" | "below">("below");
+  const [maxPanelHeight, setMaxPanelHeight] = useState<number | null>(null);
   const [context, setContext] = useState<AskContext | null>(null);
   const [space, setSpace] = useState<SerializedSpace | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -118,8 +133,19 @@ function Surface() {
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.source !== window.parent) return;
-      // The page handed the extension a new passage: the box reads it from there.
-      if ((event.data as { xmatrixAsk?: unknown } | null)?.xmatrixAsk === "prepared") setRound((current) => current + 1);
+      const data = event.data as {
+        xmatrixAsk?: unknown;
+        placement?: unknown;
+        maxPanelHeight?: unknown;
+      } | null;
+      // The page handed the extension a new passage (or updated viewport room): adapt panel direction and height.
+      if (data?.xmatrixAsk === "prepared" || data?.xmatrixAsk === "layout") {
+        if (data.placement === "above" || data.placement === "below") setPlacement(data.placement);
+        if (typeof data.maxPanelHeight === "number" && Number.isFinite(data.maxPanelHeight) && data.maxPanelHeight > 0) {
+          setMaxPanelHeight(data.maxPanelHeight);
+        }
+        if (data.xmatrixAsk === "prepared") setRound((current) => current + 1);
+      }
     };
     window.addEventListener("message", onMessage);
     // The page made this box before the person finished selecting; it hands the passage over once this says ready.
@@ -185,6 +211,10 @@ function Surface() {
     const measure = () => {
       scheduled = false;
       if (!live) return;
+      const box = element.querySelector<HTMLElement>(".app-composer-box")?.getBoundingClientRect();
+      // While the composer grows before ComposerStage updates its height, the absolutely positioned
+      // composer can momentarily rise above y=0; wait for the stage to catch up before reporting size.
+      if (box && box.top < 0) return;
       let bottom = 0, right = 0;
       for (const node of [element, ...element.querySelectorAll("*")]) {
         const rect = node.getBoundingClientRect();
@@ -192,10 +222,16 @@ function Surface() {
         bottom = Math.max(bottom, rect.bottom);
         right = Math.max(right, rect.right);
       }
-      const size = `${Math.ceil(right)}x${Math.ceil(bottom)}`;
+      const width = Math.ceil(right);
+      const height = Math.ceil(bottom);
+      const topInset = box ? Math.max(0, Math.round(box.top)) : 12;
+      const bottomInset = box ? Math.max(0, Math.round(height - box.bottom)) : 24;
+      const leftInset = box ? Math.max(0, Math.round(box.left)) : 12;
+      const rightInset = box ? Math.max(0, Math.round(width - box.right)) : 12;
+      const size = `${width}x${height}:${topInset},${bottomInset},${leftInset},${rightInset}`;
       if (bottom <= 0 || size === toldSize.current) return;
       toldSize.current = size;
-      tellFrame({ type: "size", width: Math.ceil(right), height: Math.ceil(bottom) });
+      tellFrame({ type: "size", width, height, topInset, bottomInset, leftInset, rightInset });
     };
     const report = () => {
       if (scheduled) return;
@@ -215,13 +251,13 @@ function Surface() {
     };
   }, []);
 
-  // A new passage is shown once it is drawn: the page shows the box on this size, even when it did not change.
+  // A new passage or layout update is shown once drawn: the page places the box on this size even when unchanged.
   const shownRound = context?.round;
   useLayoutEffect(() => {
     if (shownRound === undefined) return;
     toldSize.current = "";
     measureNow.current();
-  }, [shownRound]);
+  }, [shownRound, placement, maxPanelHeight]);
 
   // The composer holds the question and the Agents picked in it; the message adds the passage (askMessage).
   const send = async ({ body: question, invocationSelections: picked }: ComposerSendSnapshot) => {
@@ -240,10 +276,13 @@ function Surface() {
   };
 
   const passage = context?.passage;
+  const frameStyle = maxPanelHeight
+    ? { padding: "12px 12px 24px", ["--app-composer-panel-max-height" as string]: `${maxPanelHeight}px` }
+    : { padding: "12px 12px 24px" };
   return (
     // Room around the capsule for its shadow (0 10px 30px): the frame clips what falls outside it.
-    // selection.js places the frame this much up and left, so the capsule sits where it did.
-    <div ref={frame} className="xmatrix-app box-content w-[30rem]" style={{ padding: "12px 12px 24px" }}>
+    // selection.js places the frame using the capsule's measured insets so the capsule hugs the selection.
+    <div ref={frame} className="xmatrix-app box-content w-[30rem]" style={frameStyle}>
       {context && passage ? (
         <GrantedAuthProvider token={context.token} user={context.user}>
           <MessageReferenceCatalogProvider catalog={referenceCatalog}>
@@ -254,6 +293,7 @@ function Surface() {
               instanceTargetScope="none"
               startsConversation
               attachmentsEnabled={false}
+              panelPlacement={placement}
               space={space}
               token={context.token}
               workspaces={[]}
