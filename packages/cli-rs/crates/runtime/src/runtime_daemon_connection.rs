@@ -82,11 +82,11 @@ fn command_admission_report(command: &MachineDaemonCommand) -> error::Result<Mac
             channel_id,
             ..
         } => (request_id.clone(), None, Some(channel_id.clone())),
-        MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
+        MachineDaemonCommand::MachineLogExcerpt { request_id, .. }
+        | MachineDaemonCommand::MachineQuotaProbe { request_id, .. }
         | MachineDaemonCommand::MachineHarnessAction { request_id, .. }
         | MachineDaemonCommand::MachineTextTask { request_id, .. }
         | MachineDaemonCommand::MachineSleepAgent { request_id, .. }
-        | MachineDaemonCommand::MachineLogExcerpt { request_id, .. }
         | MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
             (request_id.clone(), None, None)
         }

@@ -123,6 +123,7 @@ To ask for help, choose **Hand to xMatrix support** in a conversation's menu, on
 - Tick what to include. Nothing is ticked at first:
   - **This conversation's messages**, including its threads.
   - **Diagnostics for this conversation**: when Agents started, stopped or failed there, and the failure codes. These are diagnostic events with only states, codes, counts and times: no message text, prompts, error messages or ids.
+  - **Daemon logs**: a recent tail of the log xMatrix's daemon wrote on one of your machines that is online. Your machine removes home folder paths, email addresses, the query part of web addresses and anything shaped like a token or key before the lines leave it, and the dialog shows you exactly what will be sent before you send it. The preview stays readable only by you for about a week; what you send is erased as soon as you withdraw the handoff.
 - Tick **I agree to let xMatrix support read what I selected**. Nothing is sent until you do.
 
 What the handoff allows:

@@ -1,11 +1,11 @@
 import type { Hono } from "hono";
-import { isMachineField, issueToOnlineDaemon, MACHINE_ACTION_DELIVERY, NO_STORE, readActionBody, refuse,
-  type MachineActionDelivery } from "./machine-action-routes";
 import { readLogExcerptStatus } from "@xmatrix/db";
 import { HUB_ROUTES, type LogExcerptStatus } from "@xmatrix/protocol";
-import { requireAuth, requireHumanAuth } from "./index-shared";
-import { machineDatabase } from "./machines";
+import { requireAuth } from "./index-shared";
+import { isMachineField, issueToOnlineDaemon, MACHINE_ACTION_DELIVERY, NO_STORE, readActionBody, refuse,
+  signedInHuman, type MachineActionDelivery } from "./machine-action-routes";
 import { privateRouteResponse } from "./private-route-response";
+import { machineDatabase } from "./machines";
 import type { Env } from "./types";
 
 const OWNER_ONLY = "Only the Machine's owner can read its daemon logs";
@@ -33,10 +33,7 @@ const LOG_EXCERPT_PORT: LogExcerptPort = {
 export function registerLogExcerptRoutes(app: Hono<{ Bindings: Env }>,
   dependencies: Partial<LogExcerptPort> = {}): void {
   const port = { ...LOG_EXCERPT_PORT, ...dependencies };
-  const owner = async (request: Request, env: Env) => {
-    const authenticated = await port.authenticate(request, env);
-    return authenticated.agentRun ? undefined : requireHumanAuth(authenticated);
-  };
+  const owner = (request: Request, env: Env) => signedInHuman(port.authenticate, request, env);
 
   app.post(HUB_ROUTES.machine_log_excerpts, (c) => privateRouteResponse(c, async () => {
     const user = await owner(c.req.raw, c.env);

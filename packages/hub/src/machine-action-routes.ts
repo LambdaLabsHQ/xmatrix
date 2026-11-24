@@ -1,6 +1,6 @@
 import { hasControlCharacter, type SerializedMachineDaemon } from "@xmatrix/protocol";
 import type { Env } from "./types";
-import { readBoundedRequestBody } from "./index-shared";
+import { readBoundedRequestBody, requireHumanAuth, type requireAuth } from "./index-shared";
 import { listOwnerMachineDaemons, machineDaemonCommand, machineRepository } from "./machines";
 
 /** Owner-requested Machine actions (harnesses, worktrees) share their request and delivery handling. */
@@ -24,6 +24,12 @@ export const MACHINE_ACTION_DELIVERY: MachineActionDelivery = {
     await listOwnerMachineDaemons(machineRepository(env), ownerUserId) as unknown as SerializedMachineDaemon[],
   issue: machineDaemonCommand,
 };
+
+/** The signed-in Human making the request, or nothing for an Agent Run: Machine actions are the owner's own. */
+export async function signedInHuman(authenticate: typeof requireAuth, request: Request, env: Env) {
+  const authenticated = await authenticate(request, env);
+  return authenticated.agentRun ? undefined : requireHumanAuth(authenticated);
+}
 
 /** The request's JSON object, or the refusal for a body that is too large or not JSON. */
 export async function readActionBody(request: Request, maxBytes: number, noun: string):

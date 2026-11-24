@@ -121,6 +121,7 @@ xMatrix 不使用廣告 Cookie、跨站追蹤、工作階段錄影，也未整�
 - 勾選要包含的內容。預設什麼都不勾：
   - **This conversation's messages**，包括其中的子討論串。
   - **Diagnostics for this conversation**：Agent 在這裡何時啟動、停止或失敗，以及失敗代碼。這些是只含狀態、代碼、計數和時間的診斷事件：沒有訊息內文、提示詞、錯誤訊息或 ID。
+  - **Daemon logs**：xMatrix 常駐程式在你某台線上機器上最近寫下的日誌末尾。家目錄路徑、電子郵件地址、網址的查詢部分，以及任何形似權杖或金鑰的內容，都會在離開你的機器之前就在本機移除；送出之前，對話框會原樣顯示將要送出的內容。預覽只有你本人可讀，保留約一週；你一撤回交接，已送出的日誌就會被刪除。
 - 勾選 **I agree to let xMatrix support read what I selected**。不勾選就什麼都不會送出。
 
 這次交接允許的範圍：

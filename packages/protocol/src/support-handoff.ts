@@ -1,5 +1,6 @@
 import { parseDiagnosticEvent, type DiagnosticEvent, type DiagnosticEventSchema } from "./diagnostic-events.js";
 import { plainRecord as record } from "./plain-record.js";
+import { hasControlCharacter } from "./field-validation.js";
 
 /**
  * Hand to xMatrix support (docs/cross-space-read-grants.md#support-handoffs).
@@ -119,7 +120,7 @@ export interface LogExcerptStatus {
 /** Lines and tabs are a log's shape; any other control character is refused. */
 function logText(value: unknown, max: number): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max &&
-    !/[\u0000-\u0008\u000b-\u001f\u007f]/u.test(value);
+    !hasControlCharacter(value.replace(/[\n\t]/gu, ""));
 }
 
 export function parseLogExcerptRequest(value: unknown): LogExcerptRequest {
