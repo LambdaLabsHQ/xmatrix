@@ -104,8 +104,8 @@ function RealPaperSheet({
     let activeEl: HTMLElement | null = null;
     blocks.forEach((el, idx) => {
       el.style.borderRadius = "6px";
-      el.style.paddingInline = "6px";
-      el.style.marginInline = "-6px";
+      el.style.paddingInline = "4px";
+      el.style.marginInline = "-4px";
       el.style.transition = "background-color 280ms ease";
       if (highlightBlockIndex !== null && highlightBlockIndex !== undefined && idx === highlightBlockIndex && highlightColor) {
         el.style.backgroundColor = `color-mix(in oklch, ${highlightColor} 13%, transparent)`;
@@ -129,7 +129,7 @@ function RealPaperSheet({
         {topRight && <div className="mb-1.5 flex justify-end sm:mb-3">{topRight}</div>}
         <div
           ref={hostRef}
-          className={`ProseMirror page-document text-[12px]! leading-[1.45]! sm:text-[14px]! sm:leading-[1.6]! [&_blockquote]:my-1.5! [&_blockquote]:py-1! sm:[&_blockquote]:my-2.5! sm:[&_blockquote]:py-1.5! [&_h2]:mt-0! [&_h2]:mb-1.5! [&_h2]:text-[14px]! [&_h2]:font-semibold! sm:[&_h2]:mb-3! sm:[&_h2]:text-[17px]! [&_li]:my-1! sm:[&_li]:my-1.5! [&_p]:my-1! sm:[&_p]:my-1.5! [&_ul]:my-1! sm:[&_ul]:my-1.5! ${
+          className={`ProseMirror page-document text-[12px]! leading-[1.45]! sm:text-[14px]! sm:leading-[1.6]! [&_blockquote]:my-1.5! [&_blockquote]:py-1! sm:[&_blockquote]:my-2.5! sm:[&_blockquote]:py-1.5! [&_h2]:mt-0! [&_h2]:mb-1.5! [&_h2]:text-[14px]! [&_h2]:font-semibold! sm:[&_h2]:mb-3! sm:[&_h2]:text-[17px]! [&_li]:my-0! [&_li+li]:mt-1.5! sm:[&_li+li]:mt-2.5! [&_li_p]:my-0! [&_li.page-task]:gap-[0.65em]! [&_li.page-task>input]:mt-[0.18em]! sm:[&_li.page-task>input]:mt-[0.22em]! [&_li.page-task>input]:shadow-none! [&>p]:my-1! sm:[&>p]:my-1.5! [&_ul]:my-1! sm:[&_ul]:my-1.5! ${
             pen ? "pr-8 sm:pr-44" : ""
           }`}
           data-editable="false"
@@ -146,10 +146,10 @@ function RealPaperSheet({
             </div>
             {/* Phone: compact face-only pen at the right edge, matching the real mobile app */}
             <div
-              className="pointer-events-none absolute right-2.5 z-10 inline-flex rounded-full p-[2px] shadow-[0_3px_10px_-3px_rgba(0,0,0,0.28)] transition-[top] duration-300 sm:hidden"
+              className="pointer-events-none absolute right-2.5 z-10 inline-flex items-center justify-center rounded-full p-[2px] shadow-[0_3px_10px_-3px_rgba(0,0,0,0.28)] transition-[top] duration-300 sm:hidden"
               style={{ top: `${penTop}px`, backgroundColor: pen.color }}
             >
-              <Face of={pen.face} size="xs" shape="circle" className="size-4! rounded-full bg-white" />
+              <Face of={pen.face} size="xs" shape="circle" className="rounded-full bg-white" />
             </div>
           </>
         )}
@@ -362,11 +362,11 @@ function ParallelWorkDemo({ step }: { step: number }) {
     const target = hostRef.current;
     if (!target) return;
     renderPageDocument(mdLines, target, REFERENCES);
-    const blocks = [...target.querySelectorAll<HTMLElement>("li")];
+    const blocks = [...target.querySelectorAll<HTMLElement>("li > div > p")];
     blocks.forEach((el, idx) => {
       el.style.borderRadius = "6px";
-      el.style.paddingInline = "6px";
-      el.style.marginInline = "-6px";
+      el.style.paddingInline = "4px";
+      el.style.marginInline = "-4px";
       if (highlightIdx !== null && idx === highlightIdx && activeWriter) {
         el.style.backgroundColor = `color-mix(in oklch, ${WRITER[activeWriter].color} 13%, transparent)`;
       } else {
@@ -447,7 +447,7 @@ function ParallelWorkDemo({ step }: { step: number }) {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-between bg-[var(--background)] px-3.5 py-2 sm:px-4 sm:py-3.5">
           <div
             ref={hostRef}
-            className="ProseMirror page-document text-[11.5px]! leading-[1.4]! sm:text-[12.5px]! sm:leading-[1.5]! [&_h2]:mt-0! [&_h2]:mb-1! [&_h2]:text-[12.5px]! sm:[&_h2]:mb-2! sm:[&_h2]:text-[14.5px]! [&_li]:my-0.5! sm:[&_li]:my-1.5! [&_ul]:my-0.5! sm:[&_ul]:my-1!"
+            className="ProseMirror page-document text-[11.5px]! leading-[1.4]! sm:text-[12.5px]! sm:leading-[1.5]! [&_h2]:mt-0! [&_h2]:mb-1! [&_h2]:text-[12.5px]! sm:[&_h2]:mb-2! sm:[&_h2]:text-[14.5px]! [&_li]:my-0! [&_li+li]:mt-1! sm:[&_li+li]:mt-2! [&_li_p]:my-0! [&_li.page-task]:gap-[0.6em]! [&_li.page-task>input]:mt-[0.14em]! sm:[&_li.page-task>input]:mt-[0.16em]! [&_li.page-task>input]:shadow-none! [&_ul]:my-0.5! sm:[&_ul]:my-1!"
             data-editable="false"
             translate="no"
           />
