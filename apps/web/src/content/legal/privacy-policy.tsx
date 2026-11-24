@@ -328,8 +328,13 @@ export function PrivacyPolicyContent() {
         <p>
           A user authorizes support access by handing a conversation to xMatrix support. They write one
           line about the problem and choose what to include, with nothing selected by default: the
-          conversation’s messages, and diagnostics for the conversation that contain only states,
-          failure codes, counts, and times. Nothing is shared until they tick “I agree to let xMatrix
+          conversation’s messages; diagnostics for the conversation that contain only states,
+          failure codes, counts, and times; and a recent tail of the xMatrix daemon log from one of
+          their online machines. The machine removes home folder paths, email addresses, the query
+          part of web addresses, and token-like strings from those log lines before they leave it, and
+          the user sees exactly what will be sent before sending. That preview remains readable only by
+          the user for about a week, and log lines sent with a handoff are erased when it is
+          withdrawn. Nothing is shared until they tick “I agree to let xMatrix
           support read what I selected”. xMatrix support, meaning our team and its support Agents, may
           then read only what was selected, read-only, for 14 days. The user, or an owner or admin of
           their Space, may withdraw it at any time, and reading stops when it is withdrawn or expires.

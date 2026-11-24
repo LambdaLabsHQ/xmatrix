@@ -92,6 +92,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't read the settings on this card",
   "Couldn't read this machine's name",
   "Couldn't read this support handoff",
+  "Couldn't read your daemon logs",
   "Couldn't record your decision",
   "Couldn't refresh the local daemon session",
   "Couldn't remove local directory",

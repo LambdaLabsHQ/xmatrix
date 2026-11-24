@@ -657,6 +657,24 @@ export interface MachineDaemonSleepResultReport {
   relayLease?: MachineDaemonCommandLease;
 }
 
+/**
+ * The owner asks for a redacted recent tail of this daemon's own log, to
+ * preview before handing a conversation to support. The daemon reads and
+ * redacts it on the machine.
+ */
+export interface MachineDaemonLogExcerptCommand {
+  type: "machine_log_excerpt";
+  requestId: string;
+  relayLease?: MachineDaemonCommandLease;
+}
+
+export interface MachineDaemonLogExcerptResultReport {
+  type: "machine_log_excerpt_result";
+  requestId: string;
+  result: import("../support-handoff.js").LogExcerptResult;
+  relayLease?: MachineDaemonCommandLease;
+}
+
 /** One bounded piece of text work for a fresh, tool-less harness process. */
 export interface MachineDaemonTextTaskCommand {
   type: "machine_text_task";
@@ -690,6 +708,7 @@ export interface MachineDaemonQuotaProbeResultReport {
 
 export type MachineDaemonClientMessage =
   | MachineDaemonSleepResultReport
+  | MachineDaemonLogExcerptResultReport
   | MachineDaemonHarnessActionResultReport
   | MachineDaemonWorktreeActionResultReport
   | MachineDaemonTextTaskResultReport
@@ -723,6 +742,7 @@ type MachineDaemonShutdown = { reason?: string } & { type: "shutdown_requested" 
 
 export type MachineDaemonServerMessage =
   | MachineDaemonSleepCommand
+  | MachineDaemonLogExcerptCommand
   | MachineDaemonHarnessActionCommand
   | MachineDaemonWorktreeActionCommand
   | MachineDaemonTextTaskCommand

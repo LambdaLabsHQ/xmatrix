@@ -1,4 +1,6 @@
 import { parseDiagnosticEvent, type DiagnosticEvent, type DiagnosticEventSchema } from "./diagnostic-events.js";
+import { plainRecord as record } from "./plain-record.js";
+import { hasControlCharacter } from "./field-validation.js";
 
 /**
  * Hand to xMatrix support (docs/cross-space-read-grants.md#support-handoffs).
@@ -77,6 +79,72 @@ export function parseSupportHandoffRequest(value: unknown): SupportHandoffReques
   const input = value as SupportHandoffRequest;
   return { line: input.line.trim(), parts: [...input.parts], consent: true,
     ...(input.logExcerpt !== undefined ? { logExcerpt: input.logExcerpt } : {}) };
+}
+
+/**
+ * The daemon log excerpt a person previews before ticking logs. The owner,
+ * signed in as a Human, asks one of their own online Machines; its daemon
+ * reads only a bounded recent tail of its own log and redacts it on the
+ * machine (home paths, emails, URL queries, token-like strings) before it
+ * answers. The Hub keeps nothing beyond the command's own result, which only
+ * the owner reads; the excerpt reaches support only when the person sends the
+ * handoff with it.
+ */
+export const MACHINE_LOG_EXCERPT_CAPABILITY = "machine_log_excerpt_v1";
+/** Unclaimed this long, a request expires instead of running late. */
+export const LOG_EXCERPT_CLAIM_TTL_MS = 2 * 60_000;
+/** Longest the daemon spends reading its logs. */
+export const LOG_EXCERPT_TIMEOUT_MS = 30_000;
+export const LOG_EXCERPT_SETTLE_MS = LOG_EXCERPT_CLAIM_TTL_MS + LOG_EXCERPT_TIMEOUT_MS + 60_000;
+const LOG_EXCERPT_REQUEST_ID = /^logs:[0-9a-f-]{36}$/u;
+const LOG_EXCERPT_ERROR_MAX = 1_024;
+
+export interface LogExcerptRequest { requestId: string }
+
+export interface LogExcerptResult {
+  status: "succeeded" | "failed";
+  /** On success: the redacted tail, newest lines last. */
+  excerpt?: string;
+  error?: string;
+}
+
+export interface LogExcerptStatus {
+  controlId: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "expired";
+  excerpt?: string;
+  error?: string;
+  requestedAt?: string;
+  completedAt?: string;
+}
+
+/** Lines and tabs are a log's shape; any other control character is refused. */
+function logText(value: unknown, max: number): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= max &&
+    !hasControlCharacter(value.replace(/[\n\t]/gu, ""));
+}
+
+export function parseLogExcerptRequest(value: unknown): LogExcerptRequest {
+  const input = record(value);
+  if (!input || typeof input.requestId !== "string" || !LOG_EXCERPT_REQUEST_ID.test(input.requestId)) {
+    throw new Error("Invalid log excerpt request");
+  }
+  return { requestId: input.requestId };
+}
+
+/** Fail closed: a success carries a bounded excerpt, a failure only its reason. */
+export function parseLogExcerptResult(value: unknown): LogExcerptResult {
+  const input = record(value);
+  if (!input || Object.keys(input).some((key) => !["status", "excerpt", "error"].includes(key))) {
+    throw new Error("Log excerpt result is invalid");
+  }
+  if (input.status === "succeeded" && logText(input.excerpt, SUPPORT_HANDOFF_LOG_EXCERPT_MAX) &&
+      input.error === undefined) {
+    return { status: "succeeded", excerpt: input.excerpt };
+  }
+  if (input.status === "failed" && input.excerpt === undefined && logText(input.error, LOG_EXCERPT_ERROR_MAX)) {
+    return { status: "failed", error: input.error };
+  }
+  throw new Error("Log excerpt result is invalid");
 }
 
 const LAUNCH_STATES = ["prepared", "queued", "admitted", "spawned", "connected", "failed", "cancelled"] as const;

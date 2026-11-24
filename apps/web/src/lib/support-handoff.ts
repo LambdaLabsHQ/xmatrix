@@ -3,9 +3,11 @@
 import { useSyncExternalStore } from "react";
 import {
   parseSupportHandoffRequest, WEB_PROXY_ROUTES,
-  type SupportDiagnosticEvent, type SupportHandoff, type SupportHandoffPart, type SupportHandoffRequest,
+  type LogExcerptStatus, type SerializedMachineDaemon, type SupportDiagnosticEvent, type SupportHandoff,
+  type SupportHandoffPart, type SupportHandoffRequest,
 } from "@xmatrix/protocol";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
+import { UserFacingProblem } from "@/lib/user-facing-error";
 
 /**
  * Hand to xMatrix support (docs/cross-space-read-grants.md#support-handoffs).
@@ -64,6 +66,50 @@ export function supportHandoffRequestOf(draft: SupportHandoffDraft): SupportHand
   const parts = (Object.keys(draft.parts) as SupportHandoffPart[]).filter((part) => draft.parts[part]);
   return parseSupportHandoffRequest({ line: draft.line, parts, consent: draft.consent,
     ...(draft.parts.logs && draft.logExcerpt !== undefined ? { logExcerpt: draft.logExcerpt } : {}) });
+}
+
+/** One of the person's online Machines whose daemon log they can preview. */
+export interface SupportLogMachine { machineId: string; label: string }
+
+/**
+ * The person's online Machines, one entry per Machine, by the name they gave
+ * it. Only the Machine's owner may ask for its logs; the Hub refuses anyone
+ * else, so this list is a convenience, not the authority.
+ */
+export function supportLogMachines(daemons: readonly SerializedMachineDaemon[]): SupportLogMachine[] {
+  const machines = new Map<string, SupportLogMachine>();
+  for (const daemon of daemons) {
+    if (daemon.status !== "online" || !daemon.machineId || machines.has(daemon.machineId)) continue;
+    machines.set(daemon.machineId, { machineId: daemon.machineId,
+      label: daemon.machineName || daemon.hostName || daemon.hostname || daemon.name });
+  }
+  return [...machines.values()];
+}
+
+const LOG_EXCERPT_POLL_MS = 1_500;
+const LOG_EXCERPT_WAIT_MS = 90_000;
+
+/**
+ * Ask one of the person's Machines for its redacted daemon log tail and wait
+ * for the answer. The daemon redacts it before it leaves the machine; nothing
+ * is sent to support until the person sends the handoff with it.
+ */
+export async function readSupportLogExcerpt(token: string, machineId: string, signal: AbortSignal): Promise<string> {
+  const { controlId } = await xmatrixApiRequest<{ controlId: string }>({ url: WEB_PROXY_ROUTES.machine_log_excerpts,
+    token, method: "POST", body: { machineId }, signal });
+  for (const started = Date.now(); Date.now() - started < LOG_EXCERPT_WAIT_MS;) {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, LOG_EXCERPT_POLL_MS);
+      signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+    });
+    const status = await xmatrixApiRequest<LogExcerptStatus>({ url: WEB_PROXY_ROUTES.machine_log_excerpt(controlId),
+      token, signal });
+    if (status.status === "succeeded" && status.excerpt) return status.excerpt;
+    if (status.status === "failed" || status.status === "expired") {
+      throw new UserFacingProblem(status.error ?? "The machine could not read its logs", true);
+    }
+  }
+  throw new UserFacingProblem("The machine did not answer in time", true);
 }
 
 export function sendSupportHandoff(token: string, channelId: string, request: SupportHandoffRequest) {

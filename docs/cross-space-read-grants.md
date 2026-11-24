@@ -113,7 +113,26 @@ different grantee, the support Space instead of one Run
      (`SUPPORT_LAUNCH_DIAGNOSTIC_EVENT`, `SUPPORT_RUN_DIAGNOSTIC_EVENT` in
      `packages/protocol/src/support-handoff.ts`): no ids, prompts or error text;
    - `logs`: a recent tail of their machine's daemon log, redacted on the
-     machine and previewed before it is sent.
+     machine and previewed before it is sent. Ticking it asks one of the
+     person's online Machines (`POST /api/machine-daemons/log-excerpts` with a
+     `machineId`, then `GET .../log-excerpts/<control-id>` until it settles).
+     Only the Machine's owner, signed in as a Human, may ask or read; Agent
+     Runs are refused. It is the `log_excerpt` machine command (migration
+     `0274`), leased only to a daemon that advertises
+     `machine_log_excerpt_v1`. The daemon reads at most the last 200 lines
+     and 64 KiB of each of its own logs (launchd's
+     `~/Library/Logs/xmatrix-daemon{.err,}.log` on macOS, the update-started
+     daemon's `logs/daemon.{err,out}` in its config directory, and the systemd
+     user journal of `xmatrix-daemon.service` when systemd runs it), and
+     redacts every line on the machine with the Desktop daemon failure card's
+     rules (`apps/desktop/src/daemon-failure.ts`): the home directory becomes
+     `~`, other user directories, email addresses, URL queries and fragments,
+     bearer/token/secret/password/key values and 32+ character token-like
+     strings are replaced. The answer is bounded to
+     `SUPPORT_HANDOFF_LOG_EXCERPT_MAX` characters and kept, readable only by
+     the owner, on the command row until machine-command retention removes it
+     (7 days after its 2-minute claim window). Support sees it only when the
+     person sends the handoff with it, as `logExcerpt`.
    Then they tick "I agree to let xMatrix support read what I selected". The
    Hub refuses a handoff without that agreement (`consent_required`).
 2. `POST /api/channels/<id>/support-handoffs` records an approved grant in the

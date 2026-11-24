@@ -121,6 +121,7 @@ Para pedir ayuda, elige **Hand to xMatrix support** en el menú de una conversac
 - Marca qué incluir. Al principio no hay nada marcado:
   - **This conversation's messages**, con sus hilos.
   - **Diagnostics for this conversation**: cuándo los Agents arrancaron, se detuvieron o fallaron en ella, y los códigos de fallo. Son eventos de diagnóstico con solo estados, códigos, recuentos y horas: sin texto de mensajes, prompts, mensajes de error ni identificadores.
+  - **Daemon logs**: las últimas líneas que el daemon de xMatrix escribió en una de tus máquinas conectadas. Tu máquina elimina las rutas de tu carpeta personal, las direcciones de correo, la parte de consulta de las direcciones web y todo lo que parezca un token o una clave antes de que las líneas salgan de ella, y el diálogo te muestra exactamente lo que se enviará antes de enviarlo. La vista previa solo la puedes leer tú durante una semana aproximadamente; lo que envías se borra en cuanto retiras el traspaso.
 - Marca **I agree to let xMatrix support read what I selected**. No se envía nada hasta que lo marques.
 
 Lo que permite el traspaso:

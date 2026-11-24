@@ -1,16 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LifeBuoy } from "lucide-react";
 import { SUPPORT_HANDOFF_DAYS, SUPPORT_HANDOFF_LINE_MAX, type SupportHandoff, type SupportHandoffPart } from "@xmatrix/protocol";
 
 import { Input } from "@/components/ui/input";
 import {
-  closeSupportHandoff, emptySupportHandoffDraft, sendSupportHandoff, supportHandoffRequestOf,
-  useSupportHandoffTarget, type SupportHandoffDraft,
+  closeSupportHandoff, emptySupportHandoffDraft, readSupportLogExcerpt, sendSupportHandoff, supportHandoffRequestOf,
+  supportLogMachines, useSupportHandoffTarget, type SupportHandoffDraft, type SupportLogMachine,
 } from "@/lib/support-handoff";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { CenteredDialogShell, DialogButton, DialogInset, DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
+import { fetchMachineDaemons } from "./workspace-admin-views";
 
 /** What each box includes, in the words the person reads before ticking it. */
 export const SUPPORT_HANDOFF_CHOICES: ReadonlyArray<{ part: SupportHandoffPart; label: string; detail: string }> = [
@@ -18,7 +19,18 @@ export const SUPPORT_HANDOFF_CHOICES: ReadonlyArray<{ part: SupportHandoffPart; 
     detail: "Everything said here, including its threads, as you can read it." },
   { part: "diagnostics", label: "Diagnostics for this conversation",
     detail: "When Agents started, stopped or failed here, and the failure codes. No message text." },
+  { part: "logs", label: "Daemon logs",
+    detail: "The recent lines xMatrix's daemon wrote on your machine. Home folders, emails, web address queries and " +
+      "anything like a key are removed on your machine, and you see them here before sending." },
 ];
+
+/** Reading the daemon log for the preview: which Machine, and how it went. */
+interface LogPreview {
+  machines: SupportLogMachine[];
+  machineId?: string;
+  reading: boolean;
+  problem?: string;
+}
 
 /**
  * Hand to xMatrix support (docs/cross-space-read-grants.md#support-handoffs).
@@ -30,18 +42,65 @@ export function SupportHandoffDialog({ token }: { token: string | null | undefin
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<SupportHandoff | null>(null);
+  const [logs, setLogs] = useState<LogPreview>({ machines: [], reading: false });
+  const logRead = useRef<AbortController | null>(null);
 
   useEffect(() => {
     // Each conversation's handoff starts from nothing ticked.
     setDraft(emptySupportHandoffDraft());
     setError(null);
     setSent(null);
+    setLogs({ machines: [], reading: false });
+    return () => logRead.current?.abort();
   }, [target?.channelId]);
 
   if (!target) return null;
   const request = supportHandoffRequestOf(draft);
-  const tick = (part: SupportHandoffPart, checked: boolean) =>
-    setDraft((current) => ({ ...current, parts: { ...current.parts, [part]: checked } }));
+  const untickLogs = () =>
+    setDraft((current) => ({ ...current, parts: { ...current.parts, logs: false }, logExcerpt: undefined }));
+
+  /** Tick logs: ask one of the person's online Machines for its redacted tail and show it before sending. */
+  async function previewLogs(preferred?: string) {
+    if (!token) return;
+    logRead.current?.abort();
+    const controller = new AbortController();
+    logRead.current = controller;
+    setDraft((current) => ({ ...current, parts: { ...current.parts, logs: true }, logExcerpt: undefined }));
+    setLogs((current) => ({ ...current, reading: true, problem: undefined }));
+    try {
+      const machines = supportLogMachines(await fetchMachineDaemons(token, controller.signal));
+      const machineId = machines.find((machine) => machine.machineId === preferred)?.machineId ?? machines[0]?.machineId;
+      if (!machineId) {
+        untickLogs();
+        setLogs({ machines, reading: false,
+          problem: "None of your machines is online, so there are no daemon logs to include." });
+        return;
+      }
+      setLogs({ machines, machineId, reading: true });
+      const excerpt = await readSupportLogExcerpt(token, machineId, controller.signal);
+      if (controller.signal.aborted) return;
+      setDraft((current) => current.parts.logs ? { ...current, logExcerpt: excerpt } : current);
+      setLogs((current) => ({ ...current, reading: false }));
+    } catch (readError) {
+      if (controller.signal.aborted) return;
+      untickLogs();
+      setLogs((current) => ({ ...current, reading: false,
+        problem: userErrorMessage(readError, "Couldn't read your daemon logs") ?? undefined }));
+    }
+  }
+
+  const tick = (part: SupportHandoffPart, checked: boolean) => {
+    if (part !== "logs") {
+      setDraft((current) => ({ ...current, parts: { ...current.parts, [part]: checked } }));
+    } else if (checked) {
+      void previewLogs(logs.machineId);
+    } else {
+      logRead.current?.abort();
+      untickLogs();
+      setLogs((current) => ({ ...current, reading: false, problem: undefined }));
+    }
+  };
+  const machineLabel = logs.machines.find((machine) => machine.machineId === logs.machineId)?.label;
 
   async function send() {
     if (!target || !token || !request) return;
@@ -88,6 +147,35 @@ export function SupportHandoffDialog({ token }: { token: string | null | undefin
                 <span>{choice.label}<span className="block text-xs text-muted-foreground">{choice.detail}</span></span>
               </label>
             ))}
+            {draft.parts.logs && logs.machines.length > 1 && (
+              <label className="ml-6 flex items-center gap-2 text-xs">
+                From
+                <select value={logs.machineId ?? ""} disabled={busy} data-support-log-machine
+                  className="rounded border bg-background px-1.5 py-1"
+                  onChange={(event) => void previewLogs(event.target.value)}>
+                  {logs.machines.map((machine) => (
+                    <option key={machine.machineId} value={machine.machineId}>{machine.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {draft.parts.logs && logs.reading && (
+              <p className="ml-6 text-xs text-muted-foreground" role="status">
+                Reading the recent daemon log{machineLabel ? ` on ${machineLabel}` : ""}…
+              </p>
+            )}
+            {draft.parts.logs && draft.logExcerpt !== undefined && (
+              <div className="ml-6 space-y-1">
+                <p className="text-xs text-muted-foreground">
+                  This is exactly what support will read{machineLabel ? `, from ${machineLabel}` : ""}:
+                </p>
+                <pre data-support-log-preview aria-label="Daemon logs to send" tabIndex={0}
+                  className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 font-mono text-[11px] leading-snug">
+                  {draft.logExcerpt}
+                </pre>
+              </div>
+            )}
+            {logs.problem && <p role="alert" className="ml-6 text-xs text-destructive">{logs.problem}</p>}
           </fieldset>
           <DialogInset className="space-y-2">
             <label className="flex cursor-pointer items-start gap-2 font-semibold">

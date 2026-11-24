@@ -754,6 +754,13 @@ pub enum MachineDaemonCommand {
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
+    /// The owner asks for a recent tail of this daemon's own log, redacted on
+    /// this machine, to preview before handing a conversation to support.
+    MachineLogExcerpt {
+        request_id: String,
+        #[serde(default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
     /// The owner lists or reclaims the git worktrees on this Machine. Paths
     /// name trees from a listing; the daemon reclaims only trees it finds
     /// registered with git itself, behind its own gates.
@@ -766,6 +773,18 @@ pub enum MachineDaemonCommand {
         #[serde(default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
+}
+
+/// The protocol's `LogExcerptResult`: `succeeded` with the redacted tail, or
+/// `failed` with why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineLogExcerptOutcome {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub excerpt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error: Option<String>,
 }
 
 /// What became of a `machine_text_task`: `completed` with the harness's
@@ -1024,6 +1043,12 @@ pub enum MachineDaemonReport {
         #[serde(skip_serializing_if = "Option::is_none", default)]
         relay_lease: Option<MachineDaemonCommandLease>,
     },
+    MachineLogExcerptResult {
+        request_id: String,
+        result: MachineLogExcerptOutcome,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        relay_lease: Option<MachineDaemonCommandLease>,
+    },
     /// The protocol's `WorktreeActionResult`, built by the repo-pool inventory.
     MachineWorktreeActionResult {
         request_id: String,
@@ -1263,6 +1288,7 @@ impl MachineDaemonCommand {
             | Self::MachineHarnessAction { relay_lease, .. }
             | Self::MachineTextTask { relay_lease, .. }
             | Self::MachineSleepAgent { relay_lease, .. }
+            | Self::MachineLogExcerpt { relay_lease, .. }
             | Self::MachineWorktreeAction { relay_lease, .. } => relay_lease.as_ref(),
         }
     }
@@ -3312,6 +3338,7 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
         | "machine_harness_action"
         | "machine_text_task"
         | "machine_sleep_agent"
+        | "machine_log_excerpt"
         | "machine_worktree_action"
         | "machine_recover_reply"
         | "machine_worktree_cleanup" => Some(
@@ -3925,6 +3952,34 @@ mod tests {
             parse_machine_daemon_server_event(r#"{"type":"machine_cli_update_check"}"#),
             Some(MachineDaemonConnectionEvent::Error { .. })
         ));
+    }
+
+    #[test]
+    fn machine_parser_reads_log_excerpt_requests_and_their_result_is_the_protocol_shape() {
+        match parse_machine_daemon_server_event(
+            r#"{"type":"machine_log_excerpt","requestId":"logs:1","relayLease":{"leaseOwner":"o","leaseGeneration":1,"entityVersion":2,"daemonEpoch":3}}"#,
+        ) {
+            Some(MachineDaemonConnectionEvent::Command(
+                command @ MachineDaemonCommand::MachineLogExcerpt { .. },
+            )) => {
+                assert!(command.relay_lease().is_some());
+            }
+            other => panic!("expected a log excerpt request, got {other:?}"),
+        }
+        let report = MachineDaemonReport::MachineLogExcerptResult {
+            request_id: "logs:1".into(),
+            result: MachineLogExcerptOutcome {
+                status: "failed".into(),
+                excerpt: None,
+                error: Some("none".into()),
+            },
+            relay_lease: None,
+        };
+        assert_eq!(
+            serde_json::to_value(report).unwrap(),
+            serde_json::json!({"type": "machine_log_excerpt_result", "requestId": "logs:1",
+                "result": {"status": "failed", "error": "none"}})
+        );
     }
 
     #[test]
