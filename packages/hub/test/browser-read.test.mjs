@@ -32,9 +32,9 @@ test("answers from the browser are bounded, and only web pages", () => {
   assert.equal(parseBrowserReadAnswer(null), null);
 });
 
-test("the Agent sees the page as text, with where it came from", () => {
-  assert.equal(browserReadText({ title: "Docs", href: "https://a.test/", text: "  body  " }), "# Docs\nhttps://a.test/\n\nbody\n");
-  assert.equal(browserReadText({ title: "", href: "https://a.test/", text: "b" }), "# https://a.test/\nhttps://a.test/\n\nb\n");
+test("the Agent sees the page's snapshot as Playwright MCP's browser_snapshot frames it", () => {
+  assert.equal(browserReadText({ title: "Docs", href: "https://a.test/", text: "- heading \"Docs\" [level=1]\n" }),
+    "- Page URL: https://a.test/\n- Page Title: Docs\n- Page Snapshot:\n```yaml\n- heading \"Docs\" [level=1]\n```\n");
 });
 
 test("`xmatrix browse` is a command", () => {

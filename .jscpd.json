@@ -204,6 +204,7 @@
     "**/coverage/**",
     "**/pnpm-lock.yaml",
     "packages/hub/src/vendor/norn/**",
+    "apps/chrome-extension/snapshot/playwright/**",
     "packages/hub/src/connectors/generated/app-store-connect.d.ts",
     "apps/android/app/src/main/assets/xmatrix-web/**",
     "packages/db/migrations/**",

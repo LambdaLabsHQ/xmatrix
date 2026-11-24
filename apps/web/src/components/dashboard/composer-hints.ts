@@ -22,12 +22,25 @@ export function composerHintParts(hint: string): { trigger: string; rest: string
 
 export const COMPOSER_HINT_INTERVAL_MS = 4000;
 
-export function composerHintAt(step: number): string {
-  return COMPOSER_HINTS[step % COMPOSER_HINTS.length]!;
+/**
+ * What this composer can complete. Every hint it shows works there (Daniel 2026-11-24): `/` completes the
+ * commands of a conversation's live Agents, so a composer with no conversation yet does not offer it; `#`
+ * completes the reader's channels, where a channel list is at hand.
+ */
+export type ComposerHintScope = { commands: boolean; channels: boolean };
+
+/** The hints a composer with `scope` shows, in turn. */
+export function composerHints(scope: ComposerHintScope = { commands: true, channels: true }): readonly string[] {
+  return COMPOSER_HINTS.filter((hint) => (hint.startsWith("/") ? scope.commands : hint.startsWith("#") ? scope.channels : true));
+}
+
+export function composerHintAt(step: number, scope?: ComposerHintScope): string {
+  const hints = composerHints(scope);
+  return hints[step % hints.length]!;
 }
 
 /** The hint to show now; it moves on only while `active` (the draft is empty). */
-export function useComposerHint(active: boolean): string {
+export function useComposerHint(active: boolean, scope?: ComposerHintScope): string {
   const [step, setStep] = useState(0);
   useEffect(() => {
     if (!active) return;
@@ -36,5 +49,5 @@ export function useComposerHint(active: boolean): string {
     }, COMPOSER_HINT_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [active]);
-  return composerHintAt(step);
+  return composerHintAt(step, scope);
 }

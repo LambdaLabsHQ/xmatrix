@@ -25,3 +25,13 @@ test("a rotating hint splits into its trigger and words; other placeholders do n
   assert.deepEqual(composerHintParts("[[ for pages"), { trigger: "[[", rest: " for pages" });
   assert.equal(composerHintParts("Join channel to send"), null);
 });
+
+// Every hint an empty composer shows works there (Daniel 2026-11-24).
+test("a composer offers only the hints it completes", () => {
+  const { composerHints } = require("./composer-hints.ts");
+  assert.deepEqual(composerHints(), [...COMPOSER_HINTS]);
+  // A new conversation, as the question box on a page: no Agents yet to take a command; channels at hand.
+  assert.deepEqual(composerHints({ commands: false, channels: true }), ["@ to summon an agent", "[[ for pages", "# for channels"]);
+  assert.deepEqual(composerHints({ commands: false, channels: false }), ["@ to summon an agent", "[[ for pages"]);
+  assert.equal(composerHintAt(2, { commands: false, channels: false }), "@ to summon an agent");
+});

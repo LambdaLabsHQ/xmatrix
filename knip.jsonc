@@ -100,7 +100,10 @@
     },
     "apps/chrome-extension": {
       // Chrome loads these by the paths manifest.json, sidepanel.html and background.js name.
-      "entry": ["src/background.js", "src/sidepanel.js", "src/selection.js", "src/panel.css", "scripts/package.mjs", "test/*.test.mjs", "package.json"],
+      // snapshot/page-snapshot.ts is bundled by scripts/package.mjs into src/page-snapshot.js, which the side panel
+      // injects into a tab; it bundles the vendored Playwright snapshot code beside it, whose exports are Playwright's.
+      "entry": ["src/background.js", "src/sidepanel.js", "src/selection.js", "src/panel.css", "scripts/package.mjs", "test/*.test.mjs", "test/page-snapshot-parity.mjs", "snapshot/page-snapshot.ts!", "package.json"],
+      "ignore": ["snapshot/playwright/**"],
     },
     "packages/mock-agent": {
       "entry": ["src/index.mjs", "package.json"],

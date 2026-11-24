@@ -50,7 +50,10 @@ export class BrowserReadWaits {
   }
 }
 
-/** What the Agent sees: the page as text, with where it came from. */
+/**
+ * What the Agent sees: the page's accessibility snapshot (the extension writes it as Playwright's `ariaSnapshot()`
+ * does), framed as Playwright MCP's `browser_snapshot` frames it, so an Agent that knows Playwright reads it as is.
+ */
 export function browserReadText(answer: { title: string; href: string; text: string }): string {
-  return `# ${answer.title || answer.href}\n${answer.href}\n\n${answer.text.trim()}\n`;
+  return `- Page URL: ${answer.href}\n- Page Title: ${answer.title}\n- Page Snapshot:\n\`\`\`yaml\n${answer.text.trim()}\n\`\`\`\n`;
 }

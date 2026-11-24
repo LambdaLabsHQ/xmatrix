@@ -368,14 +368,14 @@ export function PrivacyPolicyContent() {
           question box, which asks for access to web pages first, it reads the text you select on a
           page to show it in the box under the selection; that text stays in your browser. Only when
           you send a question does it pass the page title, address, and selected text to xMatrix with
-          it. When you ask about a whole page (its side panel&apos;s + , or opening the panel on a page
-          without a conversation), it reads that page&apos;s main text and attaches it to the new
-          conversation as a file you can remove before sending. Each message you write in its side
-          panel carries the title and address of the page beside it. While the side panel is open, an
-          Agent in your conversation may read that page, or the page the conversation was started
-          from if it is still open in a tab. An Agent may also ask to read another page you have
-          open; the panel asks you first and reads it only if you allow it. Page text
-          read this way goes to that Agent only, and xMatrix does not store it. The extension never
+          it. Each message you write in its side panel carries the title and address of the page
+          beside it, shown above what you write; you can take the page off before sending. While the
+          side panel is open, an Agent in your conversation may read that page, or the page the
+          conversation was started from if it is still open in a tab: the extension reads what the
+          browser exposes to assistive technology (headings, text, links, form fields and their
+          values as shown), not hidden content or the page&apos;s code. An Agent may also ask to read
+          another page you have open; the panel asks you first and reads it only if you allow it. A
+          page read this way goes to that Agent only, and xMatrix does not store it. The extension never
           opens a page for an Agent, does not read pages in the background, record your browsing
           history, or contact any server other than xMatrix. It keeps your sign-in session, and text you picked until the
           panel takes it, in the browser&apos;s extension storage on that device; signing out ends the

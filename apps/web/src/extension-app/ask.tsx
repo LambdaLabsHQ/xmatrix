@@ -17,11 +17,17 @@
  * to hide it.
  */
 import { createRoot } from "react-dom/client";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { type AuthUser, type SerializedSpace } from "@xmatrix/protocol";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { WEB_PROXY_ROUTES, type AuthUser, type ChannelSnapshot, type SerializedSpace } from "@xmatrix/protocol";
 import { API_ROUTES } from "xmatrix-extension:api-routes";
 import { Composer } from "@/components/dashboard/workspace-composer-dialogs";
 import { askMessage } from "./ask-message";
+import {
+  channelReferences,
+  MessageReferenceCatalogProvider,
+  type ChannelReference,
+  type MessageReferenceCatalog,
+} from "@/components/dashboard/message-reference-catalog";
 import type { ComposerSendSnapshot } from "@/components/dashboard/workspace-shell-message-model";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
@@ -146,8 +152,17 @@ function Surface() {
         if (live) setSpace(spaces.find((item) => item.id === spaceId) ?? null);
       })
       .catch(() => undefined);
+    // The Space's channels: what `#` completes, as it does in the App (message-reference-catalog.tsx).
+    void xmatrixApiRequest<{ channels?: ChannelSnapshot[] }>({ url: WEB_PROXY_ROUTES.channels, token })
+      .then(({ channels = [] }) => {
+        if (live) setChannels(channelReferences([], channels.filter((channel) => channel.spaceId === spaceId)));
+      })
+      .catch(() => undefined);
     return () => { live = false; };
   }, [token, spaceId]);
+  const [channels, setChannels] = useState<readonly ChannelReference[]>([]);
+  const referenceCatalog = useMemo<MessageReferenceCatalog | null>(() => channels.length
+    ? { channels, channelActivityMs: () => 0, onOpenChannel: () => undefined } : null, [channels]);
 
   // The frame is as big as what it shows, wherever the App positions it.
   useLayoutEffect(() => {
@@ -220,6 +235,7 @@ function Surface() {
     <div ref={frame} className="xmatrix-app box-content w-[30rem]" style={{ padding: "12px 12px 24px" }}>
       {context && passage ? (
         <GrantedAuthProvider token={context.token} user={context.user}>
+          <MessageReferenceCatalogProvider catalog={referenceCatalog}>
           <ComposerStage>
             <Composer
               channel={null}
@@ -240,7 +256,6 @@ function Surface() {
               mentionInsertRequest={null}
               autoFocusRequest={0}
               error={problem}
-              placeholder={space ? `Ask ${space.name} about this` : "Ask about this"}
               ariaLabel="Ask about this"
               sendTitle="Ask"
               onDraftChange={() => undefined}
@@ -252,6 +267,7 @@ function Surface() {
               onSend={send}
             />
           </ComposerStage>
+          </MessageReferenceCatalogProvider>
         </GrantedAuthProvider>
       ) : problem && <p role="alert" className="text-sm font-medium text-destructive">{problem}</p>}
     </div>

@@ -8,6 +8,7 @@ import { registrationMachineBusy, registrationMachineName } from "./machine-name
 import { ImageGalleryLightbox } from "./attachment-lightbox";
 import { useSystemBackHandler } from "./use-system-back";
 import { useComposerHint } from "./composer-hints";
+import { useMessageReferenceCatalog } from "./message-reference-catalog";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   invocationSelectionsEnvelope, isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
@@ -111,11 +112,14 @@ import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 import {
   ChevronLeft,
   FileText,
+  Globe,
   Paperclip,
   RefreshCw,
   Video,
   X,
 } from "lucide-react";
+import { leaveOutEmbedBrowserPage } from "@/lib/extension-embed";
+import { useEmbedBrowserPage } from "./use-extension-companion";
 
 import { Face } from "@/components/dashboard/face";
 
@@ -290,7 +294,6 @@ export const Composer = memo(function Composer({
   sendTitle,
   inlineActions,
   afterSend,
-  initialFiles,
 }: {
   compact?: boolean;
   channel: ChannelSnapshot | null;
@@ -346,8 +349,6 @@ export const Composer = memo(function Composer({
   /** Extra controls inside the input box, before Send. */
   inlineActions?: ReactNode;
   afterSend?: ReactNode;
-  /** Files the composer opens holding, attached as if dropped on it (the side panel's page text). */
-  initialFiles?: readonly File[];
 }) {
   const channel = useRealtimeChannel(catalogChannel);
   const quoteIsHere = useCallback((href: string) => Boolean(channel && messageHere(href, channel)), [channel]);
@@ -491,7 +492,12 @@ export const Composer = memo(function Composer({
     !preparingSend &&
     !sending;
   const paneActive = useAnimationActivity();
-  const composerHint = useComposerHint(paneActive && writable && !placeholder && localDraft.length === 0);
+  // In the Chrome extension's side panel, what is written here goes with the page beside it (browser-page.ts).
+  const browserPage = useEmbedBrowserPage();
+  // Each hint the empty composer shows is one it completes here (composer-hints.ts).
+  const referenceCatalog = useMessageReferenceCatalog();
+  const composerHint = useComposerHint(paneActive && writable && !placeholder && localDraft.length === 0,
+    { commands: Boolean(channel), channels: Boolean(referenceCatalog?.channels.length) });
   const completionApiRef = useRef<ComposerCompletionApi | null>(null);
   const setCursor = useCallback((value: number) => {
     completionApiRef.current?.setCursor(value);
@@ -1217,14 +1223,6 @@ export const Composer = memo(function Composer({
     return Array.from(files).map((file) => ({ file }));
   }
 
-  // The files it opens with go through the same intake as a drop, once.
-  const takenInitialFilesRef = useRef<readonly File[] | undefined>(undefined);
-  useEffect(() => {
-    if (!initialFiles?.length || !attachmentsEnabled || takenInitialFilesRef.current === initialFiles) return;
-    takenInitialFilesRef.current = initialFiles;
-    void beginAttachmentIntake(() => fileCandidates(initialFiles));
-  });
-
   async function clipboardImageCandidates(
     images: DesktopClipboardImage[]
   ): Promise<AttachmentDropCandidate[]> {
@@ -1775,6 +1773,28 @@ export const Composer = memo(function Composer({
                       onClick={onCancelReply}
                       className="composer-quote-block-remove"
                     >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {browserPage && (
+                /* The page this message goes with: not a file, a page the Agent reads (`xmatrix browse`). It is
+                   drawn as the conversation's page bookmarks are (conversation-page-cards.tsx). */
+                <div className="px-2 pt-2">
+                  <div className="conversation-page-bookmark composer-browser-page cursor-default" title={browserPage.href}>
+                    <span className="app-page-reference-chip-icon" aria-hidden="true"><Globe /></span>
+                    <span className="app-page-reference-chip-label">
+                      <span className="conversation-page-bookmark-head">
+                        <span className="conversation-page-bookmark-title">
+                          {browserPage.title || new URL(browserPage.href).host}
+                        </span>
+                      </span>
+                      <span className="conversation-page-bookmark-detail">{new URL(browserPage.href).host}</span>
+                    </span>
+                    <button type="button" title="Don't send this page" aria-label="Don't send this page"
+                      onClick={leaveOutEmbedBrowserPage}
+                      className="composer-quote-block-remove shrink-0 self-center">
                       <X className="size-3.5" />
                     </button>
                   </div>

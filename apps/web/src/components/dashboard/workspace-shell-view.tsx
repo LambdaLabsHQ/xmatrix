@@ -15,10 +15,10 @@ import {
 } from "react";
 import { useStableCallback } from "./workspace-shell-helpers";
 import { BrowserReadApprovalDialog } from "./browser-read-approval-dialog";
-import { pageAskDraft, pageTextFile, useExtensionCompanion } from "./use-extension-companion";
+import { useExtensionCompanion } from "./use-extension-companion";
 import { absoluteChannelUrl } from "./channel-links";
 import { appAddressHref } from "@/lib/app-address";
-import { announceEmbedPageThread, openEmbedAddress, openEmbedInTab, requestEmbedPageText } from "@/lib/extension-embed";
+import { announceEmbedPageThread, embedBrowserPage, openEmbedAddress, openEmbedInTab } from "@/lib/extension-embed";
 import type { AgentTraceTarget } from "./workspace-composer-dialogs";
 import { channelRecentActivityMs } from "./workspace-shell-helpers-extra";
 import { CrossSpaceReadCard, useChannelPendingCrossSpaceReads } from "./cross-space-read-card";
@@ -857,25 +857,18 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // conversation and nothing else of the workspace; with none, a new conversation about the page.
   const companion = useExtensionCompanion();
   const companionPage = companion?.page ?? null;
-  // The page the open new conversation is about, and its text once the extension has read it (only on a click).
-  const [companionAsk, setCompanionAsk] = useState<{ href: string; files: File[] } | null>(null);
+  // The page the open new conversation is about. The composer shows it as its page chip, and the message carries
+  // it; an Agent reads the page itself with `xmatrix browse` (Daniel 2026-11-24: a web page is not a file).
+  const [companionAsk, setCompanionAsk] = useState<string | null>(null);
   const askAboutPage = useStableCallback(() => {
     if (!companionPage) return;
-    // Already asking about this page (the idle panel opened it): + keeps what is written and attached there.
-    // The composer adds each new set of files it is handed, so asking again would attach the page twice.
-    if (composingConversation && companionAsk?.href === companionPage.href) return;
-    setNewConversationDraft(pageAskDraft(companionPage));
+    // Already asking about this page (the idle panel opened it): + keeps what is written there.
+    if (composingConversation && companionAsk === companionPage.href) return;
+    setNewConversationDraft("");
     setNewConversationError(null);
-    setCompanionAsk({ href: companionPage.href, files: [] });
-    requestEmbedPageText();
+    setCompanionAsk(companionPage.href);
     openNewConversation();
   });
-  // The page's text arrives after the click that asked for it: it joins the conversation as a file that can be removed.
-  useEffect(() => {
-    if (!companionPage?.text || companionAsk?.href !== companionPage.href || companionAsk.files.length) return;
-    const file = pageTextFile(companionPage);
-    if (file) setCompanionAsk({ href: companionPage.href, files: [file] });
-  }, [companionPage, companionAsk]);
   // With no conversation open, the panel offers one about the page beside it.
   const companionIdle = Boolean(companion && !selectedChannel && !composingConversation);
   useEffect(() => {
@@ -883,8 +876,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   }, [companionIdle, companionPage, askAboutPage]);
   const createCompanionConversation = useStableCallback(async (body: string, mode: "open" | "closed") => {
     const channel = await createConversationFromComposer(body, mode);
-    const page = companionAsk ? companionPage : null;
-    if (page && page.href === companionAsk?.href) {
+    // Started beside a page it carries: the page's conversation now (unless the person took the page off).
+    const page = companionAsk ? embedBrowserPage() : null;
+    if (page) {
       announceEmbedPageThread({ path: `/app/${channel.spaceId}/channels/${channel.id}`, title: page.title, href: page.href });
     }
     setCompanionAsk(null);
@@ -1202,7 +1196,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     <NewConversation
       key={newConversationDraft}
       initialDraft={newConversationDraft}
-      initialFiles={companionAsk?.files}
       space={currentSpace}
       token={token ?? null}
       workspaces={projects}

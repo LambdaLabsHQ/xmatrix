@@ -233,16 +233,15 @@ export function openEmbedAddress(path: string): boolean {
 
 /**
  * The page beside the side panel, as the extension tells it: the panel is a
- * companion to that page (Daniel 2026-11-23), not a whole workspace. `text`
- * is the page's readable text, which "Ask about this page" carries as an
- * attachment; `path` is the conversation already started from this page.
+ * companion to that page (Daniel 2026-11-23), not a whole workspace. `path`
+ * is the conversation already started from this page. The page's content is
+ * not handed over here: an Agent reads it, as its accessibility snapshot, with
+ * `xmatrix browse` (Daniel 2026-11-24: a web page is not a file).
  */
-export type EmbedPage = { title: string; href: string; text?: string; path?: string };
+export type EmbedPage = { title: string; href: string; path?: string };
 
 /** One conversation started from the extension, for the panel's Recent list. */
 export type EmbedRecent = { path: string; title: string; href: string };
-
-const MAX_PAGE_TEXT_CHARS = 200_000;
 
 function webAddress(value: unknown): string | null {
   if (typeof value !== "string" || value.length > MAX_HREF_CHARS) return null;
@@ -258,14 +257,13 @@ function boundedText(value: unknown, max: number): string | null {
   return typeof value === "string" && value.length <= max ? value : null;
 }
 
-/** Validates a page message: a web address, bounded title and text, an app conversation path. */
+/** Validates a page message: a web address, a bounded title, an app conversation path. */
 export function parseEmbedPage(data: Record<string, unknown>): EmbedPage | null {
   const href = webAddress(data.href);
   const title = boundedText(data.title, MAX_LABEL_CHARS);
   if (!href || title === null) return null;
-  const text = boundedText(data.text, MAX_PAGE_TEXT_CHARS);
   const path = typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path) ? data.path : undefined;
-  return { title, href, ...(text ? { text } : {}), ...(path ? { path } : {}) };
+  return { title, href, ...(path ? { path } : {}) };
 }
 
 /** Validates the Recent list: at most a few conversations, each an app path with a web page. */
@@ -294,21 +292,45 @@ export function subscribeEmbedPage(onPage: (page: EmbedPage) => void): () => voi
   return subscribeParent("page", (data) => {
     const page = parseEmbedPage(data);
     if (!page) return;
-    pageBesidePanel = { title: page.title, href: page.href };
+    if (pageBesidePanel?.href !== page.href || pageBesidePanel.title !== page.title) {
+      pageBesidePanel = { title: page.title, href: page.href };
+      notifyBrowserPage();
+    }
     onPage(page);
   });
 }
 
 /** The page beside the side panel, as it last said (subscribeEmbedPage). */
 let pageBesidePanel: { title: string; href: string } | null = null;
+/** A page the person took off what they write, by its address: another page goes with their messages again. */
+let leftOutPage: string | null = null;
+const browserPageListeners = new Set<() => void>();
+function notifyBrowserPage() {
+  for (const listener of browserPageListeners) listener();
+}
 
 /**
  * The page the person is looking at while they write in the side panel: each
  * message sent there carries it (browserPageMetadata), so the conversation and
- * its Agents know which page it is about. Null outside the side panel.
+ * its Agents know which page it is about, and the composer shows it. Null
+ * outside the side panel, or once the person took this page off.
  */
 export function embedBrowserPage(): { title: string; href: string } | null {
-  return extensionEmbedParent() ? pageBesidePanel : null;
+  if (!extensionEmbedParent() || !pageBesidePanel || pageBesidePanel.href === leftOutPage) return null;
+  return pageBesidePanel;
+}
+
+/** Takes the page beside the panel off what the person writes (the composer's page chip, ×), until they move on. */
+export function leaveOutEmbedBrowserPage() {
+  if (!pageBesidePanel) return;
+  leftOutPage = pageBesidePanel.href;
+  notifyBrowserPage();
+}
+
+/** Each time the page that goes with what is written changes: another page, or the person took it off. */
+export function subscribeEmbedBrowserPage(onChange: () => void): () => void {
+  browserPageListeners.add(onChange);
+  return () => browserPageListeners.delete(onChange);
 }
 
 /** The conversations started from the extension, newest first, each time the list changes. */
@@ -320,12 +342,6 @@ export function subscribeEmbedRecent(onRecent: (recent: EmbedRecent[]) => void):
 export function announceEmbedPageThread(thread: { path: string; title: string; href: string }) {
   const parent = extensionEmbedParent();
   if (parent && APP_CONVERSATION_PATH.test(thread.path)) postToParent(parent, { type: "page-thread", ...thread });
-}
-
-/** Asks the extension to read the page beside the panel (the person asked about it); it answers with a "page" message. */
-export function requestEmbedPageText() {
-  const parent = extensionEmbedParent();
-  if (parent) postToParent(parent, { type: "page-text" });
 }
 
 /**
