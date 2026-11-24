@@ -193,9 +193,9 @@ export function PrivacyPolicyContent() {
             provider still serves the account, and a prepaid balance where applicable.
           </p>
           <p>
-            <strong className="text-foreground">How to turn it off.</strong> One switch stops both the
-            file reads, the Codex app-server requests and the provider requests on that computer: Desktop Settings → Legal and
-            privacy → Local provider quota probes, or{" "}
+            <strong className="text-foreground">How to turn it off.</strong> One switch stops the
+            file reads, the Codex app-server requests and the provider requests on that computer:
+            Desktop Settings → Legal and privacy → Local provider quota probes, or{" "}
             <code className="font-mono text-xs">xmatrix config quotaProbes off</code>, or the
             environment variable{" "}
             <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code>. With it off,

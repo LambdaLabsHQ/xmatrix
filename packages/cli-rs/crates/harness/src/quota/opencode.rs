@@ -23,8 +23,8 @@ use serde_json::Value;
 
 use super::cache::KeyedProviderUsageCache;
 use super::windows::{
-    append_quota_usages, normalized_quota_percent, percent_window, prefer_codex_quota_windows,
-    quota_percent_from_usage_fields, rate_limit_window_label,
+    append_quota_usages, credit_balance, normalized_quota_percent, percent_window,
+    prefer_codex_quota_windows, quota_percent_from_usage_fields, rate_limit_window_label,
 };
 use crate::fields::{first_f64, first_reset_at, first_string};
 use crate::host::{home_dir_path, provider_client};
@@ -231,13 +231,7 @@ fn chatgpt_wham_account(value: &Value) -> Option<LlmQuotaAccount> {
             let unlimited = credits.get("unlimited").and_then(Value::as_bool) == Some(true);
             let has_credits = credits.get("has_credits").and_then(Value::as_bool) == Some(true);
             (has_credits || unlimited).then(|| LlmQuotaCredits {
-                balance: credits
-                    .get("balance")
-                    .and_then(|balance| match balance {
-                        Value::String(text) => text.trim().parse::<f64>().ok(),
-                        other => other.as_f64(),
-                    })
-                    .filter(|balance| balance.is_finite() && *balance >= 0.0),
+                balance: credit_balance(credits.get("balance")),
                 currency: None,
                 unlimited,
             })

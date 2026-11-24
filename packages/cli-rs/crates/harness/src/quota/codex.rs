@@ -24,7 +24,7 @@ use serde_json::{Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use super::cache::KeyedProviderUsageCache;
-use super::windows::{normalized_quota_percent, rate_limit_window_label};
+use super::windows::{credit_balance, normalized_quota_percent, rate_limit_window_label};
 use crate::fields::{first_f64, first_reset_at};
 use crate::usage::{LlmQuotaAccount, LlmQuotaCredits, LlmQuotaUsage, LlmUsage, has_llm_usage};
 
@@ -182,13 +182,7 @@ fn codex_account(
         && !workspace_blocked;
     let allowed = flag(root, "ordinaryUsageAllowed").map(|allowed| allowed || credits_serve);
     let credits = (has_credits || unlimited).then(|| LlmQuotaCredits {
-        balance: credits_map
-            .and_then(|map| map.get("balance"))
-            .and_then(|balance| match balance {
-                Value::String(text) => text.trim().parse::<f64>().ok(),
-                other => other.as_f64(),
-            })
-            .filter(|balance| balance.is_finite() && *balance >= 0.0),
+        balance: credit_balance(credits_map.and_then(|map| map.get("balance"))),
         currency: None,
         unlimited,
     });
@@ -381,27 +375,20 @@ mod tests {
     /// A real `account/rateLimits/read` result (Codex 0.172.0, account id
     /// removed), with the 5-hour primary and weekly secondary windows.
     fn sample_response() -> Value {
+        let snapshot = serde_json::json!({
+            "limitId": "codex",
+            "primary": { "usedPercent": 3, "windowDurationMins": 300, "resetsAt": 1795559834 },
+            "secondary": { "usedPercent": 41, "windowDurationMins": 10080, "resetsAt": 1796146634 },
+            "credits": { "hasCredits": true, "unlimited": false, "balance": "137.5" },
+            "individualLimit": null,
+            "spendControlReached": false,
+            "planType": "plus",
+            "rateLimitReachedType": null
+        });
         serde_json::json!({
             "ordinaryUsageAllowed": true,
-            "rateLimits": {
-                "limitId": "codex",
-                "primary": { "usedPercent": 3, "windowDurationMins": 300, "resetsAt": 1795559834 },
-                "secondary": { "usedPercent": 41, "windowDurationMins": 10080, "resetsAt": 1796146634 },
-                "credits": { "hasCredits": true, "unlimited": false, "balance": "137.5" },
-                "individualLimit": null,
-                "spendControlReached": false,
-                "planType": "plus",
-                "rateLimitReachedType": null
-            },
-            "rateLimitsByLimitId": {
-                "codex": {
-                    "limitId": "codex",
-                    "primary": { "usedPercent": 3, "windowDurationMins": 300, "resetsAt": 1795559834 },
-                    "secondary": { "usedPercent": 41, "windowDurationMins": 10080, "resetsAt": 1796146634 },
-                    "credits": { "hasCredits": true, "unlimited": false, "balance": "137.5" },
-                    "spendControlReached": false
-                }
-            },
+            "rateLimits": snapshot.clone(),
+            "rateLimitsByLimitId": { "codex": snapshot },
             "rateLimitResetCredits": { "availableCount": 1, "credits": null },
             "rateLimitUpsell": null
         })
@@ -574,7 +561,6 @@ mod tests {
     #[cfg(unix)]
     mod unix_app_server_tests {
         use super::*;
-        use std::os::unix::fs::PermissionsExt;
 
         fn unique_temp_dir(name: &str) -> PathBuf {
             let nanos = std::time::SystemTime::now()
@@ -614,10 +600,7 @@ done
                 response = response,
             );
             let path = dir.join("codex");
-            std::fs::write(&path, script).expect("write fake codex");
-            let mut perms = std::fs::metadata(&path).expect("meta").permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&path, perms).expect("chmod");
+            crate::quota::write_test_executable(&path, &script);
             path
         }
 
@@ -760,12 +743,8 @@ done
         #[tokio::test]
         async fn unanswered_probe_times_out_and_stops_the_server() {
             let dir = unique_temp_dir("hang");
-            let script = "#!/bin/sh\nexec sleep 30\n";
             let program = dir.join("codex");
-            std::fs::write(&program, script).unwrap();
-            let mut perms = std::fs::metadata(&program).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&program, perms).unwrap();
+            crate::quota::write_test_executable(&program, "#!/bin/sh\nexec sleep 30\n");
 
             let started = std::time::Instant::now();
             assert!(

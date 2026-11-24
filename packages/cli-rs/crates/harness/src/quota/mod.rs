@@ -247,6 +247,14 @@ fn assert_reading_holds_nothing_of_the_login(
     }
 }
 
+/// Write `script` to `path` as an executable stand-in for a provider CLI.
+#[cfg(all(test, unix))]
+pub(crate) fn write_test_executable(path: &std::path::Path, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, script).expect("write test executable");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+}
+
 #[cfg(test)]
 fn assert_provider_window_labels(
     usage: LlmUsage,
