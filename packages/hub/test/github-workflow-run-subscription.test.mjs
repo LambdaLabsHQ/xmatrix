@@ -20,23 +20,19 @@ const runRoute = { relationId: "run-relation", installationId: "42", sourceRef: 
   connectionId: "connection-1", authorityRootUserId: "user-1", features: ["status"] };
 
 function harness(routes) {
-  const appended = [];
-  const woken = [];
-  const commands = [];
-  return {
-    appended, woken, commands,
-    dependencies: {
-      delegated: async () => true,
-      exposure: { channel: async () => ({ id: "channel-1", spaceId: "space-1", mode: "closed" }),
-        openParticipation: async () => false },
-      resolveRoutes: async (_env, installationId, sourceRefs, feature) => routes.filter((route) =>
-        installationId === "42" && sourceRefs.includes(route.sourceRef) && route.features.includes(feature)),
-      append: async (_env, channelId, input) => { appended.push({ channelId, ...input }); return { ok: true }; },
-      checkVerdict: async () => assert.fail("a workflow run reads no check verdict"),
-      wake: async (_env, input) => { woken.push(input); },
-      command: async (_env, kind, input) => { commands.push({ kind, input }); },
-    },
+  const h = { appended: [], woken: [], commands: [] };
+  h.dependencies = {
+    delegated: async () => true,
+    exposure: { channel: async () => ({ id: "channel-1", spaceId: "space-1", mode: "closed" }),
+      openParticipation: async () => false },
+    resolveRoutes: async (_env, installationId, sourceRefs, feature) => routes.filter((route) =>
+      installationId === "42" && sourceRefs.includes(route.sourceRef) && route.features.includes(feature)),
+    append: async (_env, channelId, input) => (h.appended.push({ channelId, ...input }), { ok: true }),
+    checkVerdict: async () => assert.fail("a workflow run reads no check verdict"),
+    wake: async (_env, input) => void h.woken.push(input),
+    command: async (_env, kind, input) => void h.commands.push({ kind, input }),
   };
+  return h;
 }
 
 function runEvent(action, run = {}) {

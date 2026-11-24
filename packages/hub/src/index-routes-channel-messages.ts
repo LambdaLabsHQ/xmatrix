@@ -558,51 +558,41 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
     };
     return channelMessageResponse(() => channelMessageCommand(c.env, channelId, "message-reaction", command));
   }));
-  /* An Agent subscribes a conversation to a pull request itself
-     (docs/design/conversation-activity.md §3.6), answered once it is decided. */
-  app.post("/api/channels/:channelId/pull-requests", (c) => jsonErrors(c, async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const channelId = c.req.param("channelId");
-    const actor = await messageMutationActor(c.env, authUser, channelId);
-    if (actor instanceof Response) return actor;
-    const run = actor.run;
-    if (!run) {
-      return c.json({ error: "Subscribing to a pull request requires an Agent Run", code: "agent_run_required" }, 403);
-    }
-    const body = (await c.req.json().catch(() => ({}))) as { url?: unknown };
-    try {
-      return c.json({ ok: true, ...await subscribeRunToPullRequest(c.env, {
-        spaceId: run.spaceId, channelId, ownerUserId: run.ownerUserId, url: body.url,
-        commandId: productCommandId(c.req.raw, "pull-request-subscribe"),
-      }) });
-    } catch (error) {
-      if (!(error instanceof ChannelActivityInvalid)) throw error;
-      return c.json({ error: "A pull request is named by its https://github.com/<owner>/<repo>/pull/<n> URL",
-        code: "invalid_pull_request_url" }, 400);
-    }
-  }));
-  /* An Agent follows a GitHub Actions workflow run it started instead of
-     polling it: the run's verdict arrives as a message when it completes. */
-  app.post("/api/channels/:channelId/workflow-runs", (c) => jsonErrors(c, async () => {
-    const authUser = await requireAuth(c.req.raw, c.env);
-    const channelId = c.req.param("channelId");
-    const actor = await messageMutationActor(c.env, authUser, channelId);
-    if (actor instanceof Response) return actor;
-    const run = actor.run;
-    if (!run) {
-      return c.json({ error: "Subscribing to a workflow run requires an Agent Run", code: "agent_run_required" }, 403);
-    }
-    const body = (await c.req.json().catch(() => ({}))) as { url?: unknown };
-    try {
-      return c.json({ ok: true, ...await subscribeRunToWorkflowRun(c.env, {
-        spaceId: run.spaceId, channelId, ownerUserId: run.ownerUserId, url: body.url,
-        commandId: productCommandId(c.req.raw, "workflow-run-subscribe"),
-      }) });
-    } catch (error) {
-      if (!(error instanceof WorkflowRunUrlInvalid)) throw error;
-      return c.json({ error: error.message, code: "invalid_workflow_run_url" }, 400);
-    }
-  }));
+  /* An Agent subscribes its conversation to a pull request
+     (docs/design/conversation-activity.md §3.6) or to a workflow run it
+     started, instead of polling GitHub; it is answered once that is decided. */
+  for (const subscription of [
+    { path: "pull-requests", subject: "a pull request", command: "pull-request-subscribe",
+      subscribe: subscribeRunToPullRequest, invalid: (error: unknown) => error instanceof ChannelActivityInvalid
+        ? { error: "A pull request is named by its https://github.com/<owner>/<repo>/pull/<n> URL",
+          code: "invalid_pull_request_url" } : undefined },
+    { path: "workflow-runs", subject: "a workflow run", command: "workflow-run-subscribe",
+      subscribe: subscribeRunToWorkflowRun, invalid: (error: unknown) => error instanceof WorkflowRunUrlInvalid
+        ? { error: error.message, code: "invalid_workflow_run_url" } : undefined },
+  ]) {
+    app.post(`/api/channels/:channelId/${subscription.path}`, (c) => jsonErrors(c, async () => {
+      const authUser = await requireAuth(c.req.raw, c.env);
+      const channelId = c.req.param("channelId");
+      const actor = await messageMutationActor(c.env, authUser, channelId);
+      if (actor instanceof Response) return actor;
+      const run = actor.run;
+      if (!run) {
+        return c.json({ error: `Subscribing to ${subscription.subject} requires an Agent Run`,
+          code: "agent_run_required" }, 403);
+      }
+      const body = (await c.req.json().catch(() => ({}))) as { url?: unknown };
+      try {
+        return c.json({ ok: true, ...await subscription.subscribe(c.env, {
+          spaceId: run.spaceId, channelId, ownerUserId: run.ownerUserId, url: body.url,
+          commandId: productCommandId(c.req.raw, subscription.command),
+        }) });
+      } catch (error) {
+        const invalid = subscription.invalid(error);
+        if (!invalid) throw error;
+        return c.json(invalid, 400);
+      }
+    }));
+  }
   app.patch("/api/channels/:channelId/messages/:messageId", (c) => jsonErrors(c, async () => {
     const mutation = await messageMutationContext(c);
     if (mutation instanceof Response) return mutation;
