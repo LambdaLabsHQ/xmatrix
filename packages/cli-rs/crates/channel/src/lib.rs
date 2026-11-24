@@ -1354,7 +1354,7 @@ pub fn persisted_daemon_agent_run_ancestor_pid() -> Option<u32> {
         // a provider may also strip `XMATRIX_*`. Membership in the wrapper's
         // kill-on-close Job survives both, so it decides when the chain
         // cannot; otherwise such a command fell back to the Owner's session
-        // and posted as the human (#1749).
+        // and posted as the human (#2051).
         process_parent_ids()
             .and_then(|parents| {
                 tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {

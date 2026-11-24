@@ -37,7 +37,7 @@ function systemNoticeAuthor(input: { ownerUserId: string; ownerEmail: string }) 
  * never adds another notice. A session another live process still holds fails
  * every later Run of that Instance the same way until the holder ends, so that
  * failure is stable per Instance, Channel and holder (the detail names it):
- * the Channel hears it once, not once per message (#1686). Returns the
+ * the Channel hears it once, not once per message (#2050). Returns the
  * Instance such a failure is keyed by.
  */
 function heldSessionInstanceId(input: MachineRunFailureNotice, code: string): string | undefined {

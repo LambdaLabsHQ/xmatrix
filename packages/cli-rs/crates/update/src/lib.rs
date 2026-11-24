@@ -3529,7 +3529,7 @@ mod tests {
         assert!(script.contains("if ($managedLauncher)"));
         assert!(script.contains("Move-ReplacingLockedFile"));
         // A daemon the watchdog trigger started mid-update is cleared before
-        // the task is started, and older tasks gain the watchdog (#1750).
+        // the task is started, and older tasks gain the watchdog (#2054).
         // The attempt happens before the task starts and before the committed
         // receipt, so a denied watchdog is not reported as all-clear.
         let clear = script

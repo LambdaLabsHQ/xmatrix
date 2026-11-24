@@ -1180,14 +1180,14 @@ fn codex_runtime_trace_payload_covers_historical_tool_item_types() {
 
 /* The daemon hands the wrapper the name the Hub bound the Run to, and the Hub
 compares it verbatim. The Hub accepts any display name, so a wrapper that
-folded a name it did not like into an ASCII slug (`牛马` became
+folded a name it did not like into an ASCII slug (`测试助手` became
 `xmatrix-agent`) made that Agent fail every handshake. */
 #[test]
 fn the_name_the_hub_bound_the_run_to_is_sent_verbatim() {
     let long = "名".repeat(26);
     for name in [
-        "牛马",
-        "高级工程师claude",
+        "测试助手",
+        "测试工程师claude",
         "My Agent",
         "emoji-🎉",
         "claude-Devs-MacBook-Pro.local",
@@ -1197,7 +1197,7 @@ fn the_name_the_hub_bound_the_run_to_is_sent_verbatim() {
         assert_eq!(super::build_agent_name_from(Some(name), "codex"), name);
     }
     // The Hub trims the display name it stores and the name it compares.
-    assert_eq!(super::build_agent_name_from(Some(" 牛马 "), "codex"), "牛马");
+    assert_eq!(super::build_agent_name_from(Some(" 测试助手 "), "codex"), "测试助手");
 }
 
 #[test]
