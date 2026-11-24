@@ -644,18 +644,10 @@ mod tests {
     #[cfg(unix)]
     mod fake_cli {
         use super::*;
-        use std::os::unix::fs::PermissionsExt;
 
         fn temp_dir(name: &str) -> PathBuf {
-            let dir = std::env::temp_dir().join(format!(
-                "xmatrix-claude-usage-{name}-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            std::fs::create_dir_all(&dir).unwrap();
-            dir
+            crate::quota::test_temp_dir("claude-usage", name)
         }
-        static NEXT: AtomicU64 = AtomicU64::new(0);
 
         /// A `claude` that prints `version`, logs every stdin line to
         /// `stdin.log`, and answers a `get_usage` with `report`.
@@ -677,8 +669,7 @@ done
                 log = log.display()
             );
             let path = dir.join("claude");
-            std::fs::write(&path, script).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            crate::quota::write_test_executable(&path, &script);
             path
         }
 
@@ -729,37 +720,23 @@ done
         #[test]
         fn a_read_opens_no_claude_credential() {
             let dir = temp_dir("no-credentials");
-            let claude_home = dir.join(".claude");
-            std::fs::create_dir_all(&claude_home).unwrap();
-            for file in [
-                claude_home.join(".credentials.json"),
-                dir.join(".claude.json"),
-            ] {
-                let made = std::process::Command::new("mkfifo")
-                    .arg(&file)
-                    .status()
-                    .unwrap();
-                assert!(made.success());
-            }
             let program = fake_claude(&dir, "2.1.331", &live_get_usage_report());
-            let (done, finished) = std::sync::mpsc::channel();
             let home = dir.clone();
-            std::thread::spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
-                let report = runtime.block_on(ask_claude_program(
-                    &program,
-                    ClaudeLogin::DefaultLogin,
-                    Some(&home),
-                    Duration::from_secs(10),
-                ));
-                let _ = done.send(report);
-            });
-            let report = finished
-                .recv_timeout(Duration::from_secs(20))
-                .expect("the read returned without opening a credential");
+            let report = crate::quota::read_beside_fifos(
+                &[
+                    dir.join(".claude").join(".credentials.json"),
+                    dir.join(".claude.json"),
+                ],
+                async move {
+                    ask_claude_program(
+                        &program,
+                        ClaudeLogin::DefaultLogin,
+                        Some(&home),
+                        Duration::from_secs(10),
+                    )
+                    .await
+                },
+            );
             assert!(report.is_some());
             let _ = std::fs::remove_dir_all(&dir);
         }

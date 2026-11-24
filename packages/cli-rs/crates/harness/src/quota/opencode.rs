@@ -425,19 +425,9 @@ mod tests {
     #[cfg(unix)]
     mod fake_cli {
         use super::*;
-        use std::os::unix::fs::PermissionsExt;
 
         fn temp_dir(name: &str) -> PathBuf {
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
-            let dir = std::env::temp_dir().join(format!(
-                "xmatrix-opencode-usage-{name}-{}-{nanos}",
-                std::process::id()
-            ));
-            std::fs::create_dir_all(&dir).unwrap();
-            dir
+            crate::quota::test_temp_dir("opencode-usage", name)
         }
 
         /// An `opencode` that prints `version` and, for `serve`, the
@@ -457,8 +447,7 @@ exit 2
                 marker = marker.display()
             );
             let path = dir.join("opencode");
-            std::fs::write(&path, script).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            crate::quota::write_test_executable(&path, &script);
             path
         }
 
@@ -516,30 +505,16 @@ exit 2
         #[test]
         fn a_read_opens_no_opencode_credential() {
             let dir = temp_dir("no-credentials");
-            let data = dir.join(".local").join("share").join("opencode");
-            std::fs::create_dir_all(&data).unwrap();
-            let made = std::process::Command::new("mkfifo")
-                .arg(data.join("auth.json"))
-                .status()
-                .unwrap();
-            assert!(made.success());
             let program = fake_opencode(&dir, "2.4.1", 9);
-            let (done, finished) = std::sync::mpsc::channel();
             let home = dir.clone();
-            std::thread::spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
-                let _ = done.send(runtime.block_on(ask_opencode_serve(
-                    &program,
-                    Some(&home),
-                    Duration::from_secs(5),
-                )));
-            });
-            finished
-                .recv_timeout(Duration::from_secs(20))
-                .expect("the read returned without opening a credential");
+            crate::quota::read_beside_fifos(
+                &[dir
+                    .join(".local")
+                    .join("share")
+                    .join("opencode")
+                    .join("auth.json")],
+                async move { ask_opencode_serve(&program, Some(&home), Duration::from_secs(5)).await },
+            );
             let _ = std::fs::remove_dir_all(&dir);
         }
     }

@@ -898,16 +898,7 @@ mod tests {
         use super::*;
 
         fn unique_temp_dir(name: &str) -> PathBuf {
-            let nanos = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos();
-            let dir = std::env::temp_dir().join(format!(
-                "xmatrix-agy-quota-{name}-{}-{nanos}",
-                std::process::id()
-            ));
-            std::fs::create_dir_all(&dir).expect("temp dir");
-            dir
+            crate::quota::test_temp_dir("agy-quota", name)
         }
 
         fn write_fake_agy(dir: &Path, script: &str) -> PathBuf {

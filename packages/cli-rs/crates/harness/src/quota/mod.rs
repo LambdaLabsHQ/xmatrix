@@ -255,6 +255,49 @@ pub(crate) fn write_test_executable(path: &std::path::Path, script: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
 }
 
+/// A fresh directory under the system temp dir, unique to this test run.
+#[cfg(test)]
+pub(crate) fn test_temp_dir(prefix: &str, name: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "xmatrix-{prefix}-{name}-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
+}
+
+/// Make each of `paths` a FIFO, then run `read` on a thread of its own and
+/// return its answer. Opening a FIFO for reading blocks until a writer
+/// appears, so a `read` that opened one of them never returns and this fails.
+#[cfg(all(test, unix))]
+pub(crate) fn read_beside_fifos<T: Send + 'static>(
+    paths: &[PathBuf],
+    read: impl std::future::Future<Output = T> + Send + 'static,
+) -> T {
+    for path in paths {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let made = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .unwrap();
+        assert!(made.success());
+    }
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _ = done.send(runtime.block_on(read));
+    });
+    finished
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("the read returned without opening a credential")
+}
+
 #[cfg(test)]
 fn assert_provider_window_labels(
     usage: LlmUsage,
