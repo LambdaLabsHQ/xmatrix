@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: channel history names each attachment the way commands take it
+
+`@x:publish_video` and a program's `X.prepareVideo` take a Channel video as `<message id>/<attachment id>`, but `xmatrix channel history` printed an attachment's id only when it had no local copy: once the CLI had downloaded the file into its cache, the line showed the local path and nothing else, so an Agent that had just sent the video could not name it. Every attachment with an id now carries a `ref: <message id>/<attachment id>` line. CLI only. Recovery is a CI-validated CLI release reverting this change.
+
 ## Unreleased: a handoff that took over still shows the successor its author wrote
 
 A handoff written with conditions, such as `@grok:1:handoff:@model:claude-fable-5-2`, showed the written model on its card only while it was in flight. Once the successor's record arrived the card redrew the successor as its bare name (`@claude · Took over`), so the model the author asked for and the parameters xMatrix picked disappeared from the conversation. The recorded card now reads the stored mention back and keeps drawing the successor as written, each condition marked, followed by the picks of the successor's launch, the same way the in-flight card does. Web only. Recovery is a CI-validated beta reverting this change.
