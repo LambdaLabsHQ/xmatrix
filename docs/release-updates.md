@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: a beta train ships without waiting for its CodeQL scan
+
+Every release train waited for its CodeQL analysis to finish before it
+dispatched the release, although the analysis only files code scanning alerts
+and never decides whether the train ships. On a Web beta the JavaScript and
+TypeScript server half took about three minutes, longer than the gates beside
+it (about one and a half), so it set the pace of the train. A beta train now
+runs the same analysis as `codeql-beta`, which no job needs, and dispatches
+its release as soon as its gates pass; alerts still upload on every train. A
+stable train is unchanged and still waits for its scan. The Production
+Release Request run still ends only when the scan does, so the next train
+starts no earlier than before. CI only; no product, schema or client change.
+Recovery is a CI-validated revert that makes `gates` need the beta scan again.
+
 ## Unreleased: a message sent to a working Antigravity joins its turn instead of cancelling it
 
 Claude's turns took a Channel message that arrived mid-turn as more input to
