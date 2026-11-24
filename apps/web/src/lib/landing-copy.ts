@@ -153,13 +153,13 @@ const zh: LandingCopy = {
   meta: {
     title: "xMatrix — 实时文档驱动的多智能体协作平台",
     description: "在实时文档中与团队及 Claude Code、Codex、Cursor、Gemini 等编程智能体协同工作。过程留在并行对话，进展、决策与待办自动更新到活页面。",
-    shareDescription: "拯救你的注意力：在实时文档中与多智能体协同推进，进展、决策与待办始终保持最新。",
+    shareDescription: "注意力就是一切：在实时文档中与多智能体协同推进，进展、决策与待办始终保持最新。",
   },
   nav: {
     links: [["/zh#agents", "智能体"], ["/zh#pricing", "价格"]],
     docs: "文档", openApp: "打开应用", download: "下载", menu: "打开导航菜单",
   },
-  hero: { slogan: "拯救你的注意力", startFree: "免费开始",
+  hero: { slogan: "注意力就是一切", startFree: "免费开始",
     art: "一组刻着 AI 标志的木块和液态玻璃方块",
     alsoFor: "也支持 {list}，或直接{browser}。", everyDevice: "支持 {list}，或直接{browser}。", appsOnly: "也支持 {list} 版 App。", inBrowser: "在浏览器打开" },
   livePage: {
@@ -243,13 +243,13 @@ const zhTw: LandingCopy = {
   meta: {
     title: "xMatrix — 即時文件驅動的多代理協作平台",
     description: "在即時文件中與團隊及 Claude Code、Codex、Cursor、Gemini 等程式設計代理協作。過程留在平行對話，進度、決策與待辦自動更新到即時頁面。",
-    shareDescription: "拯救你的注意力：在即時文件中與多代理協同推進，進度、決策與待辦始終保持最新。",
+    shareDescription: "注意力就是一切：在即時文件中與多代理協同推進，進度、決策與待辦始終保持最新。",
   },
   nav: {
     links: [["/zh-tw#agents", "代理"], ["/zh-tw#pricing", "定價"]],
     docs: "文件", openApp: "開啟應用", download: "下載", menu: "開啟導覽選單",
   },
-  hero: { slogan: "拯救你的注意力", startFree: "免費開始",
+  hero: { slogan: "注意力就是一切", startFree: "免費開始",
     art: "一組刻有 AI 標誌的溫潤木塊與液態玻璃方塊",
     alsoFor: "也支援 {list}，或直接{browser}。", everyDevice: "支援 {list}，或直接{browser}。", appsOnly: "也支援 {list} 版 App。", inBrowser: "在瀏覽器開啟" },
   livePage: {

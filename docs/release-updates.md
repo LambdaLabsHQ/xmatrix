@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: Chinese homepage slogan updated to 「注意力就是一切」
+
+Updates the Simplified and Traditional Chinese homepage slogan (`hero.slogan`, shared by the hero and closing plank) and OpenGraph/Twitter `shareDescription` in `apps/web/src/lib/landing-copy.ts` from 「拯救你的注意力」 to 「注意力就是一切」. Web only; recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a page of the site at xmatrix.page no longer asks the Hub for a session
 
 Every page of the site mounts the app's auth provider, which reads the session
