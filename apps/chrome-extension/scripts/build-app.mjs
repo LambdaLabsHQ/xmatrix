@@ -226,16 +226,18 @@ const PAGE = `<!doctype html>
   <link rel="modulepreload" href="main.js">
   <script src="document.js"></script>
   <style>
-    /* The side panel composer is a full-bleed warm paper writing dock flush to the bottom edge
-       (Daniel 2026-11-24: occupies the full bottom area instead of a floating capsule or inset box,
-       with warm paper contrast and a dedicated two-row writing + toolbar layout so it unmistakably
-       reads as an input box; the on-page selection box keeps its floating glass capsule in ask.html).
+    /* The side panel composer is a borderless, divider-free full-bleed warm paper writing dock
+       flush to the bottom edge (Daniel 2026-11-24: occupies the full bottom area with zero borders
+       or dividing lines — pure warm paper surface contrast against the white timeline above, plus a
+       dedicated two-row writing + toolbar layout so it reads unmistakably as an input area; the
+       on-page selection box keeps its floating glass capsule in ask.html).
        #xmatrix-side-panel guarantees higher specificity than globals.css's glass-surface recipes. */
     #xmatrix-side-panel .xmatrix-app-shell .app-composer {
       position: relative !important;
       inset: auto !important;
       padding: 0 !important;
       background: transparent !important;
+      border: 0 !important;
       pointer-events: auto !important;
     }
     #xmatrix-side-panel .xmatrix-app-shell .app-composer-shell {
@@ -247,23 +249,22 @@ const PAGE = `<!doctype html>
       --app-liquid-edge-meniscus: 0 0 transparent !important;
       --app-glass-edge: none !important;
       --app-liquid-backdrop-filter: none !important;
-      --app-liquid-surface-bg: oklch(0.968 0.008 82) !important;
+      --app-liquid-surface-bg: oklch(0.958 0.011 80) !important;
       border: 0 !important;
-      border-top: 1px solid oklch(0.83 0.016 78) !important;
       border-radius: 0 !important;
-      background: oklch(0.968 0.008 82) !important;
-      background-color: oklch(0.968 0.008 82) !important;
+      background: oklch(0.958 0.011 80) !important;
+      background-color: oklch(0.958 0.011 80) !important;
       background-image: none !important;
-      box-shadow: 0 -2px 10px oklch(0.24 0.02 70 / 0.04) !important;
+      box-shadow: none !important;
       -webkit-backdrop-filter: none !important;
       backdrop-filter: none !important;
-      transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease !important;
+      transition: background-color 140ms ease !important;
     }
     #xmatrix-side-panel .xmatrix-app-shell .app-composer-box:not(.app-agent-work-card):focus-within {
-      border-top-color: oklch(0.56 0.045 65) !important;
-      background: oklch(0.978 0.006 82) !important;
-      background-color: oklch(0.978 0.006 82) !important;
-      box-shadow: inset 0 1px 0 oklch(0.56 0.045 65 / 0.2), 0 -4px 14px oklch(0.24 0.02 70 / 0.05) !important;
+      border: 0 !important;
+      background: oklch(0.948 0.013 79) !important;
+      background-color: oklch(0.948 0.013 79) !important;
+      box-shadow: none !important;
     }
     #xmatrix-side-panel .xmatrix-app-shell .app-composer-box::before,
     #xmatrix-side-panel .xmatrix-app-shell .app-composer-box::after {
@@ -274,9 +275,15 @@ const PAGE = `<!doctype html>
       padding: 0.625rem 0.75rem 0 !important;
     }
     #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-browser-page {
-      background: #ffffff !important;
-      border: 1px solid oklch(0.88 0.012 78) !important;
+      background: oklch(1 0 0 / 0.78) !important;
+      border: 0 !important;
+      box-shadow: none !important;
       border-radius: 8px !important;
+    }
+    #xmatrix-side-panel .xmatrix-app-shell .rich-message :is(pre, code) {
+      border: 0 !important;
+      box-shadow: none !important;
+      background: oklch(0.958 0.006 82) !important;
     }
     #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-input-row {
       display: flex !important;
