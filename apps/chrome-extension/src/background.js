@@ -135,8 +135,20 @@ async function takePassages() {
 }
 
 /** Opens the panel beside the tab. Called first in a click handler: Chrome allows it only in a user gesture. */
+/**
+ * One side panel per tab (Daniel 2026-11-24: the panel belongs to its page; each tab is its own thread). A tab's
+ * panel shows that tab's page and conversation; switching to a tab without one hides the panel, and switching back
+ * brings that tab's own back. The panel is turned on for a tab when it is first opened there.
+ */
+function enablePanel(tabId) {
+  return chrome.sidePanel.setOptions({ tabId, path: `src/sidepanel.html?tab=${tabId}`, enabled: true });
+}
+
+/** Opens a tab's own panel. Not awaited between the two: Chrome opens a panel only within the person's gesture. */
 function openPanel(tab) {
-  if (tab?.windowId !== undefined) chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => undefined);
+  if (tab?.id === undefined) return;
+  enablePanel(tab.id).catch(() => undefined);
+  chrome.sidePanel.open({ tabId: tab.id }).catch(() => undefined);
 }
 
 // ---- Quick ask: a question about a passage, started straight through the Hub.
@@ -164,7 +176,9 @@ async function setPendingAsk(tab, text, page = {}) {
   const passage = pagePassage({ text, title: tab.title ?? page.title, url: tab.url ?? page.url, target: "new" });
   if (!passage || tab.id === undefined) throw new Error("xMatrix can only ask about web pages.");
   await chrome.storage.session.set({ [`ask:${tab.id}`]: {
-    text: passage.text, label: passage.label || new URL(passage.href).host, href: passage.href, windowId: tab.windowId ?? null } });
+    text: passage.text, label: passage.label || new URL(passage.href).host, href: passage.href } });
+  // The box opens this tab's panel when it sends: it has to be turned on for the tab before then.
+  await enablePanel(tab.id).catch(() => undefined);
 }
 
 async function pendingAsk(tabId) {
@@ -183,7 +197,7 @@ async function askContext(tab) {
   if (!session?.user) throw Object.assign(new Error("Sign in to xMatrix in the side panel first."), { code: "signed_out" });
   const { lastSpace } = await chrome.storage.local.get("lastSpace");
   return { token: session.token, user: session.user, spaceId: lastSpace?.id ?? null,
-    passage: { text: passage.text, label: passage.label, href: passage.href }, windowId: passage.windowId };
+    passage: { text: passage.text, label: passage.label, href: passage.href }, tabId: tab.id };
 }
 
 /**
@@ -241,10 +255,10 @@ async function askSend(tab, { body, invocationSelections }) {
     await chrome.storage.session.set({ [`askThread:${tab.id}`]: { page: pageKey(passage.href), spaceId: space.id,
       channelId: channel.id, snapshot: channel.snapshot ?? null } });
     await chrome.storage.local.set({ lastSpace: { id: space.id, name: space.name } });
-    // For the side panel of the window the question was asked in: another window's panel (or an extension page
-    // open in a tab) must not take it. The conversation goes as the Hub answered it: the panel's app may not list
-    // it yet (it lists a window of a large catalog, and a new conversation reaches it only with the next refresh).
-    await chrome.storage.session.set({ openPath: { windowId: tab.windowId ?? null, channel: channel.snapshot ?? null,
+    // For the panel of the tab the question was asked in, and no other. The conversation goes as the Hub answered
+    // it: the panel's app may not list it yet (it lists a window of a large catalog, and a new conversation reaches
+    // it only with the next refresh).
+    await chrome.storage.session.set({ [`openPath:${tab.id}`]: { channel: channel.snapshot ?? null,
       path: `/app/${encodeURIComponent(space.id)}/channels/${encodeURIComponent(channel.id)}`, at: Date.now(),
       // The question, shown in the panel as sending while it is on its way (the App's pending row).
       pending: { clientMessageId, body: text, metadata } } });
@@ -390,11 +404,13 @@ const panelHandlers = {
   async quickSelectAsked() {
     await chrome.storage.local.set({ quickSelectAsked: true });
   },
-  async takeOpenPath({ windowId }) {
-    const { openPath } = await chrome.storage.session.get("openPath");
+  /** The conversation the extension just started for this tab's panel, once. */
+  async takeOpenPath({ tabId }) {
+    if (!Number.isInteger(tabId)) return null;
+    const key = `openPath:${tabId}`;
+    const { [key]: openPath } = await chrome.storage.session.get(key);
     if (!openPath || Date.now() - openPath.at >= 60_000) return null;
-    if (openPath.windowId !== null && windowId !== undefined && openPath.windowId !== windowId) return null;
-    await chrome.storage.session.remove("openPath");
+    await chrome.storage.session.remove(key);
     return { path: openPath.path, channel: openPath.channel ?? null, pending: openPath.pending ?? null };
   },
   queuePassage: ({ passage }) => queuePassage(pagePassage(passage ?? {})),
@@ -462,13 +478,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   }
 });
 
+// The toolbar button opens the panel of the tab it is clicked on.
+chrome.action.onClicked.addListener((tab) => openPanel(tab));
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SIGN_IN_ALARM) pollSignIn();
 });
 
 // A closed tab's passage and conversation go with it.
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove([`ask:${tabId}`, `askThread:${tabId}`]).catch(() => undefined);
+  chrome.storage.session.remove([`ask:${tabId}`, `askThread:${tabId}`, `openPath:${tabId}`]).catch(() => undefined);
 });
 
 chrome.permissions.onAdded.addListener(() => {
@@ -477,7 +496,9 @@ chrome.permissions.onAdded.addListener(() => {
 chrome.permissions.onRemoved.addListener(() => syncSelectionScript());
 
 function start() {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
+  // No panel for the whole browser: each tab's own, opened from the toolbar button there (chrome.action.onClicked).
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => undefined);
+  chrome.sidePanel.setOptions({ enabled: false }).catch(() => undefined);
   chrome.alarms.clear("needs-you").catch(() => undefined);
   chrome.action.setBadgeText({ text: "" }).catch(() => undefined);
   syncSelectionScript().catch(() => undefined);

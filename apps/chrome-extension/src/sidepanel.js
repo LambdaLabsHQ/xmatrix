@@ -44,12 +44,11 @@ function postToApp(message) {
   appWindow()?.postMessage({ protocol: PROTOCOL, ...message }, APP_ORIGIN);
 }
 
-/** The window this panel is beside: a conversation started from a page in it opens here. */
-let windowIdPromise = null;
-function panelWindow() {
-  windowIdPromise ??= chrome.windows.getCurrent().then((window) => window.id).catch(() => undefined);
-  return windowIdPromise;
-}
+/**
+ * The tab this panel belongs to (Daniel 2026-11-24: one panel per page, each its own thread): background.js opens
+ * it as `sidepanel.html?tab=<id>`. It shows that tab's page and conversation, whichever tab is in front.
+ */
+const PANEL_TAB = Number(new URLSearchParams(location.search).get("tab")) || null;
 
 /** A question still on its way to the conversation the app opened at, for the app to show as sending. */
 let pendingOnOpen = null;
@@ -60,7 +59,7 @@ async function openApp() {
   if (opening || $("app").getAttribute("src")) return;
   opening = true;
   appReady = false;
-  const opened = await ask("takeOpenPath", { windowId: await panelWindow() }).catch(() => null);
+  const opened = await ask("takeOpenPath", { tabId: PANEL_TAB }).catch(() => null);
   const path = opened?.path;
   // The app opens at the conversation; the question on its way is shown there once the app is ready.
   pendingOnOpen = opened?.pending ? opened : null;
@@ -72,7 +71,7 @@ async function openApp() {
 async function showOpenPath() {
   if (!$("app").getAttribute("src")) return openApp();
   if (!appReady) return;
-  const opened = await ask("takeOpenPath", { windowId: await panelWindow() });
+  const opened = await ask("takeOpenPath", { tabId: PANEL_TAB });
   if (opened) postToApp({ type: "open", path: opened.path, ...(opened.channel ? { channel: opened.channel } : {}),
     ...(opened.pending ? { pending: opened.pending } : {}) });
 }
@@ -134,16 +133,18 @@ window.addEventListener("message", async (event) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "session" && changes.passages?.newValue?.length) deliverPassages().catch(() => undefined);
-  if (area === "session" && changes.openPath?.newValue && !$("view-app").hidden) showOpenPath().catch(() => undefined);
+  if (area === "session" && changes[`openPath:${PANEL_TAB}`]?.newValue && !$("view-app").hidden) showOpenPath().catch(() => undefined);
   if (area === "local" && changes.recentThreads) showRecent().catch(() => undefined);
   // A question asked on the page gave it a conversation: the bar knows it now.
-  if (area === "session" && Object.keys(changes).some((key) => key.startsWith("askThread:"))) showPage().catch(() => undefined);
+  if (area === "session" && changes[`askThread:${PANEL_TAB}`]) showPage().catch(() => undefined);
   if ((area === "local" && changes.session) || (area === "session" && changes.signIn)) render().catch(() => undefined);
 });
 
 // ---- The page beside the panel. The panel is its companion: the conversation started from it, or one about it.
 
+/** This panel's tab (named activeTab for what it was: the panel once followed whichever tab was in front). */
 async function activeTab() {
+  if (PANEL_TAB) return chrome.tabs.get(PANEL_TAB).catch(() => null);
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   return tab ?? null;
 }
@@ -253,7 +254,7 @@ function approve(requestId, agentName, tab, href) {
 async function readForAgent({ channelId, target, agentName, requestId }) {
   // The page beside this panel: the person shows it by chatting here (Daniel 2026-11-23: no prompt for it).
   if (target === "current") {
-    const [tab] = await chrome.tabs.query({ active: true, windowId: await panelWindow() }).catch(() => []);
+    const tab = await activeTab();
     const href = capturableUrl(tab?.url ?? "");
     if (!tab?.id || !href) return { refusal: "no-page" };
     const text = await readTab(tab.id);
@@ -305,10 +306,11 @@ $("quick-select-skip").addEventListener("click", async () => {
   await render();
 });
 
-chrome.tabs.onActivated.addListener(() => showPage().catch(() => undefined));
-chrome.tabs.onUpdated.addListener((_id, change, tab) => {
-  if (tab.active && (change.title || change.url)) showPage().catch(() => undefined);
+// The panel follows its own tab to each page it shows; another tab in front changes nothing here.
+chrome.tabs.onUpdated.addListener((id, change, tab) => {
+  if ((PANEL_TAB ? id === PANEL_TAB : tab.active) && (change.title || change.url)) showPage().catch(() => undefined);
 });
+if (!PANEL_TAB) chrome.tabs.onActivated.addListener(() => showPage().catch(() => undefined));
 
 // ---- Signing in.
 

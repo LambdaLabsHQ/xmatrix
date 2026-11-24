@@ -45,14 +45,15 @@ type AskContext = {
   user: AuthUser;
   spaceId: string | null;
   passage: { text: string; label: string; href: string };
-  windowId: number | null;
+  /** The tab the box is on: its panel is the one that opens. */
+  tabId: number | null;
   /** The selection it was read for: a new one seeds the composer's draft afresh. */
   round?: number;
 };
 
 type Extension = {
   runtime: { sendMessage: (message: unknown) => Promise<{ ok: boolean; value?: unknown; error?: string; code?: string } | undefined> };
-  sidePanel?: { open: (options: { windowId: number }) => Promise<void> };
+  sidePanel?: { open: (options: { tabId: number }) => Promise<void> };
 };
 const extension = (globalThis as unknown as { chrome: Extension }).chrome;
 
@@ -228,7 +229,8 @@ function Surface() {
     sending.current = true;
     const { body, invocationSelections } = await askMessage(context.passage, question, picked, space?.id ?? null);
     // The panel opens on the new conversation; Chrome lets it open only shortly after this keystroke or click.
-    if (context.windowId !== null) void extension.sidePanel?.open({ windowId: context.windowId }).catch(() => undefined);
+    // This tab's own panel (one per page); background.js turned it on for the tab when the passage was picked.
+    if (typeof context.tabId === "number") void extension.sidePanel?.open({ tabId: context.tabId }).catch(() => undefined);
     try {
       await ask("askSend", { body, invocationSelections });
       tellFrame({ type: "close" });
