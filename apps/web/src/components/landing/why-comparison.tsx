@@ -6,13 +6,14 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useNear } from "@/components/landing/use-media";
 import { SegmentedTabs, type SegmentedTabItem } from "@/components/ui/segmented-tabs";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 
 const WhyXMatrixDemo = dynamic(
   () => import("@/components/landing/why-xmatrix-demos").then((m) => m.WhyXMatrixDemo),
   {
     ssr: false,
     loading: () => (
-      <div className="h-full w-full rounded-[12px] bg-[var(--site-paper)]/85 shadow-[0_0_0_0.5px_oklch(0.25_0.03_60/0.12)]" />
+      <div className="h-full w-full rounded-[14px] bg-[var(--site-paper)] shadow-[0_18px_44px_-18px_oklch(0.24_0.03_58/0.2)]" />
     ),
   },
 );
@@ -22,7 +23,7 @@ const WhyCompetitorDemo = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-full w-full rounded-[12px] bg-[color-mix(in_oklch,var(--site-ink)_6%,var(--background))]" />
+      <div className="h-full w-full rounded-[14px] bg-[color-mix(in_oklch,var(--site-ink)_4.2%,var(--background))]" />
     ),
   },
 );
@@ -33,9 +34,9 @@ const STEPS_PER_TOPIC = 4;
 type Row = readonly [string, string, string];
 
 /**
- * Interactive 6-topic comparison stage: one spacious topic at a time,
- * xMatrix's real product interface beside an authentic developer desk of
- * terminals, tabs, and notifications — both ticking on one synchronized clock.
+ * Interactive 6-topic comparison stage: borderless warm-paper layout with
+ * subtle walnut wood accents (a compact xMatrix plaque pill and slender
+ * sheet spine) — never heavy borders or a large wood slab.
  */
 export function WhyComparison({
   title,
@@ -106,24 +107,24 @@ export function WhyComparison({
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {/* Shared SegmentedTabs tuned for the site's warm paper: pill track on mobile, 10px/7px concentric on desktop */}
+      {/* Borderless shared SegmentedTabs on warm paper */}
       <div className="flex items-center justify-between gap-3">
         <SegmentedTabs
           items={tabItems}
           value={String(active)}
           onChange={(key) => selectTopic(Number(key))}
           label={title}
-          className="min-w-0 [--app-action-edge:inset_0_0_0_0.5px_oklch(0.32_0.02_58/0.1)] [--app-action-fill:color-mix(in_oklch,var(--site-ink)_4.5%,var(--background))] [--app-action-fill-hover:color-mix(in_oklch,var(--site-ink)_3%,var(--site-paper))] [--app-action-fill-primary:var(--site-paper)] md:flex-wrap"
-          tabClassName="cursor-pointer font-semibold max-md:px-3.5 max-md:text-[13px] aria-selected:shadow-[0_1px_3px_oklch(0.25_0.03_60/0.1),0_0_0_0.5px_oklch(0.25_0.03_60/0.08)]"
+          className="min-w-0 [--app-action-edge:none] [--app-action-fill:color-mix(in_oklch,var(--site-ink)_4%,var(--background))] [--app-action-fill-hover:color-mix(in_oklch,var(--site-ink)_2.5%,var(--site-paper))] [--app-action-fill-primary:var(--site-paper)] md:flex-wrap"
+          tabClassName="cursor-pointer font-semibold max-md:px-3.5 max-md:text-[13px] aria-selected:shadow-[0_2px_6px_-2px_oklch(0.25_0.03_60/0.14)]"
         />
 
-        {/* Quiet prev/next stepper on desktop & tablet */}
+        {/* Quiet borderless prev/next stepper */}
         <div className="hidden shrink-0 items-center gap-1.5 sm:inline-flex">
           <button
             type="button"
             aria-label="Previous comparison"
             onClick={() => selectTopic(active - 1)}
-            className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-[color-mix(in_oklch,var(--site-ink)_4.5%,var(--background))] text-[var(--site-ink-muted)] transition-colors hover:bg-[color-mix(in_oklch,var(--site-ink)_8%,var(--background))] hover:text-[var(--site-ink)]"
+            className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-[color-mix(in_oklch,var(--site-ink)_4%,var(--background))] text-[var(--site-ink-muted)] transition-colors hover:bg-[color-mix(in_oklch,var(--site-ink)_8%,var(--background))] hover:text-[var(--site-ink)]"
           >
             <ChevronLeft className="size-4" />
           </button>
@@ -134,33 +135,38 @@ export function WhyComparison({
             type="button"
             aria-label="Next comparison"
             onClick={() => selectTopic(active + 1)}
-            className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-[color-mix(in_oklch,var(--site-ink)_4.5%,var(--background))] text-[var(--site-ink-muted)] transition-colors hover:bg-[color-mix(in_oklch,var(--site-ink)_8%,var(--background))] hover:text-[var(--site-ink)]"
+            className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-[color-mix(in_oklch,var(--site-ink)_4%,var(--background))] text-[var(--site-ink-muted)] transition-colors hover:bg-[color-mix(in_oklch,var(--site-ink)_8%,var(--background))] hover:text-[var(--site-ink)]"
           >
             <ChevronRight className="size-4" />
           </button>
         </div>
       </div>
 
-      {/* Active topic comparison stage: two generous archival paper trays side by side */}
+      {/* Borderless side-by-side comparison resting directly on the homepage's warm paper */}
       <div
         id={`why-panel-${active}`}
         role="tabpanel"
         aria-label={topic}
-        className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5"
+        className="mt-8 grid grid-cols-1 gap-10 lg:grid-cols-2 lg:gap-8"
       >
-        {/* Left tray: xMatrix on warm archival paper */}
-        <figure className="m-0 flex min-w-0 flex-col gap-4 rounded-[20px] bg-[color-mix(in_oklch,var(--app-wood-panel-base)_18%,var(--background))] p-4 shadow-[inset_0_0_0_1px_oklch(0.55_0.055_66/0.16)] sm:p-5">
-          <div className="flex h-6 items-center justify-between gap-2 px-0.5">
-            <span className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em] text-[var(--site-ink)]">
-              <Image
-                src="/brand/xmatrix-icon-transparent-128.png"
-                alt=""
-                width={20}
-                height={20}
-                className="size-5 shrink-0"
-              />
-              xMatrix
-            </span>
+        {/* Left column: xMatrix accented by a compact walnut plaque + slender walnut sheet spine */}
+        <figure className="m-0 flex min-w-0 flex-col gap-4">
+          <div className="flex h-8 items-center justify-between gap-2">
+            <WoodPanel
+              as="span"
+              className="site-wood-pill inline-flex h-8 items-center gap-2 px-3 text-[13.5px] leading-none shadow-[inset_0_1px_0_oklch(1_0.02_90/0.42),0_4px_12px_-6px_oklch(0.18_0.04_55/0.42)]!"
+            >
+              <span className="inline-flex size-[18px] items-center justify-center rounded-full bg-[oklch(0.99_0.008_88/0.78)]">
+                <Image
+                  src="/brand/xmatrix-icon-transparent-128.png"
+                  alt=""
+                  width={13}
+                  height={13}
+                  className="size-[13px] shrink-0"
+                />
+              </span>
+              <span>xMatrix</span>
+            </WoodPanel>
             <span className="text-xs font-medium text-[var(--site-ink-muted)] lg:hidden">{topic}</span>
           </div>
 
@@ -172,18 +178,18 @@ export function WhyComparison({
             {near ? (
               <WhyXMatrixDemo topic={active} step={step} />
             ) : (
-              <div className="h-full w-full rounded-[12px] bg-[var(--site-paper)]/80 shadow-[0_0_0_0.5px_oklch(0.25_0.03_60/0.1)]" />
+              <div className="h-full w-full rounded-[14px] bg-[var(--site-paper)] shadow-[0_18px_44px_-18px_oklch(0.24_0.03_58/0.2)]" />
             )}
           </div>
 
-          <figcaption className="min-h-[2.75rem] px-0.5 text-[15px] leading-[1.55] font-medium text-[var(--site-ink)]">
+          <figcaption className="min-h-[2.75rem] text-[15.5px] leading-[1.55] font-medium text-[var(--site-ink)]">
             {ours}
           </figcaption>
         </figure>
 
-        {/* Right tray: Juggling tabs & terminals on cool muted paper */}
-        <figure className="m-0 flex min-w-0 flex-col gap-4 rounded-[20px] bg-[color-mix(in_oklch,var(--site-ink)_3.8%,var(--background))] p-4 shadow-[inset_0_0_0_1px_oklch(0.28_0.015_60/0.08)] sm:p-5">
-          <div className="flex h-6 items-center justify-between gap-2 px-0.5">
+        {/* Right column: Juggling tabs & terminals, quiet and borderless */}
+        <figure className="m-0 flex min-w-0 flex-col gap-4">
+          <div className="flex h-8 items-center justify-between gap-2">
             <span className="truncate text-[15px] font-medium tracking-[-0.01em] text-[var(--site-ink-muted)]">
               {others}
             </span>
@@ -200,11 +206,11 @@ export function WhyComparison({
             {near ? (
               <WhyCompetitorDemo topic={active} step={step} />
             ) : (
-              <div className="h-full w-full rounded-[12px] bg-[color-mix(in_oklch,var(--site-ink)_6%,var(--background))]" />
+              <div className="h-full w-full rounded-[14px] bg-[color-mix(in_oklch,var(--site-ink)_4.2%,var(--background))]" />
             )}
           </div>
 
-          <figcaption className="min-h-[2.75rem] px-0.5 text-[15px] leading-[1.55] text-[var(--site-ink-muted)]">
+          <figcaption className="min-h-[2.75rem] text-[15.5px] leading-[1.55] text-[var(--site-ink-muted)]">
             {theirs}
           </figcaption>
         </figure>

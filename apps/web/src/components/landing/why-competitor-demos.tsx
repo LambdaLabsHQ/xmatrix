@@ -24,11 +24,11 @@ function VendorMark({ harness, className = "size-4" }: { harness: string; classN
   return <img src={url} alt="" className={`${className} shrink-0 rounded-[4px] object-contain`} />;
 }
 
-/** Shared recessed neutral desktop mat holding the competitor's window(s). */
+/** Shared borderless soft-paper desk surface holding the competitor's window(s). */
 function DeskMat({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <div
-      className={`relative flex h-full w-full flex-col overflow-hidden rounded-[12px] bg-[color-mix(in_oklch,var(--site-ink)_6.5%,var(--background))] shadow-[inset_0_0_0_0.5px_oklch(0.28_0.02_58/0.11)] ${className}`}
+      className={`relative flex h-full w-full flex-col overflow-hidden rounded-[14px] bg-[color-mix(in_oklch,var(--site-ink)_4.2%,var(--background))] ${className}`}
       inert
     >
       {children}
@@ -198,7 +198,7 @@ function TerminalCopyPasteDemo({ step }: { step: number }) {
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden rounded-[12px] bg-[#1e1d1b] text-[#ebe7df] shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_12px_30px_-14px_rgba(20,16,12,0.4)]"
+      className="flex h-full w-full flex-col overflow-hidden rounded-[14px] bg-[#1e1d1b] text-[#ebe7df] shadow-[0_18px_42px_-16px_rgba(20,16,12,0.34)]"
       inert
     >
       {/* macOS Terminal Tab Bar */}
@@ -424,7 +424,7 @@ function RepeatedPromptsDemo({ step }: { step: number }) {
 function InterruptAndRedoDemo({ step }: { step: number }) {
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden rounded-[12px] bg-[#1e1d1b] text-[#ebe7df] shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_12px_30px_-14px_rgba(20,16,12,0.4)]"
+      className="flex h-full w-full flex-col overflow-hidden rounded-[14px] bg-[#1e1d1b] text-[#ebe7df] shadow-[0_18px_42px_-16px_rgba(20,16,12,0.34)]"
       inert
     >
       <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-white/[0.08] bg-[#282724] px-3">

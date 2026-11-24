@@ -3,25 +3,20 @@
 import { useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import { BellOff, Check, Hash } from "lucide-react";
 import { Face } from "@/components/dashboard/face";
-import { FleetMatrix, type FleetMatrixCell, type FleetMatrixColumn, type FleetMatrixRow } from "@/components/dashboard/fleet-matrix";
-import {
-  FLEET_MATRIX_MACHINE_FACTS_CLASS,
-  FLEET_MATRIX_MACHINE_HEADING_CLASS,
-  FLEET_MATRIX_MACHINE_NAME_CLASS,
-} from "@/components/dashboard/fleet-matrix-frames";
-import { MobileAvatarMatrix, type MobileMatrixRow } from "@/components/dashboard/fleet-mobile";
-import { MachineGlyph } from "@/components/dashboard/machine-glyph";
-import type { MachineOs } from "@/components/dashboard/machine-os";
+import { FleetMatrix, type FleetMatrixCell, type FleetMatrixColumn } from "@/components/dashboard/fleet-matrix";
+import { MobileAvatarMatrix } from "@/components/dashboard/fleet-mobile";
+import { buildSampleFleetView, type SampleFleetMachine } from "@/components/landing/fleet-preview";
 import { useMedia } from "@/components/landing/use-media";
 import type { PresentPerson } from "@/components/pages/page-chrome";
 import { renderPageDocument } from "@/components/pages/page-document-render";
 import { CardPen } from "@/components/pages/page-pen";
 import { pageMentions, type PageReferenceTargets } from "@/components/pages/page-reference-chips";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 
 /* Real xMatrix interfaces for each of the six comparison topics.
-   Every scene reuses the product's own primitives: renderPageDocument, CardPen,
-   Face, FleetMatrix, and MobileAvatarMatrix, sized cleanly for the comparison
-   viewport so nothing clips or collides on desktop or mobile. */
+   Borderless warm-paper sheets accented by a slender walnut inlay spine
+   (echoing the desktop app's walnut rail without ever becoming a heavy wood slab),
+   reusing renderPageDocument, CardPen, Face, FleetMatrix, and MobileAvatarMatrix. */
 
 interface WriterSpec {
   name: string;
@@ -47,6 +42,9 @@ const REFERENCES: PageReferenceTargets = {
   mentions: pageMentions([{ name: "Alex", handle: "alex" }], ["claude", "codex", "cursor", "gemini"]),
 };
 
+const SHEET_SHADOW =
+  "shadow-[0_18px_44px_-18px_oklch(0.24_0.03_58/0.22),0_2px_10px_-3px_oklch(0.24_0.03_58/0.08)]";
+
 function makePerson(
   key: WriterKey,
   options: { editing?: boolean; doing?: string; thinking?: boolean } = {},
@@ -70,7 +68,18 @@ function makePerson(
   };
 }
 
-/** Crisp warm-paper frame matching the real xMatrix page header and sheet. */
+/** Slender walnut bookbinding spine on the left edge of the paper sheet. */
+function WalnutSpine() {
+  return (
+    <WoodPanel
+      as="div"
+      aria-hidden
+      className="w-[10px] shrink-0 rounded-none! shadow-[inset_-1px_0_0_oklch(0.32_0.06_58/0.14)]!"
+    />
+  );
+}
+
+/** Borderless warm-paper sheet matching the real xMatrix page header and sheet. */
 function XMatrixSheetFrame({
   breadcrumb,
   revision,
@@ -84,21 +93,24 @@ function XMatrixSheetFrame({
 }) {
   return (
     <div
-      className="xmatrix-app flex h-full w-full flex-col overflow-hidden rounded-[12px] bg-[var(--site-paper)] text-[var(--site-ink)] shadow-[0_0_0_0.5px_oklch(0.25_0.03_60/0.14),0_12px_30px_-14px_oklch(0.25_0.03_60/0.2)]"
+      className={`xmatrix-app flex h-full w-full overflow-hidden rounded-[14px] bg-[var(--site-paper)] text-[var(--site-ink)] ${SHEET_SHADOW}`}
       inert
     >
-      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-[oklch(0.28_0.02_58/0.07)] bg-[color-mix(in_oklch,var(--site-paper)_84%,var(--background))] px-3.5">
-        <div className="flex min-w-0 items-center gap-2 text-[12px] text-[var(--site-ink-muted)]">
-          <span className="truncate font-semibold text-[var(--site-ink)]">{breadcrumb}</span>
-          {revision && (
-            <span className="shrink-0 rounded-md bg-[color-mix(in_oklch,var(--site-ink)_6%,transparent)] px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-[var(--site-ink-muted)]">
-              {revision}
-            </span>
-          )}
+      <WalnutSpine />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex h-10 shrink-0 items-center justify-between gap-2 bg-[color-mix(in_oklch,var(--site-paper)_86%,var(--background))] px-4">
+          <div className="flex min-w-0 items-center gap-2 text-[12px] text-[var(--site-ink-muted)]">
+            <span className="truncate font-semibold text-[var(--site-ink)]">{breadcrumb}</span>
+            {revision && (
+              <span className="shrink-0 rounded-md bg-[color-mix(in_oklch,var(--site-ink)_5.5%,transparent)] px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-[var(--site-ink-muted)]">
+                {revision}
+              </span>
+            )}
+          </div>
+          {rightSlot}
         </div>
-        {rightSlot}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
       </div>
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
     </div>
   );
 }
@@ -130,8 +142,7 @@ function PresenceFaces({ writers }: { writers: readonly WriterKey[] }) {
 
 /**
  * Renders real markdown via xMatrix's `renderPageDocument`, highlights the changed
- * block with the writer's subtle pen tint, and pins the real `CardPen` pill in a
- * dedicated shrink-0 footer row so it never collides with text or clips at the bottom.
+ * block with the writer's subtle pen tint, and pins the real `CardPen` pill cleanly.
  */
 function RealPageBody({
   markdown,
@@ -340,7 +351,7 @@ function YourAttentionDemo({ step }: { step: number }) {
       breadcrumb="Acme / Launch"
       revision={frame.rev}
       rightSlot={
-        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5.5%,transparent)] px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-[var(--site-ink-muted)]">
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5%,transparent)] px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-[var(--site-ink-muted)]">
           <BellOff className="size-3 shrink-0" />
           <span>{frame.note}</span>
         </span>
@@ -416,70 +427,73 @@ function ParallelWorkDemo({ step }: { step: number }) {
 
   return (
     <div
-      className="xmatrix-app flex h-full w-full flex-col overflow-hidden rounded-[12px] bg-[var(--site-paper)] text-[var(--site-ink)] shadow-[0_0_0_0.5px_oklch(0.25_0.03_60/0.14),0_12px_30px_-14px_oklch(0.25_0.03_60/0.2)] sm:flex-row"
+      className={`xmatrix-app flex h-full w-full overflow-hidden rounded-[14px] bg-[var(--site-paper)] text-[var(--site-ink)] ${SHEET_SHADOW}`}
       inert
     >
-      {/* Left: real xMatrix paper channel list */}
-      <div className="flex min-w-0 shrink-0 flex-col border-b border-[oklch(0.28_0.02_58/0.08)] bg-[color-mix(in_oklch,var(--site-ink)_3%,var(--site-paper))] sm:w-[47%] sm:border-r sm:border-b-0">
-        <div className="flex h-8 shrink-0 items-center justify-between border-b border-[oklch(0.28_0.02_58/0.07)] px-3 sm:h-9">
-          <span className="text-[11.5px] font-semibold text-[var(--site-ink)] sm:text-[12px]">Acme · Threads</span>
-          <span className="rounded-full bg-[color-mix(in_oklch,var(--site-ink)_6%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--site-ink-muted)]">
-            4 live
-          </span>
-        </div>
-        <div className="divide-y divide-[oklch(0.28_0.02_58/0.05)] overflow-hidden">
-          {PARALLEL_THREADS.map((thread, idx) => {
-            const done = step >= thread.doneAtStep;
-            const justFinished = step === thread.doneAtStep;
-            const agent = WRITER[thread.agent];
-            return (
-              <div
-                key={thread.id}
-                className={`flex items-center gap-2 px-3 py-1.5 transition-colors sm:gap-2.5 sm:py-2 ${
-                  idx === 3 ? "max-sm:hidden" : ""
-                } ${justFinished ? "bg-[var(--site-paper)]" : ""}`}
-              >
-                <Hash className="size-3 shrink-0 text-[var(--site-ink-muted)]/75 sm:size-3.5" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[11.5px] leading-tight font-semibold text-[var(--site-ink)] sm:text-[12px]">
-                    {thread.name}
-                  </p>
-                  <p className="mt-0.5 truncate text-[10.5px] leading-tight text-[var(--site-ink-muted)] sm:text-[11px]">
-                    {done ? thread.doneText : thread.workingText}
-                  </p>
+      <WalnutSpine />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden sm:flex-row">
+        {/* Left: real xMatrix paper channel list */}
+        <div className="flex min-w-0 shrink-0 flex-col bg-[color-mix(in_oklch,var(--site-ink)_3%,var(--site-paper))] sm:w-[46%]">
+          <div className="flex h-8 shrink-0 items-center justify-between px-3 sm:h-9">
+            <span className="text-[11.5px] font-semibold text-[var(--site-ink)] sm:text-[12px]">Acme · Threads</span>
+            <span className="rounded-full bg-[color-mix(in_oklch,var(--site-ink)_6%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--site-ink-muted)]">
+              4 live
+            </span>
+          </div>
+          <div className="overflow-hidden">
+            {PARALLEL_THREADS.map((thread, idx) => {
+              const done = step >= thread.doneAtStep;
+              const justFinished = step === thread.doneAtStep;
+              const agent = WRITER[thread.agent];
+              return (
+                <div
+                  key={thread.id}
+                  className={`flex items-center gap-2 px-3 py-1.5 transition-colors sm:gap-2.5 sm:py-2 ${
+                    idx === 3 ? "max-sm:hidden" : ""
+                  } ${justFinished ? "bg-[var(--site-paper)]" : ""}`}
+                >
+                  <Hash className="size-3 shrink-0 text-[var(--site-ink-muted)]/75 sm:size-3.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[11.5px] leading-tight font-semibold text-[var(--site-ink)] sm:text-[12px]">
+                      {thread.name}
+                    </p>
+                    <p className="mt-0.5 truncate text-[10.5px] leading-tight text-[var(--site-ink-muted)] sm:text-[11px]">
+                      {done ? thread.doneText : thread.workingText}
+                    </p>
+                  </div>
+                  <div className="relative shrink-0">
+                    <Face
+                      of={{ kind: "agent", name: agent.name, harness: agent.harness }}
+                      size="xs"
+                      shape="circle"
+                      className="size-5! rounded-full"
+                    />
+                    <span
+                      className={`absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-[1.5px] ring-[var(--site-paper)] ${
+                        done ? "bg-[#2f855a]" : "bg-[#d97706]"
+                      }`}
+                    />
+                  </div>
                 </div>
-                <div className="relative shrink-0">
-                  <Face
-                    of={{ kind: "agent", name: agent.name, harness: agent.harness }}
-                    size="xs"
-                    shape="circle"
-                    className="size-5! rounded-full"
-                  />
-                  <span
-                    className={`absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-[1.5px] ring-[var(--site-paper)] ${
-                      done ? "bg-[#2f855a]" : "bg-[#d97706]"
-                    }`}
-                  />
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
 
-      {/* Right: live Launch page receiving completed outcomes */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--site-paper)]">
-        <div className="flex h-8 shrink-0 items-center justify-between border-b border-[oklch(0.28_0.02_58/0.07)] px-3 sm:h-9">
-          <span className="truncate text-[11.5px] font-semibold text-[var(--site-ink)]">Page · Launch</span>
-          <span className="shrink-0 text-[10.5px] font-medium text-[var(--site-ink-muted)]">Auto-updated</span>
+        {/* Right: live Launch page receiving completed outcomes */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--site-paper)]">
+          <div className="flex h-8 shrink-0 items-center justify-between px-3 sm:h-9">
+            <span className="truncate text-[11.5px] font-semibold text-[var(--site-ink)]">Page · Launch</span>
+            <span className="shrink-0 text-[10.5px] font-medium text-[var(--site-ink-muted)]">Auto-updated</span>
+          </div>
+          <RealPageBody
+            markdown={mdLines}
+            compact
+            highlightBlockIndex={highlightIdx}
+            highlightColor={activeWriter ? WRITER[activeWriter].color : undefined}
+            pen={activeWriter ? makePerson(activeWriter, { editing: true }) : null}
+          />
         </div>
-        <RealPageBody
-          markdown={mdLines}
-          compact
-          highlightBlockIndex={highlightIdx}
-          highlightColor={activeWriter ? WRITER[activeWriter].color : undefined}
-          pen={activeWriter ? makePerson(activeWriter, { editing: true }) : null}
-        />
       </div>
     </div>
   );
@@ -488,7 +502,6 @@ function ParallelWorkDemo({ step }: { step: number }) {
 /* ── Topic 3: Across machines ────────────────────────────────────────────── */
 
 const FLEET_HARNESSES = ["claude", "codex", "cursor", "gemini"] as const;
-type FleetHarness = (typeof FLEET_HARNESSES)[number];
 const noop = () => {};
 const FLEET_COLUMNS: FleetMatrixColumn[] = FLEET_HARNESSES.map((harness) => ({
   harness,
@@ -496,7 +509,7 @@ const FLEET_COLUMNS: FleetMatrixColumn[] = FLEET_HARNESSES.map((harness) => ({
   onOpen: noop,
 }));
 
-const usage = (percent: number) => [{ key: "5h", label: "5h", percent, detail: `5h ${percent}%` }];
+const quota = (percent: number) => [{ key: "5h", label: "5h", percent, detail: `5h ${percent}%` }];
 const cellReady: FleetMatrixCell = { kind: "agent", state: "running", label: "Ready", detail: "Ready", working: 0, usage: [] };
 const cellWorking = (count: number, percent?: number): FleetMatrixCell => ({
   kind: "agent",
@@ -504,7 +517,7 @@ const cellWorking = (count: number, percent?: number): FleetMatrixCell => ({
   label: `${count} working`,
   detail: `${count} working`,
   working: count,
-  usage: percent === undefined ? [] : usage(percent),
+  usage: percent === undefined ? [] : quota(percent),
 });
 const cellLimit: FleetMatrixCell = {
   kind: "agent",
@@ -512,19 +525,11 @@ const cellLimit: FleetMatrixCell = {
   label: "5h limit",
   detail: "5h limit reached",
   working: 0,
-  usage: usage(100),
+  usage: quota(100),
 };
 const cellAbsent: FleetMatrixCell = { kind: "absent" };
 
-type MiniMachine = {
-  key: string;
-  name: string;
-  os: MachineOs;
-  online: boolean;
-  cells: Record<FleetHarness, FleetMatrixCell>;
-};
-
-function fleetForStep(step: number): MiniMachine[] {
+function fleetForStep(step: number): SampleFleetMachine[] {
   const hitLimit = step >= 1;
   const handedOff = step >= 2;
   return [
@@ -570,42 +575,7 @@ function fleetForStep(step: number): MiniMachine[] {
 function AcrossMachinesDemo({ step }: { step: number }) {
   const wide = useMedia("(min-width: 560px)");
   const space = useMemo(() => fleetForStep(step), [step]);
-
-  const rows: FleetMatrixRow[] = space.map((machine) => {
-    const workingCount = Object.values(machine.cells).reduce((sum, c) => sum + (c.kind === "agent" ? c.working : 0), 0);
-    return {
-      key: machine.key,
-      name: machine.name,
-      dimmed: false,
-      cells: machine.cells,
-      heading: (
-        <span className={FLEET_MATRIX_MACHINE_HEADING_CLASS}>
-          <span className="app-tool-state-icon shrink-0" data-state="running">
-            <MachineGlyph os={machine.os} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className={FLEET_MATRIX_MACHINE_NAME_CLASS}>{machine.name}</span>
-            <span className={FLEET_MATRIX_MACHINE_FACTS_CLASS}>
-              {workingCount === 0 ? "Idle" : `${workingCount} working`}
-            </span>
-          </span>
-        </span>
-      ),
-    };
-  });
-
-  const mobileRows: MobileMatrixRow[] = space.map((machine) => ({
-    key: machine.key,
-    name: machine.name,
-    os: machine.os,
-    own: true,
-    online: true,
-    dimmed: false,
-    exception: machine.cells.claude.kind === "agent" && machine.cells.claude.state === "attention" ? "claude 5h limit" : null,
-    loadAlerts: [],
-    quietNote: null,
-    cells: machine.cells,
-  }));
+  const { rows, mobileRows, attention, workingCount } = useMemo(() => buildSampleFleetView(space), [space]);
 
   const statusNote =
     step === 0
@@ -618,7 +588,7 @@ function AcrossMachinesDemo({ step }: { step: number }) {
     <XMatrixSheetFrame
       breadcrumb="System Overview"
       rightSlot={
-        <span className="shrink-0 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5.5%,transparent)] px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-[var(--site-ink-muted)]">
+        <span className="shrink-0 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5%,transparent)] px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-[var(--site-ink-muted)]">
           {statusNote}
         </span>
       }
@@ -635,11 +605,8 @@ function AcrossMachinesDemo({ step }: { step: number }) {
               columns={FLEET_COLUMNS}
               rows={mobileRows}
               ownMachineCount={space.length}
-              attentionCount={step >= 1 ? 1 : 0}
-              workingCount={space.reduce(
-                (sum, m) => sum + Object.values(m.cells).reduce((s, c) => s + (c.kind === "agent" ? c.working : 0), 0),
-                0,
-              )}
+              attentionCount={attention}
+              workingCount={workingCount}
               selected={null}
               onSelect={noop}
               editors={[]}
@@ -677,7 +644,7 @@ function SharedDecisionsDemo({ step }: { step: number }) {
         highlightColor={WRITER.alex.color}
         pen={step === 1 ? makePerson("alex", { editing: true }) : null}
         footer={
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-t border-[oklch(0.28_0.02_58/0.07)] bg-[color-mix(in_oklch,var(--site-paper)_86%,var(--background))] px-4 py-2.5 sm:gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 bg-[color-mix(in_oklch,var(--site-paper)_86%,var(--background))] px-4 py-2.5 sm:gap-2">
             <span className="text-[11px] font-medium text-[var(--site-ink-muted)]">
               {syncedCount === 0 ? "Waiting for edit…" : "Synced on r15:"}
             </span>
@@ -769,7 +736,7 @@ function HumanInTheLoopDemo({ step }: { step: number }) {
       breadcrumb="Acme / Launch"
       revision={frame.rev}
       rightSlot={
-        <span className="shrink-0 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5.5%,transparent)] px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-[var(--site-ink-muted)]">
+        <span className="shrink-0 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5%,transparent)] px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-[var(--site-ink-muted)]">
           {frame.status}
         </span>
       }
