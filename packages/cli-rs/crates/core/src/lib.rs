@@ -49,6 +49,7 @@ pub mod presentation_barrier;
 pub mod private_upload;
 pub mod profile;
 pub mod protocol;
+pub mod quota_access;
 pub mod read_through;
 pub mod route_key;
 pub mod space_ref;

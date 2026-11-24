@@ -9,14 +9,15 @@ export type {
 export {
   HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_ACTION_SETTLE_MS, HARNESS_ACTION_TIMEOUT_MS, HARNESS_ACTIONS, HARNESS_LOGIN_ACTIONS, HARNESS_LOGIN_STATES, harnessActionAvailable, harnessOutputTail,
   MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_CHECK_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY,
-  MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY,
+  MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, MACHINE_HARNESS_QUOTA_ACCESS_CAPABILITY,
+  HARNESS_QUOTA_ACCESS_ACTIONS, HARNESS_QUOTA_ACCESS_STATES,
   parseHarnessActionRequest, validHarnessLoginCode, parseHarnessActionResult, parseHarnessInventory, harnessItemObservedAt,
   compareHarnessVersions, harnessCommandLabel, harnessCommandLine, harnessDisplayVersion, harnessTooOld, harnessTooOldSentence,
 } from "./harness-management.js";
 export type {
   HarnessAction, HarnessActionRequest, HarnessActionResult, HarnessActionStatus, HarnessAutoUpdate,
   HarnessCommand, HarnessInventory, HarnessInventoryItem, HarnessLogin, HarnessLoginProgress, HarnessLoginState,
-  HarnessManagement, HarnessTooOld,
+  HarnessManagement, HarnessQuotaAccess, HarnessTooOld,
 } from "./harness-management.js";
 export {
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult,

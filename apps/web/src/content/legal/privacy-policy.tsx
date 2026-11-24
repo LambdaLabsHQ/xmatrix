@@ -184,9 +184,8 @@ export function PrivacyPolicyContent() {
             <strong className="text-foreground">Which files.</strong> For an AI tool you registered
             as an Agent on a computer, the xMatrix daemon on that computer may read that tool&apos;s
             own sign-in: for example Grok&apos;s{" "}
-            <code className="font-mono text-xs">~/.grok/auth.json</code>, Cursor&apos;s{" "}
-            <code className="font-mono text-xs">auth.json</code> or keychain entry, or the API key
-            the tool uses. The full list is in the{" "}
+            <code className="font-mono text-xs">~/.grok/auth.json</code>, or the API key the tool
+            uses. The full list is in the{" "}
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and local privacy guide
             </Link>
@@ -199,6 +198,24 @@ export function PrivacyPolicyContent() {
             prompt), and OpenCode through a briefly started{" "}
             <code className="font-mono text-xs">opencode serve</code>. xMatrix opens no Codex,
             Claude Code or OpenCode login file or keychain entry.
+          </p>
+          <p>
+            <strong className="text-foreground">Only with your permission, for tools without an official quota interface.</strong>{" "}
+            Cursor offers no official way to ask for its quota, so its sign-in (the macOS keychain
+            entry <code className="font-mono text-xs">cursor-access-token</code>, its{" "}
+            <code className="font-mono text-xs">auth.json</code>, or a{" "}
+            <code className="font-mono text-xs">CURSOR_API_KEY</code> or{" "}
+            <code className="font-mono text-xs">CURSOR_AUTH_TOKEN</code> already set for Cursor) is
+            not read at all until the computer&apos;s owner allows it, for that computer and that tool
+            alone: &quot;Allow reading Cursor sign-in to show quota&quot; where xMatrix shows the
+            quota, or <code className="font-mono text-xs">xmatrix config quotaAccess cursor on</code>.
+            Until then its quota shows as unknown, and xMatrix still recognizes a used-up quota from
+            Cursor&apos;s own error message. The permission is bound to the Cursor account signed in
+            when it is first used, by a fingerprint kept only on that computer: if the account or
+            credential changes, the permission ends and the last quota numbers are deleted. It can be
+            withdrawn at any time in the same place, in Settings → Legal and privacy, or with{" "}
+            <code className="font-mono text-xs">xmatrix config quotaAccess cursor off</code>, and the
+            next read is already refused. The switch below still overrides it.
           </p>
           <p>
             <strong className="text-foreground">Why.</strong> To ask that provider how much of your

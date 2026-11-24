@@ -32,11 +32,15 @@ test("archived Channels retain history, annotations, attachments, and viewer ACK
     if (query.name === "message_ack_idempotency_read_v1") return [];
     if (query.name === "message_ack_head_v1") return [{ sequence: 0 }];
     if (query.name === "message_ack_cursor_lock_v1") return [];
-    if (query.name === "message_attachment_authority_v1") return [{
-      source_channel_id: "channel-1", source_mode: "open", object_key: `objects/${hash}`,
-      content_hash: hash, encoded_bytes: 12, mime_type: "text/plain", name: "note.txt",
-      presentation_residual_json: null, version: 1,
-    }];
+    if (query.name === "message_attachment_authority_v2") {
+      assert.doesNotMatch(query.text, /archived_at/u);
+      return [{
+        channel_authorized: true, channel_metadata_json: null,
+        source_channel_id: "channel-1", source_mode: "open", object_key: `objects/${hash}`,
+        content_hash: hash, encoded_bytes: 12, mime_type: "text/plain", name: "note.txt",
+        presentation_residual_json: null, version: 1,
+      }];
+    }
     return [];
   });
   const repository = new PostgresMessageRepository(db);

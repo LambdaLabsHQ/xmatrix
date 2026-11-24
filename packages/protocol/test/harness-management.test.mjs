@@ -18,6 +18,20 @@ test("inventory validates bounds and strips untrusted diagnostics", () => {
     [{ id: "codex", installed: false, probeStatus: "missing" }]);
 });
 
+test("a harness read only under its owner's grant reports that grant, and only it can be granted", () => {
+  const item = { ...inventory.items[0], id: "cursor" };
+  for (const quotaAccess of ["granted", "not_granted", "probes_off"]) {
+    assert.equal(parseHarnessInventory({ ...inventory, items: [{ ...item, quotaAccess }] }).items[0].quotaAccess, quotaAccess);
+  }
+  assert.equal(parseHarnessInventory({ ...inventory, items: [{ ...item, quotaAccess: "fingerprint" }] }), undefined);
+  const grantable = AGENT_PRESETS.filter(preset => harnessActionAvailable(preset.management, "quota_access_on")).map(preset => preset.id);
+  assert.deepEqual(grantable, ["cursor"]);
+  for (const preset of AGENT_PRESETS) {
+    assert.equal(harnessActionAvailable(preset.management, "quota_access_off"),
+      harnessActionAvailable(preset.management, "quota_access_on"), preset.id);
+  }
+});
+
 test("every preset explicitly describes upstream management and unsupported platforms", () => {
   for (const preset of AGENT_PRESETS) {
     const management = preset.management;

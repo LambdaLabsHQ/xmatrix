@@ -20,6 +20,9 @@ use crate::error::{CliError, Result};
 use crate::hex::lowercase_hex;
 use crate::http;
 
+/// Maximum concurrent Hub media downloads for one CLI history or page read.
+pub const MEDIA_FETCH_CONCURRENCY: usize = 8;
+
 /// Where the copy a harness's file tool opens is written.
 pub enum LocalCopy<'a> {
     /// `<prefix>-<id, up to 12 characters>-<name>.<extension of its type>` in the attachment cache.
@@ -180,7 +183,13 @@ impl CachedMedia<'_> {
             std::fs::create_dir_all(parent)?;
         }
         if path != cached {
-            std::fs::copy(cached, &path)?;
+            let temporary = unique_temporary_path(&path);
+            if let Err(err) = std::fs::copy(cached, &temporary)
+                .and_then(|_| replace_file_atomically(&temporary, &path))
+            {
+                let _ = std::fs::remove_file(&temporary);
+                return Err(err.into());
+            }
         }
         Ok(path)
     }

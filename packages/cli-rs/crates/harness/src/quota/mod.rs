@@ -21,7 +21,10 @@ mod cli;
 pub mod codex;
 pub mod cursor;
 pub mod deepseek;
+pub mod grant;
 pub mod grok;
+
+pub use grant::{GrantedRead, SignInReadGrant};
 pub mod opencode;
 pub mod windows;
 pub mod zai;
@@ -118,8 +121,10 @@ pub struct ReadOptions {
 
 /// Read one provider's account quota.
 ///
-/// Returns `None` when the provider has no reading for that account, or when
-/// the provider does not support the requested [`Account`] binding.
+/// Returns `None` when the provider has no reading for that account, when
+/// the provider does not support the requested [`Account`] binding, or when
+/// the provider is read only under a grant
+/// ([`Provider::reads_sign_in_only_with_grant`], read through [`read_granted`]).
 pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> {
     if quota_probes_disabled() {
         return None;
@@ -140,9 +145,8 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::Codex, Account::Home(home)) => {
             codex::read_codex_account_usage(Some(&home), force).await
         }
-        (Provider::Cursor, Account::Process | Account::DefaultLogin) => {
-            cursor::read_cursor_period_usage(force).await
-        }
+        // Read only under a grant: see [`read_granted`].
+        (Provider::Cursor, _) => None,
         (Provider::DeepSeek, Account::Process) => deepseek::read_deepseek_balance(force).await,
         (Provider::Grok, Account::Process) => grok::read_grok_build_billing_usage(force).await,
         (Provider::Grok, Account::Home(home)) => {
@@ -153,7 +157,6 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (
             Provider::Antigravity
             | Provider::Claude
-            | Provider::Cursor
             | Provider::DeepSeek
             | Provider::OpenCode
             | Provider::Zai,
@@ -167,6 +170,31 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
             | Provider::Zai,
             Account::DefaultLogin,
         ) => None,
+    }
+}
+
+/// Read one provider's account quota under the owner's grant to read its
+/// local sign-in. A provider that needs no grant ignores it; one that does
+/// opens no credential source without it ([`GrantedRead::Closed`]).
+pub async fn read_granted(
+    provider: Provider,
+    options: ReadOptions,
+    grant: Option<&SignInReadGrant>,
+) -> GrantedRead {
+    match provider {
+        Provider::Cursor => cursor::read_cursor_period_usage(options.force, grant).await,
+        _ => GrantedRead::Read {
+            usage: read(provider, options).await,
+            bound: None,
+        },
+    }
+}
+
+impl Provider {
+    /// Whether this provider has no official quota interface, so its quota is
+    /// read from the harness's own local sign-in, and only under a grant.
+    pub fn reads_sign_in_only_with_grant(self) -> bool {
+        matches!(self, Provider::Cursor)
     }
 }
 

@@ -15,7 +15,7 @@ Para mantener estable un equipo conectado tras reinstalaciones bajo tu cuenta, e
 
 ## Consultas locales de cuota de proveedores
 
-**En resumen:** para mostrar cuánta cuota les queda a las herramientas de IA que registraste, el daemon de xMatrix lee los archivos de inicio de sesión de esas herramientas en tu equipo (por ejemplo `~/.grok/auth.json`) y consulta directamente a cada proveedor. Codex, Claude Code y OpenCode son la excepción: xMatrix pregunta a la propia herramienta y no abre ninguno de sus archivos de inicio de sesión. A Codex, a través de la sesión en curso o de un `codex app-server` iniciado brevemente; a Claude Code, a través de la sesión en curso o de un `claude` iniciado brevemente (su solicitud `get_usage`, que no envía ningún prompt); y a OpenCode, a través de un `opencode serve` iniciado brevemente. Nada de lo que lee de esos archivos (token, id de cuenta, contenido o huella del archivo) se envía a xMatrix; el Hub solo recibe la respuesta de cuota normalizada. Un único interruptor detiene la lectura de archivos, las solicitudes a Codex, Claude Code y OpenCode, y las solicitudes al proveedor (consulta «Desactivar consultas locales de cuota» más abajo).
+**En resumen:** para mostrar cuánta cuota les queda a las herramientas de IA que registraste, el daemon de xMatrix lee los archivos de inicio de sesión de esas herramientas en tu equipo (por ejemplo `~/.grok/auth.json`) y consulta directamente a cada proveedor. Codex, Claude Code y OpenCode son la excepción: xMatrix pregunta a la propia herramienta y no abre ninguno de sus archivos de inicio de sesión. A Codex, a través de la sesión en curso o de un `codex app-server` iniciado brevemente; a Claude Code, a través de la sesión en curso o de un `claude` iniciado brevemente (su solicitud `get_usage`, que no envía ningún prompt); y a OpenCode, a través de un `opencode serve` iniciado brevemente. Nada de lo que lee de esos archivos (token, id de cuenta, contenido o huella del archivo) se envía a xMatrix; el Hub solo recibe la respuesta de cuota normalizada. Un único interruptor detiene la lectura de archivos, las solicitudes a Codex, Claude Code y OpenCode, y las solicitudes al proveedor (consulta «Desactivar consultas locales de cuota» más abajo). Una herramienta sin interfaz oficial de cuota, como Cursor, no se lee en absoluto hasta que lo permites en ese ordenador (consulta «Herramientas que solo se leen con tu permiso» más abajo).
 
 Cuando registras un agente compatible (Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai o Antigravity), xMatrix puede mostrar la cuota restante en `xmatrix agent list` y en la vista Agents, y permitir que `@auto` evite cuentas agotadas.
 
@@ -25,7 +25,7 @@ Para consultar la cuota restante directamente en tu proveedor sin ejecutar un tu
 | --- | --- | --- |
 | Claude Code | Ninguno: la solicitud de control `get_usage` del propio Claude Code (la sesión en curso o un `claude` iniciado brevemente); no se envía ningún prompt | Lo gestiona Claude Code con su propio inicio de sesión |
 | Codex | Ninguno: el método `account/rateLimits/read` del propio app-server de Codex (la sesión en curso o un `codex app-server` iniciado brevemente) | Lo gestiona Codex con su propio inicio de sesión |
-| Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, llavero de macOS (`cursor-access-token`) o `auth.json` de Cursor | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
+| Cursor (solo con tu permiso en ese ordenador) | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, llavero de macOS (`cursor-access-token`) o `auth.json` de Cursor | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` o `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | Ninguno: `GET /api/experimental/usage/limits` de un `opencode serve` iniciado brevemente, que escucha solo en loopback con una contraseña de un solo uso. No se lee nada para un modelo que OpenCode envía a otro proveedor | Lo gestiona OpenCode con su propio inicio de sesión |
 | DeepSeek | `DEEPSEEK_API_KEY` o archivo de credenciales en `$DSH_HOME` | `https://api.deepseek.com/user/balance` |
@@ -37,6 +37,24 @@ Para consultar la cuota restante directamente en tu proveedor sin ejecutar un tu
 - Las credenciales permanecen en la memoria del proceso local y se envían **únicamente** al endpoint de uso de ese proveedor.
 - Las huellas SHA-256 locales se usan solo como clave de caché en memoria para detectar cambios de cuenta y **nunca se registran ni se envían a xMatrix**.
 - Al Hub de xMatrix solo llegan datos normalizados de cuota (porcentaje restante, hora de reinicio, disponibilidad de la cuenta y saldo prepago si aplica).
+
+### Herramientas que solo se leen con tu permiso
+
+Cursor no ofrece una forma oficial de consultar su cuota: la única es leer el inicio de sesión que Cursor guardó para sí mismo. Ese inicio de sesión existe para Cursor, así que xMatrix no lo trata como un permiso. Hasta que el propietario del ordenador lo permita, xMatrix no lee ninguna fuente de inicio de sesión de Cursor en ese ordenador (el elemento del llavero de macOS `cursor-access-token`, el `auth.json` de Cursor, ni `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN` ya definidos en el entorno), la cuota de Cursor aparece como **Desconocida** y una cuota agotada se sigue reconociendo por el propio mensaje de error de Cursor.
+
+Para permitirlo, el propietario del ordenador elige **Allow reading Cursor sign-in to show quota** donde las vistas Agents o Machines muestran la cuota de Cursor, o ejecuta en ese ordenador:
+
+```sh
+xmatrix config quotaAccess cursor on    # permitir
+xmatrix config quotaAccess cursor off   # dejar de leer
+xmatrix config quotaAccess              # ver qué está permitido aquí
+```
+
+- El permiso es por ordenador y por herramienta, está desactivado por defecto y es independiente del interruptor de consultas de cuota: tener `quotaProbes` activado no cuenta como permiso.
+- El inicio de sesión se lee solo en ese ordenador y solo para preguntar a Cursor por su propio uso. Nada de él sale del ordenador; el Hub solo recibe el uso que informa Cursor y si el permiso está concedido.
+- El permiso queda ligado a la cuenta de Cursor con la sesión iniciada la primera vez que se usa, mediante una huella que solo se guarda en la configuración de xMatrix de ese ordenador y nunca se envía. Si cambia la cuenta o la credencial, el permiso termina y se borran las últimas cifras de cuota.
+- Puedes retirarlo en cualquier momento en el mismo lugar, en **Settings → Legal and privacy → Reading sign-ins for quota** o con `xmatrix config quotaAccess cursor off`; la siguiente lectura ya se rechaza.
+- Desactivar las consultas locales de cuota (abajo) prevalece sobre el permiso: no se lee nada aunque esté concedido.
 
 ### Desactivar consultas locales de cuota
 

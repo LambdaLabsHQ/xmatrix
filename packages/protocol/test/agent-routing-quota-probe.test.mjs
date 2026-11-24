@@ -29,6 +29,16 @@ test('unavailable is explicit and cannot carry an invented balance', () => {
   assert.throws(() => parse(response({ ...unavailable, quotaUsages: [{ percent: 0 }] })));
 });
 
+test('a missing grant is its own reason only for a Hub that asked about grants', () => {
+  const notGranted = { ...target, status: 'unavailable', reason: 'not_granted' };
+  const asking = { ...request, accessGrants: true };
+  assert.deepEqual(parseRoutingQuotaProbeRequest(asking), asking);
+  assert.throws(() => parseRoutingQuotaProbeRequest({ ...request, accessGrants: false }));
+  assert.deepEqual(parseRoutingQuotaProbeResponse(response(notGranted), asking, now), response(notGranted));
+  assert.throws(() => parse(response(notGranted)));
+  assert.deepEqual(routingQuotaProbeObservations(response(notGranted), asking, now), []);
+});
+
 test('quota probe fences another request, epoch, profile and configuration', () => {
   for (const patch of [{ requestId: 'other' }, { connectionEpoch: 6 }]) {
     assert.throws(() => parse({ ...response(observed), ...patch }));

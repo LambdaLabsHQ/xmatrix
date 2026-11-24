@@ -21,6 +21,7 @@ use xmatrix_cli_args::{
 };
 use xmatrix_cli_core::error::{self, CliError};
 use xmatrix_cli_core::{config, telemetry_consent};
+use xmatrix_cli_core::quota_access;
 use xmatrix_repo_pool::machine_worktrees::{self, MachineWorktree, WorktreeOrigin};
 #[cfg(windows)]
 use xmatrix_windows_continuity::{
@@ -46,8 +47,18 @@ pub async fn cmd_config(
     hub_url: &str,
     key: Option<String>,
     value: Option<String>,
+    setting: Option<String>,
 ) -> error::Result<()> {
     let normalized_key = key.as_deref().map(str::trim);
+    if let Some(k @ ("quotaAccess" | "quota-access")) = normalized_key {
+        return cmd_config_quota_access(hub_url, k, value.as_deref(), setting.as_deref()).await;
+    }
+    if setting.is_some() {
+        return Err(CliError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Too many values: only `config quotaAccess <harness> on|off` takes three.",
+        )));
+    }
     match (normalized_key, value.as_deref()) {
         (Some(k @ ("quotaProbes" | "quota-probes")), Some(raw)) => {
             let enabled = config::parse_bool_setting(raw).ok_or_else(|| {
@@ -125,6 +136,7 @@ pub async fn cmd_config(
                     "telemetry".into(),
                     serde_json::Value::Bool(telemetry_allowed(hub_url).await),
                 );
+                map.insert("quotaAccess".into(), quota_access_states());
             }
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
@@ -146,6 +158,94 @@ pub async fn cmd_config(
         }
     }
     Ok(())
+}
+
+/// `{ "<harness>": "granted" | "not_granted" | "probes_off" }` for every harness
+/// whose quota is read only under its owner's grant.
+fn quota_access_states() -> serde_json::Value {
+    quota_access::quota_access_harnesses()
+        .map(|harness| {
+            (
+                harness.to_string(),
+                serde_json::Value::from(quota_access::quota_access(harness).as_str()),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
+/// `config quotaAccess [<harness> [on|off]]`: allow or stop xMatrix reading a
+/// harness's local sign-in on this computer to show its quota.
+async fn cmd_config_quota_access(
+    hub_url: &str,
+    key: &str,
+    harness: Option<&str>,
+    setting: Option<&str>,
+) -> error::Result<()> {
+    let Some(harness) = harness.map(str::trim) else {
+        println!("{}", serde_json::to_string_pretty(&quota_access_states())?);
+        return Ok(());
+    };
+    let Some(raw) = setting else {
+        if quota_access::quota_access_provider(harness).is_none() {
+            return Err(CliError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("'{harness}' needs no quota access grant."),
+            )));
+        }
+        println!("{}", quota_access::quota_access(harness).as_str());
+        return Ok(());
+    };
+    let on = config::parse_bool_setting(raw).ok_or_else(|| {
+        CliError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Invalid value '{raw}' for {key} {harness}. Use on/off."),
+        ))
+    })?;
+    let state = quota_access::set_quota_access(harness, on).await?;
+    let name = xmatrix_cli_agent::agent_preset_by_id(harness)
+        .map(|preset| preset.display_name.clone())
+        .unwrap_or_else(|| harness.to_string());
+    match (on, state) {
+        (true, quota_access::QuotaAccess::ProbesOff) => println!(
+            "Allowed reading {name}'s sign-in on this computer, but local provider quota probes are off, so nothing is read until `xmatrix config quotaProbes on`."
+        ),
+        (true, _) => println!(
+            "Allowed xMatrix to read {name}'s sign-in on this computer, only to ask {name} for its own usage. Nothing from it leaves this computer. Turn it off with `xmatrix config {key} {harness} off`."
+        ),
+        (false, _) => println!(
+            "xMatrix no longer reads {name}'s sign-in on this computer; its quota shows as unknown."
+        ),
+    }
+    report_quota_access_to_hub(hub_url).await;
+    Ok(())
+}
+
+/// Ask this machine's daemon, through the Hub, to report its harnesses again so
+/// the Hub shows the new answer (and drops the last reading after a revoke).
+/// Best effort: the daemon's next report carries it anyway.
+async fn report_quota_access_to_hub(hub_url: &str) {
+    let machine_id = config::load_config_sync().machine_id;
+    let session = config::load_session_for_hub(hub_url).await;
+    let (Some(machine_id), Some(session)) = (machine_id, session) else {
+        return;
+    };
+    let body =
+        serde_json::json!({ "machineId": machine_id, "presetId": "custom", "action": "refresh" });
+    let url = format!(
+        "{}/api/machine-daemons/harness-actions",
+        hub_url.trim_end_matches('/')
+    );
+    if let Err(error) = xmatrix_cli_core::http::request_json::<serde_json::Value>(
+        &url,
+        "POST",
+        Some(&session.token),
+        Some(body),
+    )
+    .await
+    {
+        eprintln!("The Hub will show this after the machine's next report ({error}).");
+    }
 }
 
 // Config output is diagnostic data, never a credential export. Apply the same

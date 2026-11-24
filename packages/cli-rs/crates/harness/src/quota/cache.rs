@@ -104,6 +104,13 @@ impl ProviderUsageCache {
         if force { None } else { self.hit() }
     }
 
+    /// Forget the last answer: it belongs to a sign-in that no longer counts.
+    pub(crate) fn clear(&self) {
+        if let Ok(mut cache) = self.slot().lock() {
+            *cache = None;
+        }
+    }
+
     /// Remember that the provider had no answer, and report that to the caller.
     ///
     /// Every reader's giving-up arms are a `store(None)` followed by a `None`;

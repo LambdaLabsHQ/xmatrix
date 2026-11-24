@@ -15,7 +15,7 @@ xMatrix는 호스팅 협업 Hub와 사용자 머신에서 실행되는 Rust 로�
 
 ## 로컬 공급자 할당량 조회
 
-**요약:** 등록한 AI 도구의 남은 할당량을 보여 주기 위해 xMatrix daemon은 컴퓨터에 있는 해당 도구 자체의 로그인 파일(예: `~/.grok/auth.json`)을 읽고 각 공급자에게 직접 조회합니다. Codex, Claude Code, OpenCode는 예외로, xMatrix는 도구 자체에 묻고 그 로그인 파일은 열지 않습니다. Codex는 실행 중인 세션이나 잠시 실행한 `codex app-server`를 통해, Claude Code는 실행 중인 세션이나 잠시 실행한 `claude`를 통해(프롬프트를 보내지 않는 `get_usage` 요청), OpenCode는 잠시 실행한 `opencode serve`를 통해 묻습니다. 이 파일에서 읽은 내용(토큰, 계정 ID, 파일 내용, 파일 지문)은 xMatrix로 전송되지 않으며, Hub는 정규화된 할당량 결과만 받습니다. 하나의 스위치로 파일 읽기, Codex·Claude Code·OpenCode 요청, 공급자 요청을 모두 중지할 수 있습니다(아래 「로컬 할당량 조회 끄기」 참고).
+**요약:** 등록한 AI 도구의 남은 할당량을 보여 주기 위해 xMatrix daemon은 컴퓨터에 있는 해당 도구 자체의 로그인 파일(예: `~/.grok/auth.json`)을 읽고 각 공급자에게 직접 조회합니다. Codex, Claude Code, OpenCode는 예외로, xMatrix는 도구 자체에 묻고 그 로그인 파일은 열지 않습니다. Codex는 실행 중인 세션이나 잠시 실행한 `codex app-server`를 통해, Claude Code는 실행 중인 세션이나 잠시 실행한 `claude`를 통해(프롬프트를 보내지 않는 `get_usage` 요청), OpenCode는 잠시 실행한 `opencode serve`를 통해 묻습니다. 이 파일에서 읽은 내용(토큰, 계정 ID, 파일 내용, 파일 지문)은 xMatrix로 전송되지 않으며, Hub는 정규화된 할당량 결과만 받습니다. 하나의 스위치로 파일 읽기, Codex·Claude Code·OpenCode 요청, 공급자 요청을 모두 중지할 수 있습니다(아래 「로컬 할당량 조회 끄기」 참고). 공식 할당량 인터페이스가 없는 도구(예: Cursor)는 그 컴퓨터에서 허용하기 전까지 전혀 읽지 않습니다(아래 「허용한 경우에만 읽는 도구」 참고).
 
 등록된 하네스(Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai, Antigravity 등)의 남은 구독 할당량을 `xmatrix agent list`와 Agents 화면에 표시하고 `@auto` 라우팅이 한도 초과 계정을 피할 수 있도록, 로컬 데몬이 등록된 도구의 로컬 자격 증명 저장소를 메모리 내에서 읽어 해당 공급자 엔드포인트에 직접 조회할 수 있습니다.
 
@@ -23,7 +23,7 @@ xMatrix는 호스팅 협업 Hub와 사용자 머신에서 실행되는 Rust 로�
 | --- | --- | --- |
 | Claude Code | 읽지 않음: Claude Code 자체 `get_usage` 제어 요청(실행 중인 세션 또는 잠시 실행한 `claude`), 프롬프트는 보내지 않음 | Claude Code가 자체 로그인으로 처리 |
 | Codex | 읽지 않음: Codex 자체 app-server 메서드 `account/rateLimits/read`(실행 중인 세션 또는 잠시 실행한 `codex app-server`) | Codex가 자체 로그인으로 처리 |
-| Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, macOS 키체인(`cursor-access-token`), 또는 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
+| Cursor(그 컴퓨터에서 허용한 경우에만) | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, macOS 키체인(`cursor-access-token`), 또는 Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` 또는 `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | 읽지 않음: 잠시 실행한 `opencode serve`의 `GET /api/experimental/usage/limits`(루프백에서만 수신, 일회용 비밀번호 사용). OpenCode가 다른 공급자로 라우팅하는 모델은 아무것도 읽지 않음 | OpenCode가 자체 로그인으로 처리 |
 | DeepSeek | `DEEPSEEK_API_KEY` 또는 `$DSH_HOME` 인증 파일 | `https://api.deepseek.com/user/balance` |
@@ -35,6 +35,24 @@ xMatrix는 호스팅 협업 Hub와 사용자 머신에서 실행되는 Rust 로�
 - 자격 증명은 로컬 프로세스 메모리에만 머물며 **해당 공급자의 공식 사용량 엔드포인트로만** 전송됩니다.
 - 로컬 SHA-256 지문은 계정 전환 감지용 메모리 캐시 키로만 쓰이며 **로그에 남거나 xMatrix로 전송되지 않습니다**.
 - xMatrix Hub로 전송되는 값은 정규화된 잔여 할당량(비율, 초기화 시각, 사용 가능 여부, 잔액)뿐입니다.
+
+### 허용한 경우에만 읽는 도구
+
+Cursor에는 할당량을 묻는 공식 방법이 없어, 유일한 방법은 Cursor가 자신을 위해 저장한 로그인 정보를 읽는 것입니다. 그 로그인 정보는 Cursor를 위한 것이므로 xMatrix는 이를 허가로 보지 않습니다. 컴퓨터 소유자가 허용하기 전까지 xMatrix는 그 컴퓨터에서 Cursor의 로그인 정보(macOS 키체인 항목 `cursor-access-token`, Cursor의 `auth.json`, 환경에 이미 설정된 `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`)를 전혀 읽지 않으며, Cursor의 할당량은 **알 수 없음**으로 표시됩니다. 할당량 소진은 여전히 Cursor 자체 오류 메시지로 인식합니다.
+
+허용하려면 컴퓨터 소유자가 Agents 또는 Machines 화면에서 Cursor 할당량이 표시되는 곳의 **Allow reading Cursor sign-in to show quota**를 선택하거나, 그 컴퓨터에서 다음을 실행합니다.
+
+```sh
+xmatrix config quotaAccess cursor on    # 허용
+xmatrix config quotaAccess cursor off   # 중지
+xmatrix config quotaAccess              # 이 컴퓨터에서 허용된 도구 보기
+```
+
+- 허용은 컴퓨터별·도구별이며 기본값은 꺼짐입니다. 할당량 조회 스위치와는 별개로, `quotaProbes`가 켜져 있어도 허용으로 간주하지 않습니다.
+- 로그인 정보는 그 컴퓨터에서만, Cursor에 자신의 사용량을 묻는 데에만 읽습니다. 그 내용은 컴퓨터 밖으로 나가지 않으며, Hub는 Cursor가 알려 준 사용량과 허용 여부만 받습니다.
+- 허용은 처음 사용될 때 로그인된 Cursor 계정에 묶이며, 그 지문은 그 컴퓨터의 xMatrix 설정에만 저장되고 전송되지 않습니다. 계정이나 자격 증명이 바뀌면 허용은 무효가 되고 마지막 할당량 수치도 삭제됩니다.
+- 같은 곳, **Settings → Legal and privacy → Reading sign-ins for quota**, 또는 `xmatrix config quotaAccess cursor off`로 언제든 중지할 수 있으며, 다음 읽기부터 바로 거부됩니다.
+- 로컬 할당량 조회 끄기(아래)가 허용보다 우선합니다. 허용했더라도 아무것도 읽지 않습니다.
 
 ### 로컬 할당량 조회 끄기
 

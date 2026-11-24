@@ -265,7 +265,7 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
 }
 
 /** The owner's Machine daemons, shared with the sign-in's own reading. */
-function useOwnerDaemons(token: string, userId: string) {
+export function useOwnerDaemons(token: string, userId: string) {
   return useQuery({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons", []),
     queryFn: ({ signal }) => fetchMachineDaemons(token, signal), staleTime: 15_000 });
 }

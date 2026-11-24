@@ -93,3 +93,68 @@ async fn unsupported_and_empty_files_are_refused_before_network_io() {
         ));
     }
 }
+
+#[tokio::test]
+async fn page_text_for_agent_downloads_images_concurrently() {
+    use xmatrix_cli_core::hex::sha256_hex;
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let img_a = b"page-image-alpha";
+    let img_b = b"page-image-bravo";
+    let file_a = format!("{}.png", sha256_hex(img_a));
+    let file_b = format!("{}.png", sha256_hex(img_b));
+    let body = format!(
+        "![a](xmatrix:page-media/{file_a})\n![b](xmatrix:page-media/{file_b})\n"
+    );
+
+    let cache_root = std::env::temp_dir().join(format!(
+        "xmatrix-page-media-parallel-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&cache_root);
+    let previous_config = std::env::var_os("XMATRIX_CONFIG_DIR");
+    unsafe {
+        std::env::set_var("XMATRIX_CONFIG_DIR", &cache_root);
+    }
+
+    let expected_a = format!("GET /api/spaces/s/pages/p/media/{file_a} ");
+    let expected_b = format!("GET /api/spaces/s/pages/p/media/{file_b} ");
+    let (hub, server) = http_fixture::spawn_barrier_server(2, "image/png", move |headers, _| {
+        if headers.starts_with(&expected_a) {
+            img_a.to_vec()
+        } else if headers.starts_with(&expected_b) {
+            img_b.to_vec()
+        } else {
+            panic!("unexpected page media request: {headers}");
+        }
+    });
+
+    let rendered = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crate::page::page_text_for_agent(&hub, "test-page-token", "s", "p", &body),
+    )
+    .await
+    .expect("concurrent page image downloads must not deadlock on the 2-way barrier");
+    server.join().unwrap();
+
+    let expected_path_a = cache_root
+        .join("attachment-cache")
+        .join("page-media")
+        .join(&file_a);
+    let expected_path_b = cache_root
+        .join("attachment-cache")
+        .join("page-media")
+        .join(&file_b);
+    assert!(rendered.contains(&expected_path_a.display().to_string()), "{rendered}");
+    assert!(rendered.contains(&expected_path_b.display().to_string()), "{rendered}");
+    assert_eq!(std::fs::read(&expected_path_a).unwrap(), img_a);
+    assert_eq!(std::fs::read(&expected_path_b).unwrap(), img_b);
+
+    unsafe {
+        match previous_config {
+            Some(value) => std::env::set_var("XMATRIX_CONFIG_DIR", value),
+            None => std::env::remove_var("XMATRIX_CONFIG_DIR"),
+        }
+    }
+    let _ = std::fs::remove_dir_all(&cache_root);
+}

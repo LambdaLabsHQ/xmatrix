@@ -809,6 +809,10 @@ pub enum HarnessAction {
     /// Ask this one preset's program, now, whether it is installed and signed
     /// in, and answer with what it says. Nothing is changed or remembered.
     Check,
+    /// Allow reading this harness's local sign-in on this machine to show its
+    /// quota (a harness with no official quota interface), or stop it.
+    QuotaAccessOn,
+    QuotaAccessOff,
 }
 
 impl HarnessAction {
@@ -817,6 +821,8 @@ impl HarnessAction {
         LoginFinish => "login_finish",
         LoginCancel => "login_cancel",
         Check => "check",
+        QuotaAccessOn => "quota_access_on",
+        QuotaAccessOff => "quota_access_off",
     );
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -903,6 +909,10 @@ pub struct MachineQuotaProbeRequest {
     /// accepts an observed result whose only windows are scoped.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub scoped_quota_usages: bool,
+    /// The Hub accepts the reason `not_granted` (a harness read only under its
+    /// owner's grant on this machine has none) only when it sets this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub access_grants: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4159,6 +4169,8 @@ mod tests {
             HarnessAction::LoginFinish,
             HarnessAction::LoginCancel,
             HarnessAction::Check,
+            HarnessAction::QuotaAccessOn,
+            HarnessAction::QuotaAccessOff,
         ] {
             assert_eq!(HarnessAction::parse(action.as_str()), Some(action));
         }

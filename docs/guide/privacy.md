@@ -15,7 +15,7 @@ To keep a connected computer stable across reinstalls under your account, the da
 
 ## Local provider quota probes
 
-**In short:** to show how much quota your registered AI tools have left, the xMatrix daemon reads those tools' own login files on your computer (for example `~/.grok/auth.json`) and asks each provider directly. Codex, Claude Code and OpenCode are the exceptions: xMatrix asks the tool itself and opens none of their login files. Codex is asked through the running session or a briefly started `codex app-server`, Claude Code through the running session or a briefly started `claude` (its `get_usage` request, which sends no prompt), and OpenCode through a briefly started `opencode serve`. Nothing read from those files — no token, account id, file contents or fingerprint — is sent to xMatrix; the Hub receives only the normalized quota answer. One switch stops the file reads, the requests to Codex, Claude Code and OpenCode, and the provider requests (see [Turning off local quota probes](#turning-off-local-quota-probes)).
+**In short:** to show how much quota your registered AI tools have left, the xMatrix daemon reads those tools' own login files on your computer (for example `~/.grok/auth.json`) and asks each provider directly. Codex, Claude Code and OpenCode are the exceptions: xMatrix asks the tool itself and opens none of their login files. Codex is asked through the running session or a briefly started `codex app-server`, Claude Code through the running session or a briefly started `claude` (its `get_usage` request, which sends no prompt), and OpenCode through a briefly started `opencode serve`. Nothing read from those files — no token, account id, file contents or fingerprint — is sent to xMatrix; the Hub receives only the normalized quota answer. One switch stops the file reads, the requests to Codex, Claude Code and OpenCode, and the provider requests (see [Turning off local quota probes](#turning-off-local-quota-probes)). A tool with no official quota interface, such as Cursor, is not read at all until you allow it on that computer (see [Tools read only with your permission](#tools-read-only-with-your-permission)).
 
 When you register a supported harness (such as Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai, or Antigravity), xMatrix can show remaining subscription quota in `xmatrix agent list` and the Agents view, and let `@auto` route around exhausted accounts.
 
@@ -25,7 +25,7 @@ To read remaining quota directly from each provider without running an LLM turn,
 | --- | --- | --- |
 | Claude Code | None: Claude Code's own `get_usage` control request, asked of the running session or a briefly started `claude`; no prompt is sent | Handled by Claude Code with its own sign-in |
 | Codex | None: Codex's own app-server method `account/rateLimits/read`, asked of the running session or a briefly started `codex app-server` | Handled by Codex with its own sign-in |
-| Cursor | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, macOS keychain (`cursor-access-token`), or Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
+| Cursor (only with your permission on that computer) | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, macOS keychain (`cursor-access-token`), or Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` or `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
 | OpenCode | None: `GET /api/experimental/usage/limits` of a briefly started `opencode serve`, listening on loopback only with a one-time password. Nothing is read for a model OpenCode routes to another provider | Handled by OpenCode with its own sign-in |
 | DeepSeek | `DEEPSEEK_API_KEY` or `$DSH_HOME` credential file | `https://api.deepseek.com/user/balance` |
@@ -37,6 +37,24 @@ To read remaining quota directly from each provider without running an LLM turn,
 - Credentials stay in local process memory and are sent **only** to that provider's own usage endpoint.
 - Local SHA-256 content fingerprints are used solely as in-memory cache keys to detect account switches and are **never logged or sent to xMatrix**.
 - Only normalized quota facts (remaining window percentage, reset timestamp, whether the account is currently served, and prepaid balance when applicable) are sent to the xMatrix Hub.
+
+### Tools read only with your permission
+
+Cursor offers no official way to ask for its quota: the only way is to read the sign-in Cursor stored for itself. That sign-in exists for Cursor, so xMatrix does not treat it as permission. Until the computer's owner allows it, xMatrix reads none of Cursor's sign-in sources on that computer (the macOS keychain item `cursor-access-token`, Cursor's `auth.json`, or `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN` already set in the environment), Cursor's quota shows as **Unknown**, and a used-up quota is still recognized from Cursor's own error message.
+
+To allow it, the computer's owner chooses **Allow reading Cursor sign-in to show quota** where the Agents or Machines view shows Cursor's quota, or runs on that computer:
+
+```sh
+xmatrix config quotaAccess cursor on    # allow
+xmatrix config quotaAccess cursor off   # stop
+xmatrix config quotaAccess              # show what is allowed here
+```
+
+- The permission is per computer and per tool, off by default, and separate from the quota probe switch: `quotaProbes` being on does not count as permission.
+- The sign-in is read only on that computer, only to ask Cursor for its own usage. Nothing from it leaves the computer; the Hub receives only the usage Cursor reports and whether the permission is given.
+- The permission is bound to the Cursor account signed in when it is first used, through a fingerprint that is kept only in that computer's xMatrix config and never sent. If the account or credential changes, the permission ends and the last quota numbers are deleted.
+- Stop it at any time in the same place, in **Settings → Legal and privacy → Reading sign-ins for quota**, or with `xmatrix config quotaAccess cursor off`. The next read is already refused.
+- Turning off local quota probes (below) overrides the permission: nothing is read even when it is given.
 
 ### Turning off local quota probes
 
@@ -68,7 +86,7 @@ Every diagnostic event has a declared set of fields, checked when the client bui
 Two paths carry text, and only these:
 
 - **Send failure report on a desktop startup failure card:** the CLI's last lines, which the desktop App redacts on your machine first (home directory, email addresses, URL queries and anything shaped like a token or key are replaced). The card shows you exactly these lines before you send them, and they are sent only when you press the button; the automatic report sent when diagnostics are on carries only the failure's stage, exit code, platform and App version.
-- **Server-side Hub error reports:** the server's own error message, with quoted values, email addresses, URL queries, home-directory paths and token-shaped strings removed. Logged details are reported only when they are numbers, true/false or opaque identifiers.
+- **Server-side Hub error reports:** the server's own error message, with quoted values, email addresses, URL queries, home-directory paths and token-shaped strings removed. Logged details are reported only when they are numbers, true/false, opaque identifiers or lists of code function names. The Hub's own operational evidence (database attempts, release-watch and Durable Object failures, deadlock wait graphs) is reported only in its declared shape: phases, codes, error classes, statuses, durations and code names, with any other field dropped.
 
 ### Beta and stable defaults
 

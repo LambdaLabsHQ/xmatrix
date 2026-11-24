@@ -3642,7 +3642,13 @@ fn cursor_quota_hook(
     force: bool,
     _model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
-    gated_quota_future(read_cursor_period_usage(force))
+    // Cursor has no official quota interface: its sign-in is read only under
+    // the owner's grant on this machine (`xmatrix config quotaAccess cursor`).
+    Box::pin(async move {
+        xmatrix_cli_core::quota_access::read_granted_quota("cursor", force)
+            .await
+            .usage()
+    })
 }
 
 fn antigravity_quota_hook(

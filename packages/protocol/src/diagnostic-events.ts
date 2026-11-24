@@ -70,7 +70,8 @@ export function diagnosticStackFrame(frame: { function?: string; filename?: stri
   return `    at ${name} (${file}:${position(frame.lineno)}:${position(frame.colno)})`;
 }
 
-function admits(field: DiagnosticField, value: unknown): boolean {
+/** Whether a value fits one declared field. */
+export function admitsDiagnosticField(field: DiagnosticField, value: unknown): boolean {
   switch (field.kind) {
     case "enum": return (field.values as readonly unknown[]).includes(value);
     case "number": return typeof value === "number" && Number.isFinite(value) && value >= field.min && value <= field.max &&
@@ -106,7 +107,7 @@ export function parseDiagnosticEvent<S extends DiagnosticEventSchema>(schema: S,
       if (!field.optional) return undefined;
       continue;
     }
-    if (!admits(field, fieldValue)) return undefined;
+    if (!admitsDiagnosticField(field, fieldValue)) return undefined;
     event[key] = fieldValue;
   }
   return event as DiagnosticEvent<S>;

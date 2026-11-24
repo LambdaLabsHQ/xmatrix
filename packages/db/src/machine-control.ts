@@ -3,7 +3,7 @@ import { hostnameMetadata } from "./hostname-metadata.js";
 import type { QueryResultRow } from "pg";
 import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 import {
-  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, MACHINE_HARNESS_CHECK_CAPABILITY, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
+  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, HARNESS_QUOTA_ACCESS_ACTIONS, MACHINE_HARNESS_CHECK_CAPABILITY, MACHINE_HARNESS_QUOTA_ACCESS_CAPABILITY, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_CLAIM_TTL_MS,
   MACHINE_TEXT_TASK_CAPABILITY, parseTextTaskRequest, parseTextTaskResult, TEXT_TASK_CLAIM_TTL_MS,
@@ -18,7 +18,7 @@ import {
   type ChannelCapabilityFailure,
 } from "./channel-capability-policy.js";
 import { ensureMachineName, requireMachineName } from "./machine-names.js";
-import { recordRegistrationQuotaProbeResult } from "./agent-registration-quota-probe.js";
+import { clearUngrantedRegistrationQuota, recordRegistrationQuotaProbeResult, ungrantedHarnesses } from "./agent-registration-quota-probe.js";
 import { recordHarnessActionInventory } from "./machine-harness-actions.js";
 import { recordMachineCliUpdateStatus } from "./machine-cli-release.js";
 import { recordMachineRunTerminalReport, type MachineRunTerminalEvent } from "./machine-run-terminal-reports.js";
@@ -642,6 +642,8 @@ export class PostgresMachineControlRepository {
         // An invalid one is dropped rather than failing the Run snapshot it rides on.
         const harnesses = payload.harnessInventory === undefined ? undefined
           : parseHarnessInventory(payload.harnessInventory);
+        if (harnesses) await clearUngrantedRegistrationQuota(tx, { ownerUserId, machineId,
+          harnesses: ungrantedHarnesses(harnesses.items) });
         if (harnesses) await tx.query({ name: "machine_harness_inventory_observation_v1", text: `UPDATE
           data.machine_daemons SET metadata_json=jsonb_set(metadata_json,'{harnesses}',$3::jsonb)
           WHERE daemon_id=$1 AND connection_epoch=$2 AND status='online'
@@ -1149,6 +1151,14 @@ export class PostgresMachineControlRepository {
         if (!capable[0]) throw new MachineControlError("harness_action_unavailable", 409,
           "Update this machine's daemon before signing in to harnesses from here");
       }
+      if (HARNESS_QUOTA_ACCESS_ACTIONS.includes(payload.action as never)) {
+        const capable = await tx.query({ name: "machine_harness_quota_access_v1", text: `SELECT 1
+          FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
+            AND status='online' AND capabilities_json ? $3 FOR SHARE`,
+        values: [ownerUserId, machineId, MACHINE_HARNESS_QUOTA_ACCESS_CAPABILITY], maxRows: 1 });
+        if (!capable[0]) throw new MachineControlError("harness_action_unavailable", 409,
+          "Update this machine's daemon before allowing it to read a harness's sign-in for its quota");
+      }
       if (payload.action === "check") {
         const capable = await tx.query({ name: "machine_harness_check_v1", text: `SELECT 1
           FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
@@ -1444,13 +1454,15 @@ export class PostgresMachineControlRepository {
           (command.payload_json->>'action'<>'uninstall' OR $8::boolean) AND
           (command.payload_json->>'action'<>'release' OR $9::boolean) AND
           (command.payload_json->>'action' NOT LIKE 'login%' OR $10::boolean) AND
-          (command.payload_json->>'action'<>'check' OR $15::boolean)))
+          (command.payload_json->>'action'<>'check' OR $15::boolean) AND
+          (command.payload_json->>'action' NOT LIKE 'quota_access%' OR $16::boolean)))
         AND (command.command_type<>'worktree_action' OR $11::boolean)
         AND (command.command_type<>'text_task' OR $12::boolean)
         AND (command.command_type<>'sleep' OR $13::boolean)
       ORDER BY command.created_at,command.command_id LIMIT 5
       FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_SLEEP_CAPABILITY), LEASE_RENEW_SKEW_MS,
-        Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CHECK_CAPABILITY)],
+        Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CHECK_CAPABILITY),
+        Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_QUOTA_ACCESS_CAPABILITY)],
     maxRows: 5 });
     const commands = [];
     for (const row of rows) {

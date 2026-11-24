@@ -347,11 +347,18 @@ pub enum Commands {
         command: MigrateCommand,
     },
     /// Show or set config
+    ///
+    /// Local privacy switches: `quotaProbes on|off` (every provider quota
+    /// probe), `telemetry on|off`, and `quotaAccess <harness> on|off`: allow
+    /// xMatrix to read a harness's local sign-in on this computer to show its
+    /// quota, for a harness with no official quota interface (Cursor).
     Config {
         /// Key to show or set
         key: Option<String>,
-        /// Value to set
+        /// Value to set (for `quotaAccess`: the harness)
         value: Option<String>,
+        /// For `quotaAccess <harness>`: on or off
+        setting: Option<String>,
     },
     /// memory-fabric: generic channel annotations primitive (raw Hub API)
     Annotation {
@@ -1955,11 +1962,14 @@ pub enum ChannelCommand {
     },
     /// Send a message to a channel
     Send(SendArgs),
-    /// Show all available message history for a channel
+    /// Show message history for a channel (pass --limit/--tail for only the newest N messages)
     #[command(alias = "messages")]
     History {
         /// Channel ID or xmatrix.sh channel URL
         channel_id: String,
+        /// Show only the N most recent messages instead of paging the full channel
+        #[arg(long, alias = "tail", value_parser = clap::value_parser!(u32).range(1..))]
+        limit: Option<u32>,
     },
     /// Open a simple line-based channel chat with manual refresh
     Chat {
