@@ -95,3 +95,52 @@ listed grant is re-read from its own Space, as the owner, before it is shown.
 Notices expire with the request they point at and are removed a day later. At most one open grant exists per Run and target. Terminal rows
 older than 30 days are removed, a bounded batch at a time, when a new request is
 made in that Space.
+
+## Support handoffs
+
+A person can hand one of their conversations to xMatrix support ("Hand to
+xMatrix support" in the conversation's menu and on xMatrix's failure notices).
+Staff and Agents of the support Space read a customer's conversation only this
+way: product analysis uses metadata only. A handoff is the same grant with a
+different grantee, the support Space instead of one Run
+(`data.cross_space_read_grants.grantee = 'space'`, migration `0272`).
+
+1. The person writes one line about what went wrong and ticks what to include.
+   Nothing is ticked by default:
+   - `messages`: this conversation's messages;
+   - `diagnostics`: execution states and failure codes of the conversation's
+     Agent starts and Runs, as events that pass the diagnostics allowlist
+     (`SUPPORT_LAUNCH_DIAGNOSTIC_EVENT`, `SUPPORT_RUN_DIAGNOSTIC_EVENT` in
+     `packages/protocol/src/support-handoff.ts`): no ids, prompts or error text;
+   - `logs`: a recent tail of their machine's daemon log, redacted on the
+     machine and previewed before it is sent.
+   Then they tick "I agree to let xMatrix support read what I selected". The
+   Hub refuses a handoff without that agreement (`consent_required`).
+2. `POST /api/channels/<id>/support-handoffs` records an approved grant in the
+   person's Space. Only the person who started the conversation, or an owner or
+   admin of its Space, can hand it over, and only while they can read it. The
+   Hub then opens a support conversation in the support Space
+   (`support-handoff:<grant-id>`) with the line, who sent it, what is included
+   and until when, and posts a receipt in the person's conversation.
+3. Support reads only the ticked parts, read-only:
+   `GET /api/spaces/<space-id>/support-handoffs/<grant-id>/messages|diagnostics|logs`.
+   Readers are the support Space's owners, admins and members (never its
+   viewers) and the live Runs working in that support conversation, which can
+   also use `xmatrix channel history <channel>`. Every read is made as the
+   person who handed it over, so it never reaches what they cannot read, and is
+   counted on the grant.
+4. The first read in an hour posts "xMatrix support read this conversation
+   (time)" in the person's conversation.
+5. Support answers with `POST .../replies`; the answer lands in the person's
+   conversation as a message from "xMatrix support". Support may also answer by
+   email, which the support card shows.
+6. The grant ends after 14 days, or at once when the person, or an owner or
+   admin of their Space, withdraws it (`POST .../revoke`). Every read checks
+   the grant first, so an expired or withdrawn handoff reads nothing. A
+   withdrawn handoff's log excerpt is erased at once; an expired one's when the
+   next handoff is made in that Space, a bounded batch at a time.
+
+The support Space is deployment configuration: `SUPPORT_SPACE_ID`, or the
+platform admin Space (`PLATFORM_ADMIN_SPACE_ID`) when it is unset. With
+neither, handoffs answer 503 `support_unavailable`. Its open conversations are
+visible to all its members, so it must be a staff-only Space.

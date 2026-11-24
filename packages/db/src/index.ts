@@ -216,6 +216,11 @@ export {
   type CrossSpaceRunProof,
 } from "./cross-space-read-control.js";
 export {
+  PostgresSupportHandoffRepository,
+  type SupportHandoffRead,
+  type SupportReader,
+} from "./support-handoff-control.js";
+export {
   PostgresSlackOAuthRepository,
   SlackOAuthControlError,
 } from "./slack-oauth-control.js";
