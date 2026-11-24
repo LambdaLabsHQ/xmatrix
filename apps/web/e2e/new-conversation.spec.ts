@@ -21,7 +21,7 @@ test("a new conversation completes the Space's repos after a summon", async ({ p
   await expectDraft(input, "@codex repo:owner/xmatrix ");
 });
 
-test("the empty composer takes turns teaching what typing @, /, [[ and # opens, caret or not", async ({ page }) => {
+test("the empty composer takes turns teaching what typing @, [[ and # opens, caret or not", async ({ page }) => {
   await page.clock.install();
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   const composer = await startNewConversation(page);
@@ -29,7 +29,9 @@ test("the empty composer takes turns teaching what typing @, /, [[ and # opens, 
   const hint = composer.getByTestId("composer-hint");
   await expect(hint).toHaveText("@ to summon an agent");
   await page.clock.runFor(4000);
-  await expect(hint).toHaveText("/ for commands");
+  await expect(hint).toHaveText("[[ for pages");
+  await page.clock.runFor(4000);
+  await expect(hint).toHaveText("# for channels");
   await composer.getByLabel("What should happen").fill("hello");
   await expect(hint).toHaveCount(0);
 });
