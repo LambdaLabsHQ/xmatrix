@@ -67,7 +67,9 @@ import {
   mergeChannelHistory,
   sortChannelHistory,
   commandResultHistoryMessage,
+  editedHistoryMessage,
 } from "@/components/dashboard/channel-history";
+import { latestChannelContentRevision } from "@/lib/relay-v2/channel-content-revision";
 import { sameValue } from "../../lib/same-value";
 import {
   hasChannelComposerAttachments,
@@ -2256,7 +2258,14 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             }));
             break;
           }
-          mergeAndRememberChannelHistory(message.channelId, [message.message]);
+          // An edit (a person's, or the Hub's to its own note) replaces the text
+          // of the copy this reader holds; a message not held is read with its window.
+          const cached = historyCacheRef.current.get(message.channelId);
+          const selected = selectedChannelIdRef.current === message.channelId &&
+            historyChannelIdRef.current === message.channelId;
+          const edited = editedHistoryMessage(selected ? historyRef.current : (cached?.messages || []),
+            message.message);
+          if (edited) mergeAndRememberChannelHistory(message.channelId, [edited]);
           break;
         }
       }
@@ -2767,19 +2776,25 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           ? Math.max(manifestGap, latestHistorySequenceRef.current)
           : contiguousAfter;
         if (afterSequence !== undefined && afterSequence > 0) {
+          // The revision the held rows were read at: rows after the tail only
+          // complete them while no held row has changed since.
+          const heldRevision = latestChannelContentRevision(channelId);
           const newerPage = await fetchChannelHistoryQuery(accessToken, channelId, {
             limit: OLDER_HISTORY_LIMIT,
             afterSequence,
           });
           if (!readStillCurrent()) return false;
-          if (!newerPage.hasMore) {
+          const heldRowsChanged = heldRevision !== undefined && newerPage.contentRevision !== undefined &&
+            newerPage.contentRevision !== heldRevision;
+          if (!newerPage.hasMore && !heldRowsChanged) {
             // Merging never shrinks the window, and passing false keeps the
             // current hasOlderMessages untouched.
             adoptIncrementalHistory(channelId, newerPage.messages, renderAuthority);
             return true;
           }
-          // A full incremental page can hide more rows beyond it; the tail is
-          // no longer provably contiguous, so resync with a full latest page.
+          // A full incremental page can hide more rows beyond it, and a moved
+          // content revision means a held row was edited or withdrawn; either
+          // way resync with a full latest page.
           historyTailBaseGenerationRef.current.delete(channelId);
         }
         const onlinePage = await fetchChannelHistoryQuery(accessToken, channelId, {

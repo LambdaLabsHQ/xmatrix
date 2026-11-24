@@ -88,7 +88,28 @@ export async function channelMessageCommand(
       ? { ...input, sealedAttachments: await sealAttachments(env, channelId, input) }
       : input;
     const result = await postgresMessageMutation(env, family, command, scope);
-    const { tombstoneMessage, ...receipt } = result;
+    const { tombstoneMessage, editedMessage, ...receipt } = result;
+    if (family === "edit-message" && editedMessage && typeof editedMessage === "object" &&
+        !Array.isArray(editedMessage)) {
+      // Every edit reaches the people reading the Channel as it commits, whoever
+      // made it: a person's own edit or the Hub's (the support access note).
+      // Agent Instances read edits from history; an update never starts a turn.
+      // The edit is committed either way: a reader the update misses sees the
+      // Channel's content revision move and reads its history again.
+      try {
+        const audience = await postgresMessageLiveAudience(env, channelId, scope);
+        // What an edit changes and what names the message; what accrues after
+        // commit (reactions, thread) stays with the reader's copy.
+        const { attachments: _attachments, reactions: _reactions, annotations: _annotations, thread: _thread,
+          ...message } = editedMessage as Record<string, unknown>;
+        await deliverChannelMessage(env, { ...message, deliveryKind: "update" }, {
+          recipientUserIds: audience.recipientUserIds, recipientNotifications: [], instanceOwnerUserIds: [],
+        });
+      } catch (error) {
+        console.warn("Message edit live update failed", { channelId,
+          error: error instanceof Error ? error.message : String(error) });
+      }
+    }
     if (family === "delete-message" || family === "recall-message") {
       if (!tombstoneMessage || typeof tombstoneMessage !== "object" || Array.isArray(tombstoneMessage)) {
         throw new Error("PostgreSQL tombstone delivery evidence is unavailable");
