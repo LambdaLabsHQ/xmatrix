@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: a message sent to a working Antigravity joins its turn instead of cancelling it
+
+Claude's turns took a Channel message that arrived mid-turn as more input to
+the running turn; an ACP harness had no such path, so the same message
+cancelled Antigravity's turn with `session/cancel` and the work restarted
+after it, and messages that did not cut the turn waited for it to end, which
+left the Agent's later sends behind the Channel. `agy acp` joins a
+`session/prompt` sent while a turn runs to that turn without interrupting the
+running tool (measured on 1.5.16: a `sleep 25` kept running and the answer
+quoted the joined message); it answers the earlier prompt `end_turn` at once.
+The ACP runtime now sends such a message as another `session/prompt` and ends
+the turn only when its own prompt and every joined one have answered, as it
+does for Claude. Only Antigravity is opted in; other ACP harnesses are
+interrupted as before. CLI runtime only, no Hub, schema or protocol change.
+Recovery is a release reverting this change.
+
 ## Unreleased: build both macOS CLI architectures on one Apple Silicon runner
 
 After #1880 moved hosted `macos-x64` CLI builds onto `macos-26`, requesting two

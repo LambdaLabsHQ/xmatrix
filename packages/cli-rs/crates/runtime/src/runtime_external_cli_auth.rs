@@ -3238,6 +3238,37 @@ async fn submit_acp_turn_interruptible(
             }
             return true;
         }
+        // A message that would cut the turn short joins it instead when the
+        // agent takes prompts mid-turn, as Claude's turns do.
+        if let Some(message) = crate::active_turn_steer_message(
+            event,
+            trace_channel_id,
+            agent,
+            interrupt_history_replay,
+        ) {
+            interrupter.cancel_questions().await;
+            let instruction = crate::inbound_execution_sources(std::slice::from_ref(&message))
+                .into_iter()
+                .next()
+                .and_then(|source| runtime_state.join_message_turn_source(source));
+            let input = crate::steered_turn_input(
+                &message.prompt_text(agent, None),
+                instruction.as_deref(),
+            );
+            match interrupter.steer_active_turn(&input).await {
+                Ok(true) => {
+                    if let Some(relay) = relay {
+                        crate::ack_inbound_channel_messages(relay, std::slice::from_ref(&message));
+                    }
+                    return true;
+                }
+                Ok(false) => {}
+                Err(err) => eprintln!(
+                    "{} {display_name} ACP steer failed: {err}; interrupting instead",
+                    "⚠".yellow().bold()
+                ),
+            }
+        }
         if event_requests_active_turn_interrupt_with_replay(
             event,
             trace_channel_id,
@@ -3378,6 +3409,8 @@ struct AcpInterrupter {
     write: AppServerWrite,
     session_id: String,
     questions: crate::runtime_harness_questions::PendingQuestions<(Value, Value)>,
+    /// Set when the agent joins a mid-turn prompt to its running turn.
+    steered_prompts: Option<AcpSteeredPrompts>,
 }
 
 impl AcpInterrupter {
@@ -3408,6 +3441,30 @@ impl AcpInterrupter {
 
     pub(crate) async fn interrupt_active_turn(&self) -> error::Result<()> {
         write_acp_message(&self.write, &acp_cancel_notification(&self.session_id)).await
+    }
+
+    /// Join `text` to the running turn as another `session/prompt`. False when
+    /// this agent does not join mid-turn prompts; the caller then interrupts.
+    pub(crate) async fn steer_active_turn(&self, text: &str) -> error::Result<bool> {
+        let Some(steered) = &self.steered_prompts else {
+            return Ok(false);
+        };
+        let id = format!("xmatrix-steer-{}", uuid::Uuid::new_v4());
+        steered.open(id.clone());
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": self.session_id,
+                "prompt": [acp_text_block(text)],
+            },
+        });
+        if let Err(err) = write_acp_message(&self.write, &request).await {
+            steered.close(Some(&Value::String(id)));
+            return Err(err);
+        }
+        Ok(true)
     }
 }
 
@@ -3503,6 +3560,11 @@ struct AcpVendorConfig {
     /// `run_command` or `schedule`) open across `end_turn` and emits their
     /// completion plus reactive wakeup updates between turns.
     supports_background_tasks: bool,
+    /// Whether a `session/prompt` sent while a turn runs joins that turn
+    /// (Antigravity's queued messages): the earlier prompt then returns
+    /// `end_turn` and the work carries on under the newer one. Without it a
+    /// channel message that arrives mid-turn cancels the turn instead.
+    steers_mid_turn: bool,
 }
 
 impl AcpVendorConfig {
@@ -3537,6 +3599,7 @@ impl AcpVendorConfig {
             presentation_adapter: agent_presentation_adapter_for_runtime("grok"),
             preset_acp_args: None,
             supports_background_tasks: false,
+            steers_mid_turn: false,
         }
     }
 
@@ -3585,6 +3648,7 @@ impl AcpVendorConfig {
             presentation_adapter: agent_presentation_adapter_for_acp_runtime(&stem),
             preset_acp_args: preset.and_then(|preset| preset.acp_args.clone()),
             supports_background_tasks: stem == "antigravity",
+            steers_mid_turn: stem == "antigravity",
         }
     }
 
@@ -3745,6 +3809,39 @@ struct AcpSession {
     subagent_wakeup_grace: Duration,
     /// True once the child's stdout stream returned EOF.
     inbox_closed: bool,
+    /// Prompts joined to the running turn whose `session/prompt` has not
+    /// answered yet; the turn ends only once every one of them has.
+    steered_prompts: AcpSteeredPrompts,
+}
+
+/// JSON-RPC ids of the `session/prompt` requests a running turn was steered
+/// with, shared by the turn loop and its interrupter.
+#[derive(Clone, Default)]
+pub(crate) struct AcpSteeredPrompts(Arc<std::sync::Mutex<Vec<String>>>);
+
+impl AcpSteeredPrompts {
+    fn open(&self, id: String) {
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(id);
+    }
+
+    /// Close the steer `id` answers; false when it is not one of them.
+    fn close(&self, id: Option<&Value>) -> bool {
+        let Some(id) = id.and_then(Value::as_str) else {
+            return false;
+        };
+        let mut open = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = open.len();
+        open.retain(|steer| steer != id);
+        open.len() != before
+    }
+
+    fn any_open(&self) -> bool {
+        !self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_empty()
+    }
+
+    fn clear(&self) {
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+    }
 }
 
 /// Where a vendor takes a session's trusted rules (the registration's
