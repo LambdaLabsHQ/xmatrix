@@ -903,6 +903,10 @@ pub struct MachineQuotaProbeRequest {
     /// accepts an observed result whose only windows are scoped.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub scoped_quota_usages: bool,
+    /// The Hub accepts the reason `not_granted` (a harness read only under its
+    /// owner's grant on this machine has none) only when it sets this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub access_grants: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -33,6 +33,13 @@ const MAX_WINDOW_LABEL_BYTES: usize = 24;
 const MAX_SCOPE_BYTES: usize = 64;
 /// A registration target names its harness; owner and machine are this daemon.
 const REGISTRATION_TARGET_PREFIX: &str = "registration:";
+/// The harness is read only under its owner's grant on this machine, and there
+/// is none (never given, revoked, or voided by another sign-in).
+const NOT_GRANTED: &str = "not_granted";
+
+/// The owner has not allowed reading this harness's sign-in on this machine.
+#[derive(Debug, PartialEq, Eq)]
+struct NotGranted;
 
 pub(crate) async fn execute_machine_quota_probe(
     request_id: String,
@@ -86,13 +93,10 @@ enum ReadOutcome {
 /// The deadline bounds the whole probe, so the reader future is wrapped rather
 /// than only checked before the call: a reader that hangs past the budget is
 /// cancelled instead of extending the probe.
-async fn read_with_budget<F, Fut>(
-    deadline: Instant,
-    read: F,
-) -> Result<Option<LlmUsage>, ReadOutcome>
+async fn read_with_budget<F, Fut, T>(deadline: Instant, read: F) -> Result<T, ReadOutcome>
 where
     F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Option<LlmUsage>>,
+    Fut: std::future::Future<Output = T>,
 {
     let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
         return Err(ReadOutcome::Timeout);
@@ -280,7 +284,7 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
     }
 }
 
-async fn read_account(account: QuotaAccount, fresh: bool) -> Option<LlmUsage> {
+async fn read_account(account: QuotaAccount, fresh: bool) -> Result<Option<LlmUsage>, NotGranted> {
     // Respect each reader's short success TTL: a probe is not a reason to
     // hammer the provider, and a cached reading keeps its observation time.
     // A fresh probe checks a refusal, which only a newer reading can answer;
@@ -289,19 +293,26 @@ async fn read_account(account: QuotaAccount, fresh: bool) -> Option<LlmUsage> {
         QuotaAccount::Codex(home) => (Provider::Codex, Account::Home(home)),
         QuotaAccount::Grok(home) => (Provider::Grok, Account::Home(home)),
         QuotaAccount::ClaudeDefault => (Provider::Claude, Account::DefaultLogin),
-        QuotaAccount::CursorDefault => (Provider::Cursor, Account::DefaultLogin),
+        QuotaAccount::CursorDefault => {
+            // No official quota interface: read only under the owner's grant.
+            return match xmatrix_cli_core::quota_access::read_granted_quota("cursor", fresh).await {
+                xmatrix_cli_core::quota_access::GrantedQuota::Usage(usage) => Ok(usage),
+                xmatrix_cli_core::quota_access::GrantedQuota::ProbesOff => Ok(None),
+                xmatrix_cli_core::quota_access::GrantedQuota::NotGranted => Err(NotGranted),
+            };
+        }
         QuotaAccount::OpenCodeDefault => (Provider::OpenCode, Account::Process),
         QuotaAccount::DeepSeekDefault => (Provider::DeepSeek, Account::Process),
         QuotaAccount::AntigravityDefault => (Provider::Antigravity, Account::DefaultLogin),
     };
-    quota::read(
+    Ok(quota::read(
         provider,
         ReadOptions {
             account,
             force: fresh,
         },
     )
-    .await
+    .await)
 }
 
 async fn probe_one_target(
@@ -324,7 +335,7 @@ async fn probe_one_target_with<R, F, Fut>(
 where
     R: Fn(&str) -> Resolution,
     F: FnOnce(QuotaAccount) -> Fut,
-    Fut: std::future::Future<Output = Option<LlmUsage>>,
+    Fut: std::future::Future<Output = Result<Option<LlmUsage>, NotGranted>>,
 {
     if Instant::now() >= deadline {
         return unavailable(target, "timeout");
@@ -338,7 +349,8 @@ where
     };
     let target_deadline = deadline.min(Instant::now() + PROBE_TARGET_BUDGET);
     let usage = match read_with_budget(target_deadline, || read(account)).await {
-        Ok(usage) => usage,
+        Ok(Ok(usage)) => usage,
+        Ok(Err(NotGranted)) => return unavailable(target, NOT_GRANTED),
         Err(ReadOutcome::Timeout) => return unavailable(target, "timeout"),
     };
     // Re-resolve after the read: a target whose configuration changed mid-read
@@ -450,6 +462,11 @@ fn accept_only_what_the_hub_asked(
         if !probe.quota_account {
             result.quota_account = None;
         }
+        // A Hub that did not ask about grants reads a missing grant as a
+        // configuration this daemon cannot read under.
+        if !probe.access_grants && result.reason.as_deref() == Some(NOT_GRANTED) {
+            result.reason = Some("configuration_unavailable".to_string());
+        }
         // Scoped windows alone stand only for a Hub that asked for them, and
         // a balance alone only for a Hub that asked for it.
         let balance_only = probe.account_balance && has_balance(result);
@@ -517,6 +534,7 @@ mod tests {
             fresh: false,
             account_balance: false,
             scoped_quota_usages: false,
+            access_grants: false,
         };
         let report = execute_machine_quota_probe("cmd-1".to_string(), probe, None).await;
         let MachineDaemonReport::MachineQuotaProbeResult {
@@ -944,18 +962,22 @@ mod tests {
         let deadline = Instant::now() + Duration::from_millis(40);
         let timed_out = read_with_budget(deadline, || async {
             tokio::time::sleep(Duration::from_millis(300)).await;
-            None
+            None::<LlmUsage>
         })
         .await;
         assert!(matches!(timed_out, Err(ReadOutcome::Timeout)));
 
         // A deadline already in the past is a timeout without calling the reader.
-        let expired =
-            read_with_budget(Instant::now() - Duration::from_millis(1), || async { None }).await;
+        let expired = read_with_budget(Instant::now() - Duration::from_millis(1), || async {
+            None::<LlmUsage>
+        })
+        .await;
         assert!(matches!(expired, Err(ReadOutcome::Timeout)));
 
-        let fast =
-            read_with_budget(Instant::now() + Duration::from_secs(5), || async { None }).await;
+        let fast = read_with_budget(Instant::now() + Duration::from_secs(5), || async {
+            None::<LlmUsage>
+        })
+        .await;
         assert!(matches!(fast, Ok(None)));
     }
 
@@ -1177,7 +1199,7 @@ mod tests {
                     account,
                     QuotaAccount::Grok(PathBuf::from("/fixture/home/.grok"))
                 );
-                Some(grok_fixture_usage(100.0))
+                Ok(Some(grok_fixture_usage(100.0)))
             },
         )
         .await;
@@ -1238,7 +1260,7 @@ mod tests {
                     }
                 }
             },
-            |_| async { Some(grok_fixture_usage(10.0)) },
+            |_| async { Ok(Some(grok_fixture_usage(10.0))) },
         )
         .await;
         assert_eq!(result.reason.as_deref(), Some("configuration_unavailable"));
@@ -1258,7 +1280,7 @@ mod tests {
                 &target("registration:grok", "d"),
                 far,
                 |_| grok_account(),
-                |_| async move { Some(usage) },
+                |_| async move { Ok(Some(usage)) },
             )
             .await;
             assert_eq!(result.status, "unavailable");

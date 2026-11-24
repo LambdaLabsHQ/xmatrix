@@ -1,6 +1,11 @@
 //! Cursor Agent subscription quota, read from the DashboardService usage
 //! endpoint behind the CLI's stored login.
 //!
+//! Cursor offers no official quota interface, so this reader opens Cursor's
+//! own sign-in only under the owner's per-machine [`SignInReadGrant`]
+//! (`super::grant`). Without one it reads nothing and the quota is unknown;
+//! exhaustion is still recognised from Cursor's own out-of-quota errors.
+//!
 //! Current Cursor Agent builds keep that login in the macOS login keychain
 //! (`cursor-access-token` / `cursor-user`) and do not write `auth.json`.
 //! Older installs and Windows still use `%APPDATA%/Cursor/auth.json`,
@@ -17,9 +22,13 @@
 //! Generic ACP otherwise has no account quota source for Cursor; without this
 //! hook the Agents page and `xmatrix list` show `-`.
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use serde_json::Value;
+
+use super::grant::{GrantedRead, SignInReadGrant};
 
 use super::windows::percent_window;
 use crate::fields::{first_f64, first_string};
@@ -81,46 +90,92 @@ async fn cursor_keychain_access_token() -> Option<String> {
     token_from_secret(&raw)
 }
 
-/// Resolve the bearer token the Cursor Agent CLI would use for dashboard RPCs.
-async fn cursor_access_token() -> Option<String> {
-    for key in ["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"] {
-        if let Ok(token) = std::env::var(key)
-            && let Some(token) = token_from_secret(&token)
-        {
-            return Some(token);
-        }
+/// Where the Cursor Agent CLI keeps the sign-in it uses for dashboard RPCs.
+///
+/// Every credential source this reader can open sits behind this one call, so
+/// a read without a grant provably never reaches any of them.
+pub(crate) trait CursorSignIn: Sync {
+    fn access_token(&self) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>>;
+}
+
+/// Cursor's own sign-in on this machine: the explicit `CURSOR_API_KEY` or
+/// `CURSOR_AUTH_TOKEN`, then the macOS keychain item, then `auth.json`.
+struct LocalCursorSignIn;
+
+impl CursorSignIn for LocalCursorSignIn {
+    fn access_token(&self) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>> {
+        Box::pin(async {
+            for key in ["CURSOR_API_KEY", "CURSOR_AUTH_TOKEN"] {
+                if let Ok(token) = std::env::var(key)
+                    && let Some(token) = token_from_secret(&token)
+                {
+                    return Some(token);
+                }
+            }
+            if let Some(token) = cursor_keychain_access_token().await {
+                return Some(token);
+            }
+            cursor_auth_paths()
+                .into_iter()
+                .find_map(|path| cursor_token_from_auth_file(&path))
+        })
     }
-    if let Some(token) = cursor_keychain_access_token().await {
-        return Some(token);
-    }
-    cursor_auth_paths()
-        .into_iter()
-        .find_map(|path| cursor_token_from_auth_file(&path))
 }
 
 fn cursor_cli_user_agent() -> String {
     "xmatrix/cursor".to_string()
 }
 
-/// Cursor billing-cycle and Auto/API bucket quotas from GetCurrentPeriodUsage.
-pub async fn read_cursor_period_usage(force: bool) -> Option<LlmUsage> {
+/// Cursor billing-cycle and Auto/API bucket quotas from GetCurrentPeriodUsage,
+/// read only under the owner's [`SignInReadGrant`]. Cursor has no official
+/// quota interface; without a grant no credential source is opened and the
+/// quota stays unknown.
+pub async fn read_cursor_period_usage(force: bool, grant: Option<&SignInReadGrant>) -> GrantedRead {
+    read_cursor_period_usage_with(force, grant, &LocalCursorSignIn, CURSOR_PERIOD_USAGE_URL).await
+}
+
+pub(crate) async fn read_cursor_period_usage_with(
+    force: bool,
+    grant: Option<&SignInReadGrant>,
+    sign_in: &dyn CursorSignIn,
+    endpoint: &str,
+) -> GrantedRead {
+    let Some(grant) = grant else {
+        return GrantedRead::Closed;
+    };
     if super::quota_probes_disabled() {
-        return None;
+        return GrantedRead::Closed;
     }
     let cache = super::cache::account_meter_cache(super::cache::AccountMeter::Cursor);
-    if let Some(cached) = cache.hit_unless_forced(force) {
-        return cached;
+    let Some(token) = sign_in.access_token().await else {
+        // Signed out: nothing to bind and nothing to ask.
+        return GrantedRead::Read {
+            usage: cache.unavailable(),
+            bound: None,
+        };
+    };
+    let bound = match super::grant::match_grant(grant, &token) {
+        super::grant::GrantMatch::Same { bound } => bound,
+        super::grant::GrantMatch::Changed => {
+            // Another account's reading must not outlive the grant.
+            cache.clear();
+            return GrantedRead::SignInChanged;
+        }
+    };
+    // A first read under a new grant asks afresh: the cache may hold a reading
+    // of the sign-in a voided grant was bound to.
+    if let Some(cached) = cache.hit_unless_forced(force || bound.is_some()) {
+        return GrantedRead::Read {
+            usage: cached,
+            bound,
+        };
     }
 
-    let Some(token) = cursor_access_token().await else {
-        return cache.unavailable();
-    };
-
-    let value = cache
+    let Some(value) = cache
         .fetch_json(
             "cursor",
             provider_client()
-                .post(CURSOR_PERIOD_USAGE_URL)
+                .post(endpoint)
                 .header(reqwest::header::AUTHORIZATION, format!("Bearer {token}"))
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
                 .header(reqwest::header::ACCEPT, "application/json")
@@ -128,11 +183,14 @@ pub async fn read_cursor_period_usage(force: bool) -> Option<LlmUsage> {
                 .header("Connect-Protocol-Version", "1")
                 .body("{}"),
         )
-        .await?;
+        .await
+    else {
+        return GrantedRead::Read { usage: None, bound };
+    };
 
     let usage = cursor_period_usage_from_value(&value);
     cache.store(usage.clone());
-    usage
+    GrantedRead::Read { usage, bound }
 }
 
 fn rfc3339_from_unix_millis(raw: &str) -> Option<String> {
@@ -255,6 +313,125 @@ pub(crate) fn cursor_period_usage_from_value(value: &Value) -> Option<LlmUsage> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A Cursor sign-in that counts how often any credential source is opened.
+    struct CountingSignIn {
+        token: Option<&'static str>,
+        opened: AtomicUsize,
+    }
+
+    impl CountingSignIn {
+        fn new(token: Option<&'static str>) -> Self {
+            Self {
+                token,
+                opened: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl CursorSignIn for CountingSignIn {
+        fn access_token(&self) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>> {
+            self.opened.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move { self.token.map(str::to_string) })
+        }
+    }
+
+    /// An endpoint nothing listens on: reaching it would be a request to Cursor.
+    const NO_PROVIDER: &str = "http://127.0.0.1:9/never";
+
+    #[tokio::test]
+    async fn without_a_grant_no_credential_source_is_opened() {
+        let sign_in = CountingSignIn::new(Some("sentinel-cursor-token"));
+        let read = read_cursor_period_usage_with(true, None, &sign_in, NO_PROVIDER).await;
+        assert!(matches!(read, GrantedRead::Closed), "{read:?}");
+        assert_eq!(sign_in.opened.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn the_local_sign_in_is_reachable_only_through_the_granted_reader() {
+        // `read` (the ungranted entrypoint) has no Cursor reading for any
+        // account binding: only `read_granted` can open Cursor's sign-in.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        for account in [
+            super::super::Account::Process,
+            super::super::Account::DefaultLogin,
+        ] {
+            let options = super::super::ReadOptions {
+                account,
+                force: true,
+            };
+            assert!(
+                runtime
+                    .block_on(super::super::read(super::super::Provider::Cursor, options))
+                    .is_none()
+            );
+        }
+        assert!(super::super::Provider::Cursor.reads_sign_in_only_with_grant());
+    }
+
+    #[tokio::test]
+    async fn under_a_grant_the_sign_in_reaches_only_the_request_to_cursor() {
+        use std::io::Write;
+        const TOKEN: &str = "sentinel-cursor-access-token";
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}/usage", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, headers) =
+                super::super::read_fixture_http_request(&listener, "Cursor request missing");
+            assert!(headers.contains(&format!("authorization: bearer {TOKEN}\r\n")));
+            let body = serde_json::json!({
+                "billingCycleEnd": "1900000000000",
+                "planUsage": {"autoPercentUsed": 10, "apiPercentUsed": 20}
+            })
+            .to_string();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+        });
+        let sign_in = CountingSignIn::new(Some(TOKEN));
+        let grant = SignInReadGrant::new("sentinel-grant-key");
+        let read = read_cursor_period_usage_with(true, Some(&grant), &sign_in, &endpoint).await;
+        server.join().unwrap();
+        let GrantedRead::Read {
+            usage: Some(usage),
+            bound: Some(bound),
+        } = read
+        else {
+            panic!("a first read under a grant reads and binds: {read:?}");
+        };
+        // The reading is what the daemon reports to the Hub; the binding stays
+        // in local config. Neither holds the token, and the reading holds
+        // neither the grant's key nor its fingerprint.
+        let wire = serde_json::to_string(&usage).unwrap();
+        for needle in [TOKEN, "sentinel-grant-key", bound.as_str()] {
+            assert!(!wire.contains(needle), "{needle} leaked into {wire}");
+        }
+        assert!(!bound.contains(TOKEN));
+        assert_eq!(usage.scoped_quota_usages.map(|pools| pools.len()), Some(2));
+    }
+
+    #[tokio::test]
+    async fn another_sign_in_voids_the_grant_without_asking_cursor() {
+        let grant = SignInReadGrant {
+            sign_in: Some(super::super::grant::sign_in_fingerprint(
+                "grant-key",
+                "the-granted-account-key",
+            )),
+            ..SignInReadGrant::new("grant-key")
+        };
+        let same = CountingSignIn::new(Some("the-granted-account-key"));
+        let read = read_cursor_period_usage_with(true, Some(&grant), &same, NO_PROVIDER).await;
+        assert!(
+            matches!(read, GrantedRead::Read { bound: None, .. }),
+            "{read:?}"
+        );
+
+        let other = CountingSignIn::new(Some("another-account-key"));
+        let read = read_cursor_period_usage_with(false, Some(&grant), &other, NO_PROVIDER).await;
+        assert!(matches!(read, GrantedRead::SignInChanged), "{read:?}");
+    }
 
     #[test]
     fn secret_text_drops_blank_and_keeps_a_token() {

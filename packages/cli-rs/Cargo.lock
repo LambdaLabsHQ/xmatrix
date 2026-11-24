@@ -3417,6 +3417,7 @@ dependencies = [
 name = "xmatrix-harness"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "colored",
  "dirs",
  "reqwest",
