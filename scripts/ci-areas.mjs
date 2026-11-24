@@ -116,6 +116,7 @@ const rustToolchainPaths = [
   ".github/actions/setup-windows-rust-cli",
   ".github/scripts/kache-cache.ps1",
   ".github/scripts/reclaim-windows-rust-disk.ps1",
+  ".github/scripts/reset-kache-store.sh",
   ".github/scripts/rust-compile-jobs.sh",
   ".github/scripts/setup-kache.sh",
   ".github/scripts/setup-kache.ps1",

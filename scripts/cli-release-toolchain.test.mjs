@@ -50,3 +50,29 @@ test("Windows CLI release build steps never invoke bash", () => {
     "cli-build.yml build job has shell: bash step reachable on Windows",
   );
 });
+
+// Requesting two concurrent `macos-26` VMs per CLI release or cache warm hit
+// GitHub's Apple Silicon pool capacity and cancelled the second job after 15m.
+// Both workflows must request one macOS VM while still covering both macOS
+// targets (`aarch64-apple-darwin` / `macos-arm64` and `x86_64-apple-darwin` /
+// `macos-x64`).
+test("macOS CLI release and cache warm use one Apple Silicon job for both architectures", () => {
+  for (const [file, jobName] of [
+    [".github/workflows/cli-build.yml", "build"],
+    [".github/workflows/cli-release-cache.yml", "warm"],
+  ]) {
+    const entries = readYaml(file).jobs[jobName].strategy.matrix.include;
+    const macEntries = entries.filter((entry) => String(entry.target).includes("apple-darwin"));
+    assert.equal(macEntries.length, 1, `${file} must schedule exactly one macOS job`);
+    const [mac] = macEntries;
+    assert.match(String(mac.runner), /macos-26/u);
+    assert.equal(mac.primary_target, "aarch64-apple-darwin");
+    assert.equal(mac.secondary_target, "x86_64-apple-darwin");
+    assert.equal(mac.part, "macos-arm64");
+    assert.equal(mac.secondary_part, "macos-x64");
+    assert.deepEqual(
+      String(mac.target).split(",").map((target) => target.trim()).sort(),
+      ["aarch64-apple-darwin", "x86_64-apple-darwin"],
+    );
+  }
+});

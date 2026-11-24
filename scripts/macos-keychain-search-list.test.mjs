@@ -144,9 +144,11 @@ test("CLI release serialization follows shared macOS hosts, not isolated hosted 
     assert.equal(new Set(groups).size, groups.length, "hosted builds must all be independent");
   }
   const macTargets = targets.filter((target) => target.includes("apple-darwin"));
-  assert.equal(macTargets.length, 2);
-  assert.equal(group(macTargets[0], "self-hosted", 1), group(macTargets[1], "self-hosted", 2),
-    "shared macOS keychains need serialization across architectures and release runs");
+  assert.equal(macTargets.length, 1, "macOS CLI release builds both architectures on one Apple Silicon job");
+  assert.match(macTargets[0], /aarch64-apple-darwin/u);
+  assert.match(macTargets[0], /x86_64-apple-darwin/u);
+  assert.equal(group(macTargets[0], "self-hosted", 1), group(macTargets[0], "self-hosted", 2),
+    "shared macOS keychains need serialization across release runs");
   const nativeGroups = targets.filter((target) => !macTargets.includes(target))
     .map((target) => group(target, "self-hosted", 1));
   assert.equal(new Set(nativeGroups).size, nativeGroups.length);
