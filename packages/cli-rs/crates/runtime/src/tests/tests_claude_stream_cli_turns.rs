@@ -870,7 +870,7 @@ emit '{"type":"result","subtype":"success","result":"DONE","session_id":"s1"}'
 IFS= read -r line || exit 0
 printf '%s\n' "$line" > "$root/usage-request"
 rid=$(printf '%s' "$line" | sed 's/.*"request_id":"\([^"]*\)".*/\1/')
-emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$rid\",\"response\":{\"subscription_type\":\"max\",\"rate_limits_available\":true,\"rate_limits\":{\"five_hour\":{\"utilization\":12,\"resets_at\":\"2026-11-24T22:20:00Z\"},\"seven_day\":{\"utilization\":79,\"resets_at\":\"2026-11-26T18:00:00Z\"},\"model_scoped\":[]}}}}"
+emit "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"$rid\",\"response\":{\"subscription_type\":\"pro\",\"rate_limits_available\":true,\"rate_limits\":{\"five_hour\":{\"utilization\":30,\"resets_at\":\"2030-01-01T05:00:00Z\"},\"seven_day\":{\"utilization\":60,\"resets_at\":\"2030-01-03T18:00:00Z\"},\"model_scoped\":[]}}}}"
 sleep 30
 "#,
     )
@@ -889,7 +889,7 @@ sleep 30
     .expect("a reading");
     let windows = usage.quota_usages.unwrap();
     assert_eq!(windows[0].label.as_deref(), Some("5h"));
-    assert_eq!(windows[1].percent, Some(79.0));
+    assert_eq!(windows[1].percent, Some(60.0));
     assert!(
         usage
             .scoped_quota_usages

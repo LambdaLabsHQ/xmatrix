@@ -468,17 +468,17 @@ async fn ask_claude_program(
 mod tests {
     use super::*;
 
-    /// `get_usage` from Claude Code 2.1.331 on 2026-11-24 (trimmed): Fable's
-    /// own week used up while the account's week stood at 79%.
+    /// A `get_usage` answer in Claude Code 2.1.331's shape (trimmed, made-up
+    /// values): Fable's own week used up while the account's week is at 60%.
     fn live_get_usage_report() -> Value {
         serde_json::json!({
             "session": { "total_cost_usd": 0 },
-            "subscription_type": "max",
+            "subscription_type": "pro",
             "rate_limits_available": true,
             "rate_limits": {
-                "five_hour": { "utilization": 11, "resets_at": "2026-11-24T22:20:00.698101+00:00",
+                "five_hour": { "utilization": 30, "resets_at": "2030-01-01T05:00:00.000001+00:00",
                                "limit_dollars": null, "locked_reason": null },
-                "seven_day": { "utilization": 79, "resets_at": "2026-11-26T18:00:00.698159+00:00" },
+                "seven_day": { "utilization": 60, "resets_at": "2030-01-03T18:00:00.000002+00:00" },
                 "seven_day_oauth_apps": null,
                 "seven_day_opus": null,
                 "seven_day_sonnet": null,
@@ -486,7 +486,7 @@ mod tests {
                                  "utilization": null, "currency": null },
                 "model_scoped": [
                     { "display_name": "Fable", "utilization": 100,
-                      "resets_at": "2026-11-26T17:59:59.698381+00:00" }
+                      "resets_at": "2030-01-03T17:59:59.000003+00:00" }
                 ]
             },
             "behaviors": null
@@ -498,11 +498,11 @@ mod tests {
         let usage = claude_usage_report_from_value(&live_get_usage_report()).unwrap();
         assert!(usage.quota_observed_at.is_some());
         let account = super::super::assert_provider_window_labels(usage.clone(), &["5h", "1w"]);
-        assert_eq!(account[0].percent, Some(11.0));
-        assert_eq!(account[1].percent, Some(79.0));
+        assert_eq!(account[0].percent, Some(30.0));
+        assert_eq!(account[1].percent, Some(60.0));
         assert_eq!(
             account[1].reset_at.as_deref(),
-            Some("2026-11-26T18:00:00.698159+00:00")
+            Some("2030-01-03T18:00:00.000002+00:00")
         );
         assert!(account.iter().all(|window| window.scope.is_none()));
         let scoped = usage.scoped_quota_usages.unwrap();
