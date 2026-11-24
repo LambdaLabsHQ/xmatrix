@@ -6,6 +6,7 @@ import type { ChannelAppMention, ChannelAttachment, InstanceRecord } from "@xmat
 import { agentInstanceRequiredMessage, channelPeerInstances } from "./agent-launch-context";
 import { getChannel } from "./spaces";
 import { subscribeRunToPullRequest } from "./github-pull-request-subscription";
+import { subscribeRunToWorkflowRun, WorkflowRunUrlInvalid } from "./github-workflow-run-subscription";
 import type { Env } from "./types";
 import { LIVE_RUN_LAUNCH_FIELDS, liveRunIsAdmitted, snapshotLiveRunFromProductGateway } from "./live-run-admission";
 import { type AuthUser } from "./auth";
@@ -578,6 +579,28 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
       if (!(error instanceof ChannelActivityInvalid)) throw error;
       return c.json({ error: "A pull request is named by its https://github.com/<owner>/<repo>/pull/<n> URL",
         code: "invalid_pull_request_url" }, 400);
+    }
+  }));
+  /* An Agent follows a GitHub Actions workflow run it started instead of
+     polling it: the run's verdict arrives as a message when it completes. */
+  app.post("/api/channels/:channelId/workflow-runs", (c) => jsonErrors(c, async () => {
+    const authUser = await requireAuth(c.req.raw, c.env);
+    const channelId = c.req.param("channelId");
+    const actor = await messageMutationActor(c.env, authUser, channelId);
+    if (actor instanceof Response) return actor;
+    const run = actor.run;
+    if (!run) {
+      return c.json({ error: "Subscribing to a workflow run requires an Agent Run", code: "agent_run_required" }, 403);
+    }
+    const body = (await c.req.json().catch(() => ({}))) as { url?: unknown };
+    try {
+      return c.json({ ok: true, ...await subscribeRunToWorkflowRun(c.env, {
+        spaceId: run.spaceId, channelId, ownerUserId: run.ownerUserId, url: body.url,
+        commandId: productCommandId(c.req.raw, "workflow-run-subscribe"),
+      }) });
+    } catch (error) {
+      if (!(error instanceof WorkflowRunUrlInvalid)) throw error;
+      return c.json({ error: error.message, code: "invalid_workflow_run_url" }, 400);
     }
   }));
   app.patch("/api/channels/:channelId/messages/:messageId", (c) => jsonErrors(c, async () => {

@@ -260,7 +260,7 @@ export interface SerializedAppConnectorConnection {
 }
 
 export interface SerializedAppConnectorChannelSubscription {
-  kind: "repository" | "issue";
+  kind: "repository" | "issue" | "workflow_run";
   source: string;
   features: string[];
   updatedAt: string;

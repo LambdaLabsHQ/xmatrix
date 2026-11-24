@@ -275,8 +275,9 @@ export interface PostgresGitHubSubscriptionRoute {
   relationId: string;
   installationId: string;
   sourceRef: string;
-  /** `repository` for a repository subscription, `issue` for one issue or pull request. */
-  sourceKind: "repository" | "issue";
+  /** `repository` for a repository subscription, `issue` for one issue or
+   * pull request, `workflow_run` for one GitHub Actions workflow run. */
+  sourceKind: GitHubSourceKind;
   /** When the Channel subscribed; an issue subscription older than its issue named another one. */
   createdAt: string;
   spaceId: string;
@@ -288,6 +289,13 @@ export interface PostgresGitHubSubscriptionRoute {
 }
 
 type AppPrincipal = { kind: "user" | "agent"; id: string };
+
+/** What a GitHub source relation follows. */
+export type GitHubSourceKind = "repository" | "issue" | "workflow_run";
+
+function githubSourceKind(value: unknown): GitHubSourceKind {
+  return value === "issue" || value === "workflow_run" ? value : "repository";
+}
 
 /** A route read's source and bound, shared by every ingress that resolves subscriptions. */
 function routeRead(input: { sourceRef: string; limit: number }): { sourceRef: string; limit: number } {
@@ -568,7 +576,7 @@ export class PostgresAppRepository {
     const { limit } = routeRead({ sourceRef: sourceRefs[0]!, limit: input.limit });
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes", statement: "single_read" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v9", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v10", text: `SELECT
         r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref,
         r.features_json
         FROM data.app_source_relations r JOIN data.app_connector_connections c
@@ -576,13 +584,13 @@ export class PostgresAppRepository {
         JOIN data.channels channel ON channel.channel_id=r.channel_id
           AND channel.space_id=r.space_id
         WHERE c.provider_id='github' AND ${LIVE_SOURCE_RELATION_SQL}
-          AND r.source_kind IN ('repository','issue') AND lower(r.source_ref)=ANY($2::text[])
+          AND r.source_kind IN ('repository','issue','workflow_run') AND lower(r.source_ref)=ANY($2::text[])
           AND jsonb_typeof(r.features_json)='array' AND r.features_json ? $4
           AND ${GITHUB_INSTALLATION_LINKED_SQL}
         ORDER BY r.channel_id,r.space_id,r.connection_id,r.source_kind,lower(r.source_ref) LIMIT $3`,
       values: [installationId, sourceRefs, limit, feature], maxRows: limit });
       return rows.map((row) => ({ relationId: String(row.relation_id), installationId, sourceRef: String(row.source_ref),
-        sourceKind: row.source_kind === "issue" ? "issue" as const : "repository" as const,
+        sourceKind: githubSourceKind(row.source_kind),
         createdAt: iso(row.created_at as string | Date),
         spaceId: String(row.space_id), channelId: String(row.channel_id),
         connectionId: String(row.connection_id), authorityRootUserId: String(row.created_by),
@@ -597,23 +605,23 @@ export class PostgresAppRepository {
    * which only ever take routes away. A source missing here has no route.
    */
   async githubSubscribedSources(input: { requestId: string; installationId: string; limit: number }):
-    Promise<Array<{ sourceKind: "repository" | "issue"; sourceRef: string; feature: string }>> {
+    Promise<Array<{ sourceKind: GitHubSourceKind; sourceRef: string; feature: string }>> {
     const installationId = text(input.installationId, "installationId", 100);
     if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 10_000) {
       throw new AppControlError("invalid_app_request", 400, "limit is invalid");
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscribed-sources" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscribed_sources_v1", text: `SELECT
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscribed_sources_v2", text: `SELECT
         DISTINCT r.source_kind,lower(r.source_ref) AS source_ref,feature.value AS feature
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
         CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(r.features_json)='array'
           THEN r.features_json ELSE '[]'::jsonb END) AS feature(value)
-        WHERE c.provider_id='github' AND r.source_kind IN ('repository','issue')
+        WHERE c.provider_id='github' AND r.source_kind IN ('repository','issue','workflow_run')
           AND ${GITHUB_INSTALLATION_LINKED_SQL}
         LIMIT $2`, values: [installationId, input.limit], maxRows: input.limit });
-      return rows.map((row) => ({ sourceKind: row.source_kind === "issue" ? "issue" as const : "repository" as const,
+      return rows.map((row) => ({ sourceKind: githubSourceKind(row.source_kind),
         sourceRef: String(row.source_ref), feature: String(row.feature) }));
     });
   }
@@ -1024,7 +1032,7 @@ export class PostgresAppRepository {
     const connectionId = text(input.connectionId, "connectionId", 300);
     const channelId = text(input.channelId, "channelId", 300);
     const sourceKind = text(input.sourceKind, "sourceKind", 80);
-    if (sourceKind !== "repository" && sourceKind !== "issue") throw new AppControlError(
+    if (sourceKind !== "repository" && sourceKind !== "issue" && sourceKind !== "workflow_run") throw new AppControlError(
       "invalid_app_request", 400, "sourceKind is invalid");
     const sourceRef = text(input.sourceRef, "sourceRef", 300);
     const features = array(input.features, "features");

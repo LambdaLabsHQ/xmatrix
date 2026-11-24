@@ -7,7 +7,7 @@ const sourceKey = (kind: string, ref: string, feature: string) => `${kind}\u0000
 
 /** Whether any of a delivery's sources is subscribed to for its feature. */
 function deliveryMayRoute(subscribed: ReadonlySet<string>, sourceRefs: readonly string[], feature: string): boolean {
-  return sourceRefs.some((ref) => (["repository", "issue"] as const).some((kind) =>
+  return sourceRefs.some((ref) => (["repository", "issue", "workflow_run"] as const).some((kind) =>
     subscribed.has(sourceKey(kind, ref.toLowerCase(), feature))));
 }
 
