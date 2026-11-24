@@ -1247,9 +1247,15 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     )}
     data-testid={placement === "main" ? undefined : "page-conversation"}
   >
+    {/* The phone's Channel details sheet covers the whole screen. Underneath, the conversation keeps
+        its rows and scroll position but stops painting and animating: its glass, work dock and
+        timeline otherwise kept the iOS compositor busy behind an opaque sheet (as the dock pager). */}
     <section
-      className="app-message-surface relative flex min-w-0 flex-1 flex-col overflow-hidden"
+      className={cn("app-message-surface relative flex min-w-0 flex-1 flex-col overflow-hidden",
+        mobileChannelDetailsOpen && "invisible [content-visibility:hidden]")}
+      inert={mobileChannelDetailsOpen}
     >
+      <AnimationActivityScope active={!mobileChannelDetailsOpen}>
       {companion && (
         <div
           aria-hidden="true"
@@ -1441,6 +1447,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           onEditHarnessProfile={openHarnessProfile}
         />
       )}
+      </AnimationActivityScope>
     </section>
 
     {!companion && (placement === "main" || mobileChannelDetailsOpen) && <ChannelDetails
