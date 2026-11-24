@@ -8,7 +8,7 @@ import { invocationSelectionsEnvelope } from "./composer-invocation-bindings";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
-import { announceEmbedSpace, embedBrowserPage, subscribeEmbedOpen, subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
+import { announceEmbedSpace, embedBrowserPage, subscribeEmbedOpen, type EmbedPendingMessage, subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
 import { appAddressHref, appAddressOrigin } from "@/lib/app-address";
 import { pageApi } from "@/lib/pages/page-client";
 import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
@@ -400,7 +400,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   const renderableOutgoingMessages = useMemo(() => {
     const authorizedById = new Map(s.renderableHistory.map((message) => [message.messageId, message]));
-    return s.outgoingMessages.map((message) => {
+    // A row whose message is already in the history is that message: the Hub keeps a send's clientMessageId as
+    // its messageId. However the two met (a history read that came before the row, a live event that missed it),
+    // the conversation shows it once.
+    return s.outgoingMessages.filter((message) => !authorizedById.has(message.clientMessageId)).map((message) => {
       if (!message.replyToMessageId) return message;
       const target = authorizedById.get(message.replyToMessageId);
       return {
@@ -1641,14 +1644,40 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     if (shownSpaceId && shownSpaceName) announceEmbedSpace({ id: shownSpaceId, name: shownSpaceName });
   }, [shownSpaceId, shownSpaceName]);
 
-  const handleEmbedOpen = useStableCallback((path: string, channel?: SerializedChannel) => {
+  const handleEmbedOpen = useStableCallback((path: string, channel?: SerializedChannel, pending?: EmbedPendingMessage) => {
     // A conversation the extension just started may be past the window of the catalog this app lists.
     if (channel && !s.realtimeChannels.get(channel.id)) {
       const opened = decodeChannelSnapshot(channel);
       setChannels((current) => (current.some((item) => item.id === opened.id) ? current : [opened, ...current]));
     }
-    return openInternalAppLink(new URL(path, appAddressOrigin()).toString());
+    const shown = openInternalAppLink(new URL(path, appAddressOrigin()).toString());
+    const channelId = path.split("/channels/")[1];
+    if (pending && channelId) showExtensionPendingMessage(decodeURIComponent(channelId), pending);
+    return shown;
   });
+
+  /**
+   * The question the extension is sending to the conversation it just opened (asked in the box on a page), shown
+   * at once as this app's own sending row (Daniel 2026-11-24: the wait felt long). The extension sends it; this
+   * app does not. The Hub's message, arriving live or found in the history, takes the row's place by its
+   * clientMessageId or content, as for any send; one that never lands turns "Not sent", and "Send again" sends it
+   * under the same id, which the Hub appends at most once.
+   */
+  function showExtensionPendingMessage(channelId: string, pending: EmbedPendingMessage) {
+    const { clientMessageId, body, metadata } = pending;
+    if (s.outgoingMessagesRef.current.some((item) => item.clientMessageId === clientMessageId)) return;
+    if ([...s.outboundClientIdsByMessageIdRef.current.values()].includes(clientMessageId)) return;
+    if (s.historyCacheRef.current.get(channelId)?.messages.some((message) => message.messageId === clientMessageId)) return;
+    const outgoing: OutgoingMessage = { clientMessageId, channelId, body, attachments: [],
+      appMentions: parseAppMentions(body, APP_CONNECTORS), ...(metadata ? { metadata } : {}),
+      sentAt: new Date().toISOString(), status: "pending" };
+    setOutgoingMessages((current) => [...current, outgoing]);
+    void reconcileUnconfirmedSend(channelId, clientMessageId);
+    setTimeout(() => {
+      setOutgoingMessages((current) => current.map((item) => item.clientMessageId === clientMessageId && item.status === "pending"
+        ? { ...item, status: "failed", error: "The question did not reach xMatrix" } : item));
+    }, 45_000);
+  }
   useEffect(() => subscribeEmbedOpen(handleEmbedOpen), [handleEmbedOpen]);
 
   useEffect(() => {

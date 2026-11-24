@@ -198,3 +198,17 @@ test("the person can leave the page beside the panel off, until they move to ano
   unsubscribe();
   stop();
 });
+
+// A question asked in the box on a page is shown in the panel as sending at once (Daniel 2026-11-24: too slow).
+test("the question on its way is a bounded message with its own id and the page it was asked on", (t) => {
+  const { embed } = load(t, EXTENSION);
+  const pending = { clientMessageId: "0b6c6a3e-6f1b-4a5c-9f1e-2a9d8c7b6a51", body: "> quote\n\nis this right?",
+    metadata: { browserPage: { title: "Home / X", href: "https://x.com/home" } } };
+  assert.deepEqual(embed.parseEmbedPendingMessage(pending), pending);
+  assert.equal(embed.parseEmbedPendingMessage({ ...pending, clientMessageId: "x" }), undefined);
+  assert.equal(embed.parseEmbedPendingMessage({ ...pending, body: "   " }), undefined);
+  assert.equal(embed.parseEmbedPendingMessage({ ...pending, body: "x".repeat(64 * 1024 + 1) }), undefined);
+  // Only a web page goes with it; anything else the metadata holds is dropped.
+  assert.deepEqual(embed.parseEmbedPendingMessage({ ...pending, metadata: { browserPage: { href: "javascript:1" }, xmatrixSystemNotice: true } }),
+    { clientMessageId: pending.clientMessageId, body: pending.body });
+});

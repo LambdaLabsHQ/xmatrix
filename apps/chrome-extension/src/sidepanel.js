@@ -51,13 +51,19 @@ function panelWindow() {
   return windowIdPromise;
 }
 
+/** A question still on its way to the conversation the app opened at, for the app to show as sending. */
+let pendingOnOpen = null;
+
 /** Loads the app, straight onto a conversation the extension just started when there is one. */
 let opening = false;
 async function openApp() {
   if (opening || $("app").getAttribute("src")) return;
   opening = true;
   appReady = false;
-  const path = (await ask("takeOpenPath", { windowId: await panelWindow() }).catch(() => null))?.path;
+  const opened = await ask("takeOpenPath", { windowId: await panelWindow() }).catch(() => null);
+  const path = opened?.path;
+  // The app opens at the conversation; the question on its way is shown there once the app is ready.
+  pendingOnOpen = opened?.pending ? opened : null;
   $("app").src = path ? `${APP_PAGE}?at=${encodeURIComponent(path)}` : APP_PAGE;
   opening = false;
 }
@@ -67,7 +73,8 @@ async function showOpenPath() {
   if (!$("app").getAttribute("src")) return openApp();
   if (!appReady) return;
   const opened = await ask("takeOpenPath", { windowId: await panelWindow() });
-  if (opened) postToApp({ type: "open", path: opened.path, ...(opened.channel ? { channel: opened.channel } : {}) });
+  if (opened) postToApp({ type: "open", path: opened.path, ...(opened.channel ? { channel: opened.channel } : {}),
+    ...(opened.pending ? { pending: opened.pending } : {}) });
 }
 
 function closeApp() {
@@ -101,6 +108,11 @@ window.addEventListener("message", async (event) => {
     await render();
   } else if (data.type === "ready") {
     appReady = true;
+    if (pendingOnOpen) {
+      postToApp({ type: "open", path: pendingOnOpen.path, ...(pendingOnOpen.channel ? { channel: pendingOnOpen.channel } : {}),
+        pending: pendingOnOpen.pending });
+      pendingOnOpen = null;
+    }
     await deliverPassages();
     await showOpenPath();
     await showRecent();
