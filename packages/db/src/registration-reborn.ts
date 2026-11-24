@@ -612,9 +612,9 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
           AND ($5::text IS NULL OR i.instance_id<>$5)
           AND i.status='offline' AND i.rest_state IN ('sleeping','interrupted')
           AND r.status IN (${TERMINAL_RUN_STATUS_SQL})
-          AND (NOT $3::boolean OR EXISTS (SELECT 1 FROM data.channels c
-            JOIN data.message_attention a ON a.space_id=c.space_id AND a.channel_id=c.channel_id
-            WHERE c.channel_id=i.channel_id AND a.message_id=$4 AND a.subject_id='agent:'||i.instance_id))
+          AND (NOT $3::boolean OR EXISTS (SELECT 1 FROM data.message_attention a
+            WHERE a.space_id=b.space_id AND a.subject_id='agent:'||i.instance_id
+              AND a.channel_id=i.channel_id AND a.message_id=$4))
           AND NOT EXISTS (SELECT 1 FROM data.agent_reborn_intents intent
             WHERE intent.source_instance_id=i.instance_id AND intent.state IN ('waiting','prepared'))
         ORDER BY i.updated_at DESC,i.instance_id LIMIT 16`,
