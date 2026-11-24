@@ -90,3 +90,9 @@ test("PR CI exercises the same simulator gate and production keeps its exact rev
   assert.equal(evaluate(request.jobs.ios.if), false);
   assert.equal(evaluate(gates.if), true);
 });
+
+test("the train's gates are CI and the iOS simulator; code scanning is not among them", () => {
+  assert.deepEqual(request.jobs.gates.needs, ["plan", "ci", "ios"]);
+  assert.equal(request.jobs.codeql, undefined);
+  assert.doesNotMatch(request.jobs.gates.if, /codeql/u);
+});
