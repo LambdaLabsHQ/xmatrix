@@ -1,18 +1,21 @@
 # Release Updates
 
-## Unreleased: a beta train ships without waiting for its CodeQL scan
+## Unreleased: code scanning leaves the release train
 
 Every release train waited for its CodeQL analysis to finish before it
 dispatched the release, although the analysis only files code scanning alerts
-and never decides whether the train ships. On a Web beta the JavaScript and
+and never decided whether a train shipped. On a Web beta the JavaScript and
 TypeScript server half took about three minutes, longer than the gates beside
-it (about one and a half), so it set the pace of the train. A beta train now
-runs the same analysis as `codeql-beta`, which no job needs, and dispatches
-its release as soon as its gates pass; alerts still upload on every train. A
-stable train is unchanged and still waits for its scan. The Production
-Release Request run still ends only when the scan does, so the next train
-starts no earlier than before. CI only; no product, schema or client change.
-Recovery is a CI-validated revert that makes `gates` need the beta scan again.
+it (about one and a half), so it set the pace of the train. Code scanning now
+runs from its own workflow, `.github/workflows/codeql.yml`: each push to `main`
+scans Hub, Web and Desktop JavaScript and TypeScript and the workflows, and a
+daily run scans every language, Rust, Kotlin and Swift included. A newer push
+replaces a scan still running. Alerts land in the same code scanning
+categories as before. No release train, beta or stable, waits for a scan.
+Decided by Daniel on 2026-11-24. CI only; no product, schema or client
+change. Recovery is a CI-validated change that makes the train's `gates` need
+a scan again.
+
 ## Unreleased: a pull request that reaches the Hub runs the Hub suite before merge
 
 From 2026-11-17 to 11-24, 65 release trains failed their gates, and 53 of them
