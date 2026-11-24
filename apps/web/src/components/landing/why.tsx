@@ -12,8 +12,12 @@ export function Why({ locale = "en" }: { locale?: Locale }) {
   return (
     <section id="why" className="x-section" aria-labelledby="why-title">
       <div className="x-container">
-        <SectionIntro id="why-title" title={copy.title} />
-        <WhyComparison title={copy.title} others={copy.others} rows={copy.rows} />
+        <WhyComparison
+          heading={<SectionIntro id="why-title" title={copy.title} />}
+          title={copy.title}
+          others={copy.others}
+          rows={copy.rows}
+        />
       </div>
     </section>
   );
