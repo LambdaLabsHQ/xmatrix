@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a page of the site at xmatrix.page no longer asks the Hub for a session
+
+Every page of the site mounts the app's auth provider, which reads the session
+from the Hub. At the site's own origin that read cannot succeed: the session's
+cookie does not reach xmatrix.page and the Hub does not answer it, so the
+browser blocked each reply. The provider took the blocked read for a passing
+failure and tried again for as long as the page stayed open, backing off to
+once every 30 seconds, so every page of the site logged CORS errors and kept
+sending the Hub requests it refuses. A page at the site's own origin is now
+signed out without asking; xmatrix.sh, and a deployment whose site and app
+share one origin, read the session as before. Web only, no API or schema
+change; recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the site's beta answers at beta.xmatrix.page
 
 The site lives at xmatrix.page, but a beta of it could only be read at
