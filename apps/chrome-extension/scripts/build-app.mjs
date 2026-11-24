@@ -353,7 +353,7 @@ const PAGE = `<!doctype html>
  * own surface shows over the page.
  */
 const ASK_PAGE = `<!doctype html>
-<html lang="en" class="font-sans light" data-app-theme="wood" style="color-scheme: light; background: transparent">
+<html id="xmatrix-ask-box" lang="en" class="font-sans light" data-app-theme="wood" style="color-scheme: light; background: transparent">
 <head>
   <meta charset="utf-8">
   <title>Ask xMatrix</title>
@@ -363,10 +363,17 @@ const ASK_PAGE = `<!doctype html>
     /* Only the capsule and its shadow sit on the page: the App's paper behind the composer would show as a pale
        box over the page's text around it. In a frame the glass cannot blur the page behind it, so the capsule
        carries the paper itself (Daniel 2026-11-23: the box is the input alone). Keep the composer in normal flow
-       so the frame measures its height directly without an async ResizeObserver stage loop. */
-    html[data-app-theme] .xmatrix-app { background: transparent !important; }
-    .xmatrix-app .app-composer { position: relative !important; inset: auto !important; padding: 0 !important; }
-    .xmatrix-app .app-composer-box {
+       so the frame measures its height directly without an async ResizeObserver stage loop.
+       #xmatrix-ask-box guarantees higher specificity than globals.css's :root:not(.dark) .xmatrix-app .app-composer. */
+    #xmatrix-ask-box .xmatrix-app { background: transparent !important; }
+    #xmatrix-ask-box .xmatrix-app .app-composer {
+      position: relative !important;
+      inset: auto !important;
+      width: 100% !important;
+      padding: 0 !important;
+      pointer-events: auto !important;
+    }
+    #xmatrix-ask-box .xmatrix-app .app-composer-box {
       --app-liquid-surface-bg: var(--background) !important;
       --app-liquid-shared-surface-bg: var(--background) !important;
     }
