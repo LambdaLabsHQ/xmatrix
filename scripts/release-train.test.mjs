@@ -124,10 +124,25 @@ test("the shared CLI action-name macro expands from its own crate", () => {
     assert.match(source, /xmatrix_action_names::harness_action_names!/u);
     assert.doesNotMatch(source, /include!\(/u);
   }
-  const request = readFileSync(new URL("../.github/workflows/production-release-request.yml", import.meta.url), "utf8");
-  const codeql = request.slice(request.indexOf("\n  codeql:\n"), request.indexOf("\n  gates:\n"));
+  const codeql = readFileSync(new URL("../.github/workflows/codeql.yml", import.meta.url), "utf8");
   assert.match(codeql, /matrix\.language == 'swift' && 'autobuild' \|\| 'none'/u);
   assert.doesNotMatch(codeql, /manual/u);
+});
+
+test("code scanning runs on main and daily, and no release train waits for it", () => {
+  const read = (file) => readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
+  const request = read("production-release-request.yml");
+  assert.doesNotMatch(request, /codeql-action|needs\.codeql|codeql_analyses/u);
+  assert.match(request, /\n    needs: \[plan, ci, ios\]\n/u);
+  const codeql = read("codeql.yml");
+  assert.match(codeql, /\n  push:\n    branches: \[main\]\n  schedule:\n/u);
+  assert.match(codeql, /release-train\.mjs codeql "\$SCAN"/u);
+  const scan = (mode) => JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL("release-train.mjs", import.meta.url)), "codeql", mode], { encoding: "utf8" }));
+  assert.deepEqual([...new Set(scan("push").map((analysis) => analysis.language))], ["actions", "javascript-typescript"]);
+  assert.deepEqual(
+    [...new Set(scan("full").map((analysis) => analysis.language))],
+    ["actions", "javascript-typescript", "rust", "java-kotlin", "swift"],
+  );
 });
 
 test("a stable scope names the stable Web and clients; the hub ships with every beta", () => {

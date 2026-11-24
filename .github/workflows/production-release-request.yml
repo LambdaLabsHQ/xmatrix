@@ -33,7 +33,6 @@ jobs:
       tag: ${{ steps.plan.outputs.tag }}
       channel: ${{ steps.plan.outputs.channel }}
       source_sha: ${{ steps.plan.outputs.source_sha }}
-      codeql_analyses: ${{ steps.plan.outputs.codeql_analyses }}
     steps:
       - name: Require the default branch
         uses: actions/github-script@v7
@@ -163,58 +162,18 @@ jobs:
       - name: Build and test iOS on the exact release revision
         uses: ./.github/actions/ios-simulator-test
 
-  # Code scanning before anything ships: CodeQL's security-extended queries
-  # on the frozen source. Hub, Web and Desktop JavaScript and TypeScript, and
-  # the workflows that release this train, are scanned on every channel. Rust,
-  # Kotlin and Swift are scanned only on a stable train, with the client
-  # suites (scripts/release-train.mjs, codeqlAnalyses). Pull requests and
-  # merges are not scanned. The analysis must finish before the train ships;
-  # its findings are code scanning alerts on main, not a verdict. Test code
-  # never ships, so it is not scanned. The JavaScript and TypeScript analysis
-  # runs as two halves side by side. Rust stays one analysis so cross-crate
-  # flow remains. This CodeQL only accepts Rust build-mode none. Its
-  # rust-analyzer does not load an include! that leaves the crate, so the
-  # shared action-name macro is an ordinary macro in its own crate and
-  # expanded at each call.
-  codeql:
-    needs: plan
-    if: needs.plan.outputs.scope != ''
-    name: CodeQL (${{ matrix.language }}${{ matrix.part != 'all' && format(' {0}', matrix.part) || '' }})
-    runs-on: ${{ matrix.language == 'swift' && 'macos-26' || 'ubuntu-24.04' }}
-    timeout-minutes: 45
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.plan.outputs.codeql_analyses) }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.plan.outputs.source_sha }}
-          persist-credentials: false
-      - uses: github/codeql-action/init@v4
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.language == 'swift' && 'autobuild' || 'none' }}
-          queries: security-extended
-          config: ${{ matrix.config }}
-      - uses: github/codeql-action/analyze@v4
-        with:
-          category: ${{ matrix.category }}
-          ref: refs/heads/${{ github.event.repository.default_branch }}
-          sha: ${{ needs.plan.outputs.source_sha }}
+  # Code scanning is not a train gate: CodeQL files alerts and never decided
+  # whether a train shipped, yet every train waited about three minutes for
+  # it. It runs from its own workflow on each push to main and on a daily
+  # schedule (.github/workflows/codeql.yml).
 
   # One job whose success means every gate this train's scope selects passed.
   # ci.yml fails its own aggregate unless each selected partition passed, so
   # the deployment workflows check this job instead of CI's job layout.
   gates:
-    needs: [plan, ci, ios, codeql]
+    needs: [plan, ci, ios]
     if: >-
       always() && needs.plan.result == 'success' && needs.ci.result == 'success' &&
-      needs.codeql.result == 'success' &&
       (contains(format(',{0},', needs.plan.outputs.scope), ',ios,') == (needs.ios.result == 'success')) &&
       (needs.ios.result == 'success' || needs.ios.result == 'skipped')
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["xmatrix-ci-offload"]') || 'ubuntu-24.04' }}

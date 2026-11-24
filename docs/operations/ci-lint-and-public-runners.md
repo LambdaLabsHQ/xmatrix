@@ -197,24 +197,20 @@ PNPM enters the job's PATH only after installation and its version probe succeed
 This recovery applies only to package-manager bootstrap, never validation or
 deployment failures.
 
-CodeQL scans before a release ships, not on pull requests or merges. A beta
-scans Hub, Web and Desktop JavaScript and TypeScript, plus the workflows that
-release it. Rust, Kotlin and Swift are scanned on the stable train that ships
-that client, in the same layer as the client suites, not on the beta that
-publishes them to a dev channel or TestFlight (`codeql` in
-`production-release-request.yml`; languages from `codeqlLanguages` in
+CodeQL runs from its own workflow (`.github/workflows/codeql.yml`), apart from
+the release train. Each push to `main` scans what every beta ships: Hub, Web
+and Desktop JavaScript and TypeScript, plus the workflows; a newer push
+replaces a scan still running. A daily run, or a manual dispatch, scans every
+language, Rust, Kotlin and Swift included (analyses from `codeqlAnalyses` in
 `scripts/release-train.mjs`). Swift builds on macOS with autobuild; the other
 languages use build mode `none`. Results upload as code scanning alerts on
 `main` under the same `/language:<name>` categories GitHub's default setup
 used, which must stay disabled: GitHub refuses a workflow's upload while
-default setup is on. The analysis has to finish before the train ships; its
-findings are alerts, not a gate verdict. A train already running keeps the
-scan list it started with. Existing tags and artifacts stay immutable. The
-next beta that ships the CLI shows no Rust analysis, while JavaScript,
-TypeScript and the release workflows still run; the next stable that ships a
-client runs that client's language. Recovery is a CI-validated forward release
-that puts the language back on the beta list. Do not cancel a train to change
-its scan, and do not treat an alert as a skipped gate.
+default setup is on. Its findings are alerts to work through, not a gate
+verdict, so no release train waits for a scan: every train used to wait about
+three minutes for an analysis that never decided whether it shipped. Pull
+requests are not scanned. Recovery is a CI-validated change that makes the
+train's `gates` need a scan again.
 
 CLI release builds run both macOS architectures sequentially on a single hosted
 `macos-26` (Apple Silicon) VM: `aarch64-apple-darwin` natively and
