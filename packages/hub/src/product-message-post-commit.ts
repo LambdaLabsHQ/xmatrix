@@ -93,20 +93,11 @@ export function productMessageWakesRestingInstances(body: string): boolean {
     plan.reborn.length === 0 && plan.handoff.length === 0;
 }
 
-/**
- * Prepare the wake of the message Channel's resting Instances. A person's
- * message wakes every one of them. An Agent's message wakes only the
- * Instances it addresses (an exact `@name:N`, a reply to their message, a
- * broadcast) and never its author: one Agent's progress waking every resting
- * peer with it as their prompt set them all to the same work. The others read
- * it by catch-up when something else wakes them (docs/instance-sleep.md §3).
- */
+/** Prepare the wake of every resting Instance in the message's Channel. */
 export async function dispatchRestingInstanceWake(input: ProductMessagePostCommitInput,
   wake = wakeRestingInstances): Promise<void> {
-  const fromAgent = input.senderKind === "agent";
   await wake(input.env, { commandId: `resting-wake:${input.messageId}`.slice(0, 200), channelId: input.channelId,
-    sourceMessageId: input.messageId, prompt: input.body,
-    ...(fromAgent ? { addressedOnly: true, ...(input.senderInstanceId ? { excludeInstanceId: input.senderInstanceId } : {}) } : {}) });
+    sourceMessageId: input.messageId, prompt: input.body });
 }
 
 function postCommitTaskInput(input: ProductMessagePostCommitInput) {

@@ -56,7 +56,6 @@ integration("launch survives a hostname change with stale Workspace metadata and
         agent_invocation_targets_json jsonb,edited_at timestamptz,deleted_at timestamptz,recalled_at timestamptz);
       CREATE TABLE data.delivery_cursors (space_id text,subject_id text,channel_id text,acknowledged_sequence bigint,
         version bigint,updated_at timestamptz,PRIMARY KEY (space_id,subject_id,channel_id));
-      CREATE TABLE data.message_attention (space_id text,subject_id text,channel_id text,message_id text,kind text);
       CREATE TABLE data.message_attention_revisions (space_id text,subject_id text,channel_id text,revision bigint,
         updated_at timestamptz,PRIMARY KEY (space_id,subject_id,channel_id));
       CREATE TABLE data.first_message_launch_choices (space_id text,channel_id text,message_id text,author_user_id text,choice text,source_input_version bigint,source_body_hash text,failure_code text);
@@ -1213,20 +1212,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
       targetInstanceId: sleeper.instanceId })).woken, [], "receipt replay creates no duplicate wake");
     assert.deepEqual((await reborn.wakeResting({ commandId: "wake-wrong-channel", channelId: "another-channel",
       sourceMessageId: "message", targetInstanceId: repoSleeper.instanceId })).woken, [], "a target cannot cross Channels");
-    // An Agent's message wakes only the resting Instances it addresses, and never its author.
-    assert.deepEqual((await reborn.wakeResting({ commandId: "wake-agent-progress", channelId: "channel",
-      sourceMessageId: "agent-progress", addressedOnly: true })).woken, [], "an Agent's unaddressed message wakes nobody");
-    await sql(`INSERT INTO data.message_attention VALUES ('space',$1,'channel','agent-self','mention'),
-      ('space',$2,'channel','agent-addressed','mention')`, [`agent:${repoSleeper.instanceId}`, `agent:${repoSleeper.instanceId}`]);
-    assert.deepEqual((await reborn.wakeResting({ commandId: "wake-agent-self", channelId: "channel", sourceMessageId: "agent-self",
-      addressedOnly: true, excludeInstanceId: repoSleeper.instanceId })).woken, [], "an Agent's message never wakes its author");
-    const addressed = await reborn.wakeResting({ commandId: "wake-agent-addressed", channelId: "channel",
-      sourceMessageId: "agent-addressed", addressedOnly: true });
-    assert.deepEqual(addressed.woken.map(item => item.instanceId), [repoSleeper.instanceId],
-      "an Agent's message wakes the Instance it names and no resting peer");
     const broadcast = await reborn.wakeResting({ commandId: "wake-event", channelId: "channel", sourceMessageId: "event" });
-    const woke = { woken: [...targeted.woken, ...addressed.woken, ...broadcast.woken],
-      refused: [...targeted.refused, ...addressed.refused, ...broadcast.refused] };
+    const woke = { woken: [...targeted.woken, ...broadcast.woken], refused: [...targeted.refused, ...broadcast.refused] };
     assert.deepEqual(woke.woken.map(item => item.instanceId).sort(), [sleeper.instanceId, repoSleeper.instanceId].sort());
     assert.deepEqual(woke.refused, [], "a repo Instance wakes whatever its Space's GitHub connection state");
     const repoWake = (await sql(`SELECT * FROM data.agent_reborn_intents WHERE intent_id=$1`,

@@ -125,13 +125,6 @@ remain context. Live and catch-up App work queues behind any active turn:
    bypass the live delivery's context-only classification.
 2. The authority selects the Channel's Instances with `rest_state` `sleeping` or
    `interrupted` and no unfinished reborn intent (at most 16 per message).
-   A person's message selects all of them. An Agent's message selects only the
-   Instances it addresses, read from its `data.message_attention` rows (an
-   exact `@name:N`, a reply to that Instance's message, a broadcast), and never
-   its author. One Agent's progress would otherwise wake every resting peer
-   with that progress as its first prompt, outside the live delivery's
-   context-only classification, and set them all to the same work. The peers
-   it does not wake read it by catch-up when something else wakes them.
 3. For each one it records a `wake` continuation
    (`PostgresRegistrationRebornRepository.wakeResting`) with the Instance's
    owner as the actor, and the message as its first prompt and initial message

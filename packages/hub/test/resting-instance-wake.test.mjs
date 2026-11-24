@@ -43,17 +43,3 @@ test("a committed message prepares its Channel's wakes under one command per mes
     body: "hello", actorUserId: "user-1", senderKind: "user", senderId: "user-1" },
   async () => { throw new Error("Resting Instance wake failed"); }), /Resting Instance wake failed/u);
 });
-
-test("an Agent's message wakes only the Instances it addresses, never its author", async () => {
-  const calls = [];
-  const capture = async (_env, request) => { calls.push(request); return { woken: [], refused: [] }; };
-  await dispatchRestingInstanceWake({ env: {}, channelId: "channel-1", messageId: "progress", body: "@codex:3 PR is green",
-    actorUserId: "owner-1", senderKind: "agent", senderId: "channel-1:7", senderInstanceId: "channel-1:7" }, capture);
-  await dispatchRestingInstanceWake({ env: {}, channelId: "channel-1", messageId: "person", body: "anyone?",
-    actorUserId: "user-1", senderKind: "user", senderId: "user-1" }, capture);
-  assert.deepEqual(calls, [
-    { commandId: "resting-wake:progress", channelId: "channel-1", sourceMessageId: "progress",
-      prompt: "@codex:3 PR is green", addressedOnly: true, excludeInstanceId: "channel-1:7" },
-    { commandId: "resting-wake:person", channelId: "channel-1", sourceMessageId: "person", prompt: "anyone?" },
-  ]);
-});
