@@ -97,7 +97,7 @@ test("Settings lists where a sign-in is read and stops it there", async ({ page 
 // the machine answers, the numbers read under the grant are gone from it
 // without a reload, because the Hub dropped them and the Agents are read again.
 test("Stop reading shows at once in the agent's card and its numbers go when the machine answers", async ({ page }) => {
-  const resetAt = new Date(Date.parse(E2E_NOW) + 2 * 24 * 60 * 60_000).toISOString();
+  const resetAt = new Date(Date.now() + 2 * 24 * 60 * 60_000).toISOString();
   const read = { ...cursor("e2e-user"), live: { machine: { online: true, platform: "linux" }, running: [],
     quota: { remainingPercent: 73, observedAt: E2E_NOW, expiresAt: resetAt,
       windows: [{ label: "1mo", scope: "Auto", usedPercent: 27, resetAt }] } } };
@@ -126,8 +126,10 @@ test("Stop reading shows at once in the agent's card and its numbers go when the
   await expect(access).toContainText("Quota: Unknown");
   await expect(access).not.toContainText("Read from Cursor's sign-in");
 
-  // The machine answers; the Hub no longer has the reading.
+  // The machine answers; the Hub records the change and no longer has the reading.
   await fixtureJson(page, "quota-access-dropped", catalogPattern, catalog(cursor("e2e-user")));
+  await fixtureJson(page, "quota-access-daemons", /\/api\/xmatrix\/machine-daemons(?:\?.*)?$/,
+    { daemons: [daemon("not_granted")] }, { method: "GET" });
   await releaseFixture(page, "quota-access-stopped");
   await expect(card).not.toContainText("Auto · Monthly");
   await expect(access.getByRole("button", { name: "Allow reading Cursor sign-in to show quota" })).toBeEnabled();
