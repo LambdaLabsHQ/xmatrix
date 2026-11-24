@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { WEB_PROXY_ROUTES, type DesktopDaemonFailure, type DesktopDaemonFailureReport } from "@xmatrix/protocol";
+import { DESKTOP_DAEMON_FAILURE_DETAIL_MAX, parseDesktopDaemonFailureReport, WEB_PROXY_ROUTES, type DesktopDaemonFailure } from "@xmatrix/protocol";
 import { isDiagnosticsEnabled } from "@/lib/diagnostics-preference";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 
@@ -32,13 +32,15 @@ export function reportDesktopDaemonFailure(
   const attempt = `${explicit ? "sent" : "automatic"}\n${key}`;
   if (!token || (!explicit && !isDiagnosticsEnabled()) || reported.has(attempt)) return;
   reported.add(attempt);
-  const report: DesktopDaemonFailureReport = {
+  // Only a report that is its declared fields leaves (protocol diagnostic-events).
+  const report = parseDesktopDaemonFailureReport({
     stage: failure.stage,
     ...(failure.exitCode !== undefined ? { exitCode: failure.exitCode } : {}),
-    platform: app.platform as DesktopDaemonFailureReport["platform"],
+    platform: app.platform,
     appVersion: app.version,
-    ...(explicit ? { detail: failure.detail } : {}),
-  };
+    ...(explicit ? { detail: failure.detail.slice(0, DESKTOP_DAEMON_FAILURE_DETAIL_MAX) } : {}),
+  });
+  if (!report) return;
   void xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_desktop_daemon_failure, token, method: "POST", body: report })
     .then(() => {
       if (!explicit) return;
