@@ -91,7 +91,7 @@ export function PrivacyPolicyContent() {
             when <code className="font-mono text-xs">DO_NOT_TRACK=1</code> or{" "}
             <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> is set). Each
             diagnostic event has a declared set of fields, and each field may hold only a fixed
-            value, a number, true or false, a version, or an opaque identifier; an event with any
+            value, a number, true or false, a version, a short code, or an opaque identifier; an event with any
             other field or value is refused. Client errors are reported by their class, code, and
             code locations, never by their message. The one exception is the redacted startup
             output you choose to send from a desktop failure card. Server-side Hub error reports
