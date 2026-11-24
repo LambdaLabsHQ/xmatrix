@@ -113,6 +113,26 @@ Rows apply in order: an explicit opt-in is honoured even with Do Not Track or Gl
 - **Desktop startup failure card:** even with diagnostics off, you can choose **Send failure report** once on a daemon startup failure card to share the redacted failure details shown on the card.
 - **CLI and daemon:** opt in with `xmatrix config telemetry on` or `XMATRIX_TELEMETRY=1`, and turn off with `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0`, or `DO_NOT_TRACK=1`. `xmatrix config telemetry on|off` also saves the choice to your account.
 
+## Handing a conversation to xMatrix support
+
+xMatrix staff and Agents read a conversation of yours only when you hand it to support. Product analysis uses metadata only, never what you wrote.
+
+To ask for help, choose **Hand to xMatrix support** in a conversation's menu, on a failure notice xMatrix posts (a start that failed, repeated failures, no progress for several minutes), or under **Help → Report an issue** while the conversation is open. Then:
+
+- Write one line about what went wrong.
+- Tick what to include. Nothing is ticked at first:
+  - **This conversation's messages**, including its threads.
+  - **Diagnostics for this conversation**: when Agents started, stopped or failed there, and the failure codes. These are diagnostic events with only states, codes, counts and times: no message text, prompts, error messages or ids.
+- Tick **I agree to let xMatrix support read what I selected**. Nothing is sent until you do.
+
+What the handoff allows:
+
+- **Who reads it:** xMatrix support, which is the xMatrix team and its support Agents, working in a support conversation opened for your handoff.
+- **Read-only:** support reads what you ticked, as you see it, and cannot write, react or start anything in your conversation. Support's answer arrives in your conversation as a message from "xMatrix support", or by email.
+- **For how long:** 14 days. You, or an owner or admin of your Space, can withdraw it any time with **Withdraw now** on the note it leaves in your conversation. Reading stops at once when it is withdrawn or expires.
+- **You see each read:** the first time support reads it in any hour, your conversation says "xMatrix support read this conversation" with the time.
+- Only the person who started a conversation, or an owner or admin of its Space, can hand it over.
+
 ## Legal documents
 
 - [Privacy Policy](/privacy)

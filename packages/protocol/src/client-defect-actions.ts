@@ -49,6 +49,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't disconnect the app",
   "Couldn't discover local agents",
   "Couldn't hand the session to your terminal",
+  "Couldn't hand this conversation to support",
   "Couldn't import workspace",
   "Couldn't install xMatrix update",
   "Couldn't join this Space",
@@ -90,6 +91,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't read the app's request",
   "Couldn't read the settings on this card",
   "Couldn't read this machine's name",
+  "Couldn't read this support handoff",
   "Couldn't record your decision",
   "Couldn't refresh the local daemon session",
   "Couldn't remove local directory",
@@ -115,6 +117,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't save the secret",
   "Couldn't save the setting",
   "Couldn't send that to the machine",
+  "Couldn't send the answer to the person",
   "Couldn't send the invite",
   "Couldn't send the message",
   "Couldn't send the question",
@@ -138,6 +141,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't update your profile",
   "Couldn't upload the file",
   "Couldn't use that folder",
+  "Couldn't withdraw support access",
   "That didn't work",
 ] as const;
 

@@ -109,6 +109,26 @@ xMatrix は広告 Cookie、クロスサイト追跡、セッションリプレ�
 - **CLI とデーモン**：デフォルトはオフです。有効にするには `xmatrix config telemetry on` または `XMATRIX_TELEMETRY=1`、無効にするには `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0`、または `DO_NOT_TRACK=1` を設定してください。
 - **CLI と daemon**：`xmatrix config telemetry on` または `XMATRIX_TELEMETRY=1` でオン、`xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0`、`DO_NOT_TRACK=1` でオフ。`xmatrix config telemetry on|off` は選択をアカウントにも保存します。
 
+## 会話を xMatrix サポートに渡す
+
+xMatrix のスタッフと Agent があなたの会話を読むのは、あなたがその会話をサポートに渡したときだけです。製品分析にはメタデータだけを使い、あなたが書いた内容は使いません。
+
+助けが必要なときは、会話のメニュー、xMatrix が投稿する障害通知（起動の失敗、繰り返す失敗、数分間進捗がない）、または会話を開いた状態の **Help → Report an issue** から **Hand to xMatrix support** を選びます。そのうえで:
+
+- 何が起きたかを一行で書きます。
+- 含める内容にチェックを入れます。最初は何もチェックされていません:
+  - **This conversation's messages**（スレッドを含む）。
+  - **Diagnostics for this conversation**: Agent がここでいつ起動・停止・失敗したかと、その失敗コード。状態・コード・回数・時刻だけからなる診断イベントで、メッセージ本文、プロンプト、エラーメッセージ、ID は含みません。
+- **I agree to let xMatrix support read what I selected** にチェックを入れます。チェックするまで何も送信されません。
+
+渡したときに許されること:
+
+- **誰が読むか:** xMatrix サポート、つまり xMatrix チームとそのサポート Agent が、この引き継ぎ用に開かれたサポート会話の中で対応します。
+- **読み取り専用:** サポートはあなたがチェックした内容を、あなたに見えるとおりに読むだけで、あなたの会話に書き込んだり、反応したり、何かを起動したりはできません。サポートの回答は「xMatrix support」からのメッセージとしてあなたの会話に届くか、メールで届きます。
+- **期間:** 14 日間。あなた、またはスペースのオーナーか管理者は、会話に残る案内の **Withdraw now** でいつでも取り消せます。取り消しや期限切れの時点で読み取りは止まります。
+- **読まれたことがわかる:** サポートが 1 時間のうちに初めて読んだとき、あなたの会話に「xMatrix support read this conversation」と時刻が表示されます。
+- 会話を渡せるのは、その会話を始めた人、またはそのスペースのオーナーか管理者だけです。
+
 ## 法的文書
 
 - [プライバシーポリシー (EN)](/privacy)
