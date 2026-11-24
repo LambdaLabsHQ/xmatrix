@@ -293,6 +293,7 @@ export const Composer = memo(function Composer({
   placeholder,
   ariaLabel,
   sendTitle,
+  sendIcon,
   inlineActions,
   afterSend,
 }: {
@@ -349,6 +350,8 @@ export const Composer = memo(function Composer({
   placeholder?: string;
   ariaLabel?: string;
   sendTitle?: string;
+  /** Icon inside the primary send button; defaults to the upward arrow for chat timelines. */
+  sendIcon?: ReactNode;
   /** Extra controls inside the input box, before Send. */
   inlineActions?: ReactNode;
   afterSend?: ReactNode;
@@ -1659,6 +1662,7 @@ export const Composer = memo(function Composer({
           placeholder={placeholder || (channel && !isJoined ? "Join channel to send" : composerHint)}
           ariaLabel={ariaLabel || "Message composer"}
           sendTitle={sendTitle || "Send"}
+          sendIcon={sendIcon}
           onEscape={onEscape}
           boxClassName={cn(isDropTarget && "border-primary ring-2 ring-primary/20")}
           onBoxPointerDown={focusComposerTextareaFromPointer}

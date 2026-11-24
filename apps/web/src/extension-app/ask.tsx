@@ -18,6 +18,7 @@
  */
 import { createRoot } from "react-dom/client";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { MessageCircle } from "lucide-react";
 import { WEB_PROXY_ROUTES, type AuthUser, type ChannelSnapshot, type SerializedSpace } from "@xmatrix/protocol";
 import { API_ROUTES } from "xmatrix-extension:api-routes";
 import { Composer } from "@/components/dashboard/workspace-composer-dialogs";
@@ -269,6 +270,7 @@ function Surface() {
               error={problem}
               ariaLabel="Ask about this"
               sendTitle="Ask"
+              sendIcon={<MessageCircle className="size-[19px]" strokeWidth={2.2} />}
               onDraftChange={() => undefined}
               onWorkspaceSelect={() => undefined}
               onCancelReply={() => undefined}
