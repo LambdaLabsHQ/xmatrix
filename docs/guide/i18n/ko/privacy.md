@@ -109,6 +109,26 @@ xMatrix는 광고 쿠키, 크로스사이트 추적, 세션 리플레이, PostHo
 - **CLI 및 데몬**: 기본 꺼짐입니다. `xmatrix config telemetry on` 또는 `XMATRIX_TELEMETRY=1`로 켜고, `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` 또는 `DO_NOT_TRACK=1`로 끌 수 있습니다.
 - **CLI와 daemon**: `xmatrix config telemetry on` 또는 `XMATRIX_TELEMETRY=1`로 켜고, `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0`, `DO_NOT_TRACK=1`로 끕니다. `xmatrix config telemetry on|off`는 선택을 계정에도 저장합니다.
 
+## 대화를 xMatrix 지원팀에 넘기기
+
+xMatrix 직원과 Agent는 사용자가 대화를 지원팀에 넘겼을 때만 그 대화를 읽습니다. 제품 분석에는 메타데이터만 쓰며, 사용자가 쓴 내용은 쓰지 않습니다.
+
+도움이 필요하면 대화 메뉴, xMatrix가 올리는 장애 알림(시작 실패, 반복되는 실패, 몇 분째 진행 없음), 또는 대화가 열린 상태에서 **Help → Report an issue**에서 **Hand to xMatrix support**를 고릅니다. 그런 다음:
+
+- 무엇이 잘못됐는지 한 줄로 씁니다.
+- 포함할 항목을 체크합니다. 처음에는 아무것도 체크되어 있지 않습니다:
+  - **This conversation's messages**(스레드 포함).
+  - **Diagnostics for this conversation**: Agent가 여기서 언제 시작·중지·실패했는지와 그 실패 코드. 상태, 코드, 횟수, 시각만 담은 진단 이벤트이며 메시지 본문, 프롬프트, 오류 메시지, ID는 없습니다.
+- **I agree to let xMatrix support read what I selected**를 체크합니다. 체크하기 전에는 아무것도 보내지 않습니다.
+
+넘기면 허용되는 것:
+
+- **누가 읽나요:** xMatrix 지원팀, 즉 xMatrix 팀과 지원 Agent가 이 요청을 위해 열린 지원 대화에서 처리합니다.
+- **읽기 전용:** 지원팀은 체크한 내용을 사용자에게 보이는 그대로 읽을 뿐, 사용자의 대화에 쓰거나 반응하거나 무언가를 시작할 수 없습니다. 지원팀의 답은 "xMatrix support"가 보낸 메시지로 대화에 오거나 이메일로 옵니다.
+- **기간:** 14일. 사용자 본인 또는 스페이스의 소유자나 관리자는 대화에 남는 안내의 **Withdraw now**로 언제든 철회할 수 있습니다. 철회되거나 만료되면 읽기가 즉시 멈춥니다.
+- **읽을 때마다 알 수 있습니다:** 지원팀이 한 시간 안에 처음 읽으면 대화에 "xMatrix support read this conversation"과 시각이 표시됩니다.
+- 대화를 넘길 수 있는 사람은 그 대화를 시작한 사람, 또는 해당 스페이스의 소유자나 관리자뿐입니다.
+
 ## 법적 문서
 
 - [개인정보처리방침 (EN)](/privacy)

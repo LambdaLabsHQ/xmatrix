@@ -326,6 +326,19 @@ export function PrivacyPolicyContent() {
           when a user provides or authorizes it for support and we limit that access to what is needed.
         </p>
         <p>
+          A user authorizes support access by handing a conversation to xMatrix support. They write one
+          line about the problem and choose what to include, with nothing selected by default: the
+          conversation’s messages, and diagnostics for the conversation that contain only states,
+          failure codes, counts, and times. Nothing is shared until they tick “I agree to let xMatrix
+          support read what I selected”. xMatrix support, meaning our team and its support Agents, may
+          then read only what was selected, read-only, for 14 days. The user, or an owner or admin of
+          their Space, may withdraw it at any time, and reading stops when it is withdrawn or expires.
+          Each first read in an hour is shown in the conversation, and support’s replies arrive there or
+          by email. Only the person who started the conversation, or an owner or admin of its Space,
+          can hand it over. Without a handoff, support staff and Agents do not read a customer’s
+          conversations, and product analysis uses metadata only.
+        </p>
+        <p>
           We do not sell personal information, share it for cross-context behavioral advertising, or use
           it for targeted advertising. If we ever propose a use that crosses one of these boundaries, we
           will conduct a separate product and legal review before collection and obtain any consent or
