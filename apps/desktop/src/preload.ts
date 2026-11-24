@@ -73,6 +73,13 @@ contextBridge.exposeInMainWorld("xmatrixDesktop", {
   startDaemon: () => ipcRenderer.invoke("desktop:start-daemon"),
   stopDaemon: () => ipcRenderer.invoke("desktop:stop-daemon"),
   restartDaemon: () => ipcRenderer.invoke("desktop:restart-daemon"),
+  getLocalPrivacySettings: (): Promise<{ telemetry: boolean; quotaProbes: boolean } | null> =>
+    ipcRenderer.invoke("desktop:get-local-privacy-settings"),
+  setLocalPrivacySetting: (
+    key: "telemetry" | "quotaProbes",
+    enabled: boolean,
+  ): Promise<{ telemetry: boolean; quotaProbes: boolean } | null> =>
+    ipcRenderer.invoke("desktop:set-local-privacy-setting", key, enabled),
   getSetupStatus: () => ipcRenderer.invoke("desktop:get-setup-status"),
   saveSetupStatus: (status: DesktopSetupStatus) =>
     ipcRenderer.invoke("desktop:save-setup-status", status),

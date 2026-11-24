@@ -14,6 +14,8 @@ export default function SubprocessorsPage() {
     <LegalDocument
       title="Subprocessors"
       description="The service providers MadeByRobot uses to host, secure, and operate xMatrix."
+      version="2026-11-24"
+      effectiveDate="24 November 2026"
     >
       <SubprocessorsContent />
     </LegalDocument>

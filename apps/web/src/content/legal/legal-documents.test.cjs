@@ -151,13 +151,17 @@ test("legal documents stay discoverable before and after sign-in", () => {
   assert.match(settingsSource, /contact@madebyrobot\.net/);
 });
 
-test("privacy policy discloses local quota probes, client diagnostics opt-out, and Sentry", () => {
+test("privacy policy discloses local quota probes, opt-in client diagnostics, and Sentry", () => {
   assert.match(privacySource, /XMATRIX_DISABLE_QUOTA_PROBES=1/);
   assert.match(privacySource, /xmatrix config quotaProbes off/);
   assert.match(privacySource, /never sent to xMatrix/);
-  assert.match(privacySource, /XMATRIX_TELEMETRY=0/);
+  assert.match(privacySource, /off by default/);
+  assert.match(privacySource, /XMATRIX_TELEMETRY=1/);
   assert.match(privacySource, /DO_NOT_TRACK=1/);
   assert.match(privacySource, /Sentry/);
+  assert.match(cookiesSource, /off by default/);
+  assert.match(cookiesPageSource, /version="2026-11-24"/);
+  assert.match(subprocessorsPageSource, /version="2026-11-24"/);
   assert.match(subprocessorsSource, /Apple Push Notification service/);
   assert.match(subprocessorsSource, /Firebase Cloud Messaging/);
   assert.doesNotMatch(nextConfigSource, /cloudflareinsights\.com/);

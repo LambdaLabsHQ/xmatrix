@@ -49,8 +49,12 @@ import {
   defaultCliRunner,
   importCliSession,
   readCliContext,
+  readCliPrivacySettings,
   resolveSessionCli,
+  writeCliPrivacySetting,
   type DesktopCliContext,
+  type DesktopCliPrivacyKey,
+  type DesktopCliPrivacySettings,
   type DesktopCliProfile,
 } from "./cli-context";
 import {
@@ -3017,6 +3021,33 @@ function registerIpcHandlers() {
   ipcMain.handle("desktop:start-daemon", secureIpc(() => retryDaemonStart()));
   ipcMain.handle("desktop:stop-daemon", secureIpc(() => stopDaemon()));
   ipcMain.handle("desktop:restart-daemon", secureIpc(() => restartDaemon()));
+  ipcMain.handle("desktop:get-local-privacy-settings", secureIpc(async (): Promise<DesktopCliPrivacySettings | null> => {
+    const executable = sessionCliExecutable();
+    if (!executable) return null;
+    return readCliPrivacySettings({
+      executable,
+      profileId: explicitDesktopProfileId(),
+      env: cliRunEnv(),
+      run: defaultCliRunner,
+    });
+  }));
+  ipcMain.handle("desktop:set-local-privacy-setting", secureIpc(async (
+    _event,
+    key: unknown,
+    enabled: unknown,
+  ): Promise<DesktopCliPrivacySettings | null> => {
+    if ((key !== "telemetry" && key !== "quotaProbes") || typeof enabled !== "boolean") return null;
+    const executable = sessionCliExecutable();
+    if (!executable) return null;
+    return writeCliPrivacySetting({
+      executable,
+      profileId: explicitDesktopProfileId(),
+      key: key as DesktopCliPrivacyKey,
+      enabled,
+      env: cliRunEnv(),
+      run: defaultCliRunner,
+    });
+  }));
   ipcMain.handle("desktop:get-setup-status", secureIpc(() => getDesktopSetupStatus()));
   ipcMain.handle("desktop:save-setup-status", secureIpc((_event, status: DesktopSetupStatus) =>
     saveDesktopSetupStatus(status)

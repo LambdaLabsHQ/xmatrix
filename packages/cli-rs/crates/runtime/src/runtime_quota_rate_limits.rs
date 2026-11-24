@@ -8,6 +8,9 @@ async fn provider_subscription_quota_usage(
     cmd_args: &[String],
     force: bool,
 ) -> Option<protocol::LlmUsage> {
+    if xmatrix_cli_core::config::quota_probes_disabled() {
+        return None;
+    }
     if uses_zcode_runtime(tool, cmd, cmd_args) {
         return read_zai_coding_plan_quota_usage(force).await;
     }

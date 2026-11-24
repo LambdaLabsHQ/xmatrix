@@ -11,6 +11,8 @@ xMatrix는 호스팅 협업 Hub와 사용자 머신에서 실행되는 Rust 로�
 
 소스 코드, Git 기록, 작업 디렉터리, 모델 도구 대화 내역, 로컬 모델 자격 증명은 모두 사용자 본인의 머신에 남습니다. xMatrix는 로컬 API 키나 OAuth 토큰을 Hub로 전송하지 않으며, 다른 도구의 인증 파일을 읽어 기기 간 신원을 연결하거나 추적하지 않습니다.
 
+재설치 후에도 계정 내에서 같은 컴퓨터를 안정적으로 식별하기 위해 데몬은 로컬에서 xMatrix 사용자 ID와 OS 머신 식별자를 해시하여 소유자별 `machineId`만 생성합니다. 원본 하드웨어 식별자나 계정 비격리 지문은 Hub로 전송되지 않습니다.
+
 ## 로컬 공급자 할당량 조회
 
 등록된 하네스(Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai, Antigravity 등)의 남은 구독 할당량을 `xmatrix agent list`와 Agents 화면에 표시하고 `@auto` 라우팅이 한도 초과 계정을 피할 수 있도록, 로컬 데몬이 등록된 도구의 로컬 자격 증명 저장소를 메모리 내에서 읽어 해당 공급자 엔드포인트에 직접 조회할 수 있습니다.
@@ -34,28 +36,29 @@ xMatrix는 호스팅 협업 Hub와 사용자 머신에서 실행되는 Rust 로�
 
 ### 로컬 할당량 조회 끄기
 
+데스크톱 앱의 **Settings → Legal and privacy → Local provider quota probes** 또는 아래 명령/환경 변수로 끌 수 있습니다:
+
 ```sh
 xmatrix config quotaProbes off
 # 또는 환경 변수 설정(우선 적용)
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-Antigravity만 끄려면 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`을 설정하세요. 비활성화하면 로컬 자격 증명 저장소를 읽거나 공급자 API를 호출하지 않습니다.
+Antigravity만 끄려면 `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`을 설정하세요. 비활성화하면 모든 경로에서 로컬 자격 증명 저장소를 읽거나 공급자 API를 호출하지 않습니다.
 
 ## 클라이언트 진단 및 오류 보고
 
 xMatrix는 광고 쿠키, 크로스사이트 추적, 세션 리플레이, PostHog·Google Analytics·Cloudflare Web Analytics 같은 서드파티 행동 분석 SDK를 사용하지 않습니다.
 
-기본적으로 로그인된 클라이언트는 버그 수정과 성능 개선을 위해 제한된 운영 진단 정보를 전송합니다:
+**모든 지역에서 선택적 클라이언트 진단과 브라우저 오류 보고는 기본적으로 꺼져 있습니다(명시적 옵트인).** 로그인하지 않은 마케팅·문서·법적 페이지에서는 Sentry를 로드하지 않으며, 사용자가 직접 켜거나 데스크톱 시작 실패 카드에서 수동 전송을 클릭한 경우에만 전송됩니다:
 
-- **오류 및 충돌 보고(Sentry)**: 사용자 정보, 쿠키, HTTP 헤더/본문, URL 쿼리, 콘솔 브레드크럼을 비활성화하고 인용 문자열을 마스킹해 전송합니다. DSN이 없는 로컬/셀프호스트 빌드에서는 전송하지 않습니다.
-- **퍼스트파티 진단(xMatrix Hub → Cloudflare Analytics Engine)**: 시작 시간(`/api/observable/startup-timing`), 온보딩 단계 수(`/api/observable/onboarding-step`), 데스크톱 데몬 시작 실패 정보(`/api/observable/desktop-daemon-failure`), CLI 재연결 샘플(`/api/observable/client-metrics`). 식별자는 서버 키 기반 HMAC-SHA-256으로 가명화되며 메시지나 명령 본문은 포함되지 않습니다.
+- **오류 및 충돌 보고(Sentry)**: 로그인된 앱에서 옵트인한 경우에만 전송되며, 사용자 정보, 쿠키, HTTP 헤더/본문, URL 쿼리, 콘솔 브레드크럼을 비활성화하고 인용 문자열을 마스킹합니다. DSN이 없는 로컬/셀프호스트 빌드에서는 전송하지 않습니다.
+- **퍼스트파티 진단(xMatrix Hub → Cloudflare Analytics Engine)**: 옵트인한 경우에만 시작 시간(`/api/observable/startup-timing`), 온보딩 단계 수(`/api/observable/onboarding-step`), 데스크톱 데몬 시작 실패 정보(`/api/observable/desktop-daemon-failure`), CLI 재연결 샘플(`/api/observable/client-metrics`)을 전송합니다. 식별자는 서버 키 기반 HMAC-SHA-256으로 가명화되며 메시지나 명령 본문은 포함되지 않습니다.
 
-### 진단 및 오류 보고 끄기
+### 진단 및 오류 보고 켜기/끄기
 
-- **Web, Desktop, iOS, Android**: **Settings → Legal and privacy**에서 **Send diagnostics and crash reports**를 끕니다.
-- **브라우저 개인정보 신호**: 설정에서 명시적으로 다시 켜지 않는 한 **Do Not Track(DNT)** 및 **Global Privacy Control(GPC)** 신호를 자동으로 존중합니다.
-- **CLI 및 데몬**: `xmatrix config telemetry off`를 실행하거나 `XMATRIX_TELEMETRY=0` 또는 `DO_NOT_TRACK=1`을 설정하세요.
+- **Web, Desktop, iOS, Android**: **Settings → Legal and privacy**에서 **Send diagnostics and crash reports**를 전환합니다(기본 꺼짐). 데스크톱에서는 로컬 데몬의 `telemetry` 설정도 함께 동기화됩니다.
+- **CLI 및 데몬**: 기본 꺼짐입니다. `xmatrix config telemetry on` 또는 `XMATRIX_TELEMETRY=1`로 켜고, `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` 또는 `DO_NOT_TRACK=1`로 끌 수 있습니다.
 
 ## 법적 문서
 

@@ -11,6 +11,8 @@ xMatrix はホスト型コラボレーション Hub と、ご自身のマシン�
 
 ソースコード、Git 履歴、作業ディレクトリ、プロバイダの会話履歴、およびローカルのモデル認証情報はご自身のマシン上に残ります。xMatrix が API キーや OAuth トークンを Hub へ送信したり、他ツールの認証情報から複数マシンを横断するユーザー追跡を行ったりすることはありません。
 
+再インストール後も同じマシンをアカウント内で安定して識別できるよう、デーモンはローカルで xMatrix ユーザー ID と OS マシン識別子をハッシュ化してアカウント単位の `machineId` を生成します。生のハードウェア識別子やアカウント非分離のフィンガープリントが Hub に送信されることはありません。
+
 ## ローカルのプロバイダクォータ照会
 
 登録済みのハーネス（Claude Code、Codex、Cursor、Grok、OpenCode、DeepSeek、Z.ai、Antigravity 等）について、`xmatrix agent list` や Agents 画面で残量を表示し、`@auto` ルーティングで上限到達アカウントを避けるために、ローカルデーモンが登録済みツールのローカル認証ストアを読み取り各プロバイダの残量 API を直接照会する場合があります。
@@ -34,28 +36,29 @@ xMatrix はホスト型コラボレーション Hub と、ご自身のマシン�
 
 ### ローカルクォータ照会を無効にする
 
+デスクトップアプリの **Settings → Legal and privacy → Local provider quota probes**、または以下のコマンド／環境変数で無効にできます：
+
 ```sh
 xmatrix config quotaProbes off
 # または環境変数（優先）
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-Antigravity のみ無効にする場合は `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` を設定してください。無効化するとローカル認証ストアの読み取りと残量照会を一切行いません。
+Antigravity のみ無効にする場合は `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1` を設定してください。無効化するとすべての経路でローカル認証ストアの読み取りと残量照会を行いません。
 
 ## クライアント診断とクラッシュレポート
 
 xMatrix は広告 Cookie、クロスサイト追跡、セッションリプレイ、PostHog・Google Analytics・Cloudflare Web Analytics 等のサードパーティ行動分析 SDK を使用していません。
 
-デフォルトではログイン済みクライアントから障害修正・性能改善用の限定的な診断情報を送信します：
+**すべての地域で、任意のクライアント診断およびブラウザのクラッシュレポートはデフォルトでオフ（明示的なオプトイン）です。** 未ログインのマーケティング／ドキュメント／法的ページでは Sentry を読み込みません。明示的に有効化した場合（またはデスクトップ起動失敗カードで手動送信を選んだ場合）にのみ送信されます：
 
-- **エラー・クラッシュレポート（Sentry）**：ユーザー情報・Cookie・HTTP ヘッダー/ボディ・URL クエリ・コンソールログを無効化し、引用文字列をマスクして送信します。DSN のないローカル／セルフホストビルドでは送信しません。
-- **ファーストパーティ診断（xMatrix Hub → Cloudflare Analytics Engine）**：起動時間（`/api/observable/startup-timing`）、初期設定ステップ数（`/api/observable/onboarding-step`）、デスクトップデーモン起動失敗情報（`/api/observable/desktop-daemon-failure`）、CLI 再接続サンプル（`/api/observable/client-metrics`）。識別子はサーバー側の鍵付き HMAC-SHA-256 で仮名化され、メッセージ本文やコマンド内容は含みません。
+- **エラー・クラッシュレポート（Sentry）**：ログイン済みアプリでオプトインした場合のみ送信されます。ユーザー情報・Cookie・HTTP ヘッダー/ボディ・URL クエリ・コンソールログを無効化し、引用文字列をマスクします。DSN のないローカル／セルフホストビルドでは送信しません。
+- **ファーストパーティ診断（xMatrix Hub → Cloudflare Analytics Engine）**：オプトイン時のみ起動時間（`/api/observable/startup-timing`）、初期設定ステップ数（`/api/observable/onboarding-step`）、デスクトップデーモン起動失敗情報（`/api/observable/desktop-daemon-failure`）、CLI 再接続サンプル（`/api/observable/client-metrics`）を送信します。識別子はサーバー側の鍵付き HMAC-SHA-256 で仮名化され、メッセージ本文やコマンド内容は含みません。
 
-### 診断とクラッシュレポートを無効にする
+### 診断とクラッシュレポートの有効化・無効化
 
-- **Web・Desktop・iOS・Android**：**Settings → Legal and privacy** で **Send diagnostics and crash reports** をオフにします。
-- **ブラウザのプライバシー信号**：設定で明示的に有効化しない限り、**Do Not Track（DNT）** と **Global Privacy Control（GPC）** を自動的に尊重します。
-- **CLI とデーモン**：`xmatrix config telemetry off` を実行するか、`XMATRIX_TELEMETRY=0` または `DO_NOT_TRACK=1` を設定してください。
+- **Web・Desktop・iOS・Android**：**Settings → Legal and privacy** で **Send diagnostics and crash reports** を切り替えます（デフォルトはオフ）。デスクトップではローカルデーモンの `telemetry` 設定にも連動します。
+- **CLI とデーモン**：デフォルトはオフです。有効にするには `xmatrix config telemetry on` または `XMATRIX_TELEMETRY=1`、無効にするには `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0`、または `DO_NOT_TRACK=1` を設定してください。
 
 ## 法的文書
 

@@ -53,6 +53,7 @@ export function SpaceAgentSetupCard({
   onBringAll,
   onManageMachines,
   daemonStatus,
+  onReportDaemonFailure,
 }: {
   state: SpaceAgentSetupState;
   spaceId: string | null;
@@ -70,6 +71,7 @@ export function SpaceAgentSetupCard({
   onManageMachines: () => void;
   /** The App's background service, when this is the desktop App. */
   daemonStatus?: DesktopDaemonStatus | null;
+  onReportDaemonFailure?: (failure: DesktopDaemonFailure) => void;
 }) {
   const copy = useOnboardingCopy(spaceId, token, userId);
   if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
@@ -89,7 +91,8 @@ export function SpaceAgentSetupCard({
   return (
     <SetupCardShell>
         {daemonFailure && state.kind !== "daemon-stopped" && (
-          <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mb-6"
+          <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon}
+            onReport={onReportDaemonFailure ? () => onReportDaemonFailure(daemonFailure) : undefined} className="mb-6"
             spaceId={spaceId} token={token} userId={userId} />
         )}
         {state.kind === "unreachable" && <UnreachablePanel copy={copy} onRetry={onRetryAgents} />}
@@ -113,7 +116,8 @@ export function SpaceAgentSetupCard({
               body={copy.turnOnInstalled}
             />
             {state.kind === "daemon-stopped" && daemonFailure && (
-              <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon} className="mt-4"
+              <DaemonFailureNotice copy={copy} failure={daemonFailure} starting={daemonStatus?.state === "starting"} onRetry={onStartDaemon}
+                onReport={onReportDaemonFailure ? () => onReportDaemonFailure(daemonFailure) : undefined} className="mt-4"
                 spaceId={spaceId} token={token} userId={userId} />
             )}
             {state.kind === "daemon-stopped" && !daemonFailure && (
@@ -170,6 +174,7 @@ function DaemonFailureNotice({
   failure,
   starting,
   onRetry,
+  onReport,
   className,
   spaceId,
   token,
@@ -179,6 +184,7 @@ function DaemonFailureNotice({
   failure: DesktopDaemonFailure;
   starting: boolean;
   onRetry: () => void;
+  onReport?: () => void;
   className?: string;
   spaceId: string | null;
   token: string | undefined;
@@ -194,10 +200,17 @@ function DaemonFailureNotice({
         title={known?.title ?? daemonFailureSentence(failure, copy)}
         explanation={known?.explanation}
         stepsLabel={problemCopy.stepsLabel} steps={known?.steps ?? []}
-        actions={<button type="button" disabled={starting} onClick={onRetry} className={actionClass({ variant: "primary", size: "md" })}>
-          {starting ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-          {starting ? problemCopy.daemon.tryingAgain : problemCopy.daemon.tryAgain}
-        </button>}
+        actions={<>
+          <button type="button" disabled={starting} onClick={onRetry} className={actionClass({ variant: "primary", size: "md" })}>
+            {starting ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            {starting ? problemCopy.daemon.tryingAgain : problemCopy.daemon.tryAgain}
+          </button>
+          {onReport && !delivered && (
+            <button type="button" onClick={onReport} className={actionClass({ variant: "secondary", size: "md" })}>
+              {copy.sendFailureReport}
+            </button>
+          )}
+        </>}
         detailsLabel={problemCopy.detailsLabel}
         details={(failure.detail || failure.exitCode !== undefined || delivered) ? <>
           {failure.detail && <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{failure.detail}</pre>}

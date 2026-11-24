@@ -13,6 +13,7 @@ type Rule = Parameters<typeof fixtureRule>[1];
 
 async function openWithIntent(page: import("@playwright/test").Page, state: Record<string, unknown>, rules: Rule[] = []) {
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE] });
+  await page.addInitScript(() => window.localStorage.setItem("xmatrix:diagnostics-enabled", "true"));
   await fixtureRule(page, { id: "intent-create", pattern: "**/api/xmatrix/setup-intents",
     responder: { kind: "static", json: { ...base, phase: "waiting" } } });
   await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`,

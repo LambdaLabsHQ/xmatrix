@@ -133,6 +133,11 @@ export type DesktopBridge = {
   startDaemon?: () => Promise<DesktopDaemonStatus>;
   stopDaemon?: () => Promise<DesktopDaemonStatus>;
   restartDaemon?: () => Promise<DesktopDaemonStatus>;
+  getLocalPrivacySettings?: () => Promise<{ telemetry: boolean; quotaProbes: boolean } | null>;
+  setLocalPrivacySetting?: (
+    key: "telemetry" | "quotaProbes",
+    enabled: boolean,
+  ) => Promise<{ telemetry: boolean; quotaProbes: boolean } | null>;
   getSetupStatus?: () => Promise<DesktopSetupStatus>;
   saveSetupStatus?: (status: DesktopSetupStatus) => Promise<DesktopSetupStatus>;
   chooseWorkspaceDirectory?: () => Promise<DesktopWorkspaceCandidate | null>;

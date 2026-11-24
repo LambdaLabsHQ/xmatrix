@@ -43,6 +43,7 @@ import { useDockTabSlide } from "./use-dock-tab-slide";
 import { closeViewSelection } from "./url-query-state";
 import { ConnectionStatus } from "./connection-status";
 import { markStartup, reportStartupTiming, STARTUP_REPORT_SETTLE_MS } from "@/lib/startup-timing";
+import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
@@ -1170,6 +1171,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             onRetryAgents={() => void registrationCatalog.refetch()}
             onBindAgent={(candidate) => void enableLocalHarnesses([candidate.presetId])}
             daemonStatus={desktopDaemonStatus}
+            onReportDaemonFailure={desktopContext && token
+              ? (failure) => reportDesktopDaemonFailure(token, failure, desktopContext, { explicit: true })
+              : undefined}
           />
         </div>
   );

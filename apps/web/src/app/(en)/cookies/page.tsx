@@ -14,6 +14,8 @@ export default function CookieNoticePage() {
     <LegalDocument
       title="Cookie and Local Storage Notice"
       description="The required storage and device access used to authenticate, secure, and operate xMatrix."
+      version="2026-11-24"
+      effectiveDate="24 November 2026"
     >
       <CookieNoticeContent />
     </LegalDocument>

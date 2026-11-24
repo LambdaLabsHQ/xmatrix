@@ -31,6 +31,13 @@ export type DesktopCliContext = {
   machineId: string | null;
 };
 
+export type DesktopCliPrivacyKey = "telemetry" | "quotaProbes";
+
+export type DesktopCliPrivacySettings = {
+  telemetry: boolean;
+  quotaProbes: boolean;
+};
+
 export type DesktopCliSessionImportOutcome = {
   hubUrl: string;
   userId: string;
@@ -223,4 +230,76 @@ export async function importCliSession(options: {
     expiresAt: stringOrNull(report.expiresAt) ?? "",
     daemon,
   };
+}
+
+function parseJsonObject(stdout: string): Record<string, unknown> | null {
+  const start = stdout.indexOf("{");
+  const end = stdout.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const value = JSON.parse(stdout.slice(start, end + 1)) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function privacyConfigCliArgs(
+  options: { profileId?: string; key?: DesktopCliPrivacyKey; enabled?: boolean } = {},
+): string[] {
+  const prefix = options.profileId ? ["--profile", options.profileId] : [];
+  if (!options.key) return [...prefix, "config"];
+  return [...prefix, "config", options.key, options.enabled ? "on" : "off"];
+}
+
+/** Reads the CLI's current local privacy switches (`telemetry`, `quotaProbes`). */
+export async function readCliPrivacySettings(options: {
+  executable: string;
+  profileId?: string;
+  env: NodeJS.ProcessEnv;
+  run: CliRunner;
+}): Promise<DesktopCliPrivacySettings | null> {
+  let report: Record<string, unknown> | null;
+  try {
+    const { stdout } = await options.run(
+      options.executable,
+      privacyConfigCliArgs({ profileId: options.profileId }),
+      { env: options.env, timeout: 15_000 },
+    );
+    report = parseJsonObject(stdout);
+  } catch {
+    return null;
+  }
+  if (!report || typeof report.telemetry !== "boolean" || typeof report.quotaProbes !== "boolean") {
+    return null;
+  }
+  return { telemetry: report.telemetry, quotaProbes: report.quotaProbes };
+}
+
+/** Writes one CLI local privacy switch and returns the updated effective state. */
+export async function writeCliPrivacySetting(options: {
+  executable: string;
+  profileId?: string;
+  key: DesktopCliPrivacyKey;
+  enabled: boolean;
+  env: NodeJS.ProcessEnv;
+  run: CliRunner;
+}): Promise<DesktopCliPrivacySettings | null> {
+  try {
+    await options.run(
+      options.executable,
+      privacyConfigCliArgs({ profileId: options.profileId, key: options.key, enabled: options.enabled }),
+      { env: options.env, timeout: 15_000 },
+    );
+  } catch {
+    return null;
+  }
+  return readCliPrivacySettings({
+    executable: options.executable,
+    profileId: options.profileId,
+    env: options.env,
+    run: options.run,
+  });
 }

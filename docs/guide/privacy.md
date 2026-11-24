@@ -11,6 +11,8 @@ xMatrix is a hosted collaboration hub paired with a local Rust daemon on your ow
 
 Your source code, git history, working directories, provider chat history, and local model credentials stay on the computers you control. xMatrix does not upload your local model API keys or OAuth tokens to the Hub, and does not read third-party credential files to fingerprint or link your identity across machines.
 
+To keep a connected computer stable across reinstalls under your account, the daemon derives an owner-scoped `machineId` locally (`SHA-256` of your xMatrix user ID and an OS machine identifier). Raw OS hardware identifiers and unscoped machine fingerprints are never sent to the Hub.
+
 ## Local provider quota probes
 
 When you register a supported harness (such as Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai, or Antigravity), xMatrix can show remaining subscription quota in `xmatrix agent list` and the Agents view, and let `@auto` route around exhausted accounts.
@@ -36,7 +38,7 @@ To read remaining quota directly from each provider without running an LLM turn,
 
 ### Turning off local quota probes
 
-Disable all local provider quota probes on a machine with either command or environment variable:
+Disable all local provider quota probes on a machine in **Desktop Settings → Legal and privacy → Local provider quota probes**, or via CLI / environment variable:
 
 ```sh
 # Persistent machine setting
@@ -46,22 +48,22 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-To disable only Antigravity quota probing, set `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. When disabled, xMatrix does not read local provider credential stores or query provider usage endpoints.
+To disable only Antigravity quota probing, set `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. When disabled, xMatrix does not read local provider credential stores or query provider usage endpoints—including pre-launch probes, startup/reconnect reads, and rate-limit recovery.
 
 ## Client diagnostics and crash reporting
 
 xMatrix does not use advertising cookies, cross-site tracking, session replay, or third-party behavioral analytics SDKs (such as PostHog, Google Analytics, or Cloudflare Web Analytics).
 
-By default, signed-in clients send bounded operational diagnostics to help fix bugs and performance regressions:
+**Optional client diagnostics and browser crash reporting are off by default across all regions.** Unauthenticated marketing, docs, and legal pages never load Sentry. Nothing is sent from your clients unless you explicitly opt in (or click **Send failure report** on a desktop daemon startup failure card):
 
-- **Error and crash reports (Sentry):** uncaught errors and browser defects sent with `userInfo`, `cookies`, `httpHeaders`, `httpBodies`, `urlQueryParams`, and console breadcrumbs disabled, and quoted text redacted. Self-hosted/local builds without a DSN send nothing.
-- **First-party diagnostics (xMatrix Hub → Cloudflare Analytics Engine):** startup timing (`/api/observable/startup-timing`), onboarding setup step counts (`/api/observable/onboarding-step`), desktop daemon startup failures (`/api/observable/desktop-daemon-failure`), and CLI reconnect samples (`/api/observable/client-metrics`). Identifiers are pseudonymized server-side with a keyed HMAC-SHA-256 secret; no message or command bodies are included.
+- **Error and crash reports (Sentry):** when opted in inside the signed-in app, uncaught browser errors and defects are sent with `userInfo`, `cookies`, `httpHeaders`, `httpBodies`, `urlQueryParams`, and console breadcrumbs disabled, and quoted text redacted. Self-hosted/local builds without a DSN send nothing. (Server-side Hub errors remain reported server-side to operate the hosted service.)
+- **First-party diagnostics (xMatrix Hub → Cloudflare Analytics Engine):** when opted in, clients send startup timing (`/api/observable/startup-timing`), onboarding setup step counts (`/api/observable/onboarding-step`), desktop daemon startup failures (`/api/observable/desktop-daemon-failure`), and CLI reconnect samples (`/api/observable/client-metrics`). Identifiers are pseudonymized server-side with a keyed HMAC-SHA-256 secret; no message or command bodies are included.
 
-### Turning off diagnostics and crash reporting
+### Opting in or turning diagnostics off
 
-- **Web, Desktop, iOS, and Android:** open **Settings → Legal and privacy** and turn off **Send diagnostics and crash reports**.
-- **Browser privacy signals:** xMatrix automatically honors **Do Not Track (`DNT: 1`)** and **Global Privacy Control (GPC)** unless you explicitly turn diagnostics back on in Settings.
-- **CLI and daemon:** run `xmatrix config telemetry off`, or set `XMATRIX_TELEMETRY=0` or `DO_NOT_TRACK=1`.
+- **Web, Desktop, iOS, and Android:** open **Settings → Legal and privacy** and toggle **Send diagnostics and crash reports** (off by default). On Desktop, this switch also updates the local daemon's `telemetry` setting.
+- **Desktop startup failure card:** even with diagnostics off, you can choose **Send failure report** once on a daemon startup failure card to share the redacted failure details.
+- **CLI and daemon:** off by default; opt in with `xmatrix config telemetry on` or `XMATRIX_TELEMETRY=1`, and turn off with `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0`, or `DO_NOT_TRACK=1`.
 
 ## Legal documents
 

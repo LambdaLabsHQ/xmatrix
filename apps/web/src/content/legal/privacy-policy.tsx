@@ -78,16 +78,19 @@ export function PrivacyPolicyContent() {
           <li>
             <strong className="text-foreground">Service and diagnostic information:</strong> IP
             address, browser and device type, operating system, application version, request time,
-            route or event category, response status, duration, counts, capacity, startup timing,
-            first-party onboarding step progress, client network reconnect samples, desktop daemon
-            startup failure details, crash and error information (including reports sent to Sentry),
-            and keyed-HMAC pseudonymized identifiers used to operate, secure, and troubleshoot the
-            Services. Operational diagnostics are designed not to contain message or command bodies.
-            You can turn off client diagnostics and crash reporting in Settings → Legal and privacy,
-            via browser Do Not Track / Global Privacy Control, or in the CLI via{" "}
-            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code>,{" "}
-            <code className="font-mono text-xs">DO_NOT_TRACK=1</code>, or{" "}
-            <code className="font-mono text-xs">xmatrix config telemetry off</code>; see our{" "}
+            route or event category, response status, duration, counts, capacity, server-side Hub
+            error reports (sent to Sentry), and keyed-HMAC pseudonymized identifiers used to
+            operate, secure, and troubleshoot the Services. Optional client-side diagnostics—startup
+            timing, first-party onboarding step counts, CLI network reconnect samples, automatic
+            desktop daemon startup failure reports, and scrubbed browser Sentry error reports—are{" "}
+            <strong className="text-foreground">off by default</strong> across all regions and are
+            sent only when a signed-in user opts in under Settings → Legal and privacy, submits a
+            desktop failure report from the failure card, or enables CLI network diagnostics via{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=1</code> or{" "}
+            <code className="font-mono text-xs">xmatrix config telemetry on</code> (suppressed
+            when <code className="font-mono text-xs">DO_NOT_TRACK=1</code> or{" "}
+            <code className="font-mono text-xs">XMATRIX_TELEMETRY=0</code> is set). Operational
+            diagnostics are designed not to contain message or command bodies; see our{" "}
             <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
               Telemetry and Local Privacy guide
             </Link>
@@ -148,13 +151,17 @@ export function PrivacyPolicyContent() {
           Local source files, raw terminal output, provider history, and working context remain on the
           connected computer unless a person, Agent, tool, connector, or requested feature sends them
           to a Channel, attachment, task, trace event, support request, model provider, or another
-          disclosed endpoint. When local provider quota probing is enabled for a harness you registered,
-          the daemon may read that tool&apos;s local credential store or OS keychain entry solely in
-          local memory to query that provider&apos;s own usage endpoint directly from your machine;
-          those credentials and local cache fingerprints are never sent to xMatrix, and only
-          normalized remaining-quota windows or balances are reported to the Hub for display and
-          routing. You can disable all local quota probes via{" "}
-          <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code> or{" "}
+          disclosed endpoint. To keep a connected computer stable across reinstalls under your
+          account, the daemon derives an owner-scoped <code className="font-mono text-xs">machineId</code>{" "}
+          locally by hashing your xMatrix user ID with an OS machine identifier; raw hardware
+          identifiers and unscoped fingerprints are never sent to xMatrix. When local provider quota
+          probing is enabled for a harness you registered, the daemon may read that tool&apos;s
+          local credential store or OS keychain entry solely in local memory to query that
+          provider&apos;s own usage endpoint directly from your machine; those credentials and local
+          cache fingerprints are never sent to xMatrix, and only normalized remaining-quota windows
+          or balances are reported to the Hub for display and routing. You can disable all local
+          quota probes in Desktop Settings → Legal and privacy, via{" "}
+          <code className="font-mono text-xs">XMATRIX_DISABLE_QUOTA_PROBES=1</code>, or via{" "}
           <code className="font-mono text-xs">xmatrix config quotaProbes off</code>. A sandbox can
           restrict filesystem and long-lived credential access, but current local sandbox support
           varies by platform and mode and does not enforce network egress. A run configured without a
@@ -548,9 +555,16 @@ export function PrivacyPolicyContent() {
       <LegalSection id="changes" title="19. Changes to this Policy">
         <p>
           We may update this Policy as the Services, law, or our practices change. We will publish a new
-          version and effective date and preserve accessible version history. We will provide additional
-          email or in-product notice when a change materially affects privacy rights. A policy notice is
-          not treated as consent where law requires a separate affirmative choice.
+          version and effective date and preserve accessible version history in our{" "}
+          <a
+            className="font-medium text-foreground underline underline-offset-4"
+            href="https://github.com/LambdaLabsHQ/xmatrix/commits/main/apps/web/src/content/legal"
+          >
+            public legal document history
+          </a>
+          . We will provide additional email or in-product notice when a change materially affects
+          privacy rights. A policy notice is not treated as consent where law requires a separate
+          affirmative choice.
         </p>
       </LegalSection>
 

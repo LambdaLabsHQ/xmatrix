@@ -22,9 +22,10 @@ export function reportDesktopDaemonFailure(
   token: string | null | undefined,
   failure: DesktopDaemonFailure,
   app: { platform: string; version: string },
+  options?: { explicit?: boolean },
 ): void {
   const key = failureKey(failure);
-  if (!token || !isDiagnosticsEnabled() || reported.has(key)) return;
+  if (!token || (!options?.explicit && !isDiagnosticsEnabled()) || reported.has(key)) return;
   reported.add(key);
   void xmatrixApiRequest({ url: WEB_PROXY_ROUTES.observable_desktop_daemon_failure, token, method: "POST",
     body: { ...failure, platform: app.platform, appVersion: app.version } })

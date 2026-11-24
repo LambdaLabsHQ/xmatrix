@@ -1,9 +1,16 @@
-import { isDiagnosticsEnabled } from "./lib/diagnostics-preference";
+import { isDiagnosticsEnabled, subscribeDiagnosticsPreference } from "./lib/diagnostics-preference";
 import { earlyScriptLocation, isBrowserNoticeReport, isStaleBuild } from "./lib/error-noise";
 
 // The Desktop and iOS apps load this same Web app, so this also reports their
-// page errors. A build without a DSN (local, self-hosted) reports nothing.
+// page errors once the signed-in user opts in. Unauthenticated marketing and
+// legal pages never load Sentry, and builds without a DSN report nothing.
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
+
+/** Only signed-in app routes may initialize browser Sentry. */
+const isSignedInAppRoute = () => {
+  const pathname = typeof window === "undefined" ? "" : window.location.pathname;
+  return pathname === "/app" || pathname.startsWith("/app/");
+};
 
 /** A URL without its query and fragment, which can carry one-time codes. */
 const pathOnly = (url: string) => url.replace(/[?#].*$/u, "");
@@ -14,6 +21,8 @@ const holdError = (event: ErrorEvent) => {
   early.push({ error: event.error ?? event.message, where: earlyScriptLocation(event) });
 };
 const holdRejection = (event: PromiseRejectionEvent) => { early.push({ error: event.reason, where: {} }); };
+
+let initialized = false;
 
 // Error reporting is not part of the first screen: it loads once the page has
 // loaded and the browser is idle. What fails before then is held here and sent
@@ -36,7 +45,7 @@ async function startErrorReporting(dsn: string) {
       return breadcrumb;
     },
     beforeSend(event, hint) {
-      if (!isDiagnosticsEnabled()) return null;
+      if (!isSignedInAppRoute() || !isDiagnosticsEnabled()) return null;
       // A reload fixes a stale build, and the failure screen offers it; neither is a defect to report.
       if (isStaleBuild(hint.originalException) || isBrowserNoticeReport(hint.originalException, event)) return null;
       if (event.request?.url) event.request = { url: pathOnly(event.request.url) };
@@ -60,7 +69,9 @@ async function startErrorReporting(dsn: string) {
   }
 }
 
-if (dsn && isDiagnosticsEnabled()) {
+function maybeStartErrorReporting() {
+  if (initialized || !dsn || !isSignedInAppRoute() || !isDiagnosticsEnabled()) return;
+  initialized = true;
   addEventListener("error", holdError);
   addEventListener("unhandledrejection", holdRejection);
   // A stale build cannot load the chunk; the page offers a reload for that.
@@ -69,4 +80,9 @@ if (dsn && isDiagnosticsEnabled()) {
   const start = () => "requestIdleCallback" in window ? requestIdleCallback(load, { timeout: 2_000 }) : setTimeout(load, 1);
   if (document.readyState === "complete") start();
   else addEventListener("load", start, { once: true });
+}
+
+if (dsn && typeof window !== "undefined") {
+  maybeStartErrorReporting();
+  subscribeDiagnosticsPreference(maybeStartErrorReporting);
 }

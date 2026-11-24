@@ -2083,8 +2083,6 @@ async fn run_daemon_connection(
     if let Some(watchdog) = xmatrix_cli_update::recorded_daemon_watchdog() {
         metadata["watchdog"] = serde_json::json!(watchdog);
     }
-    metadata["machineFingerprint"] = serde_json::json!(machine_identity.fingerprint.value);
-    metadata["machineFingerprintSource"] = serde_json::json!(machine_identity.fingerprint.source);
     if let Some(parent) = machine_identity.parent_machine_id {
         metadata["parentMachineId"] = serde_json::json!(parent);
     }
