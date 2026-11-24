@@ -96,7 +96,6 @@ async fn unsupported_and_empty_files_are_refused_before_network_io() {
 
 #[tokio::test]
 async fn page_text_for_agent_downloads_images_concurrently() {
-    use std::sync::{Arc, Barrier};
     use xmatrix_cli_core::hex::sha256_hex;
 
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -118,39 +117,15 @@ async fn page_text_for_agent_downloads_images_concurrently() {
         std::env::set_var("XMATRIX_CONFIG_DIR", &cache_root);
     }
 
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let hub = format!("http://{}", listener.local_addr().unwrap());
-    let barrier = Arc::new(Barrier::new(2));
     let expected_a = format!("GET /api/spaces/s/pages/p/media/{file_a} ");
     let expected_b = format!("GET /api/spaces/s/pages/p/media/{file_b} ");
-    let server = std::thread::spawn(move || {
-        let mut workers = Vec::new();
-        for _ in 0..2 {
-            let (mut socket, _) = listener.accept().unwrap();
-            let barrier = Arc::clone(&barrier);
-            let expected_a = expected_a.clone();
-            let expected_b = expected_b.clone();
-            workers.push(std::thread::spawn(move || {
-                let (headers, _) = http_fixture::read_request(&mut socket);
-                let payload = if headers.starts_with(&expected_a) {
-                    img_a.as_slice()
-                } else if headers.starts_with(&expected_b) {
-                    img_b.as_slice()
-                } else {
-                    panic!("unexpected page media request: {headers}");
-                };
-                barrier.wait();
-                write!(
-                    socket,
-                    "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    payload.len()
-                )
-                .unwrap();
-                socket.write_all(payload).unwrap();
-            }));
-        }
-        for worker in workers {
-            worker.join().unwrap();
+    let (hub, server) = http_fixture::spawn_barrier_server(2, "image/png", move |headers, _| {
+        if headers.starts_with(&expected_a) {
+            img_a.to_vec()
+        } else if headers.starts_with(&expected_b) {
+            img_b.to_vec()
+        } else {
+            panic!("unexpected page media request: {headers}");
         }
     });
 
