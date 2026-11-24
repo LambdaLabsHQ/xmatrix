@@ -76,7 +76,7 @@ const en: LandingCopy = {
     art: "A modular array of warm wood and liquid-glass blocks engraved with AI marks",
     alsoFor: "Also for {list}, or {browser}.", everyDevice: "For {list}, or {browser}.", appsOnly: "Apps for {list}.", inBrowser: "use it in your browser" },
   livePage: {
-    title: "Get all your agents on the same page.",
+    title: "One page for the whole project.",
     body: "Every owner, person or Agent, keeps its own line current, in its own colour. Decisions land once, for everyone. You read where the project stands, not who typed what.",
     art: "A project page where Claude, Codex and Cursor each move their workstream forward while a person records a decision",
     stores: "Get the phone app",
@@ -86,7 +86,7 @@ const en: LandingCopy = {
     body: "Mention an agent and it gets to work in a conversation, on whichever of your machines it runs. Dozens run in parallel; each one reports what it finished to the page.",
   },
   agents: {
-    title: "Bring the agents you already use.",
+    title: "Works with the agents you already use",
     body: (count: number) => `${count} coding agents run on your own machines, on the subscriptions or API keys you already have. When one runs out of quota, another picks up the work.`,
     matrixArt: "The agents on each machine of a Space, and what each one is doing",
     listLabel: "Works with the agents you already use",
@@ -163,7 +163,7 @@ const zh: LandingCopy = {
     art: "一组刻着 AI 标志的木块和液态玻璃方块",
     alsoFor: "还有 {list} 版，也可以{browser}。", everyDevice: "支持 {list}，也可以{browser}。", appsOnly: "还有 {list} 版 App。", inBrowser: "在浏览器里用" },
   livePage: {
-    title: "十个智能体，一页看清。",
+    title: "整个项目，一页看清。",
     body: "每个负责人，不论是人还是 Agent，各自维护自己那一行，各用各的颜色。决定只记一次，所有人都读得到。你看到的是项目现在走到哪了，而不是谁打了哪几个字。",
     art: "一个项目页面：Claude、Codex 和 Cursor 各自推进自己的工作线，同时有人记下一项决定",
     stores: "下载手机 App",
@@ -173,7 +173,7 @@ const zh: LandingCopy = {
     body: "在对话里 @ 一个智能体，它就在你的某台机器上开工。几十个对话可以同时进行，每个都把做完的事写回页面。",
   },
   agents: {
-    title: "你已经在用的智能体，全都带进来。",
+    title: "支持你已经在用的\u200b编程智能体",
     body: (count: number) => `${count} 种编程智能体，跑在你自己的机器上，继续用你已有的订阅或 API key。一个额度用完，另一个接着干。`,
     matrixArt: "一个 Space 里每台机器上的智能体，以及它们各自在做什么",
     listLabel: "支持你已经在用的编程智能体",
@@ -253,7 +253,7 @@ const zhTw: LandingCopy = {
     art: "一組刻有 AI 標誌的溫潤木塊與液態玻璃方塊",
     alsoFor: "另有 {list} 版，也可以{browser}。", everyDevice: "支援 {list}，也可以{browser}。", appsOnly: "另有 {list} 版 App。", inBrowser: "在瀏覽器中使用" },
   livePage: {
-    title: "十個代理，一頁看懂。",
+    title: "整個專案，一頁看懂。",
     body: "每位負責人——無論是人還是 Agent——各自以專屬顏色維護自己負責的那一行。決策只記錄一次，所有人都讀得到。你看到的是專案最新進度，而不是誰打了哪幾個字。",
     art: "一個專案頁面：Claude、Codex 與 Cursor 各自推進工作線，同時有人記下一項決策",
     stores: "下載手機 App",
@@ -263,7 +263,7 @@ const zhTw: LandingCopy = {
     body: "在對話中 @ 一個代理，它就會在你指定的機器上開始工作。數十個對話可同時並行，每個完成後自動把結果回報到頁面。",
   },
   agents: {
-    title: "你已經在用的代理，全都帶進來。",
+    title: "支援你已經在使用的\u200b程式設計代理",
     body: (count: number) => `${count} 種程式設計代理，跑在你自己的機器上，繼續使用你已有的訂閱或 API key。一個額度用完，另一個接手。`,
     matrixArt: "一個 Space 裡每台機器上的代理，以及它們各自在做什麼",
     listLabel: "支援你已經在使用的程式設計代理",
@@ -343,7 +343,7 @@ const ja: LandingCopy = {
     art: "AIの刻印が入った温かみのある木材とリキッドガラスのブロック群",
     alsoFor: "{list} 版もあります。{browser}。", everyDevice: "{list} に対応。{browser}。", appsOnly: "{list} 版アプリもあります。", inBrowser: "ブラウザでも使えます" },
   livePage: {
-    title: "すべてのエージェントを、1ページで把握。",
+    title: "プロジェクト全体を、1ページで把握。",
     body: "担当者（人もエージェントも）がそれぞれの色で自分の担当行を最新に保ちます。決定事項は一度書けば全員に共有され、誰が何を打ったかではなく、今の到達点をすぐ読めます。",
     art: "Claude、Codex、Cursor が各自の作業を進めながら、人間が決定事項を記録しているプロジェクトページ",
     stores: "モバイルアプリを入手",
@@ -353,7 +353,7 @@ const ja: LandingCopy = {
     body: "会話でエージェントにメンションすると、登録した自分のマシン上で作業を開始します。何十もの会話を並列で走らせ、完了した内容だけをページに集約できます。",
   },
   agents: {
-    title: "いま使っているエージェントを、\u200bそのまま連れてくる。",
+    title: "お使いの\u200bコーディングエージェントと\u200bそのまま連携",
     body: (count: number) => `${count} 種類のコーディングエージェントが、あなたのマシン上で、契約済みのサブスクリプションや API キーのまま動きます。ひとつがクォータを使い切れば、別のエージェントが作業を引き継ぎます。`,
     matrixArt: "Space 内の各マシンにあるエージェントと、それぞれの作業状況",
     listLabel: "お使いのコーディングエージェントとそのまま連携",
@@ -433,7 +433,7 @@ const ko: LandingCopy = {
     art: "AI 마크가 새겨진 따뜻한 우드와 리퀴드 글라스 블록 배열",
     alsoFor: "{list}용도 있습니다. {browser}.", everyDevice: "{list} 지원. {browser}.", appsOnly: "{list}용 앱도 있습니다.", inBrowser: "브라우저에서도 쓸 수 있습니다" },
   livePage: {
-    title: "모든 에이전트를 한 페이지에서.",
+    title: "프로젝트 전체를 한 페이지에서.",
     body: "사람이든 에이전트든 각 담당자가 자신의 색으로 담당 줄을 최신 상태로 유지합니다. 결정은 한 번만 기록되어 모두에게 공유되며, 누가 무엇을 쳤는지 대신 현재 상태를 바로 읽습니다.",
     art: "Claude, Codex, Cursor가 각자의 작업을 진행하는 동안 사람이 결정사항을 기록하는 프로젝트 페이지",
     stores: "모바일 앱 받기",
@@ -443,7 +443,7 @@ const ko: LandingCopy = {
     body: "대화에서 에이전트를 @멘션하면 등록된 내 머신에서 즉시 작업이 시작됩니다. 수십 개의 대화가 병렬로 실행되고 각자 마친 결과를 페이지에 보고합니다.",
   },
   agents: {
-    title: "이미 쓰고 있는 에이전트를 그대로 데려오세요.",
+    title: "이미 사용 중인 코딩 에이전트와 바로 연결",
     body: (count: number) => `코딩 에이전트 ${count}종이 내 머신에서, 이미 쓰고 있는 구독이나 API 키로 실행됩니다. 하나가 할당량을 다 쓰면 다른 에이전트가 작업을 이어받습니다.`,
     matrixArt: "Space의 각 머신에 있는 에이전트와 각자 하고 있는 일",
     listLabel: "이미 사용 중인 코딩 에이전트와 바로 연결",
@@ -523,7 +523,7 @@ const es: LandingCopy = {
     art: "Matriz modular de bloques de madera cálida y vidrio líquido grabados con marcas de IA",
     alsoFor: "También para {list}, o {browser}.", everyDevice: "Para {list}, o {browser}.", appsOnly: "Apps para {list}.", inBrowser: "úsalo en tu navegador" },
   livePage: {
-    title: "Una página para todos tus agentes.",
+    title: "Una página para todo el proyecto.",
     body: "Cada responsable, persona o agente, mantiene su línea al día en su propio color. Las decisiones se escriben una vez para todos. Lees en qué punto está el proyecto, no quién escribió cada mensaje.",
     art: "Una página de proyecto donde Claude, Codex y Cursor avanzan su trabajo mientras una persona registra una decisión",
     stores: "Descarga la app móvil",
@@ -533,7 +533,7 @@ const es: LandingCopy = {
     body: "Menciona a un agente y empieza a trabajar en una conversación, en cualquiera de tus máquinas registradas. Decenas corren en paralelo y cada una reporta lo terminado a la página.",
   },
   agents: {
-    title: "Trae los agentes que ya usas.",
+    title: "Funciona con los agentes que ya usas",
     body: (count: number) => `${count} agentes de código funcionan en tus propias máquinas, con las suscripciones o claves de API que ya tienes. Cuando uno agota su cuota, otro continúa el trabajo.`,
     matrixArt: "Los agentes de cada máquina de un Space y lo que hace cada uno",
     listLabel: "Funciona con los agentes que ya usas",

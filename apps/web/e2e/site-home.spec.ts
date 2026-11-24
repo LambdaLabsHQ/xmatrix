@@ -43,7 +43,7 @@ for (const width of [393, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("xMatrix");
-    await expect(page.getByRole("heading", { level: 2, name: "Get all your agents on the same page.", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 2, name: "One page for the whole project.", exact: true })).toBeVisible();
     // The phone app's two stores, as their own badges.
     await expect(page.getByRole("link", { name: "Download on the App Store", exact: true })).toHaveAttribute("href", appStore);
     await expect(page.getByRole("link", { name: "Get it on Google Play", exact: true })).toHaveAttribute("href", googlePlay);
