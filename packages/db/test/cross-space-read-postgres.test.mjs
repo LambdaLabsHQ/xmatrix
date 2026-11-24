@@ -5,6 +5,7 @@ import { Client } from "pg";
 
 import { PostgresCrossSpaceReadRepository } from "../dist/cross-space-read-control.js";
 import { PostgresSupportHandoffRepository } from "../dist/support-handoff-control.js";
+import { supportAccessNoteBody } from "../dist/support-handoff-grants.js";
 import { registeredRunRows } from "./registered-run.fixture.mjs";
 
 
@@ -234,8 +235,11 @@ integration("a person hands a conversation to support: only to support, only wha
 
     const first = await supportRead(handoff.id, "messages");
     assert.equal(first.handoff.channelId, ids.mine);
-    assert.equal(first.accessNote?.channelId, ids.mine, "the first read tells the person's conversation");
-    assert.equal((await supportRead(handoff.id, "messages")).accessNote, undefined, "at most once an hour");
+    assert.equal(first.accessNote.channelId, ids.mine, "the first read tells the person's conversation");
+    assert.deepEqual([first.accessNote.reads, first.accessNote.notedAt], [1, first.accessNote.latestAt]);
+    const second = await supportRead(handoff.id, "messages");
+    assert.deepEqual([second.accessNote.reads, second.accessNote.notedAt], [2, first.accessNote.notedAt],
+      "a later read in the hour counts in the same note");
     await assert.rejects(supportRead(handoff.id, "diagnostics"), code("support_handoff_part_not_shared"));
     await assert.rejects(supportRead(handoff.id, "logs"), code("support_handoff_part_not_shared"));
     for (const reader of [{ kind: "user", id: ids.customer }, { kind: "user", id: ids.viewer },
@@ -247,8 +251,17 @@ integration("a person hands a conversation to support: only to support, only wha
     await assert.rejects(runRead(run(ids.source)), code("cross_space_read_grant_required"),
       "a support Run outside the handoff's conversation reads nothing");
     const working = await supportRun(client, ids, handoff.supportChannelId);
-    assert.deepEqual(await runRead(working), { ownerUserId: ids.customer, spaceId: ids.target, grantId: handoff.id },
+    const { accessNote, ...asPerson } = await runRead(working);
+    assert.deepEqual(asPerson, { ownerUserId: ids.customer, spaceId: ids.target, grantId: handoff.id },
       "the Run working in the support conversation reads as the person");
+    assert.equal(accessNote.reads, 3, "the Run's read is shown in the hour's note too");
+    const context = () => repository.authorizeRead({ requestId: crypto.randomUUID(), proof: working,
+      channelId: ids.mine, part: "messages", alongside: true });
+    assert.deepEqual(await context(), { ownerUserId: ids.customer, spaceId: ids.target, grantId: handoff.id },
+      "the Channel's name and threads, read beside its messages, go through the same handoff");
+    const counted = (await client.query("SELECT read_count,access_note_reads FROM data.cross_space_read_grants WHERE grant_id=$1",
+      [handoff.id])).rows[0];
+    assert.deepEqual([Number(counted.read_count), counted.access_note_reads], [3, 3], "and are not a second read");
     await assert.rejects(repository.authorizeRead({ requestId: crypto.randomUUID(), proof: working,
       channelId: ids.mine }), code("cross_space_read_grant_required"),
     "a read that is not the conversation's messages is not covered");
@@ -262,6 +275,7 @@ integration("a person hands a conversation to support: only to support, only wha
     assert.equal(revoked.status, "revoked");
     await assert.rejects(supportRead(handoff.id, "messages"), code("support_handoff_ended"), "withdrawal is immediate");
     await assert.rejects(runRead(working), code("cross_space_read_grant_required"));
+    await assert.rejects(context(), code("cross_space_read_grant_required"), "nor the Channel's context");
     await assert.rejects(repository.authorizeHandoffReply({ requestId: crypto.randomUUID(), spaceId: ids.target,
       grantId: handoff.id, reader: supportMember }), code("support_handoff_ended"));
   });
@@ -313,6 +327,38 @@ integration("diagnostics and logs are read only as ticked, and expiry or an admi
     assert.equal(erased.log_excerpt, null);
   });
 });
+
+integration("every support read is shown: one note an hour that counts its reads, a new note the next hour",
+  async () => {
+    await withCrossSpaceFixture(async ({ client, ids, database: db }) => {
+      const repository = new PostgresSupportHandoffRepository(db);
+      const { handoff } = await repository.handOff({ requestId: crypto.randomUUID(), userId: ids.customer,
+        channelId: ids.mine, supportSpaceId: ids.home, line: "slow replies", parts: ["messages"] });
+      const read = async () => (await repository.authorizeHandoffRead({ requestId: crypto.randomUUID(),
+        spaceId: ids.target, grantId: handoff.id, reader: { kind: "user", id: ids.owner }, part: "messages" }))
+        .accessNote;
+
+      const notes = [await read(), await read(), await read()];
+      assert.equal(new Set(notes.map((note) => note.notedAt)).size, 1, "three reads in one hour, one note");
+      assert.deepEqual(notes.map((note) => note.reads), [1, 2, 3]);
+      const latest = notes[2].latestAt;
+      assert.equal(supportAccessNoteBody(notes[2]),
+        `xMatrix support read this conversation 3 times (latest ${latest.slice(11, 16)} UTC).`,
+        "the note shows every read and the latest one's time");
+      const stored = (await client.query(`SELECT read_count,last_read_at,access_note_reads
+        FROM data.cross_space_read_grants WHERE grant_id=$1`, [handoff.id])).rows[0];
+      assert.deepEqual([Number(stored.read_count), stored.access_note_reads, stored.last_read_at.toISOString()], [3, 3, latest]);
+
+      // The hour passes.
+      await client.query(`UPDATE data.cross_space_read_grants
+        SET access_noted_at=access_noted_at-interval '61 minutes' WHERE grant_id=$1`, [handoff.id]);
+      const next = await read();
+      assert.notEqual(next.notedAt, notes[0].notedAt, "the next hour's read starts a second note");
+      assert.deepEqual([next.reads, next.notedAt], [1, next.latestAt]);
+      assert.equal(supportAccessNoteBody(next),
+        `xMatrix support read this conversation (${next.latestAt.slice(0, 16).replace("T", " ")} UTC).`);
+    });
+  });
 
 /** A live Run working in the support conversation a handoff opened. */
 async function supportRun(client, ids, channelId) {

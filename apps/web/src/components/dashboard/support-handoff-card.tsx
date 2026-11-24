@@ -9,8 +9,8 @@ import type { ClientDefectAction, SupportHandoffPart } from "@xmatrix/protocol";
 import { actionClass } from "@/components/ui/action-tone";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  openSupportHandoff, readSupportHandoff, readSupportHandoffPart, replyToSupportHandoff, revokeSupportHandoff,
-  type SupportHandoffPartRead, supportHandoffCardOf,
+  openSupportHandoff, readCountLabel, readSupportHandoff, readSupportHandoffPart, replyToSupportHandoff,
+  revokeSupportHandoff, type SupportHandoffPartRead, supportHandoffCardOf, supportHandoffQueryKey,
 } from "@/lib/support-handoff";
 import { userErrorMessage } from "@/lib/user-facing-error";
 
@@ -36,7 +36,8 @@ export function SupportHandoffCard({ card, body, token, userId }: {
   userId: string;
 }) {
   const queryClient = useQueryClient();
-  const queryKey = ["support-handoff", userId, card.spaceId, card.grantId];
+  // Each access note refreshes this query (useSupportAccessNoteRefresh), so the count follows the note.
+  const queryKey = supportHandoffQueryKey(userId, card.spaceId, card.grantId);
   const handoffQuery = useQuery({
     queryKey, enabled: Boolean(token), retry: false,
     queryFn: async ({ signal }) => {
@@ -68,7 +69,7 @@ export function SupportHandoffCard({ card, body, token, userId }: {
         <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
           <LifeBuoy className="size-3.5" />
           {STATUS_LABEL[handoff.status]}
-          {live && <> · until {new Date(handoff.expiresAt).toLocaleDateString()} · {handoff.readCount} reads</>}
+          {live && <> · until {new Date(handoff.expiresAt).toLocaleDateString()} · {readCountLabel(handoff.readCount)}</>}
         </p>
       )}
       {canWithdraw && (

@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 
 import { startPgHubWorker } from "./agent-launch-postgres.fixture.mjs";
+import { prepareTestAgentRun } from "./e2e-utils.mjs";
 
 /** The id the Hub gives a person's own Space (src/spaces.ts personalSpaceId), known before the worker starts. */
 function personalSpaceId(userId) {
@@ -11,7 +12,7 @@ function personalSpaceId(userId) {
 }
 
 // docs/cross-space-read-grants.md#support-handoffs, through the real Hub routes and PostgreSQL.
-test("a person hands a conversation to support; support reads only what was ticked, and each hour's read is noted", async () => {
+test("a person hands a conversation to support; support reads only what was ticked, and every read is noted", async () => {
   const customer = { token: "support-handoff-customer", id: `customer-${randomUUID()}`,
     email: "customer@example.com", name: "Customer" };
   const staff = { token: "support-handoff-staff", id: `staff-${randomUUID()}`,
@@ -60,10 +61,18 @@ test("a person hands a conversation to support; support reads only what was tick
     const read = await ok(await call(staff, `${base}/messages`));
     assert.ok(read.history.messages.some((message) => message.body === "the agent never starts"),
       "support reads the conversation as the person");
+    const noteOf = async () => {
+      const notes = (await history(customer, channel.id))
+        .filter((message) => (message.body ?? "").startsWith("xMatrix support read this conversation"));
+      assert.equal(notes.length, 1, "one note for the hour");
+      return notes[0].body;
+    };
+    assert.match(await noteOf(), /^xMatrix support read this conversation \(\d{4}-\d\d-\d\d \d\d:\d\d UTC\)\.$/u,
+      "the person sees that support read it");
     await ok(await call(staff, `${base}/messages`));
-    const notes = (await history(customer, channel.id))
-      .filter((message) => (message.body ?? "").startsWith("xMatrix support read this conversation ("));
-    assert.equal(notes.length, 1, "the person sees that support read it, once for the hour");
+    await ok(await call(staff, `${base}/messages`));
+    assert.match(await noteOf(), /^xMatrix support read this conversation 3 times \(latest \d\d:\d\d UTC\)\.$/u,
+      "later reads in the hour update the same note");
 
     const unshared = await call(staff, `${base}/diagnostics`);
     assert.equal(unshared.status, 403);
@@ -74,11 +83,30 @@ test("a person hands a conversation to support; support reads only what was tick
     const reply = (await history(customer, channel.id)).find((message) => message.body === "Restart the daemon and try again.");
     assert.equal(reply?.senderSnapshot?.name ?? reply?.sender?.name ?? reply?.senderName, "xMatrix support");
 
+    // A Run working in the support conversation reads the conversation and,
+    // above its messages, its name and threads: both through the handoff.
+    const prepared = await prepareTestAgentRun(worker, { name: `support-agent-${randomUUID()}`, agentType: "codex",
+      spaceId: supportSpaceId, targetChannelId: handoff.supportChannelId }, staff.token);
+    const agent = { headers: { Authorization: `Bearer ${prepared.token}` } };
+    const family = `/api/channels?familyOfChannelId=${encodeURIComponent(channel.id)}`;
+    const agentHistory = `/api/channels/${encodeURIComponent(channel.id)}/history?limit=20`;
+    assert.ok((await ok(await worker.fetch(agentHistory, agent))).messages
+      .some((message) => message.body === "the agent never starts"), "the Run reads the messages as the person");
+    assert.deepEqual((await ok(await worker.fetch(family, agent))).channels.map((each) => each.id), [channel.id],
+      "the Channel's context reads through the same handoff");
+    assert.match(await noteOf(), /^xMatrix support read this conversation 4 times /u,
+      "the Run's read is shown; the context beside it is not a second read");
+
     assert.equal((await call(staff, `${base}/revoke`, {})).status, 404, "support cannot withdraw it for the person");
     assert.equal((await ok(await call(customer, `${base}/revoke`, {}))).handoff.status, "revoked");
     const ended = await call(staff, `${base}/messages`);
     assert.equal(ended.status, 403);
     assert.equal((await ended.json()).code, "support_handoff_ended", "withdrawal stops reads at once");
+    for (const path of [agentHistory, family]) {
+      const refused = await worker.fetch(path, agent);
+      assert.equal(refused.status, 403, await refused.clone().text());
+      assert.equal((await refused.json()).code, "cross_space_read_grant_required", `withdrawal ends the Run's ${path}`);
+    }
   } finally {
     await worker.stop();
   }

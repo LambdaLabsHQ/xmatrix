@@ -148,8 +148,17 @@ different grantee, the support Space instead of one Run
    also use `xmatrix channel history <channel>`. Every read is made as the
    person who handed it over, so it never reaches what they cannot read, and is
    counted on the grant.
-4. The first read in an hour posts "xMatrix support read this conversation
-   (time)" in the person's conversation.
+4. Every read is shown in the person's conversation, one note an hour so it is
+   not flooded. The hour's first read posts "xMatrix support read this
+   conversation (time)"; each later read in that hour edits the same note to
+   "xMatrix support read this conversation 3 times (latest 14:05 UTC)". The
+   next read after the hour starts a new note. The grant keeps the note's hour
+   (`access_noted_at`) and its count (`access_note_reads`, migration `0276`).
+   The handoff card's read count reads the grant again whenever a note
+   arrives or changes, so it moves with the note.
+   When a Run reads with `xmatrix channel history`, the Channel's name and
+   threads printed above the messages are covered by the same handoff and are
+   not counted as a second read; a withdrawn or expired handoff refuses both.
 5. Support answers with `POST .../replies`; the answer lands in the person's
    conversation as a message from "xMatrix support". Support may also answer by
    email, which the support card shows.

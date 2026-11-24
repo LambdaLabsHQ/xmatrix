@@ -1,5 +1,5 @@
 import { ControlError } from "./control-error.js";
-import { useSupportGrant } from "./support-handoff-grants.js";
+import { findSupportGrant, type SupportAccessNote, useSupportGrant } from "./support-handoff-grants.js";
 import type { SupportHandoffPart } from "@xmatrix/protocol";
 import { storedIso as iso } from "./stored-values.js";
 import type { QueryResultRow } from "pg";
@@ -58,11 +58,12 @@ export interface CrossSpaceReadGrant {
 /**
  * Who a granted read is made as, in the target Space: the Run's owner for a
  * Run's grant, the person who handed the Channel over for a support handoff.
- * `accessNote` names the Channel to tell that support read it, at most hourly.
+ * `accessNote` is the hour's note telling the Channel that support read it.
  */
 export interface CrossSpaceReadAuthorization {
   ownerUserId: string; spaceId: string; grantId: string;
-  accessNote?: { channelId: string; at: string };
+  /** This hour's note in the person's Channel, counting this read. */
+  accessNote?: SupportAccessNote;
 }
 
 const { text } = commandFields((field) =>
@@ -390,7 +391,9 @@ export class PostgresCrossSpaceReadRepository {
    * names a Space-wide catalog read, which only a Space grant covers.
    */
   async authorizeRead(input: { requestId: string; proof: CrossSpaceRunProof; channelId?: string;
-    spaceId?: string; part?: SupportHandoffPart }): Promise<CrossSpaceReadAuthorization | null> {
+    spaceId?: string; part?: SupportHandoffPart;
+    /** A read of what accompanies `part` (a Channel's name and threads): a handoff covers it uncounted. */
+    alongside?: boolean; }): Promise<CrossSpaceReadAuthorization | null> {
     const requestId = text(input.requestId, "requestId", 200);
     const channelId = input.channelId === undefined ? null : text(input.channelId, "channelId");
     if (!channelId && input.spaceId === undefined) throw new CrossSpaceReadError(
@@ -415,12 +418,18 @@ export class PostgresCrossSpaceReadRepository {
       if (!rows[0] && channelId && input.part) {
         // Not the Run's own grant: a support handoff to the Run's Space may cover it.
         // Only a Run working in that handoff's support conversation reads through it.
-        const handoff = await useSupportGrant(tx, { spaceId, channelId, part: input.part, at,
-          supportSpaceId: input.proof.spaceId, supportChannelId: input.proof.channelId });
+        const query = { spaceId, channelId, part: input.part, at, supportSpaceId: input.proof.spaceId,
+          supportChannelId: input.proof.channelId };
+        const covering = input.alongside ? await findSupportGrant(tx, query) : null;
+        if (covering) {
+          await this.requireOwnerRead(tx, spaceId, channelId, covering.ownerUserId);
+          return { ownerUserId: covering.ownerUserId, spaceId, grantId: covering.grantId };
+        }
+        const handoff = input.alongside ? null : await useSupportGrant(tx, query);
         if (handoff) {
           await this.requireOwnerRead(tx, spaceId, channelId, handoff.ownerUserId);
           return { ownerUserId: handoff.ownerUserId, spaceId, grantId: handoff.grantId,
-            ...(handoff.accessNote ? { accessNote: handoff.accessNote } : {}) };
+            accessNote: handoff.accessNote };
         }
       }
       if (!rows[0]) throw new CrossSpaceReadError("cross_space_read_grant_required", 403,
