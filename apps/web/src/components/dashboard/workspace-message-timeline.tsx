@@ -297,7 +297,9 @@ import { cn } from "@/lib/utils";
 import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
 import { SupportHandoffCard, SupportHandoffOffer } from "@/components/dashboard/support-handoff-card";
-import { isSupportableFailureNotice, supportHandoffCardOf } from "@/lib/support-handoff";
+import {
+  isSupportableFailureNotice, supportHandoffCardOf, useSupportAccessNoteRefresh,
+} from "@/lib/support-handoff";
 import { NornRequestCard, nornRequestMetadata } from "@/components/dashboard/norn-request-card";
 import { carriesNornBlock, MessageProgramFlow, MessageProgramProvider } from "@/components/dashboard/message-program-flow";
 import { MessageAskLine } from "./message-ask-line";
@@ -2001,6 +2003,7 @@ export const MessageRow = memo(function MessageRow({
   const quotaRetryId = quotaRetryOfferId(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(hubMetadata);
   const supportHandoff = supportHandoffCardOf(hubMetadata);
+  useSupportAccessNoteRefresh(hubMetadata, message.body);
   const nornRequest = nornRequestMetadata(hubMetadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(hubMetadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(hubMetadata);

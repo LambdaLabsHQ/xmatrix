@@ -1,6 +1,7 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useSyncExternalStore } from "react";
 import {
   parseSupportHandoffRequest, WEB_PROXY_ROUTES,
   type LogExcerptStatus, type SerializedMachineDaemon, type SupportDiagnosticEvent, type SupportHandoff,
@@ -172,4 +173,44 @@ export function isSupportableFailureNotice(metadata: Record<string, unknown> | u
   if (!metadata) return false;
   return ["machine_run_failure", "startup_fallback", "turn_stalled"].includes(String(metadata.source)) ||
     metadata.xmatrixTurnFailure === true || Boolean(metadata.xmatrixTurnRetry);
+}
+
+/** The query a handoff card reads its handoff through, per viewer. */
+export function supportHandoffQueryKey(userId: string, spaceId: string, grantId: string) {
+  return ["support-handoff", userId, spaceId, grantId] as const;
+}
+
+/**
+ * The handoff an access note ("xMatrix support read this conversation …")
+ * reports, or null for any other message. Only for a Hub-written message.
+ */
+export function supportAccessNoteOf(metadata: Record<string, unknown> | undefined):
+  { grantId: string; spaceId: string } | null {
+  const value = metadata?.supportAccess;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { grantId, spaceId } = value as Record<string, unknown>;
+  return typeof grantId === "string" && grantId && typeof spaceId === "string" && spaceId ? { grantId, spaceId } : null;
+}
+
+/**
+ * An access note arrived, or was updated with another read: every card of
+ * that handoff reads its count again, so the card and the note move together.
+ */
+export function refreshSupportHandoffReads(queryClient: QueryClient, note: { grantId: string; spaceId: string }) {
+  return queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey[0] === "support-handoff"
+    && queryKey[2] === note.spaceId && queryKey[3] === note.grantId });
+}
+
+/** Refreshes the handoff's cards whenever this access note's text (its read count) changes. */
+export function useSupportAccessNoteRefresh(metadata: Record<string, unknown> | undefined, body: string): void {
+  const queryClient = useQueryClient();
+  const note = supportAccessNoteOf(metadata);
+  const grantId = note?.grantId, spaceId = note?.spaceId;
+  useEffect(() => {
+    if (grantId && spaceId) void refreshSupportHandoffReads(queryClient, { grantId, spaceId });
+  }, [queryClient, grantId, spaceId, body]);
+}
+
+export function readCountLabel(count: number): string {
+  return count === 1 ? "1 read" : `${count} reads`;
 }

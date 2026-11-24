@@ -154,6 +154,8 @@ different grantee, the support Space instead of one Run
    "xMatrix support read this conversation 3 times (latest 14:05 UTC)". The
    next read after the hour starts a new note. The grant keeps the note's hour
    (`access_noted_at`) and its count (`access_note_reads`, migration `0276`).
+   The handoff card's read count reads the grant again whenever a note
+   arrives or changes, so it moves with the note.
    When a Run reads with `xmatrix channel history`, the Channel's name and
    threads printed above the messages are covered by the same handoff and are
    not counted as a second read; a withdrawn or expired handoff refuses both.

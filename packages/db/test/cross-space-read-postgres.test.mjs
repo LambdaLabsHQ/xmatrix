@@ -251,8 +251,17 @@ integration("a person hands a conversation to support: only to support, only wha
     await assert.rejects(runRead(run(ids.source)), code("cross_space_read_grant_required"),
       "a support Run outside the handoff's conversation reads nothing");
     const working = await supportRun(client, ids, handoff.supportChannelId);
-    assert.deepEqual(await runRead(working), { ownerUserId: ids.customer, spaceId: ids.target, grantId: handoff.id },
+    const { accessNote, ...asPerson } = await runRead(working);
+    assert.deepEqual(asPerson, { ownerUserId: ids.customer, spaceId: ids.target, grantId: handoff.id },
       "the Run working in the support conversation reads as the person");
+    assert.equal(accessNote.reads, 3, "the Run's read is shown in the hour's note too");
+    const context = () => repository.authorizeRead({ requestId: crypto.randomUUID(), proof: working,
+      channelId: ids.mine, part: "messages", alongside: true });
+    assert.deepEqual(await context(), { ownerUserId: ids.customer, spaceId: ids.target, grantId: handoff.id },
+      "the Channel's name and threads, read beside its messages, go through the same handoff");
+    const counted = (await client.query("SELECT read_count,access_note_reads FROM data.cross_space_read_grants WHERE grant_id=$1",
+      [handoff.id])).rows[0];
+    assert.deepEqual([Number(counted.read_count), counted.access_note_reads], [3, 3], "and are not a second read");
     await assert.rejects(repository.authorizeRead({ requestId: crypto.randomUUID(), proof: working,
       channelId: ids.mine }), code("cross_space_read_grant_required"),
     "a read that is not the conversation's messages is not covered");
@@ -266,6 +275,7 @@ integration("a person hands a conversation to support: only to support, only wha
     assert.equal(revoked.status, "revoked");
     await assert.rejects(supportRead(handoff.id, "messages"), code("support_handoff_ended"), "withdrawal is immediate");
     await assert.rejects(runRead(working), code("cross_space_read_grant_required"));
+    await assert.rejects(context(), code("cross_space_read_grant_required"), "nor the Channel's context");
     await assert.rejects(repository.authorizeHandoffReply({ requestId: crypto.randomUUID(), spaceId: ids.target,
       grantId: handoff.id, reader: supportMember }), code("support_handoff_ended"));
   });
@@ -337,7 +347,7 @@ integration("every support read is shown: one note an hour that counts its reads
         "the note shows every read and the latest one's time");
       const stored = (await client.query(`SELECT read_count,last_read_at,access_note_reads
         FROM data.cross_space_read_grants WHERE grant_id=$1`, [handoff.id])).rows[0];
-      assert.deepEqual([stored.read_count, stored.access_note_reads, stored.last_read_at.toISOString()], [3, 3, latest]);
+      assert.deepEqual([Number(stored.read_count), stored.access_note_reads, stored.last_read_at.toISOString()], [3, 3, latest]);
 
       // The hour passes.
       await client.query(`UPDATE data.cross_space_read_grants
