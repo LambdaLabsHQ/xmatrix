@@ -84,6 +84,9 @@ test("the ask opens after an Agent's fifth answer and Later keeps it away", asyn
 test("the ask is centred on a destination's list", async ({ page }) => {
   await openWithLiveAgent(page);
   await page.getByRole("button", { name: "App", exact: true }).click();
+  // Wait for the lazy ToolSurface AppsView to mount rather than matching ToolSplitSkeleton's
+  // transient .app-tool-list, which detaches when the dynamic chunk swaps in.
+  await expect(page.locator(".app-connectors-list")).toBeVisible();
   const list = page.locator(".app-tool-list");
   await expect(list).toBeVisible();
   await page.evaluate(() => {
