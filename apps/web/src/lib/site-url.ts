@@ -16,6 +16,14 @@ export function appHref(path: `/${string}`): string {
   return siteUrl.origin === appUrl.origin ? path : new URL(path, appUrl).href;
 }
 
+/**
+ * Whether `origin` is the site's own, where the deployment gives the site one apart from the app's. The session's
+ * cookie does not reach that origin and the Hub does not answer it, so no one is signed in on a page open there.
+ */
+export function isSiteOnlyOrigin(origin: string): boolean {
+  return siteUrl.origin !== appUrl.origin && origin === siteUrl.origin;
+}
+
 /** The card a link to the site shows when it is shared: 1200×630, the size every network renders large. */
 export const shareImage = {
   url: "/brand/xmatrix-share-card.jpg",
