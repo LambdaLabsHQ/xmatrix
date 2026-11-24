@@ -7,6 +7,23 @@ and cost analysis. Monitoring incidents reach Channels and page Automations.
 Resource data actions are reads; creating a temporary cost report and enabling
 a supported API are separate policy-controlled writes.
 
+## Result retention (Google Cloud terms)
+
+Google Cloud's General Service Terms §17 (GCP Access Tools, effective
+2027-01-01) forbid storing Google Technical Information (costs, IAM,
+architecture, topology, summaries and findings obtained through an API or MCP)
+for more than 30 days, or after the tool is disconnected. The manifest
+declares `resultRetentionDays: 29`, so the Hub deletes what `gcp` returned at
+29 days: its receipts and Monitoring incident messages become delete
+tombstones, execution summaries and reasons are cleared, and private originals
+lose their ref and are physically deleted without the 31-day upload safety
+window. Disconnecting the connection deletes all of them at once; reconnecting
+is never needed to keep using it. The Space's retention clock is armed when
+`gcp` authors a message or is disconnected and re-arms for the next due result;
+nothing polls. Each receipt and `xmatrix connector list` tell Agents not to
+copy results into Pages, memory or other lasting notes. Calls stay explicit,
+one bounded page each, so the connector does not scrape or probe.
+
 ## Connect
 
 A Human Space admin selects **Connect with Google Cloud** in Apps. GCP reuses

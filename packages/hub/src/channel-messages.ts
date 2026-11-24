@@ -1,4 +1,5 @@
 import { MessageAuthorityError, type MessageLiveRouting } from "@xmatrix/db";
+import { armAppResultRetention } from "./connectors/result-retention";
 import type { AuthorityPrincipal } from "./product-message-command";
 import type { Env } from "./types";
 import { postBillingNotice } from "./billing-notice";
@@ -137,7 +138,7 @@ export async function appendChannelMessage(
   command: Record<string, unknown>,
   httpEvidence?: { agentSendFingerprint?: string },
 ): Promise<Record<string, unknown>> {
-  const { committed, billingNotice } = await withPostgresMessageRequestScope(env, async (scope) => {
+  const { committed, billingNotice, spaceId } = await withPostgresMessageRequestScope(env, async (scope) => {
     const placement = await postgresMessageRoute(
       env,
       channelId,
@@ -153,9 +154,14 @@ export async function appendChannelMessage(
         agentSendFingerprint: httpEvidence?.agentSendFingerprint },
     );
     if (isLiveRouting(liveRouting)) committedRouting.set(committed, liveRouting);
-    return { committed, billingNotice };
+    return { committed, billingNotice, spaceId };
   });
   await postBillingNotice(env, channelId, billingNotice);
+  // A provider whose terms bound its results' storage: the Space's retention clock deletes this one when due.
+  if (typeof command.appAuthorId === "string") {
+    await armAppResultRetention(env, spaceId, command.appAuthorId).catch((error: unknown) =>
+      console.warn("App result retention could not be armed", { error: error instanceof Error ? error.message : String(error) }));
+  }
   return committed;
 }
 

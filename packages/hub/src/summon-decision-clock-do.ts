@@ -4,6 +4,7 @@ import type { Env } from "./types";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { serialQueue } from "./serial-queue";
 import { cleanupSummonDecisions } from "./summon-decision-cleanup";
+import { expireRetainedAppResults } from "./connectors/result-retention";
 import { SummonDecisionClock } from "./summon-decision-clock";
 
 export class RelaySummonDecisionClock extends DurableObject<Env> {
@@ -17,9 +18,13 @@ export class RelaySummonDecisionClock extends DurableObject<Env> {
         statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000 }).openSession();
       try {
         const content = new PostgresContentRepository(session, env.RELAY_POSTGRES_SHARD_ID);
+        // Provider-bound results first: what they release, the collector below deletes in this pass.
+        const retention = await expireRetainedAppResults(content, spaceId);
         const result = await cleanupSummonDecisions({ content, bucket: env.RELAY_PAYLOAD_BUCKET, spaceId });
-        console.info("Decision cleanup completed", result);
-        return await content.nextDecisionMaintenance({ requestId: crypto.randomUUID(), spaceId });
+        console.info("Decision cleanup completed", { ...result, retention: retention.expired });
+        const next = await content.nextDecisionMaintenance({ requestId: crypto.randomUUID(), spaceId });
+        return [next, retention.next].reduce<number | null>((min, due) =>
+          due === null ? min : min === null ? due : Math.min(min, due), null);
       } finally { await session.close(); }
     });
   }
