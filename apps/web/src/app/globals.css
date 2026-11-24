@@ -9,12 +9,6 @@
 @import "./page-document.css";
 @import "./admin-paper.css";
 
-@media (max-width: 767px) {
-  .landing-hero {
-    min-height: auto;
-  }
-}
-
 /* Inter, self-hosted. It has headed --font-sans-family for a long time while
    the app shipped no @font-face for it, so whether Inter rendered depended on
    what each machine happened to have installed — and every ascent/descent-driven

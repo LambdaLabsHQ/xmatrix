@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { SectionIntro } from "@/components/landing/section-intro";
 import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
 import { landingCopy, type Locale } from "@/lib/landing-copy";
@@ -16,12 +17,21 @@ export const publicConnectors: PublicConnector[] = [
   { id: "gitlab", name: "GitLab" },
   { id: "linear", name: "Linear" },
   { id: "notion", name: "Notion" },
-  { id: "google", name: "Google Docs, Sheets & Drive" },
   { id: "slack", name: "Slack" },
+  { id: "google", name: "Google Docs, Sheets & Drive" },
+  { id: "gmail", name: "Gmail" },
+  { id: "googlecalendar", name: "Google Calendar" },
   { id: "sentry", name: "Sentry" },
   { id: "vercel", name: "Vercel" },
-  { id: "netlify", name: "Netlify" },
   { id: "cloudflare", name: "Cloudflare" },
+  { id: "netlify", name: "Netlify" },
+  { id: "gcp", name: "Google Cloud" },
+  { id: "stripe", name: "Stripe" },
+  { id: "appstoreconnect", name: "App Store Connect" },
+  { id: "googleplay", name: "Google Play Console" },
+  { id: "googleanalytics", name: "Google Analytics" },
+  { id: "googlesearchconsole", name: "Google Search Console" },
+  { id: "x", name: "X" },
   { id: "grafana", name: "Grafana" },
   { id: "buildkite", name: "Buildkite" },
   { id: "webhook", name: "Webhook" },
@@ -31,13 +41,15 @@ export const publicConnectors: PublicConnector[] = [
 export function ConnectorList({ className, label = "Connectors" }: { className?: string; label?: string }) {
   return (
     <WoodPanel className={cn("min-w-0", className)}>
-      <ul className="flex flex-wrap gap-3" aria-label={label}>
+      {/* Glass pills with each service's mark and name. A phone has room for the marks alone, as a grid of glass
+          tiles; their names are still read out. */}
+      <ul className="grid grid-cols-[repeat(auto-fill,minmax(2.75rem,1fr))] gap-2.5 sm:flex sm:flex-wrap sm:gap-3" aria-label={label}>
         {publicConnectors.map((connector) => (
           <LiquidGlassPill
             key={connector.id}
             as="li"
             data-connector={connector.id}
-            className="inline-flex h-10 items-center gap-2 px-4 text-sm font-semibold"
+            className="flex aspect-square items-center justify-center sm:aspect-auto sm:h-10 sm:gap-2 sm:px-4 sm:text-sm sm:font-semibold"
           >
             <Image
               src={`/app-connectors/${connector.id}.svg`}
@@ -47,7 +59,7 @@ export function ConnectorList({ className, label = "Connectors" }: { className?:
               unoptimized
               className="size-[18px] shrink-0 object-contain"
             />
-            <span>{connector.name}</span>
+            <span className="sr-only sm:not-sr-only">{connector.name}</span>
           </LiquidGlassPill>
         ))}
       </ul>
@@ -60,16 +72,8 @@ export function Connectors({ locale = "en" }: { locale?: Locale }) {
   return (
     <section id="connectors" className="x-section">
       <div className="x-container">
-        <div className="max-w-3xl">
-          <h2 className="site-display text-3xl font-semibold text-foreground sm:text-5xl">
-            {copy.title}
-          </h2>
-          <p className="mt-5 text-lg leading-8 text-muted-foreground">
-            {copy.body}
-          </p>
-        </div>
-
-        <ConnectorList className="mt-12 p-6 sm:p-8" label={copy.label} />
+        <SectionIntro title={copy.title} body={copy.body} />
+        <ConnectorList className="mt-10 p-6 sm:p-8 md:mt-12" label={copy.label} />
       </div>
     </section>
   );
