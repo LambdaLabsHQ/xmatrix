@@ -391,6 +391,19 @@ export function answerEmbedBrowserReadApproval(requestId: string, allow: boolean
   if (parent) postToParent(parent, { type: "browser-read-approval", requestId, allow });
 }
 
+/**
+ * Brings a web page the person wrote from back into view, from the panel: the
+ * tab already showing it (this panel's own tab first), not a new one (Daniel
+ * 2026-11-24). The extension opens a tab only when no tab shows it any more.
+ * False outside the side panel, where the caller opens it as a link.
+ */
+export function showEmbedWebPage(href: string): boolean {
+  const parent = extensionEmbedParent();
+  if (!parent || !webAddress(href)) return false;
+  postToParent(parent, { type: "show-page", href });
+  return true;
+}
+
 /** Opens an address in a browser tab of its own, from the panel. */
 export function openEmbedInTab(href: string) {
   const parent = extensionEmbedParent();

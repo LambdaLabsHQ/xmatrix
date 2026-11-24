@@ -161,6 +161,18 @@ test("outside the side panel an Agent's page read goes nowhere", (t) => {
   assert.equal(win.parent.posted.length, 0);
 });
 
+test("a web page the person wrote from is brought back in its own tab, and only a web page", (t) => {
+  const { win, embed } = load(t, EXTENSION);
+  assert.equal(embed.showEmbedWebPage("https://x.com/daniel/status/1"), true);
+  assert.deepEqual(win.parent.posted.at(-1), { origin: EXTENSION,
+    message: { protocol: "xmatrix-embed/1", type: "show-page", href: "https://x.com/daniel/status/1" } });
+  assert.equal(embed.showEmbedWebPage("javascript:alert(1)"), false);
+  assert.equal(win.parent.posted.length, 1);
+  // Outside the side panel the card stays a plain link.
+  globalThis.window = frameWindow("https://evil.example");
+  assert.equal(embed.showEmbedWebPage("https://x.com/daniel/status/1"), false);
+});
+
 // Each message written in the side panel carries the page beside it (browser-page.ts).
 test("the side panel knows the page beside it, and messages carry only a web page", (t) => {
   const { win, embed } = load(t, EXTENSION);
