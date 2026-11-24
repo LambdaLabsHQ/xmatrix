@@ -15,7 +15,7 @@ To keep a connected computer stable across reinstalls under your account, the da
 
 ## Local provider quota probes
 
-**In short:** to show how much quota your registered AI tools have left, the xMatrix daemon reads those tools' own login files on your computer (for example `~/.grok/auth.json`) and asks each provider directly. Codex is the exception: xMatrix asks Codex itself, through the running Codex session or a briefly started `codex app-server`, and opens no Codex login file. Nothing read from those files — no token, account id, file contents or fingerprint — is sent to xMatrix; the Hub receives only the normalized quota answer. One switch stops the file reads, the Codex app-server requests and the provider requests (see [Turning off local quota probes](#turning-off-local-quota-probes)). A tool with no official quota interface, such as Cursor, is not read at all until you allow it on that computer (see [Tools read only with your permission](#tools-read-only-with-your-permission)).
+**In short:** to show how much quota your registered AI tools have left, the xMatrix daemon reads those tools' own login files on your computer (for example `~/.grok/auth.json`) and asks each provider directly. Codex, Claude Code and OpenCode are the exceptions: xMatrix asks the tool itself and opens none of their login files. Codex is asked through the running session or a briefly started `codex app-server`, Claude Code through the running session or a briefly started `claude` (its `get_usage` request, which sends no prompt), and OpenCode through a briefly started `opencode serve`. Nothing read from those files — no token, account id, file contents or fingerprint — is sent to xMatrix; the Hub receives only the normalized quota answer. One switch stops the file reads, the requests to Codex, Claude Code and OpenCode, and the provider requests (see [Turning off local quota probes](#turning-off-local-quota-probes)). A tool with no official quota interface, such as Cursor, is not read at all until you allow it on that computer (see [Tools read only with your permission](#tools-read-only-with-your-permission)).
 
 When you register a supported harness (such as Claude Code, Codex, Cursor, Grok, OpenCode, DeepSeek, Z.ai, or Antigravity), xMatrix can show remaining subscription quota in `xmatrix agent list` and the Agents view, and let `@auto` route around exhausted accounts.
 
@@ -23,11 +23,11 @@ To read remaining quota directly from each provider without running an LLM turn,
 
 | Harness | Local store read (in memory only) | Direct provider endpoint queried from your machine |
 | --- | --- | --- |
-| Claude Code | macOS login keychain (`Claude Code-credentials`) or `~/.claude/.credentials.json` | `https://api.anthropic.com/api/oauth/usage` |
+| Claude Code | None: Claude Code's own `get_usage` control request, asked of the running session or a briefly started `claude`; no prompt is sent | Handled by Claude Code with its own sign-in |
 | Codex | None: Codex's own app-server method `account/rateLimits/read`, asked of the running session or a briefly started `codex app-server` | Handled by Codex with its own sign-in |
 | Cursor (only with your permission on that computer) | `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`, macOS keychain (`cursor-access-token`), or Cursor `auth.json` | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
 | Grok Build | `GROK_CLI_OAUTH_TOKEN` or `~/.grok/auth.json` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
-| OpenCode | `OPENCODE_API_KEY` or OpenCode `auth.json` | `https://opencode.ai/zen/go/v1/usage` or ChatGPT `wham/usage` |
+| OpenCode | None: `GET /api/experimental/usage/limits` of a briefly started `opencode serve`, listening on loopback only with a one-time password. Nothing is read for a model OpenCode routes to another provider | Handled by OpenCode with its own sign-in |
 | DeepSeek | `DEEPSEEK_API_KEY` or `$DSH_HOME` credential file | `https://api.deepseek.com/user/balance` |
 | Z.ai / Zhipu | `ZAI_API_KEY` / `ZHIPU_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit` (or `open.bigmodel.cn`) |
 | Antigravity | Delegates to unmodified `agy -p "/usage" --output-format json` | Handled by `agy` itself |
@@ -68,7 +68,7 @@ xmatrix config quotaProbes off
 export XMATRIX_DISABLE_QUOTA_PROBES=1
 ```
 
-To disable only Antigravity quota probing, set `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. When disabled, xMatrix does not read local provider credential stores, start `codex app-server` or ask a Codex session, or query provider usage endpoints—including pre-launch probes, startup/reconnect reads, and rate-limit recovery.
+To disable only Antigravity quota probing, set `XMATRIX_DISABLE_ANTIGRAVITY_QUOTA_PROBE=1`. When disabled, xMatrix does not read local provider credential stores, start `codex app-server`, `claude` or `opencode serve`, ask a Codex or Claude Code session, or query provider usage endpoints—including pre-launch probes, startup/reconnect reads, and rate-limit recovery.
 
 ## Client diagnostics and crash reporting
 

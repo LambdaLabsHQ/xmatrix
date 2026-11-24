@@ -21,9 +21,8 @@ use crate::{
     active_turn_steer_message, agent_instance_connection, await_turn_with_events, clean_run_effort,
     clean_run_model, config, error, event_requests_active_turn_interrupt_with_replay,
     inbound_execution_sources, materialize_local_image_files, merge_llm_usage,
-    prompt_content_blocks, protocol, read_claude_oauth_rate_limit_usage,
-    reassert_busy_on_reconnect, resume_session_path, send_llm_trace_with_source, send_presence,
-    steered_turn_input, trace_attachment_summaries,
+    prompt_content_blocks, protocol, reassert_busy_on_reconnect, resume_session_path,
+    send_llm_trace_with_source, send_presence, steered_turn_input, trace_attachment_summaries,
 };
 
 /// Prefixed to the turn after an interrupt. Claude answers the cancelled tool
@@ -80,11 +79,11 @@ pub(crate) async fn run_claude_stream_turn(
         None => prompt,
     };
     crate::write_current_run_status("turn_running", false, None);
-    let mut latest_usage = if xmatrix_cli_core::config::quota_probes_disabled() {
-        None
-    } else {
-        read_claude_oauth_rate_limit_usage(false).await
-    };
+    // What is already known: a turn never waits for a quota read.
+    let mut latest_usage = session
+        .interrupter()
+        .account_usage(false, true, false)
+        .await;
     // Caller-provided paths are borrowed: the caller owns those files and
     // keeps them past this turn, because the prompt text cites them. Only
     // files materialized here are owned, and removed when the turn ends.
@@ -260,9 +259,13 @@ pub(crate) async fn run_claude_stream_turn(
         };
         // Told before it is reported: Hub holds only what the limit used up.
         let usage_limit = match outcome.usage_limit {
-            Some(limit) => {
-                Some(crate::runtime_usage_limit::resolve_claude_usage_limit(limit).await)
-            }
+            Some(limit) => Some(
+                crate::runtime_usage_limit::resolve_claude_usage_limit(
+                    limit,
+                    &session.interrupter(),
+                )
+                .await,
+            ),
             None => None,
         };
         limit_reading = usage_limit.as_ref().and_then(|limit| limit.usage.clone());
@@ -282,8 +285,7 @@ pub(crate) async fn run_claude_stream_turn(
     // Force a refresh after the turn so presence reflects post-turn windows when available.
     let post_turn = match limit_reading {
         Some(reading) => Some(reading),
-        None if xmatrix_cli_core::config::quota_probes_disabled() => None,
-        None => read_claude_oauth_rate_limit_usage(true).await,
+        None => session.interrupter().account_usage(true, true, false).await,
     };
     latest_usage = merge_llm_usage(latest_usage, post_turn);
 

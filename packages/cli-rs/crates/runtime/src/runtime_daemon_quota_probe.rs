@@ -118,7 +118,7 @@ enum QuotaAccount {
     ClaudeDefault,
     /// Cursor subscription of the default Cursor Agent login.
     CursorDefault,
-    /// OpenCode Go or ChatGPT login stored by the OpenCode CLI.
+    /// The OpenCode Console workspace `opencode serve` is signed in to.
     OpenCodeDefault,
     /// Prepaid balance of the API key DeepSeek Harness holds.
     DeepSeekDefault,
@@ -241,9 +241,10 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
             }
         }
         "claude" => {
-            // The reader reads the default login (keychain, then
-            // `~/.claude/.credentials.json`). Any token, API key, gateway, or
-            // relocated config dir means the spawn may bill another account.
+            // The reader asks a `claude` started without login overrides, so
+            // Claude Code reads its own default login. Any token, API key,
+            // gateway, or relocated config dir means the spawn may bill
+            // another account.
             if spawn.any_effective(quota::claude::CLAUDE_LOGIN_OVERRIDE_KEYS) || host.home.is_none()
             {
                 return Resolution::ConfigurationUnavailable;
@@ -258,9 +259,11 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
             // without the owner's grant on this machine (`read_account`).
             QuotaAccount::CursorDefault
         }
-        // Both readers resolve the key their CLI would: its stored credential
-        // file first, then the environment the spawn inherits from this daemon.
+        // OpenCode is asked through `opencode serve`, which reads its own
+        // sign-in exactly as a spawn of it would.
         "opencode" => QuotaAccount::OpenCodeDefault,
+        // The reader resolves the key DeepSeek Harness would: its stored
+        // credential file first, then the environment the spawn inherits.
         "deepseek" => QuotaAccount::DeepSeekDefault,
         "antigravity" => {
             if quota::antigravity::is_quota_probe_disabled_in(|key| spawn.effective(key))

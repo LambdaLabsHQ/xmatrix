@@ -21,6 +21,15 @@ library:
   a pre-launch probe starts `codex app-server` for one config home, asks, and
   stops it. Codex keeps its own sign-in; the reader opens no Codex credential
   file.
+  Claude Code is asked through its stream-json control request `get_usage`
+  with `skip_behaviors` (Claude Code 2.1.261 or newer): a running session is
+  asked over its own stdin, and otherwise `claude -p --input-format
+  stream-json --output-format stream-json` is started, asked, and killed
+  without a prompt. OpenCode is asked through `opencode serve`'s
+  `GET /api/experimental/usage/limits` (OpenCode 2.2.0 or newer), started on a
+  loopback port with a one-time password and killed after the answer. Both
+  tools keep their own sign-in; the readers open no Claude or OpenCode
+  credential file or keychain item.
 - **Record stream (planned).** Harness frames will be turned into one
   normalized record stream. See "Not yet extracted" below.
 
@@ -32,11 +41,12 @@ library:
   them as `protocol::LlmUsage` and `protocol::LlmQuotaUsage`, so their serde
   shape is part of the xMatrix Hub protocol. Any change to their fields or
   serde attributes is a protocol change. `usage::tests` pins the exact JSON.
-- Credentials stay in process memory. A reader picks up a token from the
-  provider CLI's own store: an environment variable, the macOS keychain via
-  `/usr/bin/security`, or the CLI's `auth.json` or `.credentials.json`. The
-  token goes only to that provider's own endpoint. Cache keys use one-way
-  SHA-256 fingerprints and are never logged or sent.
+- Credentials stay in process memory. A reader that does not ask the tool
+  itself (Cursor, DeepSeek, Grok, Z.ai) picks up a token from the provider
+  CLI's own store: an environment variable, the macOS keychain via
+  `/usr/bin/security`, or the CLI's `auth.json`. The token goes only to that
+  provider's own endpoint. Cache keys use one-way SHA-256 fingerprints and are
+  never logged or sent.
 - Every provider request has a time limit. Failures are cached briefly as
   "no answer", so a provider that keeps failing is not called over and over.
   A reader returns `None` and never makes up a reading. Set

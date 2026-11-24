@@ -17,6 +17,7 @@ use crate::usage::LlmUsage;
 pub mod antigravity;
 mod cache;
 pub mod claude;
+mod cli;
 pub mod codex;
 pub mod cursor;
 pub mod deepseek;
@@ -74,7 +75,8 @@ pub(crate) fn observed_provider_quotas(
 pub enum Provider {
     /// Google Antigravity (`agy`) Gemini and Claude/GPT model pools.
     Antigravity,
-    /// Claude Code / Claude.ai subscription 5h and 1w windows.
+    /// Claude Code / Claude.ai subscription 5h and 1w windows, asked of
+    /// Claude Code (`get_usage`).
     Claude,
     /// Codex ChatGPT subscription windows (app-server `account/rateLimits/read`).
     Codex,
@@ -84,7 +86,7 @@ pub enum Provider {
     DeepSeek,
     /// Grok Build credits (weekly or monthly).
     Grok,
-    /// OpenCode Go 5h/1w/1mo windows.
+    /// OpenCode Go 5h/1w/1mo windows, asked of `opencode serve`.
     OpenCode,
     /// Z.ai / Zhipu coding-plan windows.
     Zai,
@@ -104,7 +106,7 @@ pub enum Account {
     Home(PathBuf),
     /// The provider CLI's default login, ignoring token/config overrides in
     /// the environment. Supported by [`Provider::Antigravity`],
-    /// [`Provider::Claude`] (keychain, then `~/.claude/.credentials.json`), and
+    /// [`Provider::Claude`] (a `claude` started without them), and
     /// [`Provider::Cursor`].
     DefaultLogin,
 }
@@ -135,11 +137,9 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::Antigravity, Account::DefaultLogin) => {
             antigravity::read_antigravity_quota_usage_for_default_account(force).await
         }
-        (Provider::Claude, Account::Process) => {
-            claude::read_claude_oauth_rate_limit_usage(force).await
-        }
+        (Provider::Claude, Account::Process) => claude::read_claude_usage(force, true).await,
         (Provider::Claude, Account::DefaultLogin) => {
-            claude::read_claude_oauth_usage_for_default_account(force).await
+            claude::read_claude_usage_for_default_account(force).await
         }
         (Provider::Codex, Account::Process) => codex::read_codex_account_usage(None, force).await,
         (Provider::Codex, Account::Home(home)) => {
@@ -152,7 +152,7 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::Grok, Account::Home(home)) => {
             grok::read_grok_build_billing_usage_for_home(&home, force).await
         }
-        (Provider::OpenCode, Account::Process) => opencode::read_opencode_zen_usage(force).await,
+        (Provider::OpenCode, Account::Process) => opencode::read_opencode_go_usage(force).await,
         (Provider::Zai, Account::Process) => zai::read_zai_coding_plan_quota_usage(force).await,
         (
             Provider::Antigravity
@@ -281,6 +281,49 @@ pub(crate) fn write_test_executable(path: &std::path::Path, script: &str) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::write(path, script).expect("write test executable");
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+}
+
+/// A fresh directory under the system temp dir, unique to this test run.
+#[cfg(all(test, unix))]
+pub(crate) fn test_temp_dir(prefix: &str, name: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "xmatrix-{prefix}-{name}-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
+}
+
+/// Make each of `paths` a FIFO, then run `read` on a thread of its own and
+/// return its answer. Opening a FIFO for reading blocks until a writer
+/// appears, so a `read` that opened one of them never returns and this fails.
+#[cfg(all(test, unix))]
+pub(crate) fn read_beside_fifos<T: Send + 'static>(
+    paths: &[PathBuf],
+    read: impl std::future::Future<Output = T> + Send + 'static,
+) -> T {
+    for path in paths {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let made = std::process::Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .unwrap();
+        assert!(made.success());
+    }
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let _ = done.send(runtime.block_on(read));
+    });
+    finished
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("the read returned without opening a credential")
 }
 
 #[cfg(test)]

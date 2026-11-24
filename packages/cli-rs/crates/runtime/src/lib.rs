@@ -154,9 +154,7 @@ use runtime_turn_failure::{
 };
 use xmatrix_harness::fields::{first_f64, first_string};
 use xmatrix_harness::quota::antigravity::read_antigravity_quota_usage;
-use xmatrix_harness::quota::claude::{
-    read_claude_oauth_rate_limit_usage, record_claude_rate_limit_event,
-};
+use xmatrix_harness::quota::claude::record_claude_rate_limit_event;
 use xmatrix_harness::quota::codex as codex_quota;
 use xmatrix_harness::quota::deepseek::read_deepseek_balance_for_model;
 use xmatrix_harness::quota::grok::{grok_billing_quota_usages, read_grok_build_billing_usage};

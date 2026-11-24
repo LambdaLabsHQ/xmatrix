@@ -619,7 +619,11 @@ pub(crate) async fn claude_stream_reader(
                 );
             }
             if let Some(waiter) = model_state.resolve_control(&request_id) {
-                let _ = waiter.send(outcome);
+                let payload = value
+                    .pointer("/response/response")
+                    .cloned()
+                    .unwrap_or(Value::Null);
+                let _ = waiter.send(outcome.map(|()| payload));
             }
             continue;
         }
@@ -881,6 +885,7 @@ pub(crate) async fn claude_stream_reader(
                     .lock()
                     .unwrap_or_else(|poison| poison.into_inner()) = Some(supported);
             }
+            model_state.observe_cli_version(&value);
             if init_published {
                 continue;
             }
