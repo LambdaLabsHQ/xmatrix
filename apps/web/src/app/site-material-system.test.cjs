@@ -10,6 +10,7 @@ const siteCss = source("themes/site.css");
 const tokensCss = source("tokens.css");
 const navbarSource = source("../components/shared/navbar.tsx");
 const heroSource = source("../components/landing/hero.tsx");
+const heroDownloadSource = source("../components/landing/hero-download.tsx");
 
 test("public routes share one warm material layer", () => {
   assert.match(layoutSource, /import "@\/app\/themes\/wood\.css";\s*import "@\/app\/themes\/site\.css";/);
@@ -51,7 +52,9 @@ test("public actions use shared materials and the Hero has one wood CTA", () => 
   assert.match(navbarSource, /LiquidGlassPill/);
   assert.doesNotMatch(navbarSource, /x-glass-button/);
   assert.doesNotMatch(navbarSource, /bg-\[#68462f\]|bg-\[#513522\]/);
-  assert.match(heroSource, /WoodPanel[\s\S]*as=\{Link\}[\s\S]*href=\{appHref\("\/login"\)\}/);
+  assert.match(heroSource, /<HeroDownload locale=\{locale\} \/>/);
+  assert.match(heroDownloadSource, /<WoodPanel as="a" href=\{native\?\.href \?\? localizedPath\(locale, "\/download"\)\}/, "the Hero's wood action downloads the App");
+  assert.match(heroDownloadSource, /browserOnly \? \(\s*<WoodPanel as=\{Link\} href=\{appHref\("\/login"\)\}/, "a device with no native App starts in the browser");
   assert.match(siteCss, /\.site-page \.app-material-wood-panel\.site-wood-pill \{\s*border-radius: 999px;/);
   assert.doesNotMatch(heroSource, /landing-liquid-button/);
   assert.doesNotMatch(heroSource, /Set up with your agent|See How It Works|Shared space|clear handoffs/);
@@ -74,7 +77,7 @@ test("navbar is one glass bar with no wood slab, and woods the mobile sheet", ()
   assert.doesNotMatch(navbarSource, /<WoodPanel/);
   assert.doesNotMatch(siteCss, /site-navbar-inner|navbar-wood-reveal/);
   assert.match(navbarSource, /<span aria-hidden className="site-navbar-glass">\s*<LiquidGlassPill className="size-full">/);
-  assert.match(navbarSource, /<Link\s+href=\{appHref\("\/login"\)\}\s+className="site-navbar-cta[\s\S]*?\{copy\.startFree\}\s*<ArrowRight/, "Start Free is text with an arrow on the bar glass, not a second pill");
+  assert.match(navbarSource, /<Link\s+href=\{downloadHref\}\s+className="site-navbar-cta[\s\S]*?\{copy\.download\}\s*<ArrowRight/, "Download is text with an arrow on the bar glass, not a second pill");
   assert.match(navbarSource, /site-nav-sheet app-material-wood-panel/);
 });
 
