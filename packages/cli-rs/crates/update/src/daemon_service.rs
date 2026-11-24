@@ -1134,7 +1134,7 @@ mod tests {
         assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn -User $currentUser"));
         assert!(script.contains("-RestartCount 999"));
         // Task Scheduler restarts only a task that failed to start; the
-        // repeating trigger is what brings back a daemon that exited (#1750).
+        // repeating trigger is what brings back a daemon that exited (#2054).
         assert!(script.contains(
             "New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)"
         ));

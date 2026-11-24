@@ -166,7 +166,7 @@ test("a process found gone before it was ready is a failed start that says what 
   }
 });
 
-test("a session another process still holds is one notice for its Instance, not one per Run (#1686)", async () => {
+test("a session another process still holds is one notice for its Instance, not one per Run (#2050)", async () => {
   const detail = "harness_session_in_use: Codex conversation 01a1d3e0 is still open in Codex process 4242 on this computer, so it cannot be resumed here.";
   const codex = { ...base, agentName: "codex", phase: "wrapper_startup_failed", detail };
   const first = await machineRunFailureNoticeCommand({ ...codex, runId: "instance-1#7" });

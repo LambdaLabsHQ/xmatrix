@@ -1262,8 +1262,7 @@ reverting this change.
 When Codex refused to resume an Agent's conversation because another live
 Codex process on the same computer still had it open (`thread … already has
 an active writer`), every Run of that Agent failed with Codex's bare refusal,
-and each message in the Channel posted another copy of it (121 for one
-Windows user on 2026-11-13). The CLI now records which Codex process and
+and each message in the Channel posted another copy of it. The CLI now records which Codex process and
 xMatrix process opened each Agent's conversation, and a refused resume fails
 with `harness_session_in_use`, naming that process when it is still running
 and saying to end it (or the Run it serves) and send the message again. The
@@ -1979,7 +1978,8 @@ CI-validated beta CLI reverting this change.
 
 ## Unreleased: an Agent whose name is not ASCII starts
 
-An Agent named `牛马` exited seconds after every summon. The Hub accepts any
+An Agent with a non-ASCII name (for example `测试助手`) exited seconds after
+every summon. The Hub accepts any
 display name and binds the Run to it, but the wrapper took the name as given
 only when it was ASCII letters, digits and `._-`, and folded any other name
 into `xmatrix-agent`; the Hub then refused the handshake because the name did
@@ -2080,7 +2080,7 @@ protocol; no schema change. Recovery is a CI-validated beta reverting this chang
 When an Agent's provider account ran out, its failure notice woke that
 Agent's other resting Instances in the conversation. Each used the same
 empty account, failed within a second and posted its own failure card and
-handoff: a new Windows user saw three cards for one message. A registration
+handoff, so one message could produce several cards. A registration
 whose quota pool reads empty now leaves its resting Instances asleep
 (`registration_quota_exhausted`), and the first message after the reset
 wakes them. The hold is also recorded before the failure notice commits.
@@ -2756,7 +2756,7 @@ The desktop App installs its CLI only with a CLI session, and the Web asked
 for one only when the daemon reported a sign-in error. An App signed in by a
 path that did not hand its session over found no CLI, reported the daemon
 `missing` (not an error), and showed the setup command with nothing failing
-and nothing reported. A new user on 11-08 stopped there. When the App can
+and nothing reported, leaving a new user stuck there. When the App can
 install its own CLI and finds none, the Web now exchanges a CLI session,
 saves it and starts the daemon, as after the App's own sign-in. Beta Web
 only; recovery is a CI-validated Web release reverting the effect.
@@ -3039,8 +3039,8 @@ Recovery is a CI-validated beta Hub reverting this change.
 
 Codex threads start with the goal tools as one namespaced dynamic tool, which
 Codex CLI 0.140 and older reject at `thread/start` ("missing field
-`inputSchema`"). A new Windows user's first message on Codex CLI 0.104.0 failed
-with only that protocol error. The Codex preset now requires 0.141.0, the first
+`inputSchema`"). A first message on such an older Codex CLI failed with only
+that protocol error. The Codex preset now requires 0.141.0, the first
 release with namespaced dynamic tools: routing leaves an older Codex out, the
 connect flow says it is too old, and a refusal names Codex CLI, the machine and
 its update. Protocol registry only; no schema, daemon or client migration.
@@ -3211,8 +3211,8 @@ Recovery is a CI-validated beta release reverting this change.
 A Free Space's 500 writes were also spent on what xMatrix itself said: the
 welcome steps it writes into a new person's conversation (written under their
 name, kind `xmatrix.onboarding.v1`) and the `@<agent>` summon it sends for a
-first message nobody was named in. A new Space on 2026-11-03 had used 4 writes
-for one message of its owner. Only messages from people, Agents and apps now
+first message nobody was named in, so a new Space spent several writes on one
+message of its owner. Only messages from people, Agents and apps now
 count, as `docs/design/agent-credits.md` already said for system notices; a
 paid Space's credits were already untouched by these. Writes counted before
 this release stay counted (the counter never goes down). Hub only, no schema
