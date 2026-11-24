@@ -1,4 +1,4 @@
-import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "@xmatrix/protocol";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, appResultRetentionDays, appResultRetentionNotice } from "@xmatrix/protocol";
 import { listAppConnections } from "../apps";
 import { nornConnectorEventSpecs } from "../norn-libraries";
 import { getChannel } from "../spaces";
@@ -6,7 +6,6 @@ import type { Env } from "../types";
 import { record } from "./command-support";
 import { connectorActionCatalog } from "./action-catalog";
 import { connectorProvider } from "./registry";
-import { appResultRetentionNotice, RETAINED_APP_RESULTS } from "./result-retention";
 
 /*
  * What an Agent Run may act on in its Channel's connected apps
@@ -50,7 +49,7 @@ export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
   return APP_CONNECTOR_PROVIDER_MANIFESTS.filter((manifest) => connected.has(manifest.id)).flatMap((manifest) => {
     const executable = connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions);
     const retention = appResultRetentionNotice(manifest.id);
-    const privateDays = Math.min(30, RETAINED_APP_RESULTS.get(manifest.id) ?? 30);
+    const privateDays = Math.min(30, appResultRetentionDays(manifest.id) ?? 30);
     const actions = manifest.actions.flatMap((action) => {
       if (!action.effect) return [];
       const command = `@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`;

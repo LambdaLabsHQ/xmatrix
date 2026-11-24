@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appResultRetentionNotice, expireRetainedAppResults, RETAINED_APP_RESULTS } from "../src/connectors/result-retention.ts";
+import { appResultRetentionNotice } from "@xmatrix/protocol";
+import { expireRetainedAppResults, RETAINED_APP_RESULTS } from "../src/connectors/result-retention.ts";
 
 test("Google Cloud results are retained 29 days, inside the terms' 30", () => {
   assert.deepEqual([...RETAINED_APP_RESULTS], [["gcp", 29]]);

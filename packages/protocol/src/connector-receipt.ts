@@ -45,6 +45,18 @@ export interface ConnectorReceiptEntry {
 
 /** The receipt a connector command gets in its Channel: one line per statement,
  * each `<subject>: <status>; <detail>`. Agents read it as text. */
+/** Days a provider's terms let what it returned stay stored, when they bound it (`resultRetentionDays`). */
+export function appResultRetentionDays(appId: string): number | undefined {
+  return APP_CONNECTOR_PROVIDER_MANIFESTS.find((manifest) => manifest.id === appId)?.resultRetentionDays;
+}
+
+/** What an Agent is told about such a provider's results, so it does not keep copies longer. */
+export function appResultRetentionNotice(appId: string): string | undefined {
+  const days = appResultRetentionDays(appId);
+  return days === undefined ? undefined
+    : `Under the provider's terms this result is deleted after ${days} days, and at once when the connection is disconnected; do not copy it into Pages, memory or other lasting notes.`;
+}
+
 export function connectorReceiptBody(lines: readonly string[]): string {
   return `${CONNECTOR_RECEIPT_HEADING}\n${lines.map((line) => `- ${line}`).join("\n")}`;
 }

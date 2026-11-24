@@ -45,10 +45,3 @@ export async function armAppResultRetention(env: Env, spaceId: string, appId: st
   };
   await clock.arm(spaceId);
 }
-
-/** What an Agent is told about a retained provider's results, so it does not keep copies longer. */
-export function appResultRetentionNotice(appId: string): string | undefined {
-  const days = RETAINED_APP_RESULTS.get(appId);
-  return days === undefined ? undefined
-    : `Under the provider's terms this result is deleted after ${days} days, and at once when the connection is disconnected; do not copy it into Pages, memory or other lasting notes.`;
-}

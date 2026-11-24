@@ -1,6 +1,5 @@
 import { ControlError } from "@xmatrix/db";
-import { appResultRetentionNotice } from "./result-retention";
-import { CONNECTOR_RECEIPT_FIXES_KEY, connectorReceiptBody, connectorReceiptMessageId, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
+import { appResultRetentionNotice, CONNECTOR_RECEIPT_FIXES_KEY, connectorReceiptBody, connectorReceiptMessageId, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
 import type { AppConnectorProviderManifest, AppConnectorRemedy, ConnectorResultVisibility } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
