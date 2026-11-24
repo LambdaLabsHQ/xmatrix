@@ -2,6 +2,7 @@ import { HARNESS_ACTION_SETTLE_MS, MACHINE_HARNESS_RELEASE_CAPABILITY, parseHarn
   parseHarnessInventory, type HarnessActionResult, type HarnessActionStatus } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import { clearUngrantedRegistrationQuota, ungrantedHarnesses } from "./agent-registration-quota-probe.js";
 
 const ERROR_MAX = 256;
 
@@ -16,6 +17,10 @@ export async function recordHarnessActionInventory(tx: DatabaseTransaction, inpu
   ownerUserId: string; machineId: string; hostId: string; result: HarnessActionResult; at: string;
 }): Promise<void> {
   const { ownerUserId, machineId, result } = input;
+  // A harness whose owner revoked (or never gave) the grant to read its
+  // sign-in keeps no reading taken under one.
+  await clearUngrantedRegistrationQuota(tx, { ownerUserId, machineId,
+    harnesses: ungrantedHarnesses(result.inventory?.items ?? (result.item ? [result.item] : [])) });
   if (result.inventory) {
     await tx.query({ name: "machine_harness_action_inventory_v2", text: `UPDATE data.machine_daemons
       SET metadata_json=jsonb_set(metadata_json,'{harnesses}',$3::jsonb)

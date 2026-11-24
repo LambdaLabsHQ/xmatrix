@@ -1,4 +1,4 @@
-import { ACCOUNT_QUOTA_SCOPE, attributeRoutingQuotaRefusal, clampRoutingQuotaObservedTime, currentRoutingQuotaWindows,
+import { ACCOUNT_QUOTA_SCOPE, parseRoutingQuotaProbeResponse, attributeRoutingQuotaRefusal, clampRoutingQuotaObservedTime, currentRoutingQuotaWindows,
   digestCanonicalCloneCborV1, mergeRoutingQuotaWindows, parseLlmQuotaAccount, quotaAccountBalance, routingModelOptionNamed,
   routingModelOptions, routingQuotaAccountPartExpiry, routingQuotaObservation, routingQuotaProbeObservations,
   routingQuotaVerdict, routingScopedQuotaExpiry, type RoutingBillingHolds, type RoutingQuotaVerdict, routingQuotaRecord,
@@ -717,7 +717,63 @@ export async function recordRegistrationQuotaProbeResult(tx: DatabaseTransaction
       record: reading.record });
     recorded++;
   }
+  // The daemon read nothing for a harness it may read only under a grant it
+  // does not have; what an earlier grant read must not outlive it.
+  const ungranted = input.issued.accessGrants
+    ? parseRoutingQuotaProbeResponse(input.result, input.issued, input.now).results
+      .filter(result => result.status === "unavailable" && result.reason === "not_granted" &&
+        result.targetId.startsWith(REGISTRATION_QUOTA_PROBE_TARGET_PREFIX))
+      .map(result => result.targetId.slice(REGISTRATION_QUOTA_PROBE_TARGET_PREFIX.length))
+    : [];
+  if (ungranted.length) {
+    await clearUngrantedRegistrationQuota(tx, { ownerUserId: input.ownerUserId, machineId: input.machineId,
+      harnesses: ungranted });
+  }
   return recorded;
+}
+
+/**
+ * A harness read only under its owner's grant on a machine (Cursor) has none
+ * there now: never given, revoked, or voided because its sign-in changed. The
+ * last reading taken under that grant goes with it, so its quota shows as
+ * unknown. A hold the provider's own refusal caused stays: a billing refusal
+ * keeps its scopes, and a usage-limit hold (`source='daemon'`) keeps its row,
+ * since both come from the harness's own error, not from reading its sign-in.
+ */
+export async function clearUngrantedRegistrationQuota(tx: DatabaseTransaction, input: {
+  ownerUserId: string; machineId: string; harnesses: readonly string[];
+}): Promise<number> {
+  if (!input.harnesses.length) return 0;
+  const pools = await tx.query<QueryResultRow>({ name: "registration_quota_ungranted_pools_v1", text: `SELECT DISTINCT
+      ${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id FROM control.agent_registration_environments e
+    WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=ANY($3::text[])`,
+  values: [input.ownerUserId, input.machineId, [...input.harnesses]], maxRows: 64 });
+  const keys = pools.map(row => ({ ownerUserId: input.ownerUserId, quotaPoolId: String(row.quota_pool_id) }));
+  await lockRegistrationQuotaPools(tx, keys);
+  let cleared = 0;
+  for (const { quotaPoolId } of keys) {
+    const removed = await tx.query<QueryResultRow>({ name: "registration_quota_ungranted_delete_v1", text: `DELETE
+      FROM control.registration_quota_observations WHERE owner_user_id=$1 AND quota_pool_id=$2 AND source='provider'
+        AND NOT COALESCE(account_json ? 'billingRefusalScopes',FALSE) RETURNING 1 AS removed`,
+    values: [input.ownerUserId, quotaPoolId], maxRows: 1 });
+    const kept = await tx.query<QueryResultRow>({ name: "registration_quota_ungranted_keep_holds_v1", text: `UPDATE
+        control.registration_quota_observations SET remaining=100,
+          observed_at=statement_timestamp()-interval '1 millisecond',expires_at=statement_timestamp(),
+          windows_json=NULL,scoped_windows_json=NULL,scoped_observed_at=NULL,scoped_expires_at=NULL,
+          account_json=jsonb_build_object('billingRefusalScopes',account_json->'billingRefusalScopes')
+      WHERE owner_user_id=$1 AND quota_pool_id=$2 AND source='provider'
+        AND (windows_json IS NOT NULL OR scoped_windows_json IS NOT NULL OR remaining<>100)
+      RETURNING 1 AS kept`,
+    values: [input.ownerUserId, quotaPoolId], maxRows: 1 });
+    cleared += removed.length + kept.length;
+  }
+  return cleared;
+}
+
+/** The harnesses of an inventory (or one re-probed item) whose owner has no
+ * grant to read their sign-in on that machine. */
+export function ungrantedHarnesses(items: readonly { id: string; quotaAccess?: string }[]): string[] {
+  return items.filter(item => item.quotaAccess !== undefined && item.quotaAccess !== "granted").map(item => item.id);
 }
 
 /** The longest a reported usage limit keeps a registration out of routing

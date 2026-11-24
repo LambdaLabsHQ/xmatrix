@@ -36,6 +36,10 @@ export interface RoutingQuotaProbeRequest {
    * each with its `scope`), which may then be a result's only windows. A
    * daemon that predates it ignores the field and answers account windows. */
   scopedQuotaUsages?: true;
+  /** Accepts the reason `not_granted`: a harness read only under its owner's
+   * grant on that machine (Cursor) has none. A daemon that predates it ignores
+   * the field and reports `configuration_unavailable`. */
+  accessGrants?: true;
 }
 
 export interface RoutingQuotaProbeWindow {
@@ -73,7 +77,8 @@ export type RoutingQuotaProbeResult = RoutingQuotaProbeTarget & (
   | { status: "observed"; quotaSource: "provider_api"; quotaObservedAt: string;
       quotaUsages: RoutingQuotaProbeWindow[]; scopedQuotaUsages?: RoutingQuotaProbeWindow[];
       quotaAccount?: LlmQuotaAccount }
-  | { status: "unavailable"; reason: "unsupported" | "configuration_unavailable" | "provider_unavailable" | "timeout" }
+  | { status: "unavailable"; reason: "unsupported" | "configuration_unavailable" | "provider_unavailable" | "timeout"
+      | "not_granted" }
 );
 
 export interface RoutingQuotaProbeResponse {
@@ -363,13 +368,14 @@ function target(row: Record<string, unknown>): RoutingQuotaProbeTarget {
 
 export function parseRoutingQuotaProbeRequest(value: unknown): RoutingQuotaProbeRequest {
   const row = record(value, ["requestId", "connectionEpoch", "targets", "windowLabels", "quotaAccount", "fresh",
-    "accountBalance", "scopedQuotaUsages"]);
+    "accountBalance", "scopedQuotaUsages", "accessGrants"]);
   if (row.accountBalance !== undefined && (row.accountBalance !== true || row.quotaAccount !== true)) {
     throw new Error("Invalid quota probe balance request");
   }
   if (row.windowLabels !== undefined && row.windowLabels !== true) throw new Error("Invalid quota probe window labels");
   if (row.quotaAccount !== undefined && row.quotaAccount !== true) throw new Error("Invalid quota probe account request");
   if (row.fresh !== undefined && row.fresh !== true) throw new Error("Invalid quota probe freshness");
+  if (row.accessGrants !== undefined && row.accessGrants !== true) throw new Error("Invalid quota probe grants request");
   if (row.scopedQuotaUsages !== undefined && row.scopedQuotaUsages !== true) {
     throw new Error("Invalid quota probe scoped windows request");
   }
@@ -387,7 +393,8 @@ export function parseRoutingQuotaProbeRequest(value: unknown): RoutingQuotaProbe
     ...(row.quotaAccount === true ? { quotaAccount: true as const } : {}),
     ...(row.fresh === true ? { fresh: true as const } : {}),
     ...(row.accountBalance === true ? { accountBalance: true as const } : {}),
-    ...(row.scopedQuotaUsages === true ? { scopedQuotaUsages: true as const } : {}) };
+    ...(row.scopedQuotaUsages === true ? { scopedQuotaUsages: true as const } : {}),
+    ...(row.accessGrants === true ? { accessGrants: true as const } : {}) };
 }
 
 /** Windows of one probe result: account windows, or (`scoped`) windows that
@@ -426,7 +433,8 @@ export function parseRoutingQuotaProbeResponse(value: unknown, expected: Routing
     if (unseen.get(identity.targetId) !== identity.configurationDigest) throw new Error("Quota probe target mismatch");
     unseen.delete(identity.targetId);
     if (result.status === "unavailable") {
-      if (!["unsupported", "configuration_unavailable", "provider_unavailable", "timeout"].includes(String(result.reason)) ||
+      if (!["unsupported", "configuration_unavailable", "provider_unavailable", "timeout",
+        ...(request.accessGrants ? ["not_granted"] : [])].includes(String(result.reason)) ||
           "quotaSource" in result || "quotaObservedAt" in result || "quotaUsages" in result || "quotaAccount" in result ||
           "scopedQuotaUsages" in result) {
         throw new Error("Invalid unavailable quota probe result");
