@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { BellOff, Check, Hash } from "lucide-react";
 import { Face } from "@/components/dashboard/face";
 import { FleetMatrix, type FleetMatrixCell, type FleetMatrixColumn } from "@/components/dashboard/fleet-matrix";
@@ -11,10 +11,13 @@ import type { PresentPerson } from "@/components/pages/page-chrome";
 import { renderPageDocument } from "@/components/pages/page-document-render";
 import { CardPen } from "@/components/pages/page-pen";
 import { pageMentions, type PageReferenceTargets } from "@/components/pages/page-reference-chips";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 
 /* Real xMatrix interfaces for each of the six comparison topics.
-   Borderless warm-paper sheets reusing renderPageDocument, CardPen, Face,
-   FleetMatrix, and MobileAvatarMatrix. */
+   Matches the homepage's live stages (#live-page, #conversations, #agents)
+   directly: pure warm paper sheets with `.site-live-page-window` shadow (no
+   invented chrome bars), CardPen positioned beside the active edited block,
+   real walnut rail on the desktop conversation window, and real FleetMatrix. */
 
 interface WriterSpec {
   name: string;
@@ -40,8 +43,9 @@ const REFERENCES: PageReferenceTargets = {
   mentions: pageMentions([{ name: "Alex", handle: "alex" }], ["claude", "codex", "cursor", "gemini"]),
 };
 
-const SHEET_SHADOW =
-  "shadow-[0_18px_44px_-18px_oklch(0.24_0.03_58/0.22),0_2px_10px_-3px_oklch(0.24_0.03_58/0.08)]";
+/** Same calm warm-paper sheet elevation as `.site-live-page-window` above. */
+const LIVE_SHEET_CLASS =
+  "xmatrix-app relative flex h-full w-full flex-col overflow-hidden rounded-[12px] bg-[var(--background)] text-[var(--site-ink)] shadow-[0_0_0_0.5px_oklch(0_0_0/0.14),0_22px_60px_-8px_oklch(0.25_0.03_60/0.22),0_6px_16px_oklch(0.25_0.03_60/0.09)]";
 
 function makePerson(
   key: WriterKey,
@@ -66,126 +70,90 @@ function makePerson(
   };
 }
 
-/** Borderless warm-paper sheet matching the real xMatrix page header and sheet. */
-function XMatrixSheetFrame({
-  breadcrumb,
-  revision,
-  rightSlot,
-  children,
-}: {
-  breadcrumb: string;
-  revision?: string;
-  rightSlot?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      className={`xmatrix-app flex h-full w-full flex-col overflow-hidden rounded-[14px] bg-[var(--site-paper)] text-[var(--site-ink)] ${SHEET_SHADOW}`}
-      inert
-    >
-      <div className="flex h-10 shrink-0 items-center justify-between gap-2 bg-[color-mix(in_oklch,var(--site-paper)_86%,var(--background))] px-4">
-        <div className="flex min-w-0 items-center gap-2 text-[12px] text-[var(--site-ink-muted)]">
-          <span className="truncate font-semibold text-[var(--site-ink)]">{breadcrumb}</span>
-          {revision && (
-            <span className="shrink-0 rounded-md bg-[color-mix(in_oklch,var(--site-ink)_5.5%,transparent)] px-1.5 py-0.5 font-mono text-[10.5px] font-medium text-[var(--site-ink-muted)]">
-              {revision}
-            </span>
-          )}
-        </div>
-        {rightSlot}
-      </div>
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
-    </div>
-  );
-}
-
-/** Stacked presence avatars with colored page-cursor rings, as in the real page header. */
-function PresenceFaces({ writers }: { writers: readonly WriterKey[] }) {
-  return (
-    <div className="flex shrink-0 items-center -space-x-1">
-      {writers.map((key) => {
-        const w = WRITER[key];
-        return (
-          <span
-            key={key}
-            className="inline-flex rounded-full bg-[var(--site-paper)] p-[1.5px] ring-[1.5px]"
-            style={{ "--tw-ring-color": w.color } as CSSProperties}
-          >
-            <Face
-              of={w.harness ? { kind: "agent", name: w.name, harness: w.harness } : { kind: "external", name: w.name }}
-              size="xs"
-              shape="circle"
-              className="size-[18px]! rounded-full"
-            />
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
 /**
- * Renders real markdown via xMatrix's `renderPageDocument`, highlights the changed
- * block with the writer's subtle pen tint, and pins the real `CardPen` pill cleanly.
+ * Pure warm-paper xMatrix document rendered by `renderPageDocument`, with the
+ * writer's `CardPen` pill aligned directly to the edited block (as in the real app).
  */
-function RealPageBody({
+function RealPaperSheet({
   markdown,
   highlightBlockIndex,
   highlightColor,
   pen,
-  compact = false,
+  topRight,
   footer,
 }: {
   markdown: string;
   highlightBlockIndex?: number | null;
   highlightColor?: string;
   pen?: PresentPerson | null;
-  compact?: boolean;
+  topRight?: ReactNode;
   footer?: ReactNode;
 }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const [penTop, setPenTop] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const target = hostRef.current;
-    if (!target) return;
+    const container = containerRef.current;
+    if (!target || !container) return;
     renderPageDocument(markdown, target, REFERENCES);
     const blocks = [...target.querySelectorAll<HTMLElement>("blockquote, li, p")].filter(
       (el) => !el.querySelector("li, p"),
     );
+    let activeEl: HTMLElement | null = null;
     blocks.forEach((el, idx) => {
       el.style.borderRadius = "6px";
+      el.style.paddingInline = "6px";
+      el.style.marginInline = "-6px";
       el.style.transition = "background-color 280ms ease";
       if (highlightBlockIndex !== null && highlightBlockIndex !== undefined && idx === highlightBlockIndex && highlightColor) {
-        el.style.backgroundColor = `color-mix(in oklch, ${highlightColor} 14%, transparent)`;
-        el.style.paddingInline = "6px";
-        el.style.marginInline = "-6px";
+        el.style.backgroundColor = `color-mix(in oklch, ${highlightColor} 13%, transparent)`;
+        activeEl = el;
       } else {
         el.style.backgroundColor = "transparent";
-        el.style.paddingInline = "";
-        el.style.marginInline = "";
       }
     });
+    if (activeEl) {
+      const box = (activeEl as HTMLElement).getBoundingClientRect();
+      const parentBox = container.getBoundingClientRect();
+      setPenTop(Math.max(8, Math.round(box.top - parentBox.top + (box.height - 26) / 2)));
+    } else {
+      setPenTop(null);
+    }
   }, [markdown, highlightBlockIndex, highlightColor]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col justify-between overflow-hidden">
-      <div className={compact ? "min-h-0 flex-1 overflow-hidden px-3.5 py-1.5" : "min-h-0 flex-1 overflow-hidden px-4 py-3 sm:px-5 sm:py-3.5"}>
+    <div className={LIVE_SHEET_CLASS} inert>
+      <div ref={containerRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-5 sm:px-7 sm:py-6">
+        {topRight && <div className="mb-3 flex justify-end">{topRight}</div>}
         <div
           ref={hostRef}
-          className={
-            compact
-              ? "ProseMirror page-document text-[12px]! leading-[1.45]! [&_blockquote]:my-1! [&_blockquote]:py-0.5! [&_h2]:mt-0! [&_h2]:mb-1.5! [&_h2]:text-[13px]! [&_li]:my-0.5! [&_p]:my-0.5! [&_ul]:my-0.5!"
-              : "ProseMirror page-document text-[12.5px]! leading-[1.5]! sm:text-[13px]! [&_blockquote]:my-1.5! [&_blockquote]:py-1! [&_h2]:mt-0! [&_h2]:mb-2! [&_h2]:text-[14.5px]! [&_li]:my-1! [&_p]:my-1! [&_ul]:my-1!"
-          }
+          className={`ProseMirror page-document text-[13.5px]! leading-[1.6]! sm:text-[14px]! [&_blockquote]:my-2.5! [&_blockquote]:py-1.5! [&_h2]:mt-0! [&_h2]:mb-3! [&_h2]:text-[17px]! [&_h2]:font-semibold! [&_li]:my-1.5! [&_p]:my-1.5! [&_ul]:my-1.5! ${
+            pen ? "pr-9 sm:pr-32" : ""
+          }`}
           data-editable="false"
           translate="no"
         />
+        {pen && penTop !== null && (
+          <>
+            {/* Desktop: full colored Agent pen pill standing in the reserved right margin */}
+            <div
+              className="pointer-events-none absolute right-4 z-10 hidden transition-[top] duration-300 sm:block"
+              style={{ top: `${penTop}px` }}
+            >
+              <CardPen person={pen} />
+            </div>
+            {/* Phone: compact face-only pen at the right edge, matching the real mobile app */}
+            <div
+              className="pointer-events-none absolute right-3 z-10 inline-flex rounded-full p-[2px] shadow-[0_3px_10px_-3px_rgba(0,0,0,0.28)] transition-[top] duration-300 sm:hidden"
+              style={{ top: `${penTop}px`, backgroundColor: pen.color }}
+            >
+              <Face of={pen.face} size="xs" shape="circle" className="size-5! rounded-full bg-white" />
+            </div>
+          </>
+        )}
       </div>
-      {pen && !footer && (
-        <div className={compact ? "flex shrink-0 justify-end px-3 pb-2.5" : "flex shrink-0 justify-end px-4 pb-3 sm:px-5"}>
-          <CardPen person={pen} />
-        </div>
-      )}
       {footer}
     </div>
   );
@@ -195,7 +163,6 @@ function RealPageBody({
 
 const STANDS_FRAMES = [
   {
-    rev: "r11",
     writer: null as WriterKey | null,
     highlight: null as number | null,
     md: [
@@ -203,27 +170,25 @@ const STANDS_FRAMES = [
       "",
       "> Three tracks running in parallel.",
       "",
-      "- [ ] **Web** · @claude — auth fix (3/5 checks)",
-      "- [ ] **Mobile** · @codex — building 2.4",
-      "- [ ] **Docs** · @cursor — drafting guide",
+      "- [ ] **Web** · @claude — auth fix (3/5)",
+      "- [ ] **Mobile** · @codex — build 2.4",
+      "- [ ] **Docs** · @cursor — drafting",
     ].join("\n"),
   },
   {
-    rev: "r12",
     writer: "claude" as WriterKey,
     highlight: 1,
     md: [
       "## Launch: live docs",
       "",
-      "> Web merged. Mobile and docs still running.",
+      "> Web merged. Mobile and docs running.",
       "",
-      "- [x] **Web** · @claude — live in `v1.0.464`",
-      "- [ ] **Mobile** · @codex — building 2.4",
-      "- [ ] **Docs** · @cursor — drafting guide",
+      "- [x] **Web** · @claude — `v1.0.464`",
+      "- [ ] **Mobile** · @codex — build 2.4",
+      "- [ ] **Docs** · @cursor — drafting",
     ].join("\n"),
   },
   {
-    rev: "r13",
     writer: "codex" as WriterKey,
     highlight: 2,
     md: [
@@ -231,43 +196,35 @@ const STANDS_FRAMES = [
       "",
       "> Web and mobile ready. Waiting on docs.",
       "",
-      "- [x] **Web** · @claude — live in `v1.0.464`",
+      "- [x] **Web** · @claude — `v1.0.464`",
       "- [x] **Mobile** · @codex — `TestFlight 2.4`",
-      "- [ ] **Docs** · @cursor — drafting guide",
+      "- [ ] **Docs** · @cursor — drafting",
     ].join("\n"),
   },
   {
-    rev: "r14",
     writer: "cursor" as WriterKey,
-    highlight: 0,
+    highlight: 3,
     md: [
       "## Launch: live docs",
       "",
       "> All three tracks shipped. Ready for Friday.",
       "",
-      "- [x] **Web** · @claude — live in `v1.0.464`",
+      "- [x] **Web** · @claude — `v1.0.464`",
       "- [x] **Mobile** · @codex — `TestFlight 2.4`",
-      "- [x] **Docs** · @cursor — 5/5 published",
+      "- [x] **Docs** · @cursor — 5/5 live",
     ].join("\n"),
   },
 ];
 
 function WhereThingsStandDemo({ step }: { step: number }) {
   const frame = STANDS_FRAMES[step] ?? STANDS_FRAMES[3]!;
-  const pen = frame.writer ? makePerson(frame.writer, { editing: true }) : null;
   return (
-    <XMatrixSheetFrame
-      breadcrumb="Acme / Launch"
-      revision={frame.rev}
-      rightSlot={<PresenceFaces writers={["alex", "claude", "codex", "cursor"]} />}
-    >
-      <RealPageBody
-        markdown={frame.md}
-        highlightBlockIndex={frame.highlight}
-        highlightColor={frame.writer ? WRITER[frame.writer].color : undefined}
-        pen={pen}
-      />
-    </XMatrixSheetFrame>
+    <RealPaperSheet
+      markdown={frame.md}
+      highlightBlockIndex={frame.highlight}
+      highlightColor={frame.writer ? WRITER[frame.writer].color : undefined}
+      pen={frame.writer ? makePerson(frame.writer, { editing: true }) : null}
+    />
   );
 }
 
@@ -275,20 +232,18 @@ function WhereThingsStandDemo({ step }: { step: number }) {
 
 const ATTENTION_FRAMES = [
   {
-    rev: "r14",
-    note: "Quiet · 0 pings",
+    note: "Quiet · 0 interruptions",
     writer: null as WriterKey | null,
     highlight: null as number | null,
     md: [
       "## Launch: live docs",
       "",
-      "- [ ] **Web** · @claude — running test suite",
-      "- [ ] **Mobile** · @codex — verifying iOS build",
-      "- [ ] **Docs** · @cursor — checking screenshots",
+      "- [ ] **Web** · @claude — running tests",
+      "- [ ] **Mobile** · @codex — verifying build",
+      "- [ ] **Docs** · @cursor — checking locales",
     ].join("\n"),
   },
   {
-    rev: "r15",
     note: "Updated 1m ago · 0 pings",
     writer: "claude" as WriterKey,
     highlight: 0,
@@ -296,12 +251,11 @@ const ATTENTION_FRAMES = [
       "## Launch: live docs",
       "",
       "- [x] **Web** · @claude — 148 tests passed",
-      "- [ ] **Mobile** · @codex — verifying iOS build",
-      "- [ ] **Docs** · @cursor — checking screenshots",
+      "- [ ] **Mobile** · @codex — verifying build",
+      "- [ ] **Docs** · @cursor — checking locales",
     ].join("\n"),
   },
   {
-    rev: "r16",
     note: "Updated just now · 0 pings",
     writer: "codex" as WriterKey,
     highlight: 1,
@@ -309,21 +263,20 @@ const ATTENTION_FRAMES = [
       "## Launch: live docs",
       "",
       "- [x] **Web** · @claude — 148 tests passed",
-      "- [x] **Mobile** · @codex — TestFlight 2.4 up",
-      "- [ ] **Docs** · @cursor — checking screenshots",
+      "- [x] **Mobile** · @codex — TestFlight 2.4",
+      "- [ ] **Docs** · @cursor — checking locales",
     ].join("\n"),
   },
   {
-    rev: "r17",
-    note: "Ready · 0 pings",
+    note: "Ready when you are · 0 pings",
     writer: "cursor" as WriterKey,
     highlight: 2,
     md: [
       "## Launch: live docs",
       "",
       "- [x] **Web** · @claude — 148 tests passed",
-      "- [x] **Mobile** · @codex — TestFlight 2.4 up",
-      "- [x] **Docs** · @cursor — live in 6 locales",
+      "- [x] **Mobile** · @codex — TestFlight 2.4",
+      "- [x] **Docs** · @cursor — 6 locales live",
     ].join("\n"),
   },
 ];
@@ -331,27 +284,22 @@ const ATTENTION_FRAMES = [
 function YourAttentionDemo({ step }: { step: number }) {
   const frame = ATTENTION_FRAMES[step] ?? ATTENTION_FRAMES[3]!;
   return (
-    <XMatrixSheetFrame
-      breadcrumb="Acme / Launch"
-      revision={frame.rev}
-      rightSlot={
-        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5%,transparent)] px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-[var(--site-ink-muted)]">
+    <RealPaperSheet
+      markdown={frame.md}
+      highlightBlockIndex={frame.highlight}
+      highlightColor={frame.writer ? WRITER[frame.writer].color : undefined}
+      pen={frame.writer ? makePerson(frame.writer, { editing: false, doing: "updated" }) : null}
+      topRight={
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5%,transparent)] px-2.5 py-1 text-[11.5px] font-medium text-[var(--site-ink-muted)]">
           <BellOff className="size-3 shrink-0" />
           <span>{frame.note}</span>
         </span>
       }
-    >
-      <RealPageBody
-        markdown={frame.md}
-        highlightBlockIndex={frame.highlight}
-        highlightColor={frame.writer ? WRITER[frame.writer].color : undefined}
-        pen={frame.writer ? makePerson(frame.writer, { editing: false, doing: "updated page" }) : null}
-      />
-    </XMatrixSheetFrame>
+    />
   );
 }
 
-/* ── Topic 2: Parallel work ──────────────────────────────────────────────── */
+/* ── Topic 2: Parallel work — authentic desktop app window (rail + list + page) ── */
 
 interface ParallelThread {
   id: string;
@@ -398,6 +346,7 @@ const PARALLEL_THREADS: readonly ParallelThread[] = [
 ];
 
 function ParallelWorkDemo({ step }: { step: number }) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
   const mdLines = [
     "## Launch",
     "",
@@ -409,17 +358,50 @@ function ParallelWorkDemo({ step }: { step: number }) {
   const activeWriter: WriterKey | null = step === 1 ? "claude" : step === 2 ? "codex" : step >= 3 ? "cursor" : null;
   const highlightIdx = step >= 1 ? Math.min(step - 1, 2) : null;
 
+  useLayoutEffect(() => {
+    const target = hostRef.current;
+    if (!target) return;
+    renderPageDocument(mdLines, target, REFERENCES);
+    const blocks = [...target.querySelectorAll<HTMLElement>("li")];
+    blocks.forEach((el, idx) => {
+      el.style.borderRadius = "6px";
+      el.style.paddingInline = "6px";
+      el.style.marginInline = "-6px";
+      if (highlightIdx !== null && idx === highlightIdx && activeWriter) {
+        el.style.backgroundColor = `color-mix(in oklch, ${WRITER[activeWriter].color} 13%, transparent)`;
+      } else {
+        el.style.backgroundColor = "transparent";
+      }
+    });
+  }, [mdLines, highlightIdx, activeWriter]);
+
   return (
     <div
-      className={`xmatrix-app flex h-full w-full flex-col overflow-hidden rounded-[14px] bg-[var(--site-paper)] text-[var(--site-ink)] sm:flex-row ${SHEET_SHADOW}`}
+      className="xmatrix-app relative flex h-full w-full overflow-hidden rounded-[12px] bg-[var(--background)] text-[var(--site-ink)] shadow-[0_0_0_0.5px_oklch(0_0_0/0.18),0_22px_60px_-8px_oklch(0.25_0.03_60/0.26),0_6px_16px_oklch(0.25_0.03_60/0.1)]"
       inert
     >
-      {/* Left: real xMatrix paper channel list */}
-      <div className="flex min-w-0 shrink-0 flex-col bg-[color-mix(in_oklch,var(--site-ink)_3%,var(--site-paper))] sm:w-[46%]">
-          <div className="flex h-8 shrink-0 items-center justify-between px-3 sm:h-9">
-            <span className="text-[11.5px] font-semibold text-[var(--site-ink)] sm:text-[12px]">Acme · Threads</span>
-            <span className="rounded-full bg-[color-mix(in_oklch,var(--site-ink)_6%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--site-ink-muted)]">
-              4 live
+      {/* Real desktop walnut navigation rail (matches #conversations above) */}
+      <WoodPanel
+        as="div"
+        className="hidden w-12 shrink-0 flex-col items-center gap-3 rounded-none! pt-3.5 shadow-none! sm:flex"
+      >
+        <span className="inline-flex items-center gap-[4px]" aria-hidden>
+          <span className="size-[8px] rounded-full bg-[#ff5f57]" />
+          <span className="size-[8px] rounded-full bg-[#febc2e]" />
+          <span className="size-[8px] rounded-full bg-[#28c840]" />
+        </span>
+        <span className="mt-1 flex size-7 items-center justify-center rounded-full bg-[oklch(1_0.012_92/0.46)] text-[10px] font-bold">
+          AR
+        </span>
+      </WoodPanel>
+
+      {/* Main split: paper conversation list + live page */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden sm:flex-row">
+        <div className="flex min-w-0 shrink-0 flex-col bg-[color-mix(in_oklch,var(--site-ink)_3.5%,var(--background))] sm:w-[48%]">
+          <div className="flex h-10 shrink-0 items-center justify-between px-3.5">
+            <span className="text-[13px] font-bold text-[var(--site-ink)]">Acme</span>
+            <span className="rounded-md bg-[color-mix(in_oklch,var(--site-ink)_6%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--site-ink-muted)]">
+              4 active
             </span>
           </div>
           <div className="overflow-hidden">
@@ -430,16 +412,14 @@ function ParallelWorkDemo({ step }: { step: number }) {
               return (
                 <div
                   key={thread.id}
-                  className={`flex items-center gap-2 px-3 py-1.5 transition-colors sm:gap-2.5 sm:py-2 ${
+                  className={`flex items-center gap-2 px-3.5 py-2 transition-colors ${
                     idx === 3 ? "max-sm:hidden" : ""
-                  } ${justFinished ? "bg-[var(--site-paper)]" : ""}`}
+                  } ${justFinished ? "bg-[var(--background)]" : ""}`}
                 >
-                  <Hash className="size-3 shrink-0 text-[var(--site-ink-muted)]/75 sm:size-3.5" />
+                  <Hash className="size-3.5 shrink-0 text-[var(--site-ink-muted)]/75" />
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[11.5px] leading-tight font-semibold text-[var(--site-ink)] sm:text-[12px]">
-                      {thread.name}
-                    </p>
-                    <p className="mt-0.5 truncate text-[10.5px] leading-tight text-[var(--site-ink-muted)] sm:text-[11px]">
+                    <p className="truncate text-[12px] leading-tight font-semibold text-[var(--site-ink)]">{thread.name}</p>
+                    <p className="mt-0.5 truncate text-[11px] leading-tight text-[var(--site-ink-muted)]">
                       {done ? thread.doneText : thread.workingText}
                     </p>
                   </div>
@@ -451,7 +431,7 @@ function ParallelWorkDemo({ step }: { step: number }) {
                       className="size-5! rounded-full"
                     />
                     <span
-                      className={`absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-[1.5px] ring-[var(--site-paper)] ${
+                      className={`absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-[1.5px] ring-[var(--background)] ${
                         done ? "bg-[#2f855a]" : "bg-[#d97706]"
                       }`}
                     />
@@ -462,25 +442,25 @@ function ParallelWorkDemo({ step }: { step: number }) {
           </div>
         </div>
 
-        {/* Right: live Launch page receiving completed outcomes */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--site-paper)]">
-          <div className="flex h-8 shrink-0 items-center justify-between px-3 sm:h-9">
-            <span className="truncate text-[11.5px] font-semibold text-[var(--site-ink)]">Page · Launch</span>
-            <span className="shrink-0 text-[10.5px] font-medium text-[var(--site-ink-muted)]">Auto-updated</span>
-          </div>
-        <RealPageBody
-          markdown={mdLines}
-          compact
-          highlightBlockIndex={highlightIdx}
-          highlightColor={activeWriter ? WRITER[activeWriter].color : undefined}
-          pen={activeWriter ? makePerson(activeWriter, { editing: true }) : null}
-        />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-between bg-[var(--background)] px-4 py-3 sm:py-3.5">
+          <div
+            ref={hostRef}
+            className="ProseMirror page-document text-[12.5px]! leading-[1.5]! [&_h2]:mt-0! [&_h2]:mb-2! [&_h2]:text-[14.5px]! [&_li]:my-1.5! [&_ul]:my-1!"
+            data-editable="false"
+            translate="no"
+          />
+          {activeWriter && (
+            <div className="hidden justify-end pt-2 sm:flex">
+              <CardPen person={makePerson(activeWriter, { editing: true })} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-/* ── Topic 3: Across machines ────────────────────────────────────────────── */
+/* ── Topic 3: Across machines — real FleetMatrix on pure warm paper ──────── */
 
 const FLEET_HARNESSES = ["claude", "codex", "cursor", "gemini"] as const;
 const noop = () => {};
@@ -558,44 +538,29 @@ function AcrossMachinesDemo({ step }: { step: number }) {
   const space = useMemo(() => fleetForStep(step), [step]);
   const { rows, mobileRows, attention, workingCount } = useMemo(() => buildSampleFleetView(space), [space]);
 
-  const statusNote =
-    step === 0
-      ? "3 machines · 1 Space"
-      : step === 1
-        ? "Claude hit 5h limit"
-        : "Linux Codex took over";
-
   return (
-    <XMatrixSheetFrame
-      breadcrumb="System Overview"
-      rightSlot={
-        <span className="shrink-0 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5%,transparent)] px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-[var(--site-ink-muted)]">
-          {statusNote}
-        </span>
-      }
+    <div
+      className={`${LIVE_SHEET_CLASS} justify-center bg-[var(--site-paper)]! px-5 py-4`}
+      style={{ "--app-panel-paper": "var(--site-paper)" } as CSSProperties}
+      inert
     >
-      <div
-        className="site-matrix flex min-h-0 flex-1 items-center overflow-hidden px-3 py-2"
-        style={{ "--app-panel-paper": "var(--site-paper)", background: "transparent" } as CSSProperties}
-      >
-        <div className="w-full min-w-0 [zoom:0.86] sm:[zoom:0.82]">
-          {wide ? (
-            <FleetMatrix columns={FLEET_COLUMNS} rows={rows} selected={null} onSelect={noop} editors={[]} />
-          ) : (
-            <MobileAvatarMatrix
-              columns={FLEET_COLUMNS}
-              rows={mobileRows}
-              ownMachineCount={space.length}
-              attentionCount={attention}
-              workingCount={workingCount}
-              selected={null}
-              onSelect={noop}
-              editors={[]}
-            />
-          )}
-        </div>
+      <div className="site-matrix w-full min-w-0 [zoom:0.88] sm:[zoom:0.84]">
+        {wide ? (
+          <FleetMatrix columns={FLEET_COLUMNS} rows={rows} selected={null} onSelect={noop} editors={[]} />
+        ) : (
+          <MobileAvatarMatrix
+            columns={FLEET_COLUMNS}
+            rows={mobileRows}
+            ownMachineCount={space.length}
+            attentionCount={attention}
+            workingCount={workingCount}
+            selected={null}
+            onSelect={noop}
+            editors={[]}
+          />
+        )}
       </div>
-    </XMatrixSheetFrame>
+    </div>
   );
 }
 
@@ -614,48 +579,42 @@ function SharedDecisionsDemo({ step }: { step: number }) {
   const readers: readonly WriterKey[] = ["claude", "codex", "cursor"];
 
   return (
-    <XMatrixSheetFrame
-      breadcrumb="Acme / Strategy"
-      revision={hasNewDecision ? "r15" : "r14"}
-      rightSlot={<PresenceFaces writers={["alex", "claude", "codex", "cursor"]} />}
-    >
-      <RealPageBody
-        markdown={md}
-        highlightBlockIndex={hasNewDecision ? 1 : null}
-        highlightColor={WRITER.alex.color}
-        pen={step === 1 ? makePerson("alex", { editing: true }) : null}
-        footer={
-          <div className="flex shrink-0 flex-wrap items-center gap-1.5 bg-[color-mix(in_oklch,var(--site-paper)_86%,var(--background))] px-4 py-2.5 sm:gap-2">
-            <span className="text-[11px] font-medium text-[var(--site-ink-muted)]">
-              {syncedCount === 0 ? "Waiting for edit…" : "Synced on r15:"}
-            </span>
-            {readers.map((key, idx) => {
-              const synced = idx < syncedCount;
-              const agent = WRITER[key];
-              return (
-                <span
-                  key={key}
-                  className={`inline-flex items-center gap-1.5 rounded-full py-0.5 pr-2 pl-1 text-[11px] font-medium transition-all ${
-                    synced
-                      ? "bg-[color-mix(in_oklch,#2f6f5e_12%,var(--site-paper))] text-[#235447]"
-                      : "bg-[color-mix(in_oklch,var(--site-ink)_5%,transparent)] text-[var(--site-ink-muted)] opacity-55"
-                  }`}
-                >
-                  <Face
-                    of={{ kind: "agent", name: agent.name, harness: agent.harness }}
-                    size="xs"
-                    shape="circle"
-                    className="size-4! shrink-0 rounded-full"
-                  />
-                  <span className="capitalize">{agent.name}</span>
-                  {synced && <Check className="size-3 shrink-0" />}
-                </span>
-              );
-            })}
-          </div>
-        }
-      />
-    </XMatrixSheetFrame>
+    <RealPaperSheet
+      markdown={md}
+      highlightBlockIndex={hasNewDecision ? 1 : null}
+      highlightColor={WRITER.alex.color}
+      pen={step === 1 ? makePerson("alex", { editing: true }) : null}
+      footer={
+        <div className="flex shrink-0 flex-wrap items-center gap-2 px-6 pb-5 sm:px-7">
+          <span className="text-[11.5px] font-medium text-[var(--site-ink-muted)]">
+            {syncedCount === 0 ? "Waiting for edit…" : "Read by:"}
+          </span>
+          {readers.map((key, idx) => {
+            const synced = idx < syncedCount;
+            const agent = WRITER[key];
+            return (
+              <span
+                key={key}
+                className={`inline-flex items-center gap-1.5 rounded-full py-0.5 pr-2.5 pl-1 text-[11.5px] font-medium transition-all ${
+                  synced
+                    ? "bg-[color-mix(in_oklch,#2f6f5e_12%,var(--background))] text-[#235447]"
+                    : "bg-[color-mix(in_oklch,var(--site-ink)_5%,transparent)] text-[var(--site-ink-muted)] opacity-55"
+                }`}
+              >
+                <Face
+                  of={{ kind: "agent", name: agent.name, harness: agent.harness }}
+                  size="xs"
+                  shape="circle"
+                  className="size-4! shrink-0 rounded-full"
+                />
+                <span className="capitalize">{agent.name}</span>
+                {synced && <Check className="size-3 shrink-0" />}
+              </span>
+            );
+          })}
+        </div>
+      }
+    />
   );
 }
 
@@ -663,7 +622,6 @@ function SharedDecisionsDemo({ step }: { step: number }) {
 
 const HITL_FRAMES = [
   {
-    rev: "r18",
     writer: "claude" as WriterKey,
     pen: makePerson("claude", { editing: true }),
     md: [
@@ -671,10 +629,9 @@ const HITL_FRAMES = [
       "",
       "xMatrix opens Friday with invite-only access for early teams…",
     ].join("\n"),
-    status: "Claude writing",
+    highlight: 0,
   },
   {
-    rev: "r19",
     writer: "alex" as WriterKey,
     pen: makePerson("claude", { editing: false, thinking: true, doing: "waiting for you" }),
     md: [
@@ -682,10 +639,9 @@ const HITL_FRAMES = [
       "",
       "xMatrix opens Friday with **open signup for everyone**",
     ].join("\n"),
-    status: "Claude paused for you",
+    highlight: 0,
   },
   {
-    rev: "r20",
     writer: "claude" as WriterKey,
     pen: makePerson("claude", { editing: true }),
     md: [
@@ -693,10 +649,9 @@ const HITL_FRAMES = [
       "",
       "xMatrix opens Friday with **open signup for everyone** — pricing and docs updated to match.",
     ].join("\n"),
-    status: "Claude continued",
+    highlight: 0,
   },
   {
-    rev: "r20",
     writer: "claude" as WriterKey,
     pen: makePerson("claude", { editing: false, doing: "done" }),
     md: [
@@ -704,31 +659,21 @@ const HITL_FRAMES = [
       "",
       "xMatrix opens Friday with **open signup for everyone** — pricing and docs updated to match.",
       "",
-      "> Your wording kept intact; downstream tasks updated.",
+      "> Your edit stayed intact; Claude picked up right after it.",
     ].join("\n"),
-    status: "Your words preserved",
+    highlight: 0,
   },
 ];
 
 function HumanInTheLoopDemo({ step }: { step: number }) {
   const frame = HITL_FRAMES[step] ?? HITL_FRAMES[3]!;
   return (
-    <XMatrixSheetFrame
-      breadcrumb="Acme / Launch"
-      revision={frame.rev}
-      rightSlot={
-        <span className="shrink-0 rounded-full bg-[color-mix(in_oklch,var(--site-ink)_5%,transparent)] px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap text-[var(--site-ink-muted)]">
-          {frame.status}
-        </span>
-      }
-    >
-      <RealPageBody
-        markdown={frame.md}
-        highlightBlockIndex={0}
-        highlightColor={WRITER[frame.writer].color}
-        pen={frame.pen}
-      />
-    </XMatrixSheetFrame>
+    <RealPaperSheet
+      markdown={frame.md}
+      highlightBlockIndex={frame.highlight}
+      highlightColor={WRITER[frame.writer].color}
+      pen={frame.pen}
+    />
   );
 }
 

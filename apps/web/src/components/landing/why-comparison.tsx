@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useNear } from "@/components/landing/use-media";
 import { SegmentedTabs, type SegmentedTabItem } from "@/components/ui/segmented-tabs";
 import { WoodPanel } from "@/components/ui/material-surfaces";
@@ -13,7 +12,7 @@ const WhyXMatrixDemo = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-full w-full rounded-[14px] bg-[var(--site-paper)] shadow-[0_18px_44px_-18px_oklch(0.24_0.03_58/0.2)]" />
+      <div className="h-full w-full rounded-[12px] bg-[var(--background)] shadow-[0_0_0_0.5px_oklch(0_0_0/0.14),0_22px_60px_-8px_oklch(0.25_0.03_60/0.22)]" />
     ),
   },
 );
@@ -22,9 +21,7 @@ const WhyCompetitorDemo = dynamic(
   () => import("@/components/landing/why-competitor-demos").then((m) => m.WhyCompetitorDemo),
   {
     ssr: false,
-    loading: () => (
-      <div className="h-full w-full rounded-[14px] bg-[color-mix(in_oklch,var(--site-ink)_4.2%,var(--background))]" />
-    ),
+    loading: () => <div className="h-full w-full rounded-[12px] bg-transparent" />,
   },
 );
 
@@ -34,9 +31,12 @@ const STEPS_PER_TOPIC = 4;
 type Row = readonly [string, string, string];
 
 /**
- * Interactive 6-topic comparison stage: borderless warm-paper layout with
- * subtle walnut wood accents (a compact xMatrix plaque pill and slender
- * sheet spine) — never heavy borders or a large wood slab.
+ * Interactive 6-topic comparison matching the homepage's exact material grammar:
+ * a single compact rounded-rectangle walnut wood bar (with authentic bevel &
+ * downward shadow) holds the shared SegmentedTabs whose active item lights up
+ * as frosted glass on wood; below, xMatrix's real product interfaces and the
+ * everyday desk of terminals/windows float directly on warm paper — zero outer
+ * boxes, zero fake borders.
  */
 export function WhyComparison({
   title,
@@ -103,116 +103,79 @@ export function WhyComparison({
         nearRef(node);
         setHost(node);
       }}
-      className="mt-8 md:mt-11"
+      className="mt-7 md:mt-9"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {/* Borderless shared SegmentedTabs on warm paper */}
-      <div className="flex items-center justify-between gap-3">
+      {/* One compact rounded-rectangle walnut wood control bar (filter on wood, frosted glass on wood) */}
+      <WoodPanel
+        as="div"
+        className="inline-flex max-w-full rounded-[14px]! p-[4px] shadow-[inset_0_1px_0_oklch(1_0.02_90/0.52),inset_1px_0_0_oklch(1_0.02_90/0.26),inset_0_-1px_0_oklch(0.32_0.06_58/0.28),inset_-1px_0_0_oklch(0.32_0.06_58/0.18),0_14px_26px_-12px_oklch(0.16_0.04_55/0.58),0_3px_8px_-3px_oklch(0.18_0.04_55/0.24)]!"
+      >
         <SegmentedTabs
           items={tabItems}
           value={String(active)}
           onChange={(key) => selectTopic(Number(key))}
           label={title}
-          className="min-w-0 [--app-action-edge:none] [--app-action-fill:color-mix(in_oklch,var(--site-ink)_4%,var(--background))] [--app-action-fill-hover:color-mix(in_oklch,var(--site-ink)_2.5%,var(--site-paper))] [--app-action-fill-primary:var(--site-paper)] md:flex-wrap"
-          tabClassName="cursor-pointer font-semibold max-md:px-3.5 max-md:text-[13px] aria-selected:shadow-[0_2px_6px_-2px_oklch(0.25_0.03_60/0.14)]"
+          className="min-w-0 rounded-[10px]! border-0! bg-transparent! p-0! shadow-none! max-md:h-auto! max-md:rounded-[10px]! md:flex-wrap"
+          tabClassName="h-9 cursor-pointer rounded-[10px]! px-3.5 text-[13.5px] opacity-75 transition-all hover:bg-[oklch(1_0.02_90/0.22)] hover:opacity-100 aria-selected:bg-[oklch(1_0.015_92/0.58)]! aria-selected:opacity-100 aria-selected:[backdrop-filter:blur(6px)_saturate(1.25)] aria-selected:shadow-[inset_0_1px_0_oklch(1_0.02_90/0.78),0_2px_8px_-2px_oklch(0.18_0.04_55/0.28)]! max-md:h-9 max-md:rounded-[10px]! max-md:px-3.5 max-md:text-[13px] md:px-4 md:text-sm"
         />
+      </WoodPanel>
 
-        {/* Quiet borderless prev/next stepper */}
-        <div className="hidden shrink-0 items-center gap-1.5 sm:inline-flex">
-          <button
-            type="button"
-            aria-label="Previous comparison"
-            onClick={() => selectTopic(active - 1)}
-            className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-[color-mix(in_oklch,var(--site-ink)_4%,var(--background))] text-[var(--site-ink-muted)] transition-colors hover:bg-[color-mix(in_oklch,var(--site-ink)_8%,var(--background))] hover:text-[var(--site-ink)]"
-          >
-            <ChevronLeft className="size-4" />
-          </button>
-          <span className="min-w-[2.5rem] text-center font-mono text-xs text-[var(--site-ink-muted)] tabular-nums">
-            {active + 1}/{rows.length}
-          </span>
-          <button
-            type="button"
-            aria-label="Next comparison"
-            onClick={() => selectTopic(active + 1)}
-            className="inline-flex size-8 cursor-pointer items-center justify-center rounded-full bg-[color-mix(in_oklch,var(--site-ink)_4%,var(--background))] text-[var(--site-ink-muted)] transition-colors hover:bg-[color-mix(in_oklch,var(--site-ink)_8%,var(--background))] hover:text-[var(--site-ink)]"
-          >
-            <ChevronRight className="size-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Borderless side-by-side comparison resting directly on the homepage's warm paper */}
+      {/* Borderless side-by-side comparison directly on warm paper: clear statement first, live UI right under */}
       <div
         id={`why-panel-${active}`}
         role="tabpanel"
         aria-label={topic}
-        className="mt-8 grid grid-cols-1 gap-10 lg:grid-cols-2 lg:gap-8"
+        className="mt-10 grid grid-cols-1 gap-12 lg:grid-cols-2 lg:gap-10"
       >
-        {/* Left column: xMatrix anchored by a compact rounded-rectangle walnut plaque with downward shadow */}
-        <figure className="m-0 flex min-w-0 flex-col gap-4">
-          <div className="flex h-9 items-center justify-between gap-2">
-            <WoodPanel
-              as="span"
-              className="inline-flex h-9 items-center gap-2 rounded-[11px]! px-3.5 text-[14px] leading-none shadow-[inset_0_1px_0_oklch(1_0.02_90/0.52),inset_1px_0_0_oklch(1_0.02_90/0.26),inset_0_-1px_0_oklch(0.32_0.06_58/0.3),inset_-1px_0_0_oklch(0.32_0.06_58/0.18),0_12px_22px_-10px_oklch(0.14_0.04_55/0.56),0_3px_6px_-2px_oklch(0.18_0.04_55/0.26)]!"
-            >
-              <span className="inline-flex size-5 items-center justify-center rounded-[6px] bg-[oklch(0.99_0.008_88/0.82)] shadow-[0_1px_2px_oklch(0.2_0.04_55/0.18)]">
-                <Image
-                  src="/brand/xmatrix-icon-transparent-128.png"
-                  alt=""
-                  width={14}
-                  height={14}
-                  className="size-3.5 shrink-0"
-                />
-              </span>
-              <span>xMatrix</span>
-            </WoodPanel>
-            <span className="text-xs font-medium text-[var(--site-ink-muted)] lg:hidden">{topic}</span>
-          </div>
+        {/* Left: xMatrix */}
+        <figure className="m-0 flex min-w-0 flex-col gap-5">
+          <figcaption className="min-h-[4.25rem]">
+            <p className="inline-flex items-center gap-2 text-sm font-semibold tracking-[-0.01em] text-[var(--site-ink)]">
+              <Image
+                src="/brand/xmatrix-icon-transparent-128.png"
+                alt=""
+                width={18}
+                height={18}
+                className="size-[18px] shrink-0"
+              />
+              xMatrix
+            </p>
+            <p className="mt-1.5 text-[16.5px] leading-[1.5] font-medium text-[var(--site-ink)]">{ours}</p>
+          </figcaption>
 
           <div
-            className="h-[332px] w-full min-w-0 sm:h-[344px]"
+            className="h-[328px] w-full min-w-0 sm:h-[344px]"
             role="img"
             aria-label={`xMatrix: ${topic}`}
           >
             {near ? (
               <WhyXMatrixDemo topic={active} step={step} />
             ) : (
-              <div className="h-full w-full rounded-[14px] bg-[var(--site-paper)] shadow-[0_18px_44px_-18px_oklch(0.24_0.03_58/0.2)]" />
+              <div className="h-full w-full rounded-[12px] bg-[var(--background)] shadow-[0_0_0_0.5px_oklch(0_0_0/0.14),0_22px_60px_-8px_oklch(0.25_0.03_60/0.22)]" />
             )}
           </div>
-
-          <figcaption className="min-h-[2.75rem] text-[15.5px] leading-[1.55] font-medium text-[var(--site-ink)]">
-            {ours}
-          </figcaption>
         </figure>
 
-        {/* Right column: Juggling tabs & terminals, quiet and borderless */}
-        <figure className="m-0 flex min-w-0 flex-col gap-4">
-          <div className="flex h-9 items-center justify-between gap-2">
-            <span className="truncate text-[15px] font-medium tracking-[-0.01em] text-[var(--site-ink-muted)]">
-              {others}
-            </span>
-            <span className="font-mono text-[11px] text-[var(--site-ink-muted)]/80 sm:hidden tabular-nums">
-              {active + 1}/{rows.length}
-            </span>
-          </div>
+        {/* Right: Juggling tabs & terminals */}
+        <figure className="m-0 flex min-w-0 flex-col gap-5">
+          <figcaption className="min-h-[4.25rem]">
+            <p className="text-sm font-medium tracking-[-0.01em] text-[var(--site-ink-muted)]">{others}</p>
+            <p className="mt-1.5 text-[16.5px] leading-[1.5] text-[var(--site-ink-muted)]">{theirs}</p>
+          </figcaption>
 
           <div
-            className="h-[332px] w-full min-w-0 sm:h-[344px]"
+            className="h-[328px] w-full min-w-0 sm:h-[344px]"
             role="img"
             aria-label={`${others}: ${topic}`}
           >
             {near ? (
               <WhyCompetitorDemo topic={active} step={step} />
             ) : (
-              <div className="h-full w-full rounded-[14px] bg-[color-mix(in_oklch,var(--site-ink)_4.2%,var(--background))]" />
+              <div className="h-full w-full rounded-[12px] bg-transparent" />
             )}
           </div>
-
-          <figcaption className="min-h-[2.75rem] text-[15.5px] leading-[1.55] text-[var(--site-ink-muted)]">
-            {theirs}
-          </figcaption>
         </figure>
       </div>
 
