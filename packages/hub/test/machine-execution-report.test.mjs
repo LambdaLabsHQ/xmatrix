@@ -34,14 +34,14 @@ test("execution acknowledgement uses PostgreSQL without requiring a new connecti
         state: "active", target_shard_id: null, plan_class: "single" }];
       if (query.name === "runtime_execution_report_owner_v5") return [{ run_id: "run", instance_id: "instance",
         execution_key: "execution-key", channel_instance_id: 1 }];
-      if (["runtime_message_execution_prior_v1", "runtime_message_execution_upsert_v2", "runtime_execution_report_receipt_v1"].includes(query.name)) return [];
+      if (["runtime_message_execution_prior_v2", "runtime_message_execution_upsert_v3", "runtime_execution_report_receipt_v1"].includes(query.name)) return [];
       throw new Error(`Unexpected query ${query.name}`);
   });
   const command = executionReportCommand(principal, body);
   const receipt = await machineRunLifecycleReport({}, command, { database });
   assert.equal(receipt.requestId, body.requestId);
   assert.equal(receipt.status, "source_unavailable");
-  assert.ok(calls.some(query => query.name === "runtime_message_execution_upsert_v2"));
+  assert.ok(calls.some(query => query.name === "runtime_message_execution_upsert_v3"));
   assert.ok(calls.every(query => !/UPDATE data\.(runs|instances)/u.test(query.text)), "only execution observation storage may change");
 });
 
@@ -54,8 +54,8 @@ function finalReceiptDatabase(owner, prior) {
     if (query.name === "space_placement_resolve_v1") return [{ space_id: "space", shard_id: "shard-1", placement_epoch: 1,
       state: "active", target_shard_id: null, plan_class: "single" }];
     if (query.name === "runtime_execution_report_owner_v5") return owner;
-    if (["runtime_message_execution_prior_v1", "runtime_execution_report_receipt_v1"].includes(query.name)) return prior;
-    if (query.name === "runtime_message_execution_upsert_v2") return [];
+    if (["runtime_message_execution_prior_v2", "runtime_execution_report_receipt_v1"].includes(query.name)) return prior;
+    if (query.name === "runtime_message_execution_upsert_v3") return [];
     throw new Error(`Unexpected query ${query.name}`);
   });
 }

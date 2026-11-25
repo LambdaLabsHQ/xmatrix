@@ -675,7 +675,7 @@ test("a registered Run's exit report records its message execution under its Ins
     state: "completed", startedAtMillis: now - 1000, updatedAtMillis: now, finishedAtMillis: now } };
   await new PostgresMachineLifecycleRepository(db).apply(machineReport("exit-1", "machine_run_exited",
     { runId: "run-1", executionKey: "execution-1", taskExecution }));
-  const upsert = db.calls.find(q => q.name === "runtime_message_execution_upsert_v2");
+  const upsert = db.calls.find(q => q.name === "runtime_message_execution_upsert_v3");
   assert.ok(upsert, "the execution is recorded");
   assert.deepEqual(upsert.values.slice(4, 6), ["instance-1", "Codex"]);
 });
