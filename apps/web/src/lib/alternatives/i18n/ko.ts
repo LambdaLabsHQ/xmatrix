@@ -842,7 +842,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
       "T3 Code 대안을 찾고 계신가요? 실제 사용자 계정, 공유 채널, 살아 있는 프로젝트 페이지, 스페이스 시크릿, 프로바이더 간 핸드오프를 팀에 더해 보세요.",
     eyebrow: "T3 Code 대안 · T3 Code vs xMatrix",
     headline: "T3 Code vs xMatrix",
-    lead: "T3 Code는 뛰어난 무료 싱글플레이어 코딩 워크벤치이지만, 환경 하나가 계정 하나에 묶이고 공유 살아 있는 프로젝트 페이지가 없으며 프로바이더 할당량이 소진되면 'Limited'에서 그대로 멈춥니다. xMatrix는 공유 채널, 살아 있는 페이지, 스페이스 시크릿, 그리고 보유 머신 전반의 34종 코딩 에이전트를 팀에 제공합니다.",
+    lead: "T3 Code는 뛰어난 무료 싱글플레이어 코딩 워크벤치이지만, 환경 하나가 계정 하나에 묶이고 공유 살아 있는 프로젝트 페이지가 없으며 할당량이 소진되면 초기화되거나 수동으로 전환할 때까지 'Limited'에서 기다립니다. xMatrix는 공유 채널, 살아 있는 페이지, 스페이스 시크릿, 그리고 보유 머신 전반의 34종 코딩 에이전트를 팀에 제공합니다.",
     productCaption:
       "xMatrix 화면: 34종 코딩 에이전트가 모든 머신에서 함께 일하고 팀 전체를 위해 살아 있는 페이지를 최신으로 유지하는 진짜 멀티플레이어 채널.",
     painPoints: [

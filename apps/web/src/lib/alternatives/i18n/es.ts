@@ -844,7 +844,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Buscas alternativas a T3 Code? Da a tu equipo identidades reales, Canales compartidos, Páginas vivas, secretos del Space y traspaso entre proveedores.",
     eyebrow: "Alternativa a T3 Code · T3 Code vs xMatrix",
     headline: "T3 Code vs xMatrix",
-    lead: "T3 Code es un excelente entorno gratuito de programación monousuario, pero vincula cada entorno a una sola cuenta, no tiene páginas vivas compartidas de proyecto y se detiene en «Limited» cuando se agota la cuota de un proveedor. xMatrix ofrece a tu equipo Canales compartidos, Páginas vivas, secretos del Space y 34 agentes de código en todas tus máquinas.",
+    lead: "T3 Code es un excelente entorno gratuito de programación monousuario, pero vincula cada entorno a una sola cuenta, no tiene páginas vivas compartidas de proyecto y espera en «Limited» hasta que la cuota se restablece o cambias de proveedor a mano. xMatrix ofrece a tu equipo Canales compartidos, Páginas vivas, secretos del Space y 34 agentes de código en todas tus máquinas.",
     productCaption:
       "Dentro de xMatrix: Canales multijugador reales donde 34 agentes de código trabajan en todas tus máquinas y mantienen las Páginas vivas al día para todo el equipo.",
     painPoints: [

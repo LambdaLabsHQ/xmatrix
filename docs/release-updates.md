@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: the T3 Code comparison no longer says it stalls at quota limits
+
+The T3 Code page's intro (all 6 languages) said a thread "stalls at 'Limited'"
+when a provider quota runs out. T3 Code waits at Limited until the quota resets
+or the user switches provider by hand; it just never hands off automatically.
+The intro now says that, matching the page's own comparison table. Web only.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: production Web builds use native SWC, one typecheck, and skip the Electron binary
 
 Production Web builds (`server-release.yml`) and Android's bundled Web build
