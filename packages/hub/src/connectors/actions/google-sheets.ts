@@ -2,6 +2,7 @@ import { providerJson, ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText, requireText } from "./common";
 import { googleHeaders } from "./google-headers";
+import { createGoogleFile, workspaceMcpOrRest } from "./workspace-mcp";
 
 const FILE_ID = /^[A-Za-z0-9_-]{10,200}$/u;
 const MAX_TEXT = 12_000;
@@ -84,7 +85,21 @@ export const GOOGLE_SHEETS_ACTIONS: Record<string, ConnectorAction> = {
       return { spreadsheet, range: bounds.range, values: JSON.stringify(values) };
     },
     async execute({ credentials }, input) {
-      const bounds = googleCellRange(input.range!)!, url = rangeUrl(input.spreadsheet!, bounds.range);
+      const bounds = googleCellRange(input.range!)!;
+      // Sheets' MCP writes as typed by a person; a leading apostrophe keeps each string literal, as REST's RAW did.
+      const values = (JSON.parse(input.values!) as unknown[][]).map(row => row.map(cell => typeof cell === "string" ? `'${cell}` : cell));
+      const mcp = await workspaceMcpOrRest("sheets", credentials, "Google Docs & Drive", "update_values",
+        { spreadsheetId: input.spreadsheet, range: bounds.range, values });
+      if (mcp) {
+        const result = record(mcp.content);
+        if (result.spreadsheetId !== input.spreadsheet || !matchesRange(result.updatedRange, bounds) ||
+            result.updatedRows !== bounds.height || result.updatedColumns !== bounds.width || result.updatedCells !== bounds.width * bounds.height) {
+          throw new ProviderRequestError(502, "Google did not confirm the exact write; check the sheet before retrying");
+        }
+        return { summary: `Updated ${bounds.height * bounds.width} Google Sheet cells in ${JSON.stringify(result.updatedRange)} using RAW values; formula-like strings are saved as text`,
+          url: sheetUrl(input.spreadsheet!) };
+      }
+      const url = rangeUrl(input.spreadsheet!, bounds.range);
       url.searchParams.set("valueInputOption", "RAW");
       const result = await providerJson(url, { method: "PUT", headers: googleHeaders(credentials),
         json: { range: bounds.range, majorDimension: "ROWS", values: JSON.parse(input.values!) } });
@@ -104,6 +119,8 @@ export const GOOGLE_SHEETS_ACTIONS: Record<string, ConnectorAction> = {
         ? { title } : "use @google:create_sheet:new <one-line title, up to 250 characters>";
     },
     async execute({ credentials }, input) {
+      const created = await createGoogleFile(credentials, input.title!, "spreadsheet");
+      if (created) return { summary: `Created Google Sheet ${JSON.stringify(input.title)}`, url: sheetUrl(created) };
       const result = await providerJson("https://sheets.googleapis.com/v4/spreadsheets", { method: "POST", headers: googleHeaders(credentials),
         json: { properties: { title: input.title } } });
       if (typeof result.spreadsheetId !== "string" || !FILE_ID.test(result.spreadsheetId)) {

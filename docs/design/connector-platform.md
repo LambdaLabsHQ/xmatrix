@@ -636,8 +636,11 @@ stateless JSON-RPC POST each, JSON or event-stream answers. Curated actions
 move one by one onto the live MCP shapes through `workspaceMcpTool`, which
 reports a refusal of the server itself (`WorkspaceMcpUnavailable`) so the
 action can fall back to REST during Google's rollout: so far Calendar's
-`list_calendars` and `list_events`, and Docs' `read_doc`. Drive's MCP tools
-fail for a `drive.file` grant, so `list_files` stays on REST. `get_event`, writes and `freebusy` stay on
+`list_calendars` and `list_events`; Docs' `read_doc`, `create_doc` and
+`append_doc`; `list_files` and `create_sheet` (Drive); `update_sheet`, whose
+string cells carry a leading apostrophe so Sheets' typed-input MCP stores them
+literally, like REST's RAW. `read_sheet` stays on REST (MCP `get_values` has
+no formula or typed rendering). `get_event`, writes and `freebusy` stay on
 REST (no etag precondition, caller event id or busy-interval tool in MCP).
 
 Disconnect reads the grant through the credential authority's live Space

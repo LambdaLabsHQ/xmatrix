@@ -18,6 +18,21 @@ retention limits, and the mention states. Comparison pages drop the breadcrumb,
 eyebrow and verified line, and each title is "<Name> vs xMatrix". Web and docs
 only. Recovery is a CI-validated beta reverting this change.
 
+## Unreleased: Google Docs, Drive and Sheets writes go through Google's Workspace MCP
+
+`@google:list_files`, `create_doc`, `create_sheet`, `append_doc` and
+`update_sheet` now call Google's Workspace MCP servers (Drive
+`list_recent_files` and `create_file`, Docs `update_doc`, Sheets
+`update_values`) with the connection's token, verified on real files in
+production before this change. Sheets' MCP writes values as if typed, so each
+string cell is sent with a leading apostrophe: strings stay literal exactly as
+REST's RAW input kept them (a formula-like `=…` is saved as text), while
+numbers and booleans keep their types. Receipts and their exact-write checks
+are unchanged. REST serves a request only while Google refuses the MCP server
+itself for the project (the refusal comes before anything runs, so nothing is
+written twice). `read_sheet` stays on REST: Sheets' MCP `get_values` returns
+displayed text, not formulas or typed values. Hub only.
+
 ## Unreleased: the site footer compares xMatrix with Notion
 
 Notion competes with xMatrix on Pages, so the footer's "Compare xMatrix with"
