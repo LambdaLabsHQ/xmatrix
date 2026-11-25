@@ -159,6 +159,10 @@ different grantee, the support Space instead of one Run
    When a Run reads with `xmatrix channel history`, the Channel's name and
    threads printed above the messages are covered by the same handoff and are
    not counted as a second read; a withdrawn or expired handoff refuses both.
+   That Run's refusal is 403 `support_handoff_ended`, saying when the customer
+   withdrew the handoff or when it expired and that only the customer can hand
+   the conversation over again, not the generic
+   `cross_space_read_grant_required` that suggests `xmatrix access request`.
 5. Support answers with `POST .../replies`; the answer lands in the person's
    conversation as a message from "xMatrix support". Support may also answer by
    email, which the support card shows.
