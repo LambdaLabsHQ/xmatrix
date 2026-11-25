@@ -58,7 +58,6 @@ export function AlternativeDetailPage({
 }) {
   const siblings = relatedAlternatives(page, locale);
   const chrome = sitePagesCopy[locale].alternatives;
-  const homeHref = localizedPath(locale, "/");
   const downloadHref = localizedPath(locale, "/download");
   const docsHref = localizedPath(locale, "/docs");
 
@@ -71,25 +70,7 @@ export function AlternativeDetailPage({
       <Navbar locale={locale} />
       <main>
         <section className="mx-auto max-w-5xl px-6 pt-32 pb-12">
-          <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2 text-xs font-semibold text-muted-foreground">
-            <Link href={homeHref} className="transition-colors hover:text-foreground">
-              xMatrix
-            </Link>
-            <span aria-hidden>/</span>
-            <span className="text-foreground">{chrome.breadcrumbLabel(page.name)}</span>
-          </nav>
-
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <p className="x-eyebrow uppercase">
-              {page.eyebrow}
-              {page.alsoKnownAs ? ` · ${page.alsoKnownAs}` : ""}
-            </p>
-            <span className="text-xs text-muted-foreground">
-              {chrome.verifiedPrefix} {page.verifiedDate}
-            </span>
-          </div>
-
-          <h1 className="site-display mt-4 max-w-4xl text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+          <h1 className="site-display max-w-4xl text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
             {page.headline}
           </h1>
           <p className="mt-6 max-w-3xl text-lg leading-8 text-muted-foreground">{page.lead}</p>

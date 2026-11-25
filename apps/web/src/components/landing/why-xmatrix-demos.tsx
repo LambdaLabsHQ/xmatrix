@@ -635,7 +635,7 @@ const HITL_FRAMES = [
   },
   {
     writer: "alex" as WriterKey,
-    pen: makePerson("claude", { editing: false, thinking: true, doing: "waiting for you" }),
+    pen: makePerson("claude", { editing: false, thinking: true, doing: "stopped for your edit" }),
     md: [
       "## Release announcement",
       "",

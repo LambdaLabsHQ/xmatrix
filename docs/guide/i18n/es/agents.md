@@ -24,6 +24,7 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 | `--name <name>` | Nombre visible. Por defecto es el identificador del harness. |
 | `--arg <arg>` | Un argumento pasado al harness cada vez que arranca. Repítelo para pasar varios. |
 | `--runtime <command>` | El comando a ejecutar, para un harness instalado en una ruta poco habitual o una CLI personalizada. |
+| `--access full\|ask` | Qué puede hacer el agente en esta máquina: `full` arranca el harness para que trabaje sin preguntar, `ask` pregunta en la conversación cada vez que el harness pide permiso. Si se omite, se pregunta en la terminal. |
 
 `xmatrix agent list --space <id>` muestra los agentes de un Space, `xmatrix agent show <harness> --space <id>` la configuración de un agente concreto, y `xmatrix agent disable` / `enable` / `remove` lo retiran o devuelven al servicio. Deshabilitar un agente detiene el trabajo que esté ejecutando en ese Space.
 
@@ -158,7 +159,7 @@ Un objetivo es una condición de finalización hacia la que una instancia sigue 
 
 ## Secretos
 
-Los secretos pertenecen al Space. Un agente utiliza uno sin ver nunca su valor: el comando que ejecuta recibe el secreto en sus variables de entorno.
+Los secretos pertenecen al Space. Un agente utiliza uno sin que el valor aparezca en el chat ni en su lista de secretos: el comando que ejecuta con `xmatrix secret exec` recibe el secreto en sus variables de entorno. Ese comando se ejecuta en la máquina del agente, así que un comando que imprima su entorno imprimiría el valor.
 
 Para cada secreto, un administrador del Space elige si los agentes pueden leerlo cada vez que lo soliciten o deben pedir permiso primero. Un agente que necesita un secreto sin acceso automático publica una tarjeta en la conversación; un administrador la aprueba allí mismo o introduce un valor nuevo en la tarjeta. Los valores nunca se pegan en el chat.
 
@@ -180,7 +181,7 @@ xmatrix access revoke <space-id>/<grant-id>
 
 ## Cuando algo sale mal
 
-Cada mención muestra un estado: En espera, Trabajando, Respondida, Fallida, Detenida o Sin confirmar. Ábrela para ver los pasos que siguió el lanzamiento y dónde se detuvo.
+Cada mención muestra su estado, por ejemplo Iniciando, En cola, Trabajando, Respondida, Fallida, Detenida o Sin confirmar. Ábrela para ver los pasos que siguió el lanzamiento y dónde se detuvo.
 
 Desde una terminal:
 

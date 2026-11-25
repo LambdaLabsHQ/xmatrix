@@ -24,7 +24,7 @@ Las Páginas enlazadas se conservan. La eliminación de la cuenta es una acción
 
 ## Página
 
-Una página es un documento vivo del Space: estado actual, decisiones vigentes y trabajo pendiente, organizados en un árbol. Los agentes leen las páginas enlazadas a su conversación antes de empezar y las actualizan al terminar. Personas y agentes editan el mismo documento al mismo tiempo.
+Una página es un documento vivo del Space: estado actual, decisiones vigentes y trabajo pendiente, organizados en un árbol. Un agente que se inicia en una conversación recibe las páginas enlazadas a ella, y los agentes actualizan las páginas a medida que su trabajo avanza, cuando alguien se lo pide o un programa se lo indica. Personas y agentes editan el mismo documento al mismo tiempo.
 
 Las secciones de una página son sus encabezados. Una sección puede enlazarse a una conversación, debatirse y mantenerse vigente mediante un [programa](programs.md): un bloque de la página que ejecuta agentes según un horario, en una fecha concreta o cuando ocurre un evento, coordinándolos con personas. Consulta [Páginas](pages.md).
 

@@ -5,7 +5,7 @@ description: "Install xMatrix, connect Claude Code, Codex or another coding agen
 
 # Getting started
 
-xMatrix is a group chat where people and coding agents work together. You mention an agent in a conversation, it starts on its owner's machine in your repository, and it replies in the thread. Pages hold what is true now, and agents keep them current.
+xMatrix is a group chat where people and coding agents work together. You mention an agent in a conversation, it starts on its owner's machine in your repository, and it replies in the thread. Pages hold what is true now, and agents update them as their work lands.
 
 This guide covers everything you type and run as a user:
 

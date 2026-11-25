@@ -11,7 +11,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Comparing Linear Agents alternatives? Skip expiring sandbox credits, cloud-only ticket runs and Enterprise-gated audit logs with local Channels and Pages.",
     eyebrow: "Linear Agents Alternative · Linear vs xMatrix",
-    headline: "Linear Agents Alternative: Run Agents on Your Own Machines & Subscriptions — Works Alongside Linear",
+    headline: "Linear Agents vs xMatrix",
     lead: "Linear is an extraordinary issue tracker, and Linear Agents turns well-scoped issues into cloud sandbox PRs—at $0.25 per 20 minutes plus token spend from a separate prepaid wallet that expires in 12 months. Keep Linear for issue tracking and connect it to xMatrix to run 34 coding harnesses on your own machines in live Channels and living Pages.",
     productCaption: "Inside xMatrix: keep Linear connected while running local Claude Code and Codex harnesses in live Channels with zero sandbox meters or expiring prepaid balances.",
     painPoints: [
@@ -34,7 +34,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "Linear's audit log is restricted to Enterprise and does not record granular individual agent actions, and there is no unified per-app approval gate covering Cloudflare, Vercel, Gmail, Sentry, or Stripe.",
         xmatrixAnswer:
-          "xMatrix includes full conversation/run traces, Space-level secrets, and per-app policies across 35 connected apps—including Linear itself.",
+          "xMatrix includes conversation/run traces, Space-level secrets, and per-app policies across 40+ connected apps—including Linear itself.",
       },
     ],
     comparisonRows: [
@@ -55,7 +55,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Governance & auditability",
-        xmatrix: "Per-app policies across 35 apps + Space secrets on every plan",
+        xmatrix: "Per-app policies across 40+ apps + Space secrets on every plan",
         competitor: "Team-level agent toggles; audit logs Enterprise-only, not per agent action",
       },
       {
@@ -115,8 +115,8 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Looking for Notion Custom Agents alternatives? Skip the $20–$24 Business gate, three credit wallets and creator-drained pauses with xMatrix living Pages.",
     eyebrow: "Notion Custom Agents Alternative · Notion vs xMatrix",
-    headline: "Notion Custom Agents Alternative: Living Pages Updated as Agents Ship Code — Without Three Credit Wallets",
-    lead: "Notion Custom Agents sit behind a $20–$24/seat Business paywall and a convoluted three-wallet credit system where shared agents drain their creator's personal Select credits and pause mid-run. xMatrix updates living Pages automatically as 34 coding harnesses ship in your real repos—no credit wallets required.",
+    headline: "Notion Custom Agents vs xMatrix",
+    lead: "Notion Custom Agents sit behind a $20–$24/seat Business paywall and a convoluted three-wallet credit system where shared agents drain their creator's personal Select credits and pause mid-run. In xMatrix, agents across 34 coding harnesses update living Pages as they ship in your real repos, drawing on one pooled credit allowance per Space.",
     productCaption: "Inside xMatrix: agents run in your real repos, talk with your team in Channels, and maintain living Pages—with one pooled Space allowance and full mobile access.",
     painPoints: [
       {
@@ -124,7 +124,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "Notion splits AI usage into personal Standard credits (1,500/mo), personal Select credits (500/mo, required for Custom Agents), and admin-purchased Workspace Notion Credits ($10/1,000). Personal balances can't pool or roll over, teammates triggering a shared agent burn the creator's personal Select pool by default, and agents pause mid-task the instant credits hit zero.",
         xmatrixAnswer:
-          "xMatrix Pro is one flat $10/human seat/month ($8/mo annual) with 5,000 pooled agent credits per seat across the Space, a 50% grace cushion, and zero LLM token resale—human edits are always free.",
+          "xMatrix Pro is $10 per person a month ($8/mo billed annually). Each seat adds 5,000 credits a month to one pool shared by the Space; Agent and app writes use them while people write free, then owner-bought packs ($10 per 5,000) and a 2,500-per-seat grace allowance follow. xMatrix never resells LLM tokens.",
       },
       {
         title: "No local machine execution, cross-machine relay, or real-time agent channels",
@@ -138,7 +138,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "Notion's mobile app blocks creating Custom Agents and restricts mobile users to interacting only with Custom Agents they personally own—leaving teammates stranded away from a desktop.",
         xmatrixAnswer:
-          "Every xMatrix member can read Pages, summon any authorized Space agent, and approve external connector actions from Web (including iPhone & iPad), Desktop, or Android.",
+          "xMatrix members can read Pages and summon the Space's agents—and Space admins can approve Ask-first connector actions—from the Web, the desktop apps, or the iPhone, iPad, and Android apps.",
       },
     ],
     comparisonRows: [
@@ -159,12 +159,12 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Mobile team access",
-        xmatrix: "Full Channel, Page, agent summon, and approval access for all members",
+        xmatrix: "Channels, Pages, and agent summons on mobile; Space admins approve actions there too",
         competitor: "Cannot create Custom Agents on mobile or run team-shared agents",
       },
       {
         dimension: "Secrets & engineering connectors",
-        xmatrix: "Space-level secret vault + 35 connectors (including Notion itself)",
+        xmatrix: "Space-level secret vault + 40+ connectors (including Notion itself)",
         competitor: "No Space-level secret vault for CLI execution",
       },
     ],
@@ -173,7 +173,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     ],
     switchWhen: [
       "You're tired of untangling Standard vs. Select vs. Workspace credits or watching shared team agents stall because one builder's personal credits ran dry.",
-      "You want coding agents running directly on your own repositories and automatically maintaining project Pages—not wikis that drift behind reality.",
+      "You want coding agents running directly on your own repositories and maintaining project Pages as they work—not wikis that drift behind reality.",
       "Your engineers need mobile access to shared agents, Space secrets, and governed deploy/ops connectors.",
     ],
     migrationSteps: [
@@ -204,7 +204,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       {
         question: "What happens if a person and an agent edit the same xMatrix Page?",
         answer:
-          "The human always wins. If you type in a paragraph an agent is updating, the agent waits and continues from what you wrote so your words are never overwritten.",
+          "Nothing is locked. An agent co-writing live keeps out of the paragraph you are typing in and stops the moment you edit what it is writing; an agent editing from the CLI whose change overlaps yours has it refused and gets the current text to merge into.",
       },
     ],
     relatedSlugs: ["nowledge-mem", "linear", "youmind", "raft"],
@@ -218,7 +218,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Looking for Slack Code alternatives? Escape 1 req/min limits, 15-message history on custom apps and 90-day Free caps, with real agent runtimes in xMatrix.",
     eyebrow: "Slack Code Alternative · Slack Code vs xMatrix",
-    headline: "Slack Code Alternative: Agents on Your Machines, Decisions on Living Pages — Works Alongside Slack",
+    headline: "Slack Code vs xMatrix",
     lead: "Slack Code API adds task channels and diff previews inside Slack, but Slack is still just a chat shell with no agent runtime, no living documentation, and severe API throttling (1 req/min, 15 messages max on history endpoints for non-Marketplace apps). Keep Slack connected via xMatrix's Slack connector while running 34 coding harnesses on your own machines and keeping decisions in living Pages.",
     productCaption: "Inside xMatrix: native multi-human and multi-agent Channels backed by your own machines and living Pages—with full context access and zero 15-message API walls.",
     painPoints: [
@@ -241,7 +241,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "Even with task channels, Slack has no living project document layer—decisions sink under hundreds of messages and force every new person or agent to guess what still holds true.",
         xmatrixAnswer:
-          "Every xMatrix Channel connects directly to living Pages where agents rewrite the current state in place—so you read one page to know where a project stands.",
+          "xMatrix Channels link to living Pages where agents rewrite the current state in place—so you read the page to know where a project stands.",
       },
     ],
     comparisonRows: [
@@ -262,12 +262,12 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Governed connectors & secrets",
-        xmatrix: "Space secrets + 35 connected apps with per-app policies",
+        xmatrix: "Space secrets + 40+ connected apps with per-app policies",
         competitor: "No built-in agent secret vault or cross-app runtime governance",
       },
       {
         dimension: "Works with Slack?",
-        xmatrix: "Native Slack connector lets xMatrix agents read/post to Slack with approval",
+        xmatrix: "Native Slack connector brings Slack messages into a Channel; agents post back under its permission",
         competitor: "Lives strictly inside Slack",
       },
     ],
@@ -290,7 +290,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         title: "Turn pinned Slack messages into living Pages",
-        detail: "Replace stale pinned messages and bookmarks with Pages that agents keep current automatically.",
+        detail: "Replace stale pinned messages and bookmarks with Pages that agents update as their work lands.",
       },
     ],
     faqs: [
@@ -320,7 +320,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Comparing Nowledge Mem alternatives? Go beyond memory fragments from chats: run coding agents across machines and keep living Pages current in xMatrix.",
     eyebrow: "Nowledge Mem Alternative · Nowledge Mem vs xMatrix",
-    headline: "Nowledge Mem Alternative: Team Project Memory Written by the Agents Doing the Work",
+    headline: "Nowledge Mem vs xMatrix",
     lead: "Nowledge Mem builds a clever local graph/vector memory layer across AI tools, but it is a passive memory store—it guesses facts from old chats, cannot run coding agents or govern external tools, and its Team workspace remains in private beta. In xMatrix, the working runs write authoritative living Pages your whole team shares today.",
     productCaption: "Inside xMatrix: instead of passively guessing memories from old chats, the exact coding agents shipping your work keep living project Pages accurate across your team.",
     painPoints: [
@@ -343,7 +343,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "Nowledge Mem Team is still in private beta, local setups require macOS 15+ plus manual MCP/proxy wiring, and there is no Space secret vault or per-app approval gate for production tools.",
         xmatrixAnswer:
-          "xMatrix Spaces are live and self-serve today across macOS, Windows, Linux, Android, and Web (including iPhone & iPad)—with Space-level secrets and per-app policies across 35 connected apps.",
+          "xMatrix Spaces are live and self-serve today across macOS, Windows, Linux, iPhone & iPad, Android, and Web—with Space-level secrets and per-app policies across 40+ connected apps.",
       },
     ],
     comparisonRows: [
@@ -369,7 +369,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Secrets & external apps",
-        xmatrix: "Space-level secrets + 35 connectors with per-app policies",
+        xmatrix: "Space-level secrets + 40+ connectors with per-app policies",
         competitor: "Hosted Slack connection in Team; no ops connector approval plane",
       },
     ],
@@ -377,8 +377,8 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       "You want an offline personal memory graph capturing chats across web ChatGPT, Claude web, and Cursor without changing how you execute code.",
     ],
     switchWhen: [
-      "You want the agents doing the work to maintain one authoritative project Page—not a background extractor guessing facts from old transcripts.",
-      "You need live team Spaces today (not a private beta) with multi-machine agent execution and 35 governed ops connectors.",
+      "You want the agents doing the work to maintain authoritative project Pages—not a background extractor guessing facts from old transcripts.",
+      "You need live team Spaces today (not a private beta) with multi-machine agent execution and 40+ governed ops connectors.",
       "You want zero manual local proxy/tunnel plumbing across macOS, Windows, Linux, Android, and Web.",
     ],
     migrationSteps: [
@@ -392,7 +392,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         title: "Schedule Page upkeep with Norn routines",
-        detail: "Keep metrics, release notes, and open blockers fresh automatically without paying background LLM extraction tokens on idle chat logs.",
+        detail: "Have an agent refresh metrics, release notes, and open blockers on a schedule instead of paying background LLM extraction tokens on idle chat logs.",
       },
     ],
     faqs: [
@@ -409,7 +409,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       {
         question: "What happens if an agent writes something wrong to an xMatrix Page?",
         answer:
-          "Every Page has full revision history and human-priority co-editing—edit any line yourself and agents immediately pick up the corrected truth.",
+          "Every Page has full revision history and lock-free co-editing—edit any line yourself, and agents that read that section are told of the change at their next turn.",
       },
     ],
     relatedSlugs: ["everos", "notion", "raft", "lobehub"],
@@ -423,7 +423,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Looking for EverOS or EverMemOS alternatives? Leave single-machine SQLite locks, hidden extraction LLM bills and no team sync for xMatrix Channels and Pages.",
     eyebrow: "EverOS (EverMemOS) Alternative · EverOS vs xMatrix",
-    headline: "EverOS Alternative: Multi-Machine Project Memory Written by the Agents Doing the Work",
+    headline: "EverOS vs xMatrix",
     lead: "EverOS (EverMemOS) pairs Markdown files with local SQLite and LanceDB indexes, but its open-source v1 explicitly refuses a second service on the same directory, excludes multi-tenancy and sync, and burns continuous background LLM tokens on extraction. xMatrix gives teams real-time multi-machine execution across 34 harnesses and authoritative living Pages.",
     productCaption: "Inside xMatrix: real-time multi-machine Markdown Pages updated by your working coding agents—with zero single-directory locks or background extraction token drain.",
     painPoints: [
@@ -446,7 +446,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "EverOS is a memory backend (and dropped Foresight predictions in v1.7.1); it cannot summon coding harnesses across machines or require human approval before touching Vercel, Cloudflare, Gmail, or Stripe.",
         xmatrixAnswer:
-          "xMatrix combines multi-agent execution across 34 harnesses, Space secrets, per-app approvals across 35 connectors, and living Pages into one cohesive workspace.",
+          "xMatrix combines multi-agent execution across 34 harnesses, Space secrets, per-app approvals across 40+ connectors, and living Pages into one cohesive workspace.",
       },
     ],
     comparisonRows: [
@@ -467,12 +467,12 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Concurrent editing",
-        xmatrix: "Live collaborative Pages with suggestion mode, attribution, and human edit priority",
+        xmatrix: "Live collaborative Pages with suggestion mode, attribution, and lock-free merging",
         competitor: "Local directory locks; concurrent local tool writes cause contention",
       },
       {
         dimension: "Governance & connectors",
-        xmatrix: "Space-level secrets + 35 connected apps with per-app policies",
+        xmatrix: "Space-level secrets + 40+ connected apps with per-app policies",
         competitor: "None",
       },
     ],
@@ -482,7 +482,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     switchWhen: [
       "You work across multiple machines or with teammates and cannot live inside a single-directory v1 lock boundary.",
       "You want authoritative Markdown Pages maintained by working Runs rather than paying continuous background LLM extraction costs.",
-      "You need real agent execution across 34 harnesses and 35 governed connectors in addition to persistent project knowledge.",
+      "You need real agent execution across 34 harnesses and 40+ governed connectors in addition to persistent project knowledge.",
     ],
     migrationSteps: [
       {
@@ -525,7 +525,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Comparing YouMind alternatives? Trade $20–$200/mo solo credit tiers for xMatrix's $10/seat multiplayer coding Channels, local repo runs and living Pages.",
     eyebrow: "YouMind Alternative · YouMind vs xMatrix",
-    headline: "The YouMind Alternative Built for Team Coding Agents, Android, and Real Repos",
+    headline: "YouMind vs xMatrix",
     lead: "YouMind is a slick solo creation studio for synthesizing videos, podcasts, and web research into slides and articles ($20–$200/month in credits), but it lacks native team collaboration, has no Android app, and only bridges GitHub/Linear context rather than running local coding agents. xMatrix coordinates real code, research, and operations in one multiplayer Space.",
     productCaption: "Inside xMatrix: keep research, specs, and live multi-agent software shipping in one multiplayer Space across desktop, Web, Android, and iOS.",
     painPoints: [
@@ -548,7 +548,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "YouMind ships iOS and Chrome extensions with no official Android app, leaving Android developers unable to monitor or steer runs away from their desk.",
         xmatrixAnswer:
-          "xMatrix runs across macOS, Windows, Linux, Android, and Web (including iPhone & iPad), keeping research, specs, code PRs, and launches on one living Page.",
+          "xMatrix runs across macOS, Windows, Linux, iPhone & iPad, Android, and Web, keeping research, specs, code PRs, and launches in shared living Pages.",
       },
     ],
     comparisonRows: [
@@ -574,7 +574,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Platform coverage",
-        xmatrix: "macOS, Windows, Linux, Android, and Web (including iPhone & iPad)",
+        xmatrix: "macOS, Windows, Linux, iPhone & iPad, Android, and Web",
         competitor: "Web, iOS, Chrome extension; no official Android app",
       },
     ],
@@ -596,7 +596,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         title: "Automate recurring research and reporting",
-        detail: "Embed scheduled Norn programs inside your Pages so weekly digests and metrics stay current automatically.",
+        detail: "Embed scheduled Norn programs inside your Pages so an agent refreshes weekly digests and metrics on schedule.",
       },
     ],
     faqs: [
@@ -608,7 +608,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       {
         question: "Does xMatrix have an Android app?",
         answer:
-          "Yes. xMatrix provides an Android app alongside macOS, Windows, Linux, and Web (including iPhone & iPad).",
+          "Yes. xMatrix has an Android app (Google Play or APK), alongside an iPhone & iPad app, desktop apps for macOS and Windows, the Web, and the CLI for Linux machines.",
       },
       {
         question: "Can external agents use xMatrix too?",
@@ -627,9 +627,9 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Google Jules went read-only Nov 11 and shuts down Dec 31, 2026. Bring Jules memories, schedules and repos to xMatrix; run Antigravity, Claude Code and Codex.",
     eyebrow: "Google Jules Alternative · Dec 31 Shutdown Migration",
-    headline: "Move Async GitHub Work Off Google Jules Before Dec 31 — Keep Dispatching From Your Phone",
-    lead: "Google Jules stopped running new sessions on November 11, 2026 and turns off completely on December 31, 2026, with no automatic migration of memories, schedules, or tasks. xMatrix lets you import exported context into living Pages and keep dispatching async GitHub PRs from your phone or Web—running Google Antigravity and 34 other harnesses on an always-on computer or your own VPS.",
-    productCaption: "Inside xMatrix: keep clearing GitHub issues asynchronously from Web or mobile with Google Antigravity, Claude Code, Codex, and 32 other harnesses running on your own always-on machine or VPS.",
+    headline: "Moving Off Google Jules",
+    lead: "Google Jules stopped running new sessions on November 11, 2026 and turns off completely on December 31, 2026, with no automatic migration of memories, schedules, or tasks. xMatrix lets you import exported context into living Pages and keep dispatching async GitHub PRs from your phone or Web—running Google Antigravity and 33 other harnesses on an always-on computer or your own VPS.",
+    productCaption: "Inside xMatrix: keep clearing GitHub issues asynchronously from Web or mobile with Google Antigravity, Claude Code, Codex, and 31 other harnesses running on your own always-on machine or VPS.",
     painPoints: [
       {
         title: "Permanent shutdown on December 31, 2026 with manual-only export",
@@ -643,14 +643,14 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "Developers on Hacker News, Reddit, and Google AI forums voiced frustration over losing Jules' predictable daily async task model and worrying that moving everything into one vendor's unified quota pool will trigger unexpected caps or overages.",
         xmatrixAnswer:
-          "xMatrix natively runs Google Antigravity right alongside 34 other coding harnesses (Claude Code, Codex, Cursor, Gemini CLI, etc.)—and can hand work off to another provider when one vendor's quota window fills up.",
+          "xMatrix natively runs Google Antigravity right alongside 33 other coding harnesses (Claude Code, Codex, Cursor, Gemini CLI, etc.)—and can hand work off to another provider when one vendor's quota window fills up.",
       },
       {
         title: "Rebuilding lightweight mobile and async GitHub backlog clearing",
         problem:
           "Early migrants noted that moving off Jules broke their quick mobile-to-PR habit for clearing GitHub issues asynchronously without sitting at a local IDE all day.",
         xmatrixAnswer:
-          "Connect one always-on computer or your own Linux VPS, then mention @auto repo:owner/repo from Android or Web (including iPhone & iPad)—or trigger agents automatically from GitHub events—and watch PRs, CI status, and Page updates land asynchronously.",
+          "Connect one always-on computer or your own Linux VPS, then mention @auto repo:owner/repo from the iPhone, iPad, or Android app or the Web—or trigger agents automatically from GitHub events—and watch PRs, CI status, and Page updates land asynchronously.",
       },
     ],
     comparisonRows: [
@@ -661,7 +661,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Harness & model choice",
-        xmatrix: "Google Antigravity + 34 other coding harnesses (+ --runtime) with quota handoff",
+        xmatrix: "Google Antigravity + 33 other coding harnesses (+ --runtime) with quota handoff",
         competitor: "Google-only cloud agent (retiring into Google Antigravity)",
       },
       {
@@ -684,7 +684,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       "There is no option to stay on Jules past December 31, 2026—export your data with npm install -g @google/jules before access ends. Note that xMatrix requires your own always-on computer or VPS rather than hosted cloud VMs.",
     ],
     switchWhen: [
-      "You want to keep using Google Antigravity alongside 34 other harnesses without betting everything on one vendor.",
+      "You want to keep using Google Antigravity alongside 33 other harnesses without betting everything on one vendor.",
       "You need a durable home for your exported Jules memories, environment secrets, and scheduled GitHub backlog jobs.",
       "You already have a Mac Studio, desktop, or inexpensive Linux VPS and want async phone-to-PR workflows that a cloud beta shutdown can't take away.",
     ],
@@ -706,7 +706,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       {
         question: "Can I run Google Antigravity inside xMatrix after migrating from Jules?",
         answer:
-          "Yes. xMatrix natively supports Google Antigravity (agy) alongside 34 other harnesses (Claude Code, Codex, Cursor, Gemini, etc.) on your own machines.",
+          "Yes. xMatrix natively supports Google Antigravity (agy) alongside 33 other harnesses (Claude Code, Codex, Cursor, Gemini, etc.) on your own machines.",
       },
       {
         question: "Does xMatrix provide hosted cloud VMs like Jules did?",

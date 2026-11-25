@@ -7,26 +7,26 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     verifiedDate: "2026 年 11 月 22 日",
     metaTitle: "Raft 替代方案 (2026)：Raft vs xMatrix",
     metaDescription:
-      "正在尋找 Raft（Slock）替代方案？比較 Raft vs xMatrix：用即時更新的即時頁面取代沉在聊天紀錄裡的決策與已下線的 Wiki Agent、支援 34 種程式設計代理，以及 35 個受控管應用。",
+      "正在尋找 Raft（Slock）替代方案？比較 Raft vs xMatrix：用即時更新的即時頁面取代沉在聊天紀錄裡的決策與已下線的 Wiki Agent、支援 34 種程式設計代理，以及 40 多個受控管應用。",
     eyebrow: "Raft 替代方案 · Raft vs xMatrix",
-    headline: "Raft 替代方案：讓決策沉澱在即時頁面，而非埋沒於聊天紀錄",
-    lead: "Raft 將開發 Agent 視為聊天室隊友，並於 2026 年 9 月下線了 Wiki Agent。xMatrix 保留了人與 34 種程式設計代理共享的頻道，並把已完成的工作直接轉化為即時頁面（Pages），跨所有主機與 35 個整合工具維持最新狀態。",
+    headline: "Raft vs xMatrix",
+    lead: "Raft 將開發 Agent 視為聊天室隊友，並於 2026 年 9 月下線了 Wiki Agent。xMatrix 保留了人與 34 種程式設計代理共享的頻道，Agent 會把完成的工作記錄在全隊共讀的即時頁面（Pages）中，並以個別應用權限控管 40 多個整合工具。",
     productCaption:
-      "xMatrix 實景：團隊成員與開發 Agent 在頻道（Channels）中即時協作，同步更新同一份動態專案頁面，不再讓脈絡散落在聊天捲軸與本機 MEMORY.md 檔案中。",
+      "xMatrix 實景：團隊成員與開發 Agent 在頻道（Channels）中即時協作，同步更新共享的動態專案頁面，不再讓脈絡散落在聊天捲軸與本機 MEMORY.md 檔案中。",
     painPoints: [
       {
         title: "工作成果困在聊天紀錄與單機 MEMORY.md 檔案裡",
         problem:
           "Raft 於 2026 年 9 月 24 日下線了 Wiki Agent，讓每個 Agent 仍綁定在單一電腦的本機 MEMORY.md 與 notes/ 目錄。一旦 Agent 早期寫下錯誤假設，過時脈絡便會在交接間持續殘留，直到人工手動清理；且 Free 方案的工作區歷史紀錄僅保留 30 天。",
         xmatrixAnswer:
-          "xMatrix 將即時頁面設為產品的核心產出。工作完成時 Agent 會自動更新對應章節；當成員正在編輯某個段落時，Agent 會先等待並接續成員寫下的內容，絕不覆蓋人工修改。",
+          "xMatrix 將即時頁面設為產品的核心產出。工作落地時 Agent 會更新對應章節；若成員正在編輯某個段落，Agent 會先等待並接續成員寫下的內容。",
       },
       {
         title: "Stamp 僅涵蓋 GitHub——維運連接器缺少統一的核准層",
         problem:
           "Raft 的 Stamp 僅針對 GitHub push 與 PR 提供人工核准，但實際交付軟體的團隊還得操作 Vercel、Cloudflare、Linear、Sentry、Gmail、Stripe 與 Google Workspace。除此之外，Raft 的 Agent 執行環境啟動時會直接略過權限檢查。",
         xmatrixAnswer:
-          "xMatrix 在 35 個整合工具上套用統一的個別應用權限原則（唯讀、先詢問或讀寫，其中 GitHub 提供唯讀與讀寫），而 Space 層級機密則透過 xmatrix secret exec 在執行時注入，讓 Agent 永遠接觸不到原始機密值。",
+          "xMatrix 在 40 多個整合應用上套用統一的個別應用權限（唯讀、先詢問或讀寫，其中 GitHub 提供唯讀與讀寫），而 xmatrix secret exec 會將 Space 機密傳入指令的執行環境，不會將其印出或放進聊天中。",
       },
       {
         title: "Pro 方案仍對 Agent 收取席位費，且綁定單一電腦",
@@ -44,7 +44,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "核准機制與機密管理",
-        xmatrix: "35 個應用個別權限原則 + Space 機密（GitHub：唯讀／讀寫）",
+        xmatrix: "40 多個應用的個別權限 + Space 機密；各主機擁有者為每個代理工具選擇完全存取或先詢問",
         competitor: "僅針對 GitHub push/PR 提供 Stamp；本機代理權杖；執行環境略過權限檢查",
       },
       {
@@ -112,7 +112,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在比較 Lody 替代方案？告別單一工作階段 worktree 與背景服務斷線問題，改用 xMatrix 的多人共享頻道、即時頁面、Space 機密與 Webhook 自動化。",
     eyebrow: "Lody 替代方案 · Lody vs xMatrix",
-    headline: "Lody 替代：一個頻道、一份即時頁面，全隊與所有代理即時共享",
+    headline: "Lody vs xMatrix",
     lead: "Lody 以「一個 worktree 對應一個獨立工作階段」為核心，並透過閉源雲端中繼同步。xMatrix 讓隊友與 34 種程式設計代理齊聚同一個共享頻道、隨工作落地持續更新即時頁面，並加上 Space 機密與事件驅動的 Norn 程式。",
     productCaption:
       "xMatrix 實景：不再逐一轉交孤立的開發工作階段，而是讓隊友與 34 種程式設計代理在同一個頻道即時協作，並將成果沉澱到即時頁面中。",
@@ -122,7 +122,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Lody 圍繞個人開發工作階段與子工作階段樹設計；雖然隊友間可以移交工作階段，但多人多 Agent 共享頻道、成員 @提及與共享專案文件仍停留在路線圖，並非核心工作流程。",
         xmatrixAnswer:
-          "xMatrix 從第一天起就讓多位成員與多個 Agent 同處一個頻道，且每次任務完成後都會自動更新追蹤專案現況的共享頁面。",
+          "xMatrix 從第一天起就讓多位成員與多個 Agent 同處一個頻道，且 Agent 會將完成的工作寫回追蹤專案現況的共享頁面。",
       },
       {
         title: "跨裝置背景服務心跳斷線與 worktree 鎖定衝突",
@@ -136,7 +136,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Lody 僅依單一工作階段設定權限，沒有工作區機密庫，也缺少維運工具的個別應用治理，且自動化僅支援定時 cron 而無法接收外部 Webhook 事件觸發。",
         xmatrixAnswer:
-          "xMatrix 提供執行時注入的 Space 層級機密、涵蓋 35 個整合工具的個別應用核准控管，以及內嵌於頁面、可由排程或 GitHub、Sentry 等外部事件觸發的 Norn 程式。",
+          "xMatrix 提供執行時注入的 Space 層級機密、涵蓋 40 多個整合工具的個別應用核准控管，以及內嵌於頁面、可由排程或 GitHub、Sentry 等外部事件觸發的 Norn 程式。",
       },
     ],
     comparisonRows: [
@@ -147,7 +147,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "機密與外部維運工具",
-        xmatrix: "Space 層級機密（xmatrix secret exec）+ 35 個受控管應用整合",
+        xmatrix: "Space 層級機密（xmatrix secret exec）+ 40 多個受控管應用整合",
         competitor: "僅限單一工作階段權限；無工作區機密庫",
       },
       {
@@ -215,47 +215,47 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "評估 Multica 替代方案？擺脫無頭工單執行、#9559 靜默丟失 bypassPermissions 限制與明文環境變數，改用 xMatrix 的即時頻道、即時頁面與 Space 機密。",
     eyebrow: "Multica 替代方案 · Multica vs xMatrix",
-    headline: "Multica 替代：別把每個需求都開成工單，說一次，代理交付、即時頁面同步最新",
-    lead: "Multica 強制把每項 Agent 任務都塞進預設 bypassPermissions 的無頭看板工單，且缺乏動態文件層。xMatrix 讓團隊與 34 種程式設計代理在頻道即時協作（或透過 xmatrix claude 掛接互動式工作階段）、自動保持即時頁面最新，並以 Space 機密治理 35 個整合工具。",
+    headline: "Multica vs xMatrix",
+    lead: "Multica 強制把每項 Agent 任務都塞進預設 bypassPermissions 的無頭看板工單，且缺乏動態文件層。xMatrix 讓團隊與 34 種程式設計代理在頻道即時協作（或透過 xmatrix claude 在你自己的終端機中啟動 Claude Code，並以頻道成員身分加入）、由 Agent 保持即時頁面最新，並以 Space 機密治理 40 多個整合工具。",
     productCaption:
-      "xMatrix 實景：在共享頻道與隊友一同即時引導 Claude Code、Codex 與其餘 33 種程式設計代理，搭配明確的應用核准與即時頁面，取代盲跑的無頭看板工單。",
+      "xMatrix 實景：在共享頻道與隊友一同即時引導 Claude Code、Codex 與其餘 32 種程式設計代理，搭配明確的應用核准與即時頁面，取代盲跑的無頭看板工單。",
     painPoints: [
       {
         title: "預設強制啟用 bypassPermissions、權限限制曾靜默失效，且伺服器以明文存放環境變數",
         problem:
           "Multica 啟動 Claude Code 時預設加上 --permission-mode bypassPermissions、啟動 Codex 時採 full-auto 模式，且以明文在伺服器存放環境變數。社群回報的漏洞 #9559 更揭露 custom_args 會靜默丟棄使用者設定的 --permission-mode 限制。",
         xmatrixAnswer:
-          "xMatrix 透過個別應用的「唯讀」、「先詢問」或「讀寫」原則治理 35 個整合工具的外部操作，並透過 xmatrix secret exec 在執行時注入 Space 機密，讓原始憑證永遠不會出現在伺服器環境變數或對話紀錄裡。",
+          "xMatrix 透過個別應用的「唯讀」、「先詢問」或「讀寫」權限治理 40 多個整合應用的外部操作，並由 xmatrix secret exec 將 Space 機密傳入指令的執行環境，讓機密永遠不會出現在對話紀錄裡。每台主機的擁有者在新增代理工具時，都會為其選擇完全存取或先詢問。",
       },
       {
         title: "所有工作都得開成無頭工單——沒有共享頻道，也不能掛接互動工作階段",
         problem:
           "Multica 內建聊天僅限私人一對一對話，整個流程要求把工作轉成無頭看板工單，並不支援在中途即時微調方向，或把進行中的本機終端機工作階段拉進團隊對話裡。",
         xmatrixAnswer:
-          "xMatrix 讓隊友與 34 種程式設計代理在共享頻道中即時協作——執行 xmatrix claude 即可將既有的本機終端機工作階段直接掛接進頻道，並讓最終成果自動彙整至即時頁面。",
+          "xMatrix 讓隊友與 34 種程式設計代理在共享頻道中即時協作——執行 xmatrix claude 即可在你的終端機中啟動 Claude Code，並以即時成員身分加入頻道，同時由 Agent 將成果寫回即時頁面。",
       },
       {
         title: "缺乏即時頁面與內建專案記憶",
         problem:
           "Multica 只追蹤工單與技能，不維護持續演進的專案現況——社群提出的記憶功能請求（#838）自 2026 年 4 月以來一直未獲回應，導致決策散落在已關閉的工單中。",
         xmatrixAnswer:
-          "每個 xMatrix Space 都原生內建即時頁面。每項決策只寫一次，支援人機共同編輯（具備建議模式與逐段署名），並由實際動手做的 Agent 自動保持最新。",
+          "每個 xMatrix Space 都原生內建即時頁面。每項決策只寫一次，支援人機共同編輯（具備建議模式與逐段署名），並由實際動手做的 Agent 保持最新。",
       },
     ],
     comparisonRows: [
       {
         dimension: "協作模式",
-        xmatrix: "多人多 Agent 共享頻道 + xmatrix claude 工作階段掛接 + 即時頁面（Pages）",
+        xmatrix: "多人多 Agent 共享頻道 + 在你終端機中執行的 xmatrix claude + 即時頁面（Pages）",
         competitor: "看板工單 + 僅限無頭背景執行 + 私人 1 對 1 聊天",
       },
       {
         dimension: "外部操作與機密管理",
-        xmatrix: "35 個應用個別權限原則 + 遮罩保護的 Space 機密（執行時注入）",
+        xmatrix: "40 多個應用的個別權限 + 傳入指令、絕不顯示於聊天中的 Space 機密",
         competitor: "預設 bypassPermissions（#9559）；伺服器明文環境變數；MCP schema 核准",
       },
       {
         dimension: "動態文件",
-        xmatrix: "原生即時頁面由 Agent 更新；支援建議模式、逐段署名與人工編輯優先",
+        xmatrix: "原生即時頁面由 Agent 更新；支援建議模式、逐段署名與無鎖定共同編輯",
         competitor: "無（記憶功能請求 #838 尚未解決）",
       },
       {
@@ -265,7 +265,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "外部維運連接器",
-        xmatrix: "35 個原生整合工具（GitHub、Linear、Vercel、Cloudflare、Sentry、Gmail、Stripe 等）",
+        xmatrix: "40 多個原生整合工具（GitHub、Linear、Vercel、Cloudflare、Sentry、Gmail、Stripe 等）",
         competitor: "聊天橋接（Slack、Lark、DingTalk、WeCom、Telegram）+ MCP 外掛",
       },
     ],
@@ -276,13 +276,13 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     switchWhen: [
       "你想要與隊友及多個開發 Agent 即時互動並隨時微調方向，而不是盲跑的無頭工單。",
       "伺服器明文環境變數與 bypassPermissions 預設設定無法通過你的正式部署或維運安全要求。",
-      "你希望專案決策與待辦事項自動整理在即時頁面裡，而不是深埋在已關閉的工單紀錄中。",
+      "你希望專案決策與待辦事項由你的 Agent 整理在即時頁面裡，而不是深埋在已關閉的工單紀錄中。",
     ],
     migrationSteps: [
       {
         title: "連接現有的開發主機",
         detail:
-          "在原本跑 Multica 背景服務的主機安裝 xMatrix CLI，你本機的 Claude Code、Codex 與 Cursor 設定立即就能啟用。",
+          "在原本跑 Multica 背景服務的主機安裝 xMatrix CLI，再以 xmatrix agent add 加入你本機的 Claude Code、Codex 與 Cursor 設定。",
       },
       {
         title: "將重複性 Autopilot 任務搬進頁面的 Norn 例行任務",
@@ -303,7 +303,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "xMatrix 會強制 Claude Code 以 bypassPermissions 模式執行嗎？",
         answer:
-          "不會。xMatrix 將主機存取與外部應用權限視為明確控管邊界：已連結應用支援唯讀、先詢問與讀寫模式，Space 機密也絕不會以明文暴露在 Agent 對話紀錄裡。",
+          "不會。新增代理工具時，由該主機的擁有者選擇其存取方式：完全存取（對 Claude Code，xMatrix 會加上 --dangerously-skip-permissions）或先詢問，此時每個權限請求都會在頻道中詢問。已連結應用另外支援唯讀、先詢問與讀寫模式，Space 機密的值也絕不會出現在聊天中。",
       },
       {
         question: "在 xMatrix 中可以由多位成員同時監看並引導同一個 Agent 嗎？",
@@ -316,10 +316,10 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     verifiedDate: "2026 年 11 月 22 日",
     metaTitle: "Paradev / Superset 替代方案 (2026)：vs xMatrix",
     metaDescription:
-      "正在找 Paradev（Superset）替代方案？在 macOS、Windows、Linux 與 Android 上以 US$10／席位執行開發團隊，享有共享頻道、即時頁面與 35 個應用權限控管。",
+      "正在找 Paradev（Superset）替代方案？在 macOS、Windows、Linux 與 Android 上以 US$10／席位執行開發團隊，享有共享頻道、即時頁面與 40 多個應用權限控管。",
     eyebrow: "Paradev (Superset) 替代方案 · Paradev vs xMatrix",
-    headline: "跨作業系統團隊的 Paradev 替代方案：共享頻道、即時頁面、US$10／席位",
-    lead: "Paradev（2026 年 10 月由 Superset 更名）以 macOS 為主、團隊版價格直跳 US$60／人／月，且開啟遠端主機即暴露整台電腦。xMatrix 橫跨 macOS、Windows、Linux、Android 與 Web，以每位人類成員 US$10／月提供共享頻道、即時頁面與 35 個受控管整合工具。",
+    headline: "Paradev vs xMatrix",
+    lead: "Paradev（2026 年 10 月由 Superset 更名）以 macOS 為主、團隊版價格直跳 US$60／人／月，且開啟遠端主機即暴露整台電腦。xMatrix 橫跨 macOS、Windows、Linux、Android 與 Web，以每位人類成員 US$10／月提供共享頻道、即時頁面與 40 多個受控管整合工具。",
     productCaption:
       "xMatrix 實景：透過清爽的頻道與即時頁面統籌數十個並行 Agent 對話，不必在 20 個終端機分割視窗之間疲於奔命。",
     painPoints: [
@@ -342,7 +342,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Paradev 沒有 Space 層級機密與跨應用的核准治理層；一旦開放遠端中繼存取，實質上等於將整台主機暴露給已授權的隊友。",
         xmatrixAnswer:
-          "xMatrix 將 Agent 限制在已註冊的儲存庫與目錄中，透過不暴露明文的方式注入 Space 機密，並在 35 個維運整合工具上強制執行個別應用權限原則。",
+          "xMatrix 會在你註冊的儲存庫與目錄中啟動 Agent，讓每台主機的擁有者為每個代理工具選擇完全存取或先詢問，將 Space 機密傳入指令而不印出，並在 40 多個整合工具上強制執行個別應用權限。",
       },
     ],
     comparisonRows: [
@@ -353,7 +353,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "核心工作流程",
-        xmatrix: "共享頻道 + 隨工作完成自動更新的即時頁面（Pages）",
+        xmatrix: "共享頻道 + 由 Agent 隨工作完成更新的即時頁面（Pages）",
         competitor: "並行 IDE／worktree 工作區 + 可釘選留言的已發布頁面",
       },
       {
@@ -363,7 +363,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "機密與維運應用",
-        xmatrix: "Space 層級機密庫 + 35 個具個別核准原則的整合工具",
+        xmatrix: "Space 層級機密庫 + 40 多個具個別核准原則的整合工具",
         competitor: "行內工作區外核准；無 Space 機密；僅支援開發類觸發",
       },
       {
@@ -378,7 +378,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     ],
     switchWhen: [
       "在 Claude／Codex 訂閱之外再付 US$20–$60／席位，對協調自有主機的小團隊來說負擔過重。",
-      "你希望用一份即時頁面掌握 20 個並行 Agent 的進度，而不是在 20 個終端機分頁間來回切換。",
+      "你希望 20 個並行討論串中的 Agent 把成果寫進即時頁面，而不是在 20 個終端機分頁間來回切換。",
       "你的 Agent 需要受控管地存取 Cloudflare、Vercel、Gmail、Stripe、Sentry 或 Google Workspace，而不只限於 git worktree。",
     ],
     migrationSteps: [
@@ -388,7 +388,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         title: "用專案頁面取代多分頁監看",
-        detail: "在連結至專案頁面的頻道裡召喚 Agent，讓每個 PR、測試結果與決策自動彙整進頁面。",
+        detail: "在連結至該頁面的頻道裡召喚 Agent，讓它們把每個 PR、測試結果與決策寫回頁面。",
       },
       {
         title: "集中管理憑證與應用權限",
@@ -404,7 +404,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "xMatrix 如何避免 Paradev 的終端機雜亂問題？",
         answer:
-          "你不必逐一檢查數十個原始終端機視窗，xMatrix 的每個對話都會把最終成果寫回即時頁面，讓你幾秒內就能掃描完整現況。",
+          "你不必逐一檢查數十個原始終端機視窗，xMatrix 的 Agent 會把每個對話的成果寫回連結的即時頁面，讓你直接在那裡掃描目前現況。",
       },
       {
         question: "Superset 真的更名為 Paradev 了嗎？",
@@ -420,10 +420,10 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "Conductor 已被 Meta 收購並於 2026 年 11 月 20 日關閉 Conductor Cloud。立即遷移至 xMatrix，以 US$10／席位跨 macOS、Windows 與 Linux 執行 Claude Code 與 Codex 團隊。",
     eyebrow: "Conductor 替代方案 · Meta 收購後遷移指南",
-    headline: "Meta 關閉 Conductor 後該遷往何處：跨 Mac、Windows 與 Linux 的即時頁面工作區",
+    headline: "在 Meta 關閉後告別 Conductor",
     lead: "Meta 於 2026 年 11 月收購 Conductor、停止新用戶註冊，並在 2026 年 11 月 20 日關閉 Conductor Cloud，僅 macOS 專屬本機版維持維護至 2027 年初。xMatrix 是持續活躍且獨立營運的新家，讓你的 34 種程式設計代理橫跨 macOS、Windows 與 Linux 運行，並把團隊脈絡保存在即時頁面中。",
     productCaption:
-      "xMatrix 實景：將從 Conductor 匯出的儲存庫與 Claude Code／Codex 登入無縫帶入跨作業系統工作區，涵蓋 macOS、Windows、Linux、Android 與 Web。",
+      "xMatrix 實景：將從 Conductor 匯出的儲存庫與 Claude Code／Codex 登入無縫帶入跨作業系統工作區，涵蓋 macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web。",
     painPoints: [
       {
         title: "Conductor Cloud 已走入歷史，產品路線圖逐步收尾",
@@ -437,14 +437,14 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Conductor 獨立營運期間始終未推出原生 Windows 或 Linux 支援，迫使混合平台工程團隊必須拆分工具，或為了共用工作區而額外添購 Mac。",
         xmatrixAnswer:
-          "xMatrix 支援 macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad），讓 Linux 建置伺服器、Windows 開發機與 MacBook 共處同一個 Space。",
+          "xMatrix 支援 macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web，讓 Linux 建置伺服器、Windows 開發機與 MacBook 共處同一個 Space。",
       },
       {
         title: "關閉前定價高達 US$50–$60／月，且缺乏動態專案頁面",
         problem:
           "Conductor 過往 Pro 方案收費 US$50／月、Teams 為 US$60／人／月，長對話紀錄容易造成介面卡頓，且知識分散在獨立工作區中，沒有共享的動態文件。",
         xmatrixAnswer:
-          "xMatrix Pro 為每位人類成員 US$10／月（年繳 US$8／月），在 34 種程式設計代理下不限 Agent 數量，自動將成果整理為即時頁面，並附帶 35 個受控管整合工具與 Space 機密。",
+          "xMatrix Pro 為每位人類成員 US$10／月（年繳 US$8／月），在 34 種程式設計代理下不限 Agent 數量，由 Agent 將完成的工作記錄在即時頁面中，並附帶 40 多個受控管整合工具與 Space 機密。",
       },
     ],
     comparisonRows: [
@@ -455,7 +455,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "支援作業系統",
-        xmatrix: "macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad）",
+        xmatrix: "macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web",
         competitor: "僅支援 macOS 與 iOS；無原生 Windows 或 Linux 支援",
       },
       {
@@ -470,7 +470,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "治理與外部連接器",
-        xmatrix: "35 個應用個別權限原則 + Space 機密",
+        xmatrix: "40 多個應用個別權限原則 + Space 機密",
         competitor: "本機 Agent 以完整作業系統使用者權限運行；無維運核准層",
       },
     ],
@@ -480,7 +480,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     switchWhen: [
       "你在 11 月 20 日失去了 Conductor Cloud，現在就需要一個活躍且支援跨主機的 Claude Code 與 Codex 工作區。",
       "你的團隊除了 Mac 之外，還同時使用 Windows 或 Linux 主機。",
-      "你希望享有可預期的 US$10／席位定價、動態專案頁面，以及 GitHub、Linear、Vercel 與 Cloudflare 的受控管連接器。",
+      "你希望享有 US$10／席位定價、動態專案頁面，以及 GitHub、Linear、Vercel 與 Cloudflare 的受控管連接器。",
     ],
     migrationSteps: [
       {
@@ -522,7 +522,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在比較 Orca（stablyai/orca）替代方案？擺脫單人記憶體暴衝、8,900+ 未解 Issue 與脆弱的區網手機配對，改用 xMatrix 多人頻道與即時頁面。",
     eyebrow: "Orca 替代方案 · Orca vs xMatrix",
-    headline: "當團隊不只你一人時的 Orca 替代方案：單一頻道、即時頁面與精準路由",
+    headline: "Orca vs xMatrix",
     lead: "Orca 是一款熱門的開源單人 ADE，擅長將單一提示詞同時扇出（fan-out）到多個本機 worktree，但多人介面仍未推出、把同一提示扇出給 N 個 Agent 會讓 Token 消耗倍增，大型艦隊也容易吃爆本機記憶體。xMatrix 會從 34 種程式設計代理中將每項任務精準路由給最合適的 Agent，並為整個團隊持續維護即時頁面。",
     productCaption:
       "xMatrix 實景：將並行開發任務分散到你所有的主機上，不再因內嵌瀏覽器而吃爆記憶體，無論桌面或手機都能清爽掌握進度。",
@@ -546,7 +546,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Orca 行動端仰賴區域網路 E2EE QR Code 配對，在企業 VPN 或分段 Wi-Fi 環境下經常失效，且任務跑完後不會留下持續維護的專案 Wiki。",
         xmatrixAnswer:
-          "xMatrix 透過 Hub 在任何網路環境（行動網路、VPN 或桌面端）穩定連線，並將完成的工作轉化為即時頁面，讓整個團隊隨時在網頁、桌面或手機查閱。",
+          "xMatrix 透過 Hub 在任何網路環境（行動網路、VPN 或桌面端）穩定連線，並由 Agent 將完成的工作記錄在即時頁面中，讓整個團隊隨時在網頁、桌面或手機查閱。",
       },
     ],
     comparisonRows: [
@@ -557,22 +557,22 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "動態專案狀態",
-        xmatrix: "由 Agent 持續更新的頁面；人工編輯優先不衝突",
+        xmatrix: "隨工作落地由 Agent 更新的頁面；與成員無鎖定共同編輯",
         competitor: "worktree diff 與實驗性 DAG 編排；無動態文件",
       },
       {
         dimension: "行動端與遠端存取",
-        xmatrix: "透過 Hub 中繼的 Web（含 iPhone 與 iPad）、桌面端與 Android，跨任何網路與 VPN",
+        xmatrix: "透過 Hub 中繼的 Web、桌面端、iPhone 與 iPad 及 Android 應用程式，跨任何網路與 VPN",
         competitor: "區域網路 QR 配對，易受企業 VPN／防火牆阻斷",
       },
       {
         dimension: "路由與 Token 消耗",
-        xmatrix: "@auto 依專長、CPU／記憶體與配額餘裕挑選最合適的單一 Agent",
+        xmatrix: "@auto 依任務適配度、CPU／記憶體與配額餘裕挑選單一 Agent",
         competitor: "扇出提示會在 N 個並行 worktree 上倍增 Token 消耗",
       },
       {
         dimension: "維運連接器",
-        xmatrix: "35 個具個別應用原則的整合工具 + Space 機密",
+        xmatrix: "40 多個具個別應用原則的整合工具 + Space 機密",
         competitor: "實驗性 Slack／Discord 脈絡橋接；無維運核准層",
       },
     ],
@@ -603,7 +603,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "為什麼 Orca 的 GitHub 星數這麼高，未解決 Issue 卻也這麼多？",
         answer:
-          "Orca 會在應用程式內於啟動 35 個 Agent 後彈出提示，引導使用者一鍵對儲存庫按星，因此星數突破 132k，同時也伴隨 8,988 個未關閉 Issue。建議依日常穩定度以及是否需要多人治理來評估兩款工具。",
+          "星數衡量的是關注度，而非是否適合你的團隊。Orca 是熱門專案，同時累積了大量未關閉 Issue；建議依日常穩定度以及是否需要多人治理來評估兩款工具。",
       },
       {
         question: "xMatrix 在企業 VPN 與手機行動網路下能正常運作嗎？",
@@ -624,8 +624,8 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在找 LobeHub 或 LobeChat 替代方案？告別點數轉售加價、2.0 PostgreSQL／S3 自架門檻與 RAG 片段汙染，改用 xMatrix 本機開發 Agent 與即時頁面。",
     eyebrow: "LobeHub (LobeChat) 替代方案 · LobeHub vs xMatrix",
-    headline: "LobeHub 替代：給已訂閱 Claude Code 或 Codex 的開發團隊，別再為點數付兩次錢",
-    lead: "LobeHub（由 LobeChat 更名）是主打轉售模型點數的通用型 AI 工作區，2.0 自架架構沉重，且缺乏多人多 Agent 共享頻道。xMatrix 直接沿用你的現有訂閱，在真實儲存庫中執行 34 種程式設計代理，並內建 Goals 交付驗證與 35 個受控管整合工具。",
+    headline: "LobeHub vs xMatrix",
+    lead: "LobeHub（由 LobeChat 更名）是主打轉售模型點數的通用型 AI 工作區，2.0 自架架構沉重，且缺乏多人多 Agent 共享頻道。xMatrix 直接沿用你的現有訂閱，在真實儲存庫中執行 34 種程式設計代理，並內建用於設定完成條件的 Goals 與 40 多個受控管整合工具。",
     productCaption:
       "xMatrix 實景：在即時團隊頻道與即時頁面中協調你既有的 Claude Code、Codex 與 Cursor 訂閱，零 Token 轉售加價、零 Docker 維運負擔。",
     painPoints: [
@@ -634,7 +634,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "LobeHub Cloud 免費方案（約 50 萬點）封鎖了許多旗艦模型，付費方案（每月 US$12.9／US$24.9／US$49.9）則透過雲端點數對每個 Token 計費。開發者普遍反映長程式碼脈絡與深度研究 Agent 消耗點數的速度遠超預期。",
         xmatrixAnswer:
-          "xMatrix 絕不轉售或加價 LLM Token。你的 Agent 直接使用你原本擁有的 Claude Code、Codex、Cursor 或 Gemini 訂閱與 API 金鑰，xMatrix Pro 僅收固定 US$10／人類席位／月。",
+          "xMatrix 絕不轉售或加價 LLM Token。你的 Agent 直接使用你原本擁有的 Claude Code、Codex、Cursor 或 Gemini 訂閱與 API 金鑰，xMatrix Pro 則為每人每月 US$10，每席位含 5,000 點額度，供 Agent 與應用寫入使用。",
       },
       {
         title: "沉重的 2.0 架構改寫與失效的舊版自架教學",
@@ -674,7 +674,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "交付驗證與權限治理",
-        xmatrix: "Goals 每回合自動驗證完成條件 + 涵蓋所有代理的 35 個受控管整合工具",
+        xmatrix: "在支援 Goals 的代理工具上使用 Goals + 40 多個受控管整合工具",
         competitor: "內建交付檢查；透過 lh connect 連接的外部開發 Agent 未受治理",
       },
     ],
@@ -694,7 +694,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         title: "將靜態知識庫轉換為即時頁面與 Goals",
-        detail: "把關鍵架構筆記與待辦工作匯入 xMatrix 頁面，讓 Agent 自動保持最新，並用 /goal 自動驗證完成條件。",
+        detail: "把關鍵架構筆記與待辦工作匯入 xMatrix 頁面，由 Agent 隨工作落地持續更新，並用 xmatrix goal 設定一個讓執行持續努力達成的完成條件。",
       },
       {
         title: "以個別應用治理連結維運服務",
@@ -705,7 +705,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "xMatrix 會像 LobeHub Cloud 一樣轉售 AI 模型點數嗎？",
         answer:
-          "不會。Agent 一律使用你自有的訂閱或 API 金鑰。xMatrix Pro 額度（每位人類成員 US$10／月含 5,000 次 Agent 訊息／頁面修訂）僅涵蓋平台協作，絕不轉售 LLM Token。",
+          "不會。Agent 一律使用你自有的訂閱或 API 金鑰。xMatrix Pro（每人每月 US$10）每席位含 5,000 點額度，用於 Agent 與應用訊息、Agent 頁面修訂及付費 X API 操作——絕不轉售 LLM Token。",
       },
       {
         question: "xMatrix 如何避免 LobeHub 的知識庫檢索汙染問題？",
@@ -715,7 +715,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "xMatrix 也支援個別工具核准與機密管理嗎？",
         answer:
-          "支援。每個已連結應用都支援唯讀、先詢問與讀寫權限，Space 層級機密則在指令執行時注入，絕不對 Agent 暴露原始數值。",
+          "支援。已連結應用支援唯讀、先詢問與讀寫權限（GitHub：唯讀或讀寫），Space 機密則在執行時傳入指令的執行環境，不會被印出或放進聊天中。",
       },
     ],
   },
@@ -725,8 +725,8 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在比較 Cumora（yetone/cumora）替代方案？直接在你真實的本機儲存庫中執行開發 Agent，告別離線沙盒阻斷（#350）、bwrap 錯誤與邀請制預覽。",
     eyebrow: "Cumora 替代方案 · Cumora vs xMatrix",
-    headline: "Cumora 替代方案：代理直接在真實儲存庫工作，透過受控管整合工具交付",
-    lead: "Cumora 將人設驅動的 Agent 放進團隊聊天室，卻將本機 BYOA 鎖在與真實工作區隔離的離線沙盒裡，屢遇 Bubblewrap 與 CDN 擷取失敗（#350），且仍處於邀請制預覽。xMatrix 直接在你的儲存庫執行 34 種程式設計代理，透過 35 個受控管整合工具與即時頁面交付成果。",
+    headline: "Cumora vs xMatrix",
+    lead: "Cumora 將人設驅動的 Agent 放進團隊聊天室，卻將本機 BYOA 鎖在與真實工作區隔離的離線沙盒裡，屢遇 Bubblewrap 與 CDN 擷取失敗（#350），且仍處於邀請制預覽。xMatrix 直接在你的儲存庫執行 34 種程式設計代理，透過 40 多個受控管整合工具與即時頁面交付成果。",
     productCaption:
       "xMatrix 實景：無需等待邀請碼，也沒有離線沙盒高牆——你真實的本機 Claude Code 與 Codex 工具直接在你的儲存庫裡與團隊並肩作戰。",
     painPoints: [
@@ -742,14 +742,14 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "使用者頻頻遭遇本機 bwrap 啟動失敗、Cumora Cloud Kubernetes FUSE pod 與本機 BYOA 主機行為不一致，以及手機端顯示「coming soon」佔位畫面；且儲存庫自 2026 年 11 月 1 日後便未再推送新 commit。",
         xmatrixAnswer:
-          "xMatrix 持續穩定發布 macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad），採單一且一致的本機主機執行模型，經由正式環境持續驗證。",
+          "xMatrix 持續穩定發布 macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web 版本，採單一且一致的本機主機執行模型，經由正式環境持續驗證。",
       },
       {
         title: "缺乏用於交付與維運的受控管連接器",
         problem:
           "Cumora 雖內建聊天、文件、看板與行事曆元件，卻缺少針對 GitHub、Vercel、Cloudflare、Linear、Sentry、Gmail 與 Stripe 的跨應用核准層與 Space 機密庫。",
         xmatrixAnswer:
-          "xMatrix 原生連接 35 個工程與商務應用，提供個別應用權限原則與 Space 層級機密。",
+          "xMatrix 原生連接 40 多個工程與商務應用，提供個別應用權限原則與 Space 層級機密。",
       },
     ],
     comparisonRows: [
@@ -765,17 +765,17 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "外部應用治理",
-        xmatrix: "35 個具個別應用原則的整合工具 + Space 機密",
+        xmatrix: "40 多個具個別應用原則的整合工具 + Space 機密",
         competitor: "僅有正式部署核准；缺乏同等維運連接器核准層",
       },
       {
         dimension: "動態專案文件",
-        xmatrix: "由人與執行中任務共同維護、即時更新的頁面（Pages）",
+        xmatrix: "與人共同編輯、並由 Agent 隨工作落地更新的頁面（Pages）",
         competitor: "搭配人設聊天的內建文件、看板與行事曆",
       },
       {
         dimension: "行動端與跨平台支援",
-        xmatrix: "macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad）",
+        xmatrix: "macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web",
         competitor: "以桌面／網頁為主；行動端工作階段尚有缺口（顯示 coming soon）",
       },
     ],
@@ -791,7 +791,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     migrationSteps: [
       {
         title: "免等候補名單，立即開始使用",
-        detail: "幾秒內建立免費 xMatrix Space——支援最多 3 位隊友與不限數量的 Agent。",
+        detail: "建立免費 xMatrix Space——支援最多 3 人與不限數量的 Agent。",
       },
       {
         title: "註冊現有的本機儲存庫與執行工具",
@@ -806,7 +806,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "xMatrix 會像 Cumora 一樣封鎖本機開發 Agent 的對外網路嗎？",
         answer:
-          "不會。Agent 會在你註冊的本機開發環境中沿用正常網路存取，套件安裝、查閱 API 文件與測試套件都能順利運作；而對外部 SaaS 的寫入操作則透過 xMatrix 的個別應用核准層控管。",
+          "不會。Agent 會在你註冊的本機開發環境中沿用正常網路存取，套件安裝、查閱 API 文件與測試套件都能順利運作；而透過已連結應用進行的寫入則遵循各應用的權限設定。",
       },
       {
         question: "試用 xMatrix 需要邀請碼嗎？",
@@ -825,7 +825,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在找 T3 Code 替代方案？為團隊帶來真實成員身分、共享頻道（GitHub Discussion #27974）、動態專案頁面（#15858）、Space 機密與跨供應商交接（#15846）。",
     eyebrow: "T3 Code 替代方案 · T3 Code vs xMatrix",
-    headline: "團隊版 T3 Code：真實身分、單一頻道，以及一份即時頁面",
+    headline: "T3 Code vs xMatrix",
     lead: "T3 Code 是一款出色的免費單人開發工作台，但每個環境都綁死單一帳號、缺少共享動態專案頁面，且供應商配額見底時只會卡在「Limited」。xMatrix 為你的團隊帶來共享頻道、即時頁面、Space 機密，以及跨主機運行的 34 種程式設計代理。",
     productCaption:
       "xMatrix 實景：在真正的多人頻道裡讓 34 種程式設計代理跨主機協作，為整個團隊持續保持即時頁面最新。",
@@ -849,7 +849,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "T3 Code 擅長本機 diff 與模擬器，卻沒有共享專案記憶或動態文件（GitHub Discussion #15858），新討論串預設即採 Full access，免費 T3 Connect 通道僅限 3 台主機，且範疇侷限於寫程式而缺乏受控管的維運應用。",
         xmatrixAnswer:
-          "xMatrix 將完成的對話轉化為即時頁面、跨 34 種程式設計代理連接不限數量的主機、安全保存 Space 層級機密，並治理 Vercel、Cloudflare、Sentry、Gmail 與 Stripe 等 35 個整合工具。",
+          "在 xMatrix 中，Agent 會將完成的工作記錄在即時頁面裡；你可以跨 34 種程式設計代理連接任意數量的主機、保存 Space 層級機密，並治理 Vercel、Cloudflare、Sentry、Gmail 與 Stripe 等 40 多個整合應用。",
       },
     ],
     comparisonRows: [
@@ -870,7 +870,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "預設安全與維運治理",
-        xmatrix: "35 個應用個別權限原則 + Space 機密",
+        xmatrix: "各主機擁有者為每個代理工具選擇完全存取或先詢問；40 多個應用個別權限原則 + Space 機密",
         competitor: "新討論串預設 Full access；單機本機機密；僅限開發議題",
       },
       {
@@ -906,7 +906,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "既然 T3 Code 免費，為什麼團隊願意付費升級 xMatrix Pro？",
         answer:
-          "如果你只需要在 1–3 台電腦使用的免費單人工作台，T3 Code 非常棒。當團隊需要真正的多人 Space、動態專案頁面、跨供應商自動配額交接、Space 機密以及 35 個受控管整合工具時，就會選擇 xMatrix。",
+          "如果你只需要在 1–3 台電腦使用的免費單人工作台，T3 Code 非常棒。當團隊需要真正的多人 Space、動態專案頁面、跨供應商自動配額交接、Space 機密以及 40 多個受控管整合工具時，就會選擇 xMatrix。",
       },
       {
         question: "Claude 達到上限時，xMatrix 真的會自動切換供應商嗎？",
@@ -926,7 +926,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "評估 herdr（herdr-core）替代方案？立即在 xMatrix 獲得內建身分驗證、團隊權限、免候補名單的跨裝置中繼、個別應用核准與即時頁面。",
     eyebrow: "herdr 替代方案 · herdr vs xMatrix",
-    headline: "herdr 替代方案：具備團隊驗證、核准與即時頁面——今日即可跨裝置上線",
+    headline: "herdr vs xMatrix",
     lead: "herdr 從受歡迎的 Rust TUI 多工器演進為 herdr-core 搭配原生應用程式，帶來破壞性協定變動並引發 Reddit 對 GUI 綁定的反彈，同時仍缺乏多使用者驗證、核准機制、機密庫與正式上線的雲端中繼。xMatrix 今天就提供完整受控管的協作層。",
     productCaption:
       "xMatrix 實景：今日即可在桌面、網頁與手機跨裝置協作——搭配經驗證的 Space、Space 機密與即時頁面，取代未驗證的預覽 socket。",
@@ -936,7 +936,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "herdr-core 明確定位為單一使用者本機執行環境：任何連上其 socket 的人實質上就擁有完整 shell 權限。它沒有使用者角色、沒有操作核准、沒有機密庫，也沒有排程或 Webhook 觸發自動化。",
         xmatrixAnswer:
-          "xMatrix 在本機執行之上建立明確的信任邊界：經查驗的人類與 Agent 身分、不暴露明文的 Space 層級機密、個別應用核准原則，以及 Norn 自動化程式。",
+          "xMatrix 在本機執行之上建立明確的信任邊界：經查驗的人類與 Agent 身分、傳入指令時不會被印出或放進聊天中的 Space 層級機密、個別應用核准原則，以及 Norn 自動化程式。",
       },
       {
         title: "協定頻繁異動、破壞性變更與從 TUI 轉向 GUI 的社群反彈",
@@ -950,7 +950,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "跨裝置加密中繼（Herdr Cloud）與官方行動 App 仍處於候補名單或開發中；即便未來上線，PTY 多工器仍會把所有決策埋沒在終端機捲軸紀錄裡。",
         xmatrixAnswer:
-          "xMatrix 今天就能在 macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad）之間穩定跨機中繼，並於任務結束後自動更新即時頁面。",
+          "xMatrix 今天就能在 macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web 之間穩定跨機中繼，並由 Agent 將完成的工作寫回即時頁面。",
       },
     ],
     comparisonRows: [
@@ -961,7 +961,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "跨裝置中繼與行動端",
-        xmatrix: "今日即上線，支援 macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad）",
+        xmatrix: "今日即上線，支援 macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web",
         competitor: "目前需手動設定 SSH；Herdr Cloud 中繼仍在候補名單",
       },
       {
@@ -971,7 +971,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "自動化與外部連接器",
-        xmatrix: "排程與事件驅動 Norn 程式 + 35 個整合工具",
+        xmatrix: "排程與事件驅動 Norn 程式 + 40 多個整合工具",
         competitor: "無內建 cron、Webhook 自動化或應用連接器",
       },
       {
@@ -986,7 +986,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     ],
     switchWhen: [
       "你今天就想要跨裝置的桌面與手機存取，不想繼續苦等 Herdr Cloud 候補名單或排查 SSH ProxyCommand 外洩問題。",
-      "在 Agent 接觸 GitHub、Vercel、Cloudflare 或正式環境之前，你需要真正的身分驗證、Space 機密與人工核准。",
+      "在 Agent 透過 Vercel、Cloudflare、Linear 或其他已連結應用採取行動之前，你需要真正的身分驗證、Space 機密與人工核准。",
       "你希望在即時頁面一目了然掌握專案現況，而不是在常駐 PTY 窗格裡大海撈針。",
     ],
     migrationSteps: [
@@ -1012,7 +1012,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "相較於直接暴露本機 PTY socket，xMatrix 為什麼更安全？",
         answer:
-          "xMatrix 在伺服器端強制執行 Space 驗證與成員控管、將主機註冊與 Space 存取權分離、以 xmatrix secret exec 遮罩注入 Space 機密，並透過唯讀或先詢問原則把關所有已連結 SaaS 操作。",
+          "xMatrix 在伺服器端強制執行 Space 驗證與成員控管、將主機註冊與 Space 存取權分離、以 xmatrix secret exec 將 Space 機密傳入指令而不印出，並透過唯讀或先詢問權限把關已連結 SaaS 操作。",
       },
       {
         question: "我還是可以從終端機操作 xMatrix 嗎？",
@@ -1027,24 +1027,24 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "尋找 Seedmux 替代方案？擺脫 macOS + iPhone 平台綁定、閉源執行檔與手機端預設 YOLO 模式，在 macOS、Windows、Linux、Android 與 iOS 使用 xMatrix。",
     eyebrow: "Seedmux 替代方案 · Seedmux vs xMatrix",
-    headline: "Seedmux 替代方案：支援跨作業系統團隊、Android 與受控管行動操作",
+    headline: "Seedmux vs xMatrix",
     lead: "Seedmux 結合了精緻的 Ghostty + tmux macOS 終端機與 iPhone 配套 App，但它是閉源軟體、僅限 Mac 與單人使用，且手機端啟動的工作階段預設進入 YOLO 模式。xMatrix 為 macOS、Windows、Linux、Android 與 iOS 帶來跨主機協作、真實團隊 Space 與即時頁面。",
     productCaption:
-      "xMatrix 實景：橫跨 macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad）的單一工作區，以受控管的應用核准取代手機端預設 YOLO 模式。",
+      "xMatrix 實景：橫跨 macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web 的單一工作區，搭配受控管的應用核准，以及由各主機擁有者選定的代理工具存取權限。",
     painPoints: [
       {
         title: "macOS + iPhone 平台綁定，將 Windows、Linux 與 Android 排除在外",
         problem:
           "Seedmux 嚴格限定為原生 macOS 應用程式，仰賴瀏海區域通知並搭配 iPhone 配套 App（需 Seedmux Pro）。沒有原生 Windows 或 Linux 桌面版、沒有網頁工作區，也沒有 Android App。",
         xmatrixAnswer:
-          "xMatrix 涵蓋 macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad），你與隊友手邊的每台電腦與手機都能加入同一個 Space。",
+          "xMatrix 涵蓋 macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web，你與隊友手邊的每台電腦與手機都能加入同一個 Space。",
       },
       {
         title: "單人終端機窗格，且行動端預設開啟 YOLO 模式",
         problem:
           "Seedmux 沒有團隊頻道、沒有共享角色，也沒有 Space 機密；從 iPhone 配套 App 發起的工作階段預設採 YOLO 權限，且經過行動網路或企業防火牆中繼時容易增加核准延遲。",
         xmatrixAnswer:
-          "xMatrix 在手機與桌面維持同等嚴謹的治理：個別應用「唯讀／先詢問／讀寫」原則、遮罩保護的 Space 機密，以及可供隊友共同檢視與核准的多人頻道。",
+          "無論從哪個裝置發起工作，xMatrix 都套用相同規則：每個代理工具都以其主機擁有者確認過的完全存取或先詢問權限運行，已連結應用遵循「唯讀／先詢問／讀寫」權限，Space 機密不會出現在聊天中，而 Space 管理員會在共享頻道中核准「先詢問」操作。",
       },
       {
         title: "脆弱的 CLI 狀態擷取，且缺乏動態專案文件",
@@ -1057,7 +1057,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     comparisonRows: [
       {
         dimension: "支援平台",
-        xmatrix: "macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad）",
+        xmatrix: "macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web",
         competitor: "僅限 macOS + iPhone 配套 App（Linux 主機僅靠 SSH／中繼）",
       },
       {
@@ -1067,7 +1067,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "行動端安全預設",
-        xmatrix: "行動端與網頁端套用一致的個別應用核准原則與 Space 機密",
+        xmatrix: "主機擁有者確認過的代理工具存取權限（完全存取或先詢問）+ 任何裝置皆適用相同的個別應用原則",
         competitor: "手機發起的工作階段預設啟用 YOLO 模式",
       },
       {
@@ -1077,7 +1077,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "外部維運應用",
-        xmatrix: "35 個整合工具（GitHub、Linear、Vercel、Cloudflare、Sentry、Gmail、Stripe 等）",
+        xmatrix: "40 多個整合工具（GitHub、Linear、Vercel、Cloudflare、Sentry、Gmail、Stripe 等）",
         competitor: "僅限終端機 CLI 指令；無 SaaS 連接器核准層",
       },
     ],
@@ -1086,7 +1086,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     ],
     switchWhen: [
       "你或你的隊友使用 Windows、Linux 或 Android 裝置。",
-      "你需要穩妥的行動端控制，不想讓遠端工作階段預設進入 YOLO 無防護權限。",
+      "你需要行動端控制，且每台主機的擁有者都已為每個代理工具明確選擇完全存取或先詢問。",
       "你希望將決策與專案進度持續整理在即時頁面中，而非稍縱即逝的終端機分割視窗。",
     ],
     migrationSteps: [
@@ -1096,10 +1096,10 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         title: "免自架中繼，直接跨網頁、桌面與行動端操作",
-        detail: "從任何瀏覽器（含 iPhone 與 iPad）、桌面應用程式或 Android 裝置追蹤進度並回覆核准。",
+        detail: "從任何瀏覽器、桌面應用程式，或 iPhone、iPad 與 Android App 追蹤進度並回覆核准。",
       },
       {
-        title: "將所有工作成果收斂到同一份即時頁面",
+        title: "將所有工作成果收斂到即時頁面",
         detail: "不必手動巡檢每個 worker 窗格的回執，讓各 Agent 直接更新專案頁面的對應章節。",
       },
     ],
@@ -1126,7 +1126,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "比較 Linear Agents 替代方案？擺脫會過期的預付沙盒點數、僅限雲端工單執行與 Enterprise 才有的稽核日誌，改用 xMatrix 本機頻道與即時頁面。",
     eyebrow: "Linear Agents 替代方案 · Linear vs xMatrix",
-    headline: "Linear Agents 替代：在自有主機與既有訂閱上執行代理，無過期點數，與 Linear 並肩運作",
+    headline: "Linear Agents vs xMatrix",
     lead: "Linear 是極為出色的議題追蹤工具，Linear Agents 也能將界定清楚的 Issue 轉成雲端沙盒 PR——但每 20 分鐘要價 US$0.25 另計 Token 費用，且必須從 12 個月過期的獨立預付錢包扣款。你可以繼續用 Linear 追蹤議題，並將它連接至 xMatrix，在自有主機的即時頻道與即時頁面中執行 34 種程式設計代理。",
     productCaption:
       "xMatrix 實景：保留 Linear 連線的同時，在本機以 Claude Code 與 Codex 於即時頻道協作，免付沙盒計時費、沒有過期預付餘額。",
@@ -1150,7 +1150,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Linear 的稽核日誌僅限 Enterprise 方案，且不會細部記錄個別 Agent 操作，更缺乏涵蓋 Cloudflare、Vercel、Gmail、Sentry 與 Stripe 的統一應用核准閘門。",
         xmatrixAnswer:
-          "xMatrix 內建完整的對話與執行軌跡、Space 層級機密，以及涵蓋 35 個整合工具（包含 Linear 本身）的個別應用權限原則。",
+          "xMatrix 內建對話與執行軌跡、Space 層級機密，以及涵蓋 40 多個整合應用（包含 Linear 本身）的個別應用權限原則。",
       },
     ],
     comparisonRows: [
@@ -1171,7 +1171,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "治理與可稽核性",
-        xmatrix: "全方案皆享 35 個應用個別權限原則 + Space 機密",
+        xmatrix: "全方案皆享 40 多個應用個別權限原則 + Space 機密",
         competitor: "團隊層級 Agent 開關；稽核日誌僅限 Enterprise 且不細分單一 Agent 操作",
       },
       {
@@ -1228,8 +1228,8 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在尋找 Notion Custom Agents 替代方案？擺脫 US$20–$24 Business 門檻、三種點數錢包、建立者點數耗盡導致暫停與行動端限制，改用 xMatrix 即時頁面。",
     eyebrow: "Notion Custom Agents 替代方案 · Notion vs xMatrix",
-    headline: "Notion Custom Agents 替代：隨代理交付程式碼自動更新的即時頁面，擺脫三套點數錢包",
-    lead: "Notion Custom Agents 被鎖在 US$20–$24／席位的 Business 方案與複雜的三錢包點數制度後，團隊共用 Agent 預設會扣光建立者的個人 Select 點數並在途中停擺。xMatrix 會在 34 種程式設計代理於你的真實儲存庫交付程式碼時自動更新即時頁面——無須任何點數錢包。",
+    headline: "Notion Custom Agents vs xMatrix",
+    lead: "Notion Custom Agents 被鎖在 US$20–$24／席位的 Business 方案與複雜的三錢包點數制度後，團隊共用 Agent 預設會扣光建立者的個人 Select 點數並在途中停擺。在 xMatrix 中，34 種程式設計代理會在你的真實儲存庫交付程式碼時更新即時頁面，並共用每個 Space 單一的點數額度池。",
     productCaption:
       "xMatrix 實景：Agent 在真實儲存庫執行、在頻道與團隊對話並持續維護即時頁面——單一 Space 共享額度池，完整支援行動端。",
     painPoints: [
@@ -1238,7 +1238,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Notion 將 AI 用量拆成個人 Standard 點數（1,500／月）、個人 Select 點數（500／月，使用 Custom Agents 必備）以及管理員加購的 Workspace Notion Credits（US$10／1,000 點）。個人餘額既不能合併也不能遞延，隊友觸發共用 Agent 預設會扣建立者的個人 Select 池，點數歸零當下任務就會中途暫停。",
         xmatrixAnswer:
-          "xMatrix Pro 採單一固定費率 US$10／人類席位／月（年繳 US$8／月），每席位提供 5,000 點全 Space 共享的 Agent 額度並附帶 50% 緩衝空間，零 LLM Token 轉售——人類編輯一律免費。",
+          "xMatrix Pro 為每人每月 US$10（年繳 US$8／月）。每個席位每月為整個 Space 共享的額度池增加 5,000 點；Agent 與應用寫入會消耗點數，人類編輯則免費，用完後依序使用擁有者加購的點數包（每 5,000 點 US$10）與每席位 2,500 點的緩衝額度。xMatrix 絕不轉售 LLM Token。",
       },
       {
         title: "無法本機主機執行、無跨機中繼，也沒有即時 Agent 頻道",
@@ -1252,7 +1252,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Notion 手機 App 禁止建立 Custom Agents，且僅允許行動端使用者互動「自己個人擁有」的 Custom Agents，讓離開桌機的隊友束手無策。",
         xmatrixAnswer:
-          "每位 xMatrix 成員都能在 Web（含 iPhone 與 iPad）、桌面端或 Android 閱讀頁面、召喚任何已授權的 Space Agent，並核准外部連接器操作。",
+          "xMatrix 成員可以從 Web、桌面應用程式，或 iPhone、iPad 與 Android App 閱讀頁面並召喚 Space 的 Agent——Space 管理員也能在這些裝置上核准「先詢問」的連接器操作。",
       },
     ],
     comparisonRows: [
@@ -1273,12 +1273,12 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "行動端團隊存取",
-        xmatrix: "所有成員皆具完整頻道、頁面、召喚 Agent 與核准權限",
+        xmatrix: "行動端可使用頻道、頁面與召喚 Agent；Space 管理員也能在行動端核准操作",
         competitor: "行動端無法建立 Custom Agents，也無法執行團隊共用 Agent",
       },
       {
         dimension: "機密與工程連接器",
-        xmatrix: "Space 層級機密庫 + 35 個整合工具（包含 Notion 本身）",
+        xmatrix: "Space 層級機密庫 + 40 多個整合工具（包含 Notion 本身）",
         competitor: "無可供 CLI 執行的 Space 層級機密庫",
       },
     ],
@@ -1287,7 +1287,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     ],
     switchWhen: [
       "你受夠了搞懂 Standard、Select 與 Workspace 三種點數，或看團隊共用 Agent 因為建立者個人點數用完而停擺。",
-      "你希望開發 Agent 直接在你的儲存庫工作並自動維護專案頁面，而不是任由 Wiki 與現實脫節。",
+      "你希望開發 Agent 直接在你的儲存庫工作並在工作時維護專案頁面，而不是任由 Wiki 與現實脫節。",
       "你的工程師需要在手機上存取共享 Agent、Space 機密以及受控管的部署／維運連接器。",
     ],
     migrationSteps: [
@@ -1316,7 +1316,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "如果人跟 Agent 同時編輯同一份 xMatrix 頁面會怎麼樣？",
         answer:
-          "一律以人優先。當你正在某個段落打字而 Agent 準備更新時，Agent 會停下等待並接續你寫下的文字，絕不會覆蓋你的內容。",
+          "不會有任何鎖定。即時共同撰寫的 Agent 會避開你正在打字的段落，並在你編輯它正在撰寫的內容時立即停止；透過 CLI 編輯的 Agent 若變更與你的重疊，該變更會被拒絕，並取得目前內容以便重新合併。",
       },
     ],
   },
@@ -1327,7 +1327,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "尋找 Slack Code 替代方案？擺脫 Slack 對自訂應用設下的每分鐘 1 次、最多 15 則歷史訊息限流、90 天免費上限與缺少 Agent 執行環境的限制，改用 xMatrix。",
     eyebrow: "Slack Code 替代方案 · Slack Code vs xMatrix",
-    headline: "Slack Code 替代：代理跑在自有主機、決策留在即時頁面，與 Slack 並肩協作",
+    headline: "Slack Code vs xMatrix",
     lead: "Slack Code API 在 Slack 內加入了任務頻道與 diff 預覽，但 Slack 本質仍是聊天外殼——沒有 Agent 執行環境、沒有動態文件，還對非 Marketplace 應用程式的歷史紀錄端點施加嚴苛限流（每分鐘 1 次、單次最多 15 則）。透過 xMatrix 原生 Slack 連接器維持與 Slack 的連動，同時在自有主機執行 34 種程式設計代理並把決策留在即時頁面中。",
     productCaption:
       "xMatrix 實景：由自有主機與即時頁面支撐的原生多人多 Agent 頻道，享有完整脈絡讀取權限，零 15 則 API 阻擋。",
@@ -1351,7 +1351,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "即便有了任務頻道，Slack 依舊缺少動態專案文件層——決策很快沉沒在數百則訊息之下，迫使每位新進成員或 Agent 反覆猜測哪些結論依然有效。",
         xmatrixAnswer:
-          "xMatrix 的每個頻道都直接連結至即時頁面，由 Agent 原地改寫最新狀態——只要讀一頁就能掌握整個專案現況。",
+          "xMatrix 的頻道會連結至即時頁面，由 Agent 原地改寫最新狀態——只要讀頁面就能掌握專案現況。",
       },
     ],
     comparisonRows: [
@@ -1367,17 +1367,17 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "動態專案狀態",
-        xmatrix: "隨工作完成自動更新的即時頁面（Pages）",
+        xmatrix: "由 Agent 隨工作完成更新的即時頁面（Pages）",
         competitor: "線性捲動聊天紀錄與已封存的任務頻道",
       },
       {
         dimension: "受控管整合工具與機密",
-        xmatrix: "Space 機密 + 35 個具個別應用權限原則的整合工具",
+        xmatrix: "Space 機密 + 40 多個具個別應用權限原則的整合工具",
         competitor: "無內建 Agent 機密庫或跨應用執行期治理",
       },
       {
         dimension: "能否與 Slack 整合？",
-        xmatrix: "原生 Slack 連接器可經核准後在 Slack 讀寫訊息",
+        xmatrix: "原生 Slack 連接器將 Slack 訊息帶入頻道；Agent 依其權限設定回覆至 Slack",
         competitor: "完全綁定在 Slack 內部",
       },
     ],
@@ -1400,7 +1400,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         title: "把釘選的 Slack 訊息升級為即時頁面",
-        detail: "用會由 Agent 自動維持最新的頁面，取代早就過時的釘選訊息與書籤。",
+        detail: "用 Agent 隨工作落地更新的頁面，取代早就過時的釘選訊息與書籤。",
       },
     ],
     faqs: [
@@ -1425,7 +1425,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "比較 Nowledge Mem 替代方案？別只從舊聊天抽取出推測的記憶碎片——在 xMatrix 跨主機執行開發 Agent，並直接維護權威的動態專案頁面。",
     eyebrow: "Nowledge Mem 替代方案 · Nowledge Mem vs xMatrix",
-    headline: "Nowledge Mem 替代：由實際動手的代理直接寫下的團隊專案記憶",
+    headline: "Nowledge Mem vs xMatrix",
     lead: "Nowledge Mem 在各 AI 工具間建立了巧妙的本機圖譜／向量記憶層，但它只是被動的記憶庫——從舊對話推測事實、無法執行開發 Agent 或控管外部工具，且 Team 工作區仍在封測階段。在 xMatrix 中，實際執行的任務會直接寫下整個團隊今天就能共享的權威即時頁面。",
     productCaption:
       "xMatrix 實景：不再事後從舊對話裡被動推測記憶，而是讓實際交付程式碼的 Agent 直接維持整個團隊的動態專案頁面準確無誤。",
@@ -1449,7 +1449,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Nowledge Mem Team 仍處於封閉測試（private beta），本機部署要求 macOS 15+ 與手動 MCP／代理設定，且沒有 Space 機密庫或正式環境工具的核准閘門。",
         xmatrixAnswer:
-          "xMatrix Space 今天即可自助啟用，支援 macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad），並內建 Space 層級機密與 35 個整合工具的個別應用權限原則。",
+          "xMatrix Space 今天即可自助啟用，支援 macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web，並內建 Space 層級機密與 40 多個整合工具的個別應用權限原則。",
       },
     ],
     comparisonRows: [
@@ -1475,7 +1475,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "機密與外部應用",
-        xmatrix: "Space 層級機密 + 35 個具個別應用原則的整合工具",
+        xmatrix: "Space 層級機密 + 40 多個具個別應用原則的整合工具",
         competitor: "Team 版僅含託管 Slack 連線；無維運連接器核准層",
       },
     ],
@@ -1483,8 +1483,8 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       "你需要一套離線個人記憶圖譜，用來跨網頁版 ChatGPT、Claude 網頁版與 Cursor 擷取對話，且不打算改變現有的程式執行方式。",
     ],
     switchWhen: [
-      "你希望由實際做完工作的 Agent 直接維護一份權威專案頁面，而不是仰賴背景抽取器從舊對話猜測事實。",
-      "你今天就需要可用的團隊 Space（而非封測），包含跨主機 Agent 執行與 35 個受控管維運整合工具。",
+      "你希望由實際做完工作的 Agent 直接維護權威專案頁面，而不是仰賴背景抽取器從舊對話猜測事實。",
+      "你今天就需要可用的團隊 Space（而非封測），包含跨主機 Agent 執行與 40 多個受控管維運整合工具。",
       "你不想在 macOS、Windows、Linux、Android 與 Web 之間手動維護本機代理與通道設定。",
     ],
     migrationSteps: [
@@ -1498,7 +1498,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         title: "用 Norn 例行任務維持頁面常新",
-        detail: "自動保持指標、發行說明與待辦阻礙最新，不必再為了掃描閒置聊天紀錄而白付背景 LLM 抽取 Token。",
+        detail: "讓 Agent 依排程更新指標、發行說明與待辦阻礙，不必再為了掃描閒置聊天紀錄而白付背景 LLM 抽取 Token。",
       },
     ],
     faqs: [
@@ -1514,7 +1514,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         question: "如果 Agent 在 xMatrix 頁面寫錯內容怎麼辦？",
-        answer: "每份頁面都保存完整修訂歷史且採人工優先共編——你直接改寫任何一行，Agent 就會立刻以修正後的內容為準。",
+        answer: "每份頁面都保存完整修訂歷史並支援無鎖定共同編輯——你直接改寫任何一行，讀取該章節的 Agent 會在下一回合收到變更通知。",
       },
     ],
   },
@@ -1525,7 +1525,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在尋找 EverOS 或 EverMemOS 替代方案？告別單機 SQLite 鎖定、隱藏的背景抽取 LLM 帳單與無團隊同步，改用 xMatrix 頻道與即時頁面。",
     eyebrow: "EverOS (EverMemOS) 替代方案 · EverOS vs xMatrix",
-    headline: "EverOS 替代：由實際動手的代理直接寫下的跨主機專案記憶",
+    headline: "EverOS vs xMatrix",
     lead: "EverOS（EverMemOS）以 Markdown 檔案搭配本機 SQLite 與 LanceDB 索引，但其開源 v1 明確禁止在同一目錄啟動第二個服務、將多租戶與同步排除在範疇外，且持續在背景消耗 LLM Token 進行抽取。xMatrix 為團隊帶來涵蓋 34 種程式設計代理的即時跨主機執行與權威即時頁面。",
     productCaption:
       "xMatrix 實景：由實際動手的開發 Agent 即時更新跨主機 Markdown 頁面，零單一目錄鎖定衝突，零背景抽取 Token 消耗。",
@@ -1549,7 +1549,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "EverOS 本質是記憶後端（且 v1.7.1 已移除 Foresight 預測功能）；它無法跨主機召喚程式設計代理，也無法在接觸 Vercel、Cloudflare、Gmail 或 Stripe 前要求人工核准。",
         xmatrixAnswer:
-          "xMatrix 將涵蓋 34 種程式設計代理的多 Agent 執行、Space 機密、35 個整合工具的個別應用核准與即時頁面整合在同一工作區中。",
+          "xMatrix 將涵蓋 34 種程式設計代理的多 Agent 執行、Space 機密、40 多個整合工具的個別應用核准與即時頁面整合在同一工作區中。",
       },
     ],
     comparisonRows: [
@@ -1570,12 +1570,12 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "並行編輯處理",
-        xmatrix: "即時協作頁面，支援建議模式、逐段署名與人工編輯優先",
+        xmatrix: "即時協作頁面，支援建議模式、逐段署名與無鎖定合併",
         competitor: "本機目錄鎖定；多工具同時寫入易引發競爭衝突",
       },
       {
         dimension: "治理與外部連接器",
-        xmatrix: "Space 層級機密 + 35 個具個別應用原則的整合工具",
+        xmatrix: "Space 層級機密 + 40 多個具個別應用原則的整合工具",
         competitor: "無",
       },
     ],
@@ -1585,7 +1585,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     switchWhen: [
       "你需要跨多台主機或與隊友協作，無法接受 v1 單一目錄的鎖定限制。",
       "你希望由實際執行任務的 Agent 直接維護權威 Markdown 頁面，而非長期支付背景 LLM 抽取成本。",
-      "除了持久化專案知識外，你還需要涵蓋 34 種程式設計代理的真實執行能力與 35 個受控管整合工具。",
+      "除了持久化專案知識外，你還需要涵蓋 34 種程式設計代理的真實執行能力與 40 多個受控管整合工具。",
     ],
     migrationSteps: [
       {
@@ -1623,7 +1623,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "比較 YouMind 替代方案？擺脫每月 US$20–$200 單人點數方案與缺少 Android／團隊支援的限制，改用 US$10／席位的 xMatrix 多人開發頻道、本機儲存庫執行與即時頁面。",
     eyebrow: "YouMind 替代方案 · YouMind vs xMatrix",
-    headline: "YouMind 替代方案：專為團隊開發 Agent、Android 與真實儲存庫打造",
+    headline: "YouMind vs xMatrix",
     lead: "YouMind 是一款精緻的個人創作工作室，擅長將影片、Podcast 與網頁研究彙整成簡報與文章（每月 US$20–$200 點數方案），但缺乏原生團隊協作、沒有 Android App，對 GitHub／Linear 也僅止於橋接脈絡而非執行本機開發 Agent。xMatrix 在同一個多人 Space 中整合程式碼交付、研究與維運。",
     productCaption:
       "xMatrix 實景：在涵蓋桌面、網頁、Android 與 iOS 的同一個多人 Space 裡，把研究筆記、規格與多 Agent 軟體交付一次串起。",
@@ -1647,7 +1647,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "YouMind 僅提供 iOS 與 Chrome 擴充功能，沒有官方 Android App，讓 Android 開發者離開座位就無法監控或引導任務。",
         xmatrixAnswer:
-          "xMatrix 橫跨 macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad），將研究、規格、程式碼 PR 與上線進度統一收斂在同一份即時頁面。",
+          "xMatrix 橫跨 macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web，將研究、規格、程式碼 PR 與上線進度統一收斂在共享的即時頁面中。",
       },
     ],
     comparisonRows: [
@@ -1673,7 +1673,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "平台覆蓋範圍",
-        xmatrix: "macOS、Windows、Linux、Android 與 Web（含 iPhone 與 iPad）",
+        xmatrix: "macOS、Windows、Linux、iPhone 與 iPad、Android 以及 Web",
         competitor: "網頁、iOS、Chrome 擴充功能；無官方 Android App",
       },
     ],
@@ -1695,7 +1695,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         title: "自動化定期研究與報表彙整",
-        detail: "在頁面內嵌排程 Norn 程式，讓每週摘要與關鍵指標自動維持最新。",
+        detail: "在頁面內嵌排程 Norn 程式，由 Agent 依排程更新每週摘要與關鍵指標。",
       },
     ],
     faqs: [
@@ -1705,7 +1705,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         question: "xMatrix 有 Android App 嗎？",
-        answer: "有的。xMatrix 提供 Android App，並同步支援 macOS、Windows、Linux 與 Web（含 iPhone 與 iPad）。",
+        answer: "有的。xMatrix 提供 Android App（可從 Google Play 或 APK 安裝），另有 iPhone 與 iPad App、macOS 與 Windows 桌面應用程式、Web，以及供 Linux 主機使用的 CLI。",
       },
       {
         question: "外部 Agent 也能搭配 xMatrix 使用嗎？",
@@ -1721,10 +1721,10 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "Google Jules 已於 11 月 11 日轉為唯讀，並於 2026 年 12 月 31 日正式關閉。將匯出的 Jules 記憶、排程與 GitHub 儲存庫帶到 xMatrix，並肩執行 Antigravity、Claude Code 與 Codex。",
     eyebrow: "Google Jules 替代方案 · 12 月 31 日關閉遷移指南",
-    headline: "在 12 月 31 日前將非同步 GitHub 工作遷出 Google Jules——繼續從手機派工",
-    lead: "Google Jules 已於 2026 年 11 月 11 日停止執行新工作階段，並將於 2026 年 12 月 31 日徹底下線，且未提供記憶、排程或任務的自動遷移。xMatrix 讓你將匯出的脈絡直接匯入即時頁面，並繼續從手機或 Web 非同步派發 GitHub PR——在你自有的常駐電腦或自管 VPS 上執行 Google Antigravity 與其餘 34 種程式設計代理。",
+    headline: "遷出 Google Jules",
+    lead: "Google Jules 已於 2026 年 11 月 11 日停止執行新工作階段，並將於 2026 年 12 月 31 日徹底下線，且未提供記憶、排程或任務的自動遷移。xMatrix 讓你將匯出的脈絡直接匯入即時頁面，並繼續從手機或 Web 非同步派發 GitHub PR——在你自有的常駐電腦或自管 VPS 上執行 Google Antigravity 與其餘 33 種程式設計代理。",
     productCaption:
-      "xMatrix 實景：從 Web 或手機持續非同步推進 GitHub Issues，讓 Google Antigravity、Claude Code、Codex 與其餘 32 種程式設計代理在你自有的常駐主機或 VPS 上並肩合作。",
+      "xMatrix 實景：從 Web 或手機持續非同步推進 GitHub Issues，讓 Google Antigravity、Claude Code、Codex 與其餘 31 種程式設計代理在你自有的常駐主機或 VPS 上並肩合作。",
     painPoints: [
       {
         title: "2026 年 12 月 31 日永久關閉，且僅支援手動匯出",
@@ -1738,14 +1738,14 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Hacker News、Reddit 與 Google AI 論壇的開發者紛紛表達對失去 Jules 可預期每日非同步任務模式的無奈，並擔心把所有工作集中到單一廠商的統一配額池後，會更常撞上意外上限或超額費用。",
         xmatrixAnswer:
-          "xMatrix 原生支援將 Google Antigravity 與其餘 34 種程式設計代理（Claude Code、Codex、Cursor、Gemini CLI 等）並列運行——當單一廠商配額視窗耗盡時，也能將工作交接給其他供應商。",
+          "xMatrix 原生支援將 Google Antigravity 與其餘 33 種程式設計代理（Claude Code、Codex、Cursor、Gemini CLI 等）並列運行——當單一廠商配額視窗耗盡時，也能將工作交接給其他供應商。",
       },
       {
         title: "重建輕量行動端與非同步清理 GitHub 待辦的習慣",
         problem:
           "早期遷移者反映，離開 Jules 後中斷了原本在手機隨時開單、非同步清掉 GitHub Issues 並產出 PR 的輕快習慣，不必整天守在本機 IDE 前。",
         xmatrixAnswer:
-          "只要連上一台常駐電腦或你自管的 Linux VPS，再從 Android 或 Web（含 iPhone 與 iPad）輸入 @auto repo:owner/repo，或由 GitHub 事件自動觸發 Agent，就能非同步看著 PR、CI 狀態與頁面更新陸續到位。",
+          "只要連上一台常駐電腦或你自管的 Linux VPS，再從 iPhone、iPad 或 Android App 或 Web 輸入 @auto repo:owner/repo，或由 GitHub 事件自動觸發 Agent，就能非同步看著 PR、CI 狀態與頁面更新陸續到位。",
       },
     ],
     comparisonRows: [
@@ -1756,7 +1756,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       },
       {
         dimension: "執行工具與模型選擇",
-        xmatrix: "Google Antigravity + 其餘 34 種程式設計代理（含 --runtime）與配額交接",
+        xmatrix: "Google Antigravity + 其餘 33 種程式設計代理（含 --runtime）與配額交接",
         competitor: "僅限 Google 雲端 Agent（退場整合至 Google Antigravity）",
       },
       {
@@ -1779,7 +1779,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       "2026 年 12 月 31 日之後將無法繼續留在 Jules——請務必在服務終止前透過 npm install -g @google/jules 完成資料匯出。另請留意：xMatrix 需要你自備常駐電腦或自管 VPS，不提供託管雲端 VM。",
     ],
     switchWhen: [
-      "你想繼續使用 Google Antigravity，並與其餘 34 種程式設計代理並肩運作，不必把所有工作押注在單一廠商。",
+      "你想繼續使用 Google Antigravity，並與其餘 33 種程式設計代理並肩運作，不必把所有工作押注在單一廠商。",
       "你需要一個長久穩定的家，承接匯出的 Jules 記憶、環境機密與 GitHub 排程巡檢任務。",
       "你手邊已有 Mac Studio、桌機或平價 Linux VPS，想要一套不會因雲端測試服務關閉而被迫中斷的手機非同步開 PR 工作流。",
     ],
@@ -1801,7 +1801,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "從 Jules 遷移後，我還能在 xMatrix 裡執行 Google Antigravity 嗎？",
         answer:
-          "可以。xMatrix 原生支援 Google Antigravity（agy），並可在你的自有主機上與其餘 34 種程式設計代理（Claude Code、Codex、Cursor、Gemini 等）並列運作。",
+          "可以。xMatrix 原生支援 Google Antigravity（agy），並可在你的自有主機上與其餘 33 種程式設計代理（Claude Code、Codex、Cursor、Gemini 等）並列運作。",
       },
       {
         question: "xMatrix 會像 Jules 一樣提供託管雲端 VM 嗎？",

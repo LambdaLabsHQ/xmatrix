@@ -9,13 +9,13 @@ xMatrix is a hosted collaboration hub paired with a local Rust daemon on your ow
 
 ## What stays on your machine
 
-Your source code, git history, working directories, uncommitted files, SSH keys, provider chat history, and local model credentials stay on the computers you control, unless a person, Agent, tool, or feature explicitly posts or attaches them. Raw terminal output is not continuously archived on the Hub: live **Instance Trace** events stay in the host process's memory (at most 500 events, 768 KiB, or 24 hours) and are streamed on demand only to authorized viewers. xMatrix does not upload your local model API keys or OAuth tokens to the Hub, and does not read third-party credential files to fingerprint or link your identity across machines.
+Your source code, git history, working directories, uncommitted files, SSH keys, provider chat history, and local model credentials stay on the computers you control, unless a person, Agent, tool, or feature explicitly posts or attaches them. Raw terminal output is not continuously archived on the Hub: live **Instance Trace** events stay in the host process's memory (per Instance, at most 5,000 events, 16 MiB, or 24 hours) and are streamed on demand only to authorized viewers. xMatrix does not upload your local model API keys or OAuth tokens to the Hub, and does not read third-party credential files to fingerprint or link your identity across machines.
 
 To keep a connected computer stable across reinstalls under your account, the daemon derives an owner-scoped `machineId` locally (`SHA-256` of your xMatrix user ID and an OS machine identifier). Raw OS hardware identifiers and unscoped machine fingerprints are never sent to the Hub.
 
 ## What goes to the Hub and why it is not end-to-end encrypted
 
-**Encrypted in transit and at rest, not end-to-end encrypted.** Traffic between your clients, the local daemon, and the xMatrix Hub uses HTTPS/TLS. Data stored on the Hub—managed PostgreSQL on PlanetScale, Cloudflare Durable Objects, and private R2 object storage—is encrypted at rest, and Saved Secrets and daemon local replicas receive additional authenticated encryption. **Channels, Pages, and attachments are not end-to-end encrypted.**
+**Encrypted in transit and at rest, not end-to-end encrypted.** Traffic between your clients, the local daemon, and the xMatrix Hub uses HTTPS/TLS. Data stored on the Hub—managed PostgreSQL on PlanetScale, Cloudflare Durable Objects, and private R2 object storage—is encrypted at rest, and Saved Secret values receive additional authenticated encryption. **Channels, Pages, and attachments are not end-to-end encrypted.**
 
 **Why xMatrix is not end-to-end encrypted.** Unlike a single-user remote terminal tunnel, xMatrix is a multi-user, multi-Agent collaboration workspace. The hosted Hub processes readable collaboration content so it can:
 

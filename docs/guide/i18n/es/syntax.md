@@ -131,7 +131,7 @@ El compositor muestra los identificadores y valores que anuncia actualmente cada
 
 ### Quién inicia un agente
 
-Enviar desde el compositor de xMatrix inicia los agentes que invocas. El mensaje de un agente solo inicia otro cuando se envía con `xmatrix send --launch`; sin esa opción, un `@codex` dentro de su informe es solo una mención, de modo que los agentes nunca se invocan entre sí por accidente. Stop, reborn y handoff funcionan igual en ambos casos.
+Enviar desde el compositor de xMatrix inicia los agentes que invocas. Un mensaje enviado desde la CLI, por una persona o por un agente, solo inicia uno cuando se envía con `xmatrix send --launch`; sin esa opción, un `@codex` dentro del informe de un agente es solo una mención, de modo que los agentes nunca se invocan entre sí por accidente. Stop, reborn y handoff funcionan igual en ambos casos.
 
 Una mención que no inició nada lo indica sobre la propia mención, y su autor puede iniciarla desde ahí. Ningún texto en un mensaje inicia un agente por sí solo: la condición retirada `launch:force` se ignora, así que un agente no puede iniciar a otro escribiéndola en un informe.
 
