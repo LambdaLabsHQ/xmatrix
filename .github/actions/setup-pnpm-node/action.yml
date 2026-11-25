@@ -7,11 +7,12 @@ inputs:
     default: "true"
   electron-binary:
     description: >-
-      When false, skip the Electron binary download in Electron's postinstall.
-      Only the desktop jobs run Electron; the others need its package, not the
-      GitHub release download it fetches, which can time out (504).
+      When true, allow Electron's postinstall binary download. Defaults to false
+      because only desktop jobs run Electron; every other job needs only the
+      workspace packages and avoids the GitHub release download, which can time
+      out (504).
     required: false
-    default: "true"
+    default: "false"
 runs:
   using: composite
   steps:

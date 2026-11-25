@@ -118,6 +118,8 @@ jobs:
           release_channel: ${{ steps.release-channel.outputs.channel }}
 
       - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: pnpm install --frozen-lockfile
 
       - name: Build protocol package for exact Hub bundle
@@ -697,14 +699,15 @@ jobs:
             echo "::notice::No verified prebuilt Web bundle for $XMATRIX_DEPLOY_SHA; building it here"
           fi
 
+      # `build:cloudflare` builds `@xmatrix/protocol` and runs `next build` with
+      # its own lint and typecheck (including generated `.next/types`) on the
+      # native SWC binding CI and e2e test; neither a preceding `tsc --noEmit`
+      # nor `NEXT_TEST_WASM` belongs here.
       - name: Typecheck and build production Web
         if: steps.prebuilt.outputs.hit != 'true'
         env:
-          NEXT_TEST_WASM: "1"
           XMATRIX_WEB_SOURCE_MAPS: ${{ secrets.SENTRY_AUTH_TOKEN != '' && '1' || '' }}
-        run: |
-          pnpm exec turbo typecheck --filter=@xmatrix/web
-          pnpm --filter @xmatrix/web build:cloudflare
+        run: pnpm --filter @xmatrix/web build:cloudflare
 
       # Browser stack traces resolve against maps held by error reporting; the
       # deployed assets never serve them.

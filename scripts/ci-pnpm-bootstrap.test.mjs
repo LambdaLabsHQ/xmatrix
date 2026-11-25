@@ -61,6 +61,19 @@ test("hosted installs do not restore the PNPM store from the Actions cache", () 
   assert.doesNotMatch(action, /hashFiles\([^)\n]*package\.json/u);
 });
 
+test("only desktop CI downloads the Electron binary during workspace install", () => {
+  const action = parse(readRepoFile(".github/actions/setup-pnpm-node/action.yml"));
+  assert.equal(action.inputs["electron-binary"].default, "false");
+
+  const ci = parse(readRepoFile(".github/workflows/ci.yml"));
+  const desktopSetup = ci.jobs.desktop.steps.find((item) => item.uses === "./.github/actions/setup-pnpm-node");
+  assert.equal(desktopSetup?.with?.["electron-binary"], "true");
+
+  const server = parse(readRepoFile(".github/workflows/server-release.yml"));
+  const hubInstall = server.jobs.hub.steps.find((item) => item.name === "Install dependencies");
+  assert.equal(hubInstall?.env?.ELECTRON_SKIP_BINARY_DOWNLOAD, "1");
+});
+
 test("a bootstrap ECONNRESET retries the pinned install and publishes PNPM only after success", posix, (t) => {
   const { result, calls, delays, published, directory } = bootstrap(t, ["ECONNRESET", ""]);
   assert.equal(result.status, 0, result.stderr + result.stdout);
