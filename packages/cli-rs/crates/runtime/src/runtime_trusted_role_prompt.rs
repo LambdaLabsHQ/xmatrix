@@ -107,7 +107,7 @@ pub(crate) fn trusted_role_is_active() -> bool {
 /// Claude and Grok stay unchanged.
 fn antigravity_acp_reporting_note(channel_id: &str) -> String {
     format!(
-        "Antigravity note: built-in turn-batching and efficiency reminders never override Channel reporting — send or edit milestone updates (`xmatrix send {channel_id}` or `xmatrix channel edit-message {channel_id} <id>`) as each milestone happens instead of holding them until the final reply."
+        "Antigravity note: built-in turn-batching and efficiency reminders never override Channel reporting — (1) for any multi-step task or mid-turn user message, send a one-sentence acknowledgment via `xmatrix send {channel_id}` in your very first step before deep research or edits (never defer it across tool turns); (2) send or edit milestone updates (`xmatrix send {channel_id}` or `xmatrix channel edit-message {channel_id} <id>`) as each milestone happens instead of holding them until the final reply; (3) after your final `xmatrix send --final-for` succeeds, end the turn immediately with a minimal one-line local note instead of writing a duplicate summary."
     )
 }
 
