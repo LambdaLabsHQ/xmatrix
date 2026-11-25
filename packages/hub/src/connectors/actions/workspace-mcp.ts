@@ -118,6 +118,33 @@ export async function workspaceMcpTool(server: WorkspaceMcpServer, credentials: 
   }
 }
 
+/**
+ * A curated action's MCP answer, or undefined while Google refuses the server
+ * itself for this project (the caller then serves the same request from REST).
+ * The refusal comes before the tool runs, so a write is never applied twice.
+ */
+export async function workspaceMcpOrRest(server: WorkspaceMcpServer, credentials: Readonly<Record<string, string>>, product: string,
+  tool: string, args: Record<string, unknown>): Promise<Record<string, unknown> | undefined> {
+  try { return await workspaceMcpTool(server, credentials, product, tool, args); }
+  catch (error) {
+    if (!(error instanceof WorkspaceMcpUnavailable)) throw error;
+    console.warn("Workspace MCP unavailable; using REST", { server, tool, status: error.status });
+    return undefined;
+  }
+}
+
+/** A new blank Google Doc or Sheet through Drive's MCP `create_file`; undefined while the server refuses this project. */
+export async function createGoogleFile(credentials: Readonly<Record<string, string>>, title: string,
+  kind: "document" | "spreadsheet"): Promise<string | undefined> {
+  const file = await workspaceMcpOrRest("drive", credentials, "Google Docs & Drive", "create_file",
+    { title, contentMimeType: `application/vnd.google-apps.${kind}` });
+  if (!file) return undefined;
+  if (typeof file.id !== "string" || !/^[A-Za-z0-9_-]{10,200}$/u.test(file.id) || file.mimeType !== `application/vnd.google-apps.${kind}`) {
+    throw new ProviderRequestError(502, `Google did not confirm the new ${kind}; check Drive before retrying`);
+  }
+  return file.id;
+}
+
 /** `mcp_tools`, `mcp_read` and `mcp_write` for a connector whose token serves `servers`. */
 export function workspaceMcpActions(servers: readonly WorkspaceMcpServer[], product: string): Record<string, ConnectorAction> {
   const serverOf = (value: string) => (servers as readonly string[]).includes(value) ? value as WorkspaceMcpServer : undefined;

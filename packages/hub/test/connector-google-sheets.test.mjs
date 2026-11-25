@@ -67,17 +67,26 @@ test("read rejects malformed/wrong range replies, denied files and explicitly ma
   assert.match(long.result.summary, /Truncated/u); assert.ok(long.result.summary.length < 12_300);
 });
 
-test("writes require exact bounded scalar matrices, separate policies, RAW input and confirmed receipts", async () => {
+const mcp = structuredContent => ({ body: { jsonrpc: "2.0", id: 1, result: { structuredContent } } });
+const notEnrolled = { status: 403, body: { error: { message: "MCP is not enabled for this project" } } };
+
+test("writes require exact bounded scalar matrices, go through Sheets MCP with every string kept literal, and confirm receipts", async () => {
   for (const text of ["", "invalid", update("A1:B2", [[1]]), update("A1:B1", [[1], [2]]), update("A1", [[null]]),
     update("A1", [[{}]]), update("A1:U1", [Array(21).fill(1)]), '{"range":"A1","values":[[1e999]]}']) {
     assert.equal(typeof actions.update_sheet.parse({ target: spreadsheet, text }), "string", text);
   }
   const text = update("'Work Sheet'!A1:B2", [["=IMPORTXML(\"https://evil.example\")", 3], [false, ""]]);
-  const response = await run("update_sheet", text, [receipt("'Work Sheet'!A1:B2", 2, 2)]);
-  assert.equal(response.calls.length, 1); assert.equal(response.calls[0].method, "PUT");
-  assert.equal(response.calls[0].url.searchParams.get("valueInputOption"), "RAW");
-  assert.deepEqual(response.calls[0].body, { range: "'Work Sheet'!A1:B2", majorDimension: "ROWS", values: JSON.parse(text).values });
+  const response = await run("update_sheet", text, [mcp({ content: { ...receipt("'Work Sheet'!A1:B2", 2, 2), status: "success" } })]);
+  assert.equal(response.calls.length, 1);
+  assert.equal(response.calls[0].url.href, "https://sheetsmcp.googleapis.com/mcp/v1");
+  // Sheets MCP writes as typed by a person; the leading apostrophe keeps each string literal (RAW).
+  assert.deepEqual(response.calls[0].body.params, { name: "update_values", arguments: { spreadsheetId: spreadsheet,
+    range: "'Work Sheet'!A1:B2", values: [["'=IMPORTXML(\"https://evil.example\")", 3], [false, "'"]] } });
   assert.match(response.result.summary, /Updated 4 .* RAW/u); assert.doesNotMatch(response.result.summary, /evil\.example/u);
+  const rest = await run("update_sheet", text, [notEnrolled, receipt("'Work Sheet'!A1:B2", 2, 2)]);
+  assert.equal(rest.calls[1].method, "PUT");
+  assert.equal(rest.calls[1].url.searchParams.get("valueInputOption"), "RAW");
+  assert.deepEqual(rest.calls[1].body, { range: "'Work Sheet'!A1:B2", majorDimension: "ROWS", values: JSON.parse(text).values });
   for (const actionId of ["update_sheet", "create_sheet"]) {
     assert.equal(getAppConnectorProvider("google").actions.find(action => action.id === actionId).effect, "write");
     assert.equal(actionRefusal({ providerId: "google", actionId, effect: "write", senderKind: "agent", mode: null }), undefined);
@@ -85,24 +94,30 @@ test("writes require exact bounded scalar matrices, separate policies, RAW input
 });
 
 test("ambiguous/denied/timed-out writes are sent once, never refreshed or retried by the action", async () => {
-  for (const response of [{}, receipt("Other!A1", 1, 1), { ...receipt("Work!A1", 1, 1), spreadsheetId: "other" },
-    { ...receipt("Work!A1", 1, 1), updatedCells: 0 }, { status: 403, body: {} }, { error: new DOMException("timeout", "TimeoutError") }]) {
+  for (const response of [mcp({}), mcp({ content: receipt("Other!A1", 1, 1) }), mcp({ content: { ...receipt("Work!A1", 1, 1), spreadsheetId: "other" } }),
+    mcp({ content: { ...receipt("Work!A1", 1, 1), updatedCells: 0 } }), { status: 429, body: {} },
+    { body: { jsonrpc: "2.0", id: 1, result: { isError: true, content: [{ type: "text", text: "The caller does not have permission" }] } } },
+    { error: new DOMException("timeout", "TimeoutError") }]) {
     let calls;
     await assert.rejects(run("update_sheet", update("Work!A1", [[1]]), [response], spreadsheet, value => { calls = value; }));
     assert.equal(calls.length, 1, "failed writes must not be replayed or refreshed");
-    assert.equal(calls[0].method, "PUT");
   }
 });
 
-test("create uses the same app grant and canonical sheet URL; malformed acknowledgments fail without replay", async () => {
+test("create goes through Drive MCP with the same app grant and canonical sheet URL; malformed acknowledgments fail without replay", async () => {
   for (const text of ["", "x".repeat(251), "title\nbody", "bad\tname"]) {
     assert.equal(typeof actions.create_sheet.parse({ target: "new", text }), "string");
   }
-  const response = await run("create_sheet", "Work results", [{ spreadsheetId: spreadsheet, spreadsheetUrl: "https://evil.example" }], "new");
-  assert.equal(response.calls[0].url.href, "https://sheets.googleapis.com/v4/spreadsheets");
-  assert.deepEqual(response.calls[0].body, { properties: { title: "Work results" } });
+  const response = await run("create_sheet", "Work results",
+    [mcp({ id: spreadsheet, mimeType: "application/vnd.google-apps.spreadsheet", viewUrl: "https://evil.example" })], "new");
+  assert.equal(response.calls[0].url.href, "https://drivemcp.googleapis.com/mcp/v1");
+  assert.deepEqual(response.calls[0].body.params, { name: "create_file",
+    arguments: { title: "Work results", contentMimeType: "application/vnd.google-apps.spreadsheet" } });
   assert.equal(response.result.url, `https://docs.google.com/spreadsheets/d/${spreadsheet}/edit`);
   let calls;
-  await assert.rejects(run("create_sheet", "Work results", [{}], "new", value => { calls = value; }), /check Drive before retrying/u);
+  await assert.rejects(run("create_sheet", "Work results", [mcp({})], "new", value => { calls = value; }), /check Drive before retrying/u);
   assert.equal(calls.length, 1);
+  const rest = await run("create_sheet", "Work results", [notEnrolled, { spreadsheetId: spreadsheet }], "new");
+  assert.equal(rest.calls[1].url.href, "https://sheets.googleapis.com/v4/spreadsheets");
+  assert.deepEqual(rest.calls[1].body, { properties: { title: "Work results" } });
 });
