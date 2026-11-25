@@ -9486,20 +9486,39 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   font-size: 13px;
   font-weight: 450;
   line-height: 24px;
+  /* It arrives with the message, so the author sees at once that something is happening to it. */
+  animation: launch-line-enter 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 .xmatrix-app .launch-line-status {
   min-width: 0;
 }
 
-/* Still reading: the words breathe, and stand still once there is a reading. */
-.xmatrix-app .launch-line[data-live] .launch-line-status {
-  animation: launch-line-reading 1.6s ease-in-out infinite;
+@keyframes launch-line-enter {
+  from { opacity: 0; transform: translateY(-4px); }
 }
 
-@keyframes launch-line-reading {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+/* While xMatrix or the Agent is at work the words carry a light sweeping
+   across them; they stand still once the author has something to decide. */
+.xmatrix-app.xmatrix-app.xmatrix-app .launch-line[data-working] .launch-line-status {
+  background-image: linear-gradient(90deg, var(--muted-foreground) 0%, var(--muted-foreground) 40%,
+    var(--foreground) 50%, var(--muted-foreground) 60%, var(--muted-foreground) 100%) !important;
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: launch-line-sweep 1.8s linear infinite;
+}
+
+@keyframes launch-line-sweep {
+  from { background-position: 100% 0; }
+  to { background-position: -150% 0; }
+}
+
+/* The ring around the mark of whoever acts next turns while they work. */
+@keyframes launch-ring-turn {
+  from { transform: rotate(-90deg); }
+  to { transform: rotate(270deg); }
 }
 
 .xmatrix-app .launch-line-agent {
@@ -9537,9 +9556,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: color-mix(in oklab, var(--foreground) 78%, transparent);
+  color: color-mix(in oklab, var(--foreground) 62%, transparent);
   font: inherit;
-  font-weight: 620;
+  font-weight: 560;
   transition: background-color 120ms ease, color 120ms ease;
 }
 
@@ -9560,7 +9579,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
 
 /* A thumb's target on a phone, without moving the sentence. */
 @media (pointer: coarse) {
-  .xmatrix-app .launch-line { min-height: 32px; }
+  .xmatrix-app .launch-line { min-height: 32px; column-gap: 8px; }
   .xmatrix-app.xmatrix-app.xmatrix-app .launch-line-action { height: 32px; margin: 0 -8px; padding: 0 8px; }
 }
 
@@ -9617,7 +9636,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .xmatrix-app .launch-line[data-live] .launch-line-status { animation: none; }
+  .xmatrix-app .launch-line,
+  .xmatrix-app.xmatrix-app.xmatrix-app .launch-line[data-working] .launch-line-status,
+  .xmatrix-app .launch-ring-track { animation: none !important; }
 }
 
 /* Rail update: a whiter liquid-glass disc the size of the profile avatar,

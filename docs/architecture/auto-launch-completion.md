@@ -116,7 +116,8 @@ Agent to start now (`START_INTENT_CATEGORIES`: `summon` or `conversation`) in
 the same call that chooses the harness. A decided harness is never launched
 from there: xMatrix replies to the first message with an ordinary
 `@<harness>` message, appended with `launch: true` because whether to start is
-already decided. That message's author is xMatrix itself (`system:xmatrix`),
+already decided. The web shows that reply without quoting the
+first message, which is directly above it. That message's author is xMatrix itself (`system:xmatrix`),
 and it launches as the first message's author: the launch authority accepts a
 `system:xmatrix` source only as `xmatrix-summon:<first-message-id>`, and only
 for the author of that message's recorded `start` decision. The message goes
@@ -153,7 +154,9 @@ is still open is the Hub's own `open` in each record, never a comparison with
 the reader's clock. The web shows one line of text under the message, not a
 card and not a list of Agents: "Choosing an Agent…", then Jev's pick and the
 seconds left, with the author's two ways out as words at its end ("Change" or
-"Pick one", and "Don't start"). Opening the menu claims "start nothing"
+"Pick one", and "Don't start"). A ring around the mark of whoever acts next
+leads the line: turning while xMatrix reads or the Agent starts, draining
+with the author's seconds while they may change the pick. Opening the menu claims "start nothing"
 first, so choosing is never a race against the window; the Agent picked there
 is the author's own `@<harness>` message, an ordinary summon, and the menu's
 last row puts that summon in the composer, where model, effort, machine and
