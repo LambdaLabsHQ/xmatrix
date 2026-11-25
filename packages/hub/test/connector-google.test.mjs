@@ -82,10 +82,18 @@ test("read includes all tabs, nested tabs and table text, supports one tab and r
   const tabs = [{ tabProperties: { title: "Requirements", tabId: "t.1" }, documentTab: { body: { content: [paragraph("first\n"),
     { table: { tableRows: [{ tableCells: [{ content: [paragraph("cell\n")] }] }] } }] } },
     childTabs: [{ tabProperties: { title: "Subtab", tabId: "t.2" }, documentTab: { body: { content: [paragraph("second\n")] } } }] }];
-  const { result, calls } = await fetched([{ body: { documentId: id, title: "Plan", tabs } }], () =>
+  const mcp = content => ({ body: { jsonrpc: "2.0", id: 1, result: { structuredContent: { content } } } });
+  const { result, calls } = await fetched([mcp({ documentId: id, title: "Plan", tabs })], () =>
     GOOGLE_ACTIONS.read_doc.execute({ credentials: { oauthToken: "access" } }, { document: id }));
-  assert.match(calls[0].url, /includeTabsContent=true$/);
+  assert.equal(calls[0].url, "https://docsmcp.googleapis.com/mcp/v1");
+  assert.deepEqual(calls[0].body.params, { name: "read_doc", arguments: { documentId: id } });
   assert.equal(calls[0].headers.get("authorization"), "Bearer access");
+  assert.match(result.summary, /^Google Doc: Plan/);
+  // While Google refuses the Docs MCP server for this project, REST serves the same read.
+  const rest = await fetched([{ status: 403, body: { error: { message: "not enabled" } } }, { body: { documentId: id, title: "Plan", tabs } }], () =>
+    GOOGLE_ACTIONS.read_doc.execute({ credentials: { oauthToken: "access" } }, { document: id }));
+  assert.match(rest.calls[1].url, /includeTabsContent=true$/);
+  assert.equal(rest.result.summary, result.summary);
   for (const word of ["first", "cell", "second", "Subtab", "untrusted"]) assert.ok(result.summary.includes(word));
   const excerpt = googleDocumentExcerpt({ tabs }, "t.2");
   assert.match(excerpt.text, /second/);
@@ -97,8 +105,10 @@ test("read includes all tabs, nested tabs and table text, supports one tab and r
 });
 
 test("read fails on denied access and mismatched or malformed document data", async () => {
-  for (const response of [{ status: 403 }, { status: 404 }, { body: { documentId: "other", title: "wrong" } },
-    { body: { documentId: id, title: "bad", tabs: [{}] } }]) {
+  const mcp = result => ({ body: { jsonrpc: "2.0", id: 1, result } });
+  for (const response of [mcp({ isError: true, content: [{ type: "text", text: "Requested entity was not found." }] }),
+    mcp({ structuredContent: { content: { documentId: "other", title: "wrong" } } }),
+    mcp({ structuredContent: { content: { documentId: id, title: "bad", tabs: [{}] } } })]) {
     await fetched([response], async calls => {
       await assert.rejects(GOOGLE_ACTIONS.read_doc.execute({ credentials: { oauthToken: "access" } }, { document: id }));
       assert.equal(calls.length, 1);
