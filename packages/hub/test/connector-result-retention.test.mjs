@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { appResultRetentionNotice } from "@xmatrix/protocol";
 import { expireRetainedAppResults, RETAINED_APP_RESULTS } from "../src/connectors/result-retention.ts";
 
-test("Google Cloud results are retained 29 days, inside the terms' 30", () => {
-  assert.deepEqual([...RETAINED_APP_RESULTS], [["gcp", 29]]);
+test("Google Cloud and Workspace results are retained 29 days, inside the terms' 30", () => {
+  assert.deepEqual(new Map(RETAINED_APP_RESULTS), new Map([["gcp", 29], ["gmail", 29], ["google", 29], ["googlecalendar", 29]]));
   assert.match(appResultRetentionNotice("gcp"), /deleted after 29 days.*disconnected.*do not copy it into Pages, memory/);
   assert.equal(appResultRetentionNotice("slack"), undefined);
 });

@@ -9,6 +9,23 @@ Agents and operators can now query App Store and Google Play operational metrics
 
 Hub and protocol only; no schema migration. Recovery is a CI-validated beta reverting this change.
 
+## Unreleased: Gmail, Google Docs/Drive/Sheets and Calendar results expire at 29 days
+
+Google's Workspace AI Tools Addendum (from 2027-02-01) lets data an AI tool
+reads from Workspace be processed only for the user's active task and never
+kept after the tool is disconnected; Google Cloud's §17 already bounded @gcp.
+`gmail`, `google` and `googlecalendar` now declare `resultRetentionDays: 29`,
+so the Space retention clock that expires @gcp results expires theirs too:
+receipts and inbound events become tombstones, execution summaries clear, and
+private originals are collected at once; disconnecting deletes everything.
+Gmail notification reads stored privately (owned by the event message,
+`app:gmail:…`) are now matched as well; before, only receipt-owned originals
+(`…:<app>`) were. Results stored before this release expire when the Space's
+clock next runs (any retained-provider call, private result or routing
+decision arms it). Removing a single Gmail mailbox, rather than disconnecting
+Gmail, does not yet delete that mailbox's earlier results; the 29-day bound
+still applies. Hub only; no schema or client change.
+
 ## Unreleased: code scanning leaves the release train
 
 Every release train waited for its CodeQL analysis to finish before it

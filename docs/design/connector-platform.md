@@ -623,6 +623,12 @@ message's Reply-To (else From) in its thread with In-Reply-To and References
 set; header values are single-line and non-ASCII ones RFC 2047 encoded. There
 is no label, delete, draft or settings action. Notifications are described below. Composio is a subprocessor for connected mailboxes.
 
+Gmail, Google Docs/Drive/Sheets and Calendar declare `resultRetentionDays: 29`
+(Google Workspace AI Tools Addendum, from 2027-02-01), like `gcp`
+(`docs/connectors/gcp.md`): receipts, inbound events, execution summaries and
+private originals, including notification reads owned by `app:gmail:…` event
+messages, are deleted at 29 days and at once on disconnect.
+
 Disconnect reads the grant through the credential authority's live Space
 owner/admin check before any provider deletion. Member-visible connection
 metadata is not authorization for that effect. Composio retirement happens

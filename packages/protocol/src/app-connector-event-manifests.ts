@@ -134,6 +134,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       ],
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/drive.file"], secretRefs: [] },
+    // Google Workspace AI Tools Addendum (from 2027-02-01): user data only for
+    // active user-authorized tasks and never kept after disconnecting.
+    resultRetentionDays: 29,
   },
   {
     ...actionConnector({
@@ -230,6 +233,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       ],
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events.freebusy"], secretRefs: [] },
+    // Google Workspace AI Tools Addendum (from 2027-02-01): user data only for
+    // active user-authorized tasks and never kept after disconnecting.
+    resultRetentionDays: 29,
   },
   {
     ...actionConnector({
@@ -374,6 +380,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       ],
     }),
     auth: { type: "oauth", scopes: ["https://mail.google.com/"], secretRefs: [] },
+    // Google Workspace AI Tools Addendum (from 2027-02-01): user data only for
+    // active user-authorized tasks and never kept after disconnecting.
+    resultRetentionDays: 29,
     events: {
       ingress: false,
       source: { label: "Mailbox", description: "One of your mailboxes with notifications on in Apps → Gmail. Only its owner and their Agents subscribe it.",
