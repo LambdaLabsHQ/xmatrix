@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Google Docs reads go through Google's Docs MCP server
+
+`@google:read_doc` now calls Google's Docs MCP server (`read_doc`), whose answer
+is Docs' own `documents.get` shape with tabs, so the excerpt (all tabs, nested
+tabs and tables, or one `#tab=`) is unchanged. REST serves the read only while
+Google refuses the MCP server itself for the project. Drive's MCP tools
+(`search_files`, `list_recent_files`) answered Google's internal error for a
+`drive.file` grant in production, so `list_files` stays on REST; Sheets and
+the Docs/Sheets writes follow once verified on a live file. Hub only.
+
 ## Unreleased: Calendar lists read through Google's Workspace MCP server
 
 `@googlecalendar:list_calendars` and `list_events` now call Google's Calendar

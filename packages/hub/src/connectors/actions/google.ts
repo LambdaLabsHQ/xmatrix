@@ -4,7 +4,7 @@ import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText, requireText } from "./common";
 import { googleHeaders } from "./google-headers";
 import { GOOGLE_SHEETS_ACTIONS } from "./google-sheets";
-import { workspaceMcpActions } from "./workspace-mcp";
+import { WorkspaceMcpUnavailable, workspaceMcpActions, workspaceMcpTool } from "./workspace-mcp";
 
 const FILE_ID = /^[A-Za-z0-9_-]{10,200}$/u;
 const TAB_ID = /^[A-Za-z0-9_.-]{1,100}$/u;
@@ -108,6 +108,23 @@ export function googleDocumentExcerpt(document: Record<string, unknown>, tabId?:
   return { text, truncated };
 }
 
+/**
+ * The document as Docs' `documents.get` with tabs, from Google's Docs MCP server
+ * (`read_doc` answers that same shape under `content`); REST serves only while
+ * Google refuses the MCP server itself for this project.
+ */
+async function readDocument(credentials: Readonly<Record<string, string>>, id: string): Promise<Record<string, unknown>> {
+  try {
+    const answer = await workspaceMcpTool("docs", credentials, "Google Docs & Drive", "read_doc", { documentId: id });
+    const document = record(answer.content);
+    return { ...document, title: typeof document.title === "string" ? document.title : "(untitled document)" };
+  } catch (error) {
+    if (!(error instanceof WorkspaceMcpUnavailable)) throw error;
+    console.warn("Docs MCP unavailable; using REST", { status: error.status });
+    return providerJson(`https://docs.googleapis.com/v1/documents/${id}?includeTabsContent=true`, { headers: googleHeaders(credentials) });
+  }
+}
+
 export const GOOGLE_ACTIONS: Record<string, ConnectorAction> = {
   ...GOOGLE_SHEETS_ACTIONS,
   ...workspaceMcpActions(["docs", "drive", "sheets", "slides"], "Google Docs & Drive"),
@@ -118,8 +135,7 @@ export const GOOGLE_ACTIONS: Record<string, ConnectorAction> = {
       return target && !statement.text.trim() ? target : "name an app-authorized document id or official Docs URL";
     },
     async execute({ credentials }, input) {
-      const document = await providerJson(`https://docs.googleapis.com/v1/documents/${input.document}?includeTabsContent=true`,
-        { headers: googleHeaders(credentials) });
+      const document = await readDocument(credentials, input.document!);
       if (document.documentId !== input.document || typeof document.title !== "string") {
         throw new ProviderRequestError(502, "Google did not confirm the requested document");
       }
