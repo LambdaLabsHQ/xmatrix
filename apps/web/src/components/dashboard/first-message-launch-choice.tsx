@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useReaderLocale } from "@/lib/onboarding-locale";
-import { launchRejectionCause, type ProblemLocale, type InteractionDecisionWindow, type InteractionLaunchOption } from "@xmatrix/protocol";
+import { FIRST_MESSAGE_LAUNCH_WINDOW_MS, launchRejectionCause, type ProblemLocale, type InteractionDecisionWindow, type InteractionLaunchOption } from "@xmatrix/protocol";
 import { LaunchAgentMenu, OptionMark } from "./launch-agent-menu";
 import { launchChoiceRead, launchChoiceView } from "./first-message-launch-choice-state";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { cn } from "@/lib/utils";
 
 /** Re-render on a short tick only while the window is open. */
 function useNow(active: boolean) {
@@ -135,19 +136,29 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, fo
     : view.failureCode ? failureNote(view.failureCode, locale)
     : view.by === "jev" ? "xMatrix read this as conversation" : undefined;
   const status = menu && canAsk ? "Choose who starts"
-    : view.kind === "chosen" ? <><Agent option={view.option} /> is starting</>
+    : view.kind === "chosen" ? <><Agent option={view.option} plain /> is starting…</>
     : view.kind === "none" ? (cause ? `No Agent started · ${cause}` : "No Agent started")
     : pick ? <><Agent option={pick} /> {remaining !== undefined
-      ? <>starts in <span className="launch-line-count">{Math.ceil(remaining / 1000)}s</span></> : "is starting"}</>
+      ? <>starts in <span className="launch-line-count">{Math.ceil(remaining / 1000)}s</span></> : "is starting…"}</>
     : recommended === null ? "Read as conversation, so no Agent starts"
     : "Choosing an Agent…";
   const live = undecided && !pick && recommended !== null;
   // Jev could not read it, or read it as conversation: the same exit either way.
   const asking = view.kind === "none" || recommended === null;
+  // What the ring around the mark says: xMatrix at work, the pick's seconds draining, or the pick starting.
+  const ring = menu && canAsk ? undefined
+    : view.kind === "chosen" || (pick && remaining === undefined) ? "spin"
+    : pick && remaining !== undefined ? remaining / FIRST_MESSAGE_LAUNCH_WINDOW_MS
+    : live ? "spin" : undefined;
+  const marked = view.kind === "chosen" ? view.option : pick;
   return (
     <div ref={line} className="launch-line" data-state={view.kind} data-live={live || undefined}
+      data-working={ring === "spin" || undefined}
       role={undecided ? "group" : "status"} aria-label={undecided ? "The Agent that starts" : undefined}>
+      {ring !== undefined && <LaunchRing option={marked} left={typeof ring === "number" ? ring : undefined} />}
       <span className="launch-line-status">{status}</span>
+      {!menu && (canAsk || (acting && view.kind === "open" && !asking)) &&
+        <span aria-hidden="true" className="h-3 w-px bg-foreground/15 max-sm:hidden" />}
       {!menu && canAsk && !asking && (
         <button type="button" className="launch-line-action" aria-haspopup="menu" aria-expanded={menu} onClick={() => void choose()}>
           {pick ? "Change" : "Pick one"}
@@ -172,7 +183,34 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, fo
   );
 }
 
-/** An Agent named in the line: its mark and its name, in ink. */
-function Agent({ option }: { option: InteractionLaunchOption }) {
-  return <span className="launch-line-agent"><OptionMark option={option} />{option.displayName}</span>;
+/** An Agent named in the line, in ink: its mark is the ring's. */
+function Agent({ option, plain }: { option: InteractionLaunchOption; plain?: boolean }) {
+  return plain ? <>{option.displayName}</> : <span className="launch-line-agent">{option.displayName}</span>;
+}
+
+const RING_RADIUS = 11;
+const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
+
+/**
+ * The line's sign of life, before its words: the mark of whoever acts next in
+ * a ring. Without a pick it is xMatrix's mark and the ring turns; with one it
+ * is the Agent's mark and the ring drains with the author's seconds, then
+ * turns again while the Agent starts.
+ */
+function LaunchRing({ option, left }: { option?: InteractionLaunchOption; left?: number }) {
+  const draining = left !== undefined;
+  return (
+    <span className="launch-ring relative -mr-1 inline-grid size-[26px] shrink-0 place-items-center" aria-hidden="true">
+      <svg viewBox="0 0 26 26" strokeWidth={2} className={cn("launch-ring-track absolute inset-0 -rotate-90 fill-none",
+        !draining && "animate-[launch-ring-turn_0.9s_linear_infinite]")}>
+        <circle cx="13" cy="13" r={RING_RADIUS} className="stroke-foreground/10" />
+        <circle cx="13" cy="13" r={RING_RADIUS} strokeLinecap="round" strokeDasharray={RING_LENGTH}
+          className="stroke-foreground transition-[stroke-dashoffset] duration-100 ease-linear"
+          strokeDashoffset={draining ? RING_LENGTH * (1 - Math.max(0, Math.min(1, left))) : RING_LENGTH * 0.72} />
+      </svg>
+      {option ? <OptionMark option={option} />
+        // eslint-disable-next-line @next/next/no-img-element -- xMatrix's own small mark, as on its messages.
+        : <img src="/brand/xmatrix-management-icon.png" alt="" className="launch-line-mark" />}
+    </span>
+  );
 }
