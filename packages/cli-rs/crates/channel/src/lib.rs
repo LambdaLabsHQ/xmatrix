@@ -36,6 +36,7 @@ mod subscription_wait;
 pub use read_context::{
     ChannelReadContext, LaunchContext, load_channel_read_context, load_launch_context,
 };
+pub use subscription_wait::cmd_channel_subscribe_wait;
 
 const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::private_upload::BLOB_MAX_BYTES;
 // Relay authority bounds one channel-history query to 200 enriched rows (older
@@ -262,7 +263,7 @@ fn resolve_channel_selector<'a>(
     }
 }
 
-async fn resolve_channel_reference(
+pub async fn resolve_channel_reference(
     hub_url: &str,
     token: &str,
     selector: &str,
@@ -1589,9 +1590,10 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
                     .await
                     .map(|_| ());
             }
+            let token = token.to_string();
             subscription_wait::cmd_channel_subscribe_wait(
                 hub_url,
-                token,
+                || std::future::ready(Ok(token.clone())),
                 &channel_id,
                 &pull_request,
                 std::time::Duration::from_secs(timeout.max(1) * 60),
