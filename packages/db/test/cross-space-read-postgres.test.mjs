@@ -100,6 +100,11 @@ function proofOf(ids, executionKey = "execution-1") {
 }
 
 const code = (expected) => (error) => error.code === expected;
+const refusal = (expected, message) => (error) => {
+  assert.deepEqual([error.code, error.status, error.message], [expected, 403, message]);
+  return true;
+};
+const utcMinute = (at) => new Date(at).toISOString().slice(0, 16).replace("T", " ");
 
 integration("a Run reads another Space only through its owner's approved grant, as its owner", async () => {
   await withCrossSpaceFixture(async ({ client, ids, repository, proof }) => {
@@ -219,8 +224,9 @@ integration("a person hands a conversation to support: only to support, only wha
     const runRead = (proof, part = "messages", channelId = ids.mine) => repository.authorizeRead({
       requestId: crypto.randomUUID(), proof, channelId, part });
 
-    await assert.rejects(runRead(run(ids.source)), code("cross_space_read_grant_required"),
-      "with no handoff support reads nothing");
+    await assert.rejects(runRead(run(ids.source)), refusal("cross_space_read_grant_required",
+      "This Run has no approved grant to read outside its own Space; " +
+      "ask its owner with `xmatrix access request <channel>`"), "with no handoff support reads nothing");
     await assert.rejects(handOff(`${ids.customer}-stranger`, []), code("channel_not_found"));
     await client.query(`INSERT INTO data.space_members (space_id,user_id,role,version,created_at,updated_at)
       VALUES ($1,$2,'member',1,now(),now())`, [ids.target, ids.teammate]);
@@ -274,10 +280,26 @@ integration("a person hands a conversation to support: only to support, only wha
       grantId: handoff.id, userId: ids.customer });
     assert.equal(revoked.status, "revoked");
     await assert.rejects(supportRead(handoff.id, "messages"), code("support_handoff_ended"), "withdrawal is immediate");
-    await assert.rejects(runRead(working), code("cross_space_read_grant_required"));
-    await assert.rejects(context(), code("cross_space_read_grant_required"), "nor the Channel's context");
+    const withdrawn = `The customer withdrew this support handoff on ${utcMinute((await client.query(
+      "SELECT decided_at FROM data.cross_space_read_grants WHERE grant_id=$1", [handoff.id])).rows[0].decided_at)} UTC; you can no longer read the conversation. ` +
+      "Reply in this support conversation; the customer can hand it over again.";
+    await assert.rejects(runRead(working), refusal("support_handoff_ended", withdrawn),
+      "the Run is told the customer withdrew it, not to ask for access");
+    await assert.rejects(context(), refusal("support_handoff_ended", withdrawn), "nor the Channel's context");
+    await assert.rejects(runRead(working, "messages", ids.sibling), code("cross_space_read_grant_required"),
+      "a conversation that was never handed over keeps the generic refusal");
     await assert.rejects(repository.authorizeHandoffReply({ requestId: crypto.randomUUID(), spaceId: ids.target,
       grantId: handoff.id, reader: supportMember }), code("support_handoff_ended"));
+
+    const again = await handOff(ids.customer, ["messages"]);
+    const renewed = await supportRun(client, ids, again.handoff.supportChannelId);
+    assert.equal((await runRead(renewed)).grantId, again.handoff.id, "a new handoff reads again");
+    const lapsedAt = new Date(Date.now() - 60_000);
+    await client.query("UPDATE data.cross_space_read_grants SET expires_at=$2 WHERE grant_id=$1",
+      [again.handoff.id, lapsedAt.toISOString()]);
+    await assert.rejects(runRead(renewed), refusal("support_handoff_ended",
+      `This support handoff expired on ${utcMinute(lapsedAt)} UTC; you can no longer read the conversation. ` +
+      "Reply in this support conversation; the customer can hand it over again."), "expiry is said as expiry");
   });
 });
 

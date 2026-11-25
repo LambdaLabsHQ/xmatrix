@@ -152,7 +152,10 @@ test("a person hands a conversation to support; support reads only what was tick
     for (const path of [agentHistory, family]) {
       const refused = await worker.fetch(path, agent);
       assert.equal(refused.status, 403, await refused.clone().text());
-      assert.equal((await refused.json()).code, "cross_space_read_grant_required", `withdrawal ends the Run's ${path}`);
+      const body = await refused.json();
+      assert.equal(body.code, "support_handoff_ended", `withdrawal ends the Run's ${path}`);
+      assert.match(body.error, /^The customer withdrew this support handoff on \d{4}-\d\d-\d\d \d\d:\d\d UTC; /u,
+        "the Run is told the customer withdrew it, not to ask for access");
     }
   } finally {
     await worker.stop();

@@ -238,7 +238,8 @@ export async function crossSpaceRetryOwner(env: Env, run: AgentRunPrincipal | un
   try {
     return await crossSpaceReadOwner(env, run, target, part, alongside) ?? denied;
   } catch (error) {
-    if (error instanceof CrossSpaceReadError && error.code === "cross_space_read_grant_required") {
+    if (error instanceof CrossSpaceReadError && (error.code === "cross_space_read_grant_required" ||
+      error.code === "support_handoff_ended")) {
       return postgresControlErrorResponse(error);
     }
     if (error instanceof CrossSpaceReadError && error.status === 404) return denied;

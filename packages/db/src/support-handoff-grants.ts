@@ -123,3 +123,35 @@ export async function findSupportGrant(tx: DatabaseTransaction, input: SupportGr
   const row = rows[0];
   return row ? { grantId: String(row.grant_id), ownerUserId: String(row.owner_user_id) } : null;
 }
+
+/**
+ * Why a support Run's read of the Channel has no live handoff when the latest
+ * handoff of it to the Run's support conversation has ended: withdrawn, or
+ * expired, and when. Null when there was no such handoff, or it is still live
+ * (a part it does not cover is refused as any ungranted read).
+ */
+export async function endedSupportGrant(tx: DatabaseTransaction, input: SupportGrantQuery):
+  Promise<{ ended: "withdrawn" | "expired"; at: string } | null> {
+  const rows = await tx.query<QueryResultRow>({ name: "support_handoff_ended_v1", text: `SELECT
+      g.status,g.decided_at,g.expires_at FROM data.cross_space_read_grants g
+    WHERE g.space_id=$1 AND g.grantee='space' AND g.source_space_id=$2 AND g.source_channel_id=$4
+      AND (g.channel_id=$3 OR g.channel_id=(SELECT t.metadata_json->>'threadRootChannelId'
+        FROM data.channels t WHERE t.space_id=$1 AND t.channel_id=$3 AND t.metadata_json->>'kind'='thread'))
+    ORDER BY g.requested_at DESC,g.grant_id DESC LIMIT 1`,
+  values: [input.spaceId, input.supportSpaceId, input.channelId ?? null, input.supportChannelId ?? null],
+  maxRows: 1 });
+  const row = rows[0];
+  if (!row) return null;
+  const expiresAt = iso(row.expires_at);
+  if (row.status === "revoked") return { ended: "withdrawn", at: row.decided_at ? iso(row.decided_at) : expiresAt };
+  if (row.status === "approved" && Date.parse(expiresAt) > Date.parse(input.at)) return null;
+  return row.status === "approved" || row.status === "expired" ? { ended: "expired", at: expiresAt } : null;
+}
+
+/** What a support Run is told when the handoff it read through has ended. */
+export function supportHandoffEndedText(ended: { ended: "withdrawn" | "expired"; at: string }): string {
+  const what = ended.ended === "withdrawn" ? "The customer withdrew this support handoff"
+    : "This support handoff expired";
+  return `${what} on ${minute(ended.at)} UTC; you can no longer read the conversation. ` +
+    "Reply in this support conversation; the customer can hand it over again.";
+}
