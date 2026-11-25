@@ -1726,6 +1726,13 @@ integration("a passed check keeps the name of the account it reached; a failed o
     assert.equal((await read()).metadata.connectedAccount, "owner@example.com", "a failed check names nobody new");
     await check({ ok: true, account: "next@example.com" });
     assert.equal((await read()).metadata.connectedAccount, "next@example.com", "switching accounts replaces the name");
+    // Switch account saves the row before its Check; the Check's name never blocks or is set by that save.
+    const save = body => apps.upsert({ commandId: crypto.randomUUID(), spaceId: space, actorUserId: "owner", at: new Date().toISOString(),
+      provider: { id: "webhook", name: "Webhook", authMode: "api-token", scopes: [], secretRefs: [], capabilities: [], metadataFields: [] }, body });
+    await save({ status: "disconnected" });
+    assert.equal((await read()).metadata.connectedAccount, "next@example.com");
+    await save({ status: "configured", metadata: { connectedAccount: "spoof@example.com" } });
+    assert.equal((await read()).metadata.connectedAccount, "next@example.com", "a client never names the account");
     await check({ ok: true });
     assert.equal((await read()).metadata?.connectedAccount, undefined, "a passed check that names nobody drops the old name");
   });
