@@ -314,13 +314,42 @@ fn active_turn_steer_message(
 /// What the harness reads for a message joined to its running turn.
 fn steered_turn_input(message_text: &str, final_reply_instruction: Option<&str>) -> String {
     let mut input = format!(
-        "[xMatrix] This message arrived while you were working. It joins your current turn and did not interrupt it: finish or adjust the work in progress as it asks.\n\n{message_text}"
+        "[xMatrix] This message arrived while you were working. It joins your current turn and did not interrupt it: if continuing will take more than one quick step, send a brief Channel acknowledgment first, then finish or adjust the work in progress as it asks.\n\n{message_text}"
     );
     if let Some(instruction) = final_reply_instruction {
         input.push_str("\n\n");
         input.push_str(instruction);
     }
     input
+}
+
+/// Bind a steered message onto the running execution, materialize its inbound
+/// attachments when present, and format the steered prompt text.
+async fn prepare_steered_turn_input(
+    message: &InboundChannelMessage,
+    agent: &protocol::SerializedAgent,
+    relay: Option<&agent_instance_connection::AgentInstanceConnectionClient>,
+    runtime_state: &AgentRuntimeStateTracker,
+) -> (String, Option<LocalImageFiles>) {
+    let instruction = inbound_execution_sources(std::slice::from_ref(message))
+        .into_iter()
+        .next()
+        .and_then(|source| runtime_state.join_message_turn_source(source));
+    let inbound_images = if message
+        .attachments
+        .as_deref()
+        .is_some_and(|items| !items.is_empty())
+        && let Some(relay) = relay
+    {
+        Some(materialize_inbound_image_files(message.attachments.as_deref(), relay).await)
+    } else {
+        None
+    };
+    let input = steered_turn_input(
+        &message.prompt_text(agent, inbound_images.as_ref()),
+        instruction.as_deref(),
+    );
+    (input, inbound_images)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

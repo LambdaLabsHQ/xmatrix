@@ -465,10 +465,14 @@ impl ClaudeStreamInterrupter {
         }
     }
 
-    /// Join `text` to the running turn: Claude reads it at its next tool
-    /// boundary, or answers it right after the turn's own result. False with
-    /// no turn running, or one already being interrupted.
-    pub(crate) async fn steer_active_turn(&self, text: &str) -> error::Result<bool> {
+    /// Join structured user content blocks (text and optional images) to the
+    /// running turn: Claude reads it at its next tool boundary, or answers it
+    /// right after the turn's own result. False with no turn running, or one
+    /// already being interrupted.
+    pub(crate) async fn steer_active_turn_blocks(
+        &self,
+        content_blocks: Vec<Value>,
+    ) -> error::Result<bool> {
         let stdin = {
             let mut active = self.active.lock().await;
             let Some(turn) = active.as_mut().filter(|turn| !turn.interrupt_requested) else {
@@ -487,10 +491,7 @@ impl ClaudeStreamInterrupter {
             turn.inputs_steered += 1;
             stdin
         };
-        let bytes = serde_json::to_vec(&claude_stream_user_message(vec![serde_json::json!({
-            "type": "text",
-            "text": text,
-        })]))?;
+        let bytes = serde_json::to_vec(&claude_stream_user_message(content_blocks))?;
         if let Err(err) = write_json_line(&stdin, bytes, "Claude stream steer").await {
             if let Some(turn) = self.active.lock().await.as_mut() {
                 turn.inputs_steered = turn.inputs_steered.saturating_sub(1);
