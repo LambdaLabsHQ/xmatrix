@@ -964,16 +964,7 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(codex.install.current().unwrap().command, "npm");
-        assert!(
-            registry_preset("zcode")
-                .unwrap()
-                .management
-                .as_ref()
-                .unwrap()
-                .install
-                .current()
-                .is_none()
-        );
+        assert!(registry_preset("zcode").is_none());
     }
 
     #[test]

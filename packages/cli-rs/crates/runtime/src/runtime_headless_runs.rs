@@ -58,7 +58,7 @@ pub(crate) async fn run_headless_external(run: ExternalRun<'_>) -> error::Result
     append_windows_utf8_env(&mut agent_env)?;
     let pty_wrapper = pty::PtyWrapper::spawn(&spawn_cmd, &spawn_args, cwd, &agent_env, cols, rows)?;
 
-    // ZCode / Z.ai Coding Plan: publish 5h+weekly (and MCP) quotas into presence when available.
+    // Z.ai Coding Plan: publish 5h+weekly (and MCP) quotas into presence when available.
     let latest_provider_usage = provider_subscription_quota_usage(tool, cmd, cmd_args, false).await;
     if latest_provider_usage.is_some() {
         send_presence(

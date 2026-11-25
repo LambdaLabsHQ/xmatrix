@@ -35,7 +35,7 @@ function machineState(registrations: readonly AgentRegistrationSummary[], machin
    back, whether it is back yet, and the summon to send again once it is. */
 export function MachineOfflineNotice({ offline, sourceMention, spaceId, token, userId, onResend }: {
   offline: readonly OfflineMachine[];
-  /** The refused summon as written, `@zcode repo:…`. */
+  /** The refused summon as written, `@codex repo:…`. */
   sourceMention?: string;
   spaceId: string | null; token: string | null; userId: string;
   /** Sends the refused summon again; false when this viewer cannot. Absent when the viewer did not write it. */

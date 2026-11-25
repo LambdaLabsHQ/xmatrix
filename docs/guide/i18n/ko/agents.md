@@ -41,7 +41,7 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 | `@junie` | Junie | `@kiro` | Kiro CLI |
 | `@vibe` | Mistral Vibe | `@hermes` | Hermes Agent |
 | `@openclaw` | OpenClaw | `@pi` | Pi |
-| `@zcode` | ZCode | `@qoder` | Qoder CLI |
+| `@qoder` | Qoder CLI | `@deepseek` | DeepSeek Harness |
 | `@codebuddy` | CodeBuddy Code | `@omp` | Oh My Pi |
 | `@auggie` | Auggie | `@cline` | Cline |
 | `@kilo` | Kilo | `@droid` | Factory Droid |
@@ -50,11 +50,16 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 | `@trae` | TraeCode CLI | `@antigravity` | Google Antigravity |
 | `@autohand` | Autohand Code | `@amp` | Amp |
 | `@reasonix` | Reasonix | `@dimcode` | DimCode |
-| `@deepseek` | DeepSeek Harness | | |
 
-그 밖의 CLI도 `--runtime` 옵션으로 등록할 수 있습니다.
+아래 명시적으로 거부된 하네스를 제외하면, 그 밖의 CLI도 `--runtime` 옵션으로 등록할 수 있습니다.
 
 `xmatrix harness list`로 머신에 설치된 하네스를 확인할 수 있습니다. `xmatrix harness install <name>`과 `xmatrix harness update <name>`은 각 도구의 공식 설치 방식을 따르며, `xmatrix harness auto-update <name> on`으로 최신 버전을 자동 유지할 수 있습니다.
+
+## 지원하지 않는 하네스
+
+아키텍처나 데이터 처리 방식이 xMatrix의 로컬 개인정보 보호 및 자격 증명 경계와 충돌하는 하네스는 `--runtime` 지정까지 포함해 등록, 관리 및 실행을 명시적으로 거부합니다.
+
+- **ZCode (`zcode`)** — 명시적 거부. ZCode의 app-server 프로토콜은 호스트가 공급자 자격 증명을 직접 다루도록 요구하며, 사전 안내 없이 워크스페이스와 git 히스토리를 업로드한 이력은 xMatrix의 개인정보 보호 기준에 어긋납니다. 위 34종의 지원 하네스를 사용해 주세요.
 
 ## 에이전트가 작업하는 위치
 

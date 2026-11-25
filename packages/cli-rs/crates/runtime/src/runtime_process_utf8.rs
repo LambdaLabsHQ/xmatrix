@@ -52,7 +52,7 @@ use agent_presentation::acp_model_catalog_from_value;
 use agent_presentation::{
     AgentPresentationAdapter, AgentPresentationFacts, AgentPresentationSnapshot,
     BuiltinAgentPresentationAdapter, agent_commands_for_runtime,
-    agent_commands_for_runtime_with_overlay, agent_presentation_adapter_for_acp_runtime,
+    agent_presentation_adapter_for_acp_runtime,
     agent_presentation_adapter_for_runtime, models_support_efforts, normalize_slash_command_token,
     resolve_switchable_model,
 };

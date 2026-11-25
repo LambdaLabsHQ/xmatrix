@@ -257,6 +257,12 @@ export const STARTUP_FAILURES = {
     zh: { title: "{machine} 没有响应", explanation: "{machine} 连着，但一直没有响应启动 {agent} 的指令，什么都没有启动。",
       steps: ["在 {machine} 上重启 xMatrix。", "然后再发一次消息。"] },
   },
+  harness_refused: {
+    en: { title: "{agent}'s harness is explicitly refused by xMatrix", explanation: "xMatrix refuses to run this harness for privacy and credential-boundary reasons:",
+      steps: ["Address another supported Agent instead.", "See https://xmatrix.page/docs/agents#unsupported-harnesses for details."] },
+    zh: { title: "xMatrix 明确拒绝运行 {agent} 对应的程序", explanation: "出于隐私与凭证边界原因，xMatrix 明确拒绝运行该程序：",
+      steps: ["请改用其他受支持的 Agent。", "详见 https://xmatrix.page/docs/agents#unsupported-harnesses 。"] },
+  },
   harness_missing: {
     en: { title: "{agent}'s program isn't installed on {machine}", explanation: "The machine couldn't find the program that runs {agent}:",
       steps: ["Install it on {machine}, or open a new terminal there if you just installed it.", "Then send your message again."] },
@@ -356,6 +362,7 @@ export const LAUNCH_REJECTION_CAUSES_ZH: Readonly<Record<string, string>> = {
   registration_machine_unavailable: "你指定的电脑上没有这个 Agent。可以在 Agents 页面或用 xmatrix agent list 查看每台电脑能跑哪些 Agent。",
   registration_machine_ambiguous: "不止一个人有同名的电脑；请通过电脑主人的 Agent 来指定。",
   registration_harness_unavailable: "没有哪台电脑能在其余条件下运行你指定的程序。可以在 Agents 页面或用 xmatrix agent list 查看每台电脑能跑哪些 Agent。",
+  registration_harness_refused: "出于隐私与凭证边界原因，xMatrix 明确拒绝运行该程序（详见 https://xmatrix.page/docs/agents#unsupported-harnesses）。请改用其他受支持的 Agent。",
   registration_model_unavailable: "没有哪台电脑能在其余条件下提供你指定的模型。",
   registration_effort_unavailable: "没有哪台电脑能在其余条件下提供你指定的推理强度。",
   registration_directory_unavailable: "你指定的目录没有对任何符合其余条件的电脑开放。",

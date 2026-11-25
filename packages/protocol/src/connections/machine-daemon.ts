@@ -163,7 +163,7 @@ export interface MachineDaemonSpawnCommand {
   runtime: string;
   runtimeArgs?: string[];
   /** Server-authoritative execution adapter selected from the registration. */
-  agentBackend?: "codex-app" | "claude-print" | "zcode-app" | "grok-acp" | "acp" | "pty";
+  agentBackend?: "codex-app" | "claude-print" | "grok-acp" | "acp" | "pty";
   /** Presentation/config preset identity; legacy daemons may ignore it. */
   agentPresetId?: string;
   /** The Hub's harness preset for this spawn. The daemon uses it instead of

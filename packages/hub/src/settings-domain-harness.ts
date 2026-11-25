@@ -1,6 +1,6 @@
 import {
   agentPresetById, agentPresetForLauncher, appViewAddress, harnessItemObservedAt, parseHarnessInventory,
-  type SerializedMachineDaemon, type SettingDescriptor,
+  refusedAgentHarnessMessage, type SerializedMachineDaemon, type SettingDescriptor,
 } from "@xmatrix/protocol";
 import { MACHINE_ACTION_DELIVERY } from "./machine-action-routes";
 import type { SettingDomainResolver, SettingsReader } from "./settings-registry";
@@ -31,6 +31,8 @@ export function harnessSettingsDomain(port: HarnessSettingsPort = MACHINE_ACTION
       const described: SettingDescriptor[] = [];
       for (const address of addresses) {
         const [machine, named] = address.parts as [string, string];
+        const refusedHarness = refusedAgentHarnessMessage(named);
+        if (refusedHarness) return refusedHarness;
         const preset = settingHarness(named);
         if (!preset) return `${named} is not a harness xMatrix knows`;
         const daemon = daemons.find((item) => item.machineId === machine) ??

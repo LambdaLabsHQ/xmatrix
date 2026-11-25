@@ -29,7 +29,14 @@ export interface LandingCopy {
   livePage: { title: string; body: string; art: string; stores: string };
   conversations: { title: string; body: string };
   /** `body` says how many agents the registry holds. */
-  agents: { title: string; body: (count: number) => string; matrixArt: string; listLabel: string };
+  agents: {
+    title: string;
+    body: (count: number) => string;
+    matrixArt: string;
+    listLabel: string;
+    refusedNote: string;
+    refusedLink: { href: string; label: string };
+  };
   why: { title: string; others: string; rows: readonly Row[] };
   connectors: { title: string; body: string; label: string };
   pricing: {
@@ -79,6 +86,8 @@ const en: LandingCopy = {
     body: (count: number) => `${count} coding agents running on your own Mac, Linux, and Windows machines—using the subscriptions and API keys you already pay for. Code and credentials stay local, and when one agent hits its quota, another picks up the work.`,
     matrixArt: "The agents on each machine of a Space, and what each one is doing",
     listLabel: "Any machine. Any agent. All managed in one place.",
+    refusedNote: "xMatrix explicitly refuses ZCode to protect your local code and credential boundaries.",
+    refusedLink: { href: "/docs/agents#unsupported-harnesses", label: "Why ZCode is refused" },
   },
   why: {
     title: "Why xMatrix", others: "Juggling tabs & terminals",
@@ -111,7 +120,7 @@ const en: LandingCopy = {
     questions: [
       ["Do my agents cost extra?", "No. Every plan supports unlimited agents, and Pro charges only per human seat. Your agents keep using the subscriptions or API keys you already have—with no markup."],
       ["Where do my agents run?", "On your own machines, directly inside the folders and repositories you register. xMatrix coordinates your Space across machines while your code and model credentials stay local and are never uploaded to xMatrix. When quota display is enabled, the local daemon uses them only on your machine to query your provider's usage endpoint, and you can disable that anytime."],
-      ["Which agents work with xMatrix?", "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode, and dozens more—all through one CLI. Run xmatrix agent add to connect the ones already on your machine."],
+      ["Which agents work with xMatrix?", "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode, and dozens more—34 built-in coding agents through one CLI. Run xmatrix agent add to connect the ones already on your machine. ZCode is explicitly refused to protect local code and credential boundaries."],
       ["What happens when a person and an agent edit the same paragraph?", "The person always wins. If an agent reaches a paragraph you are editing, it pauses, waits until you finish, and continues from your latest text—never overwriting your words."],
       ["Do I have to watch every conversation?", "No. Execution happens in parallel threads while outcomes roll up into the live document. Read the page to see where everything stands, and open a thread only when you want the details."],
       ["Is it only for code?", "Not at all. Teams also use agents to keep release checklists, research, metrics, hiring, and operations docs continuously up to date."],
@@ -157,6 +166,8 @@ const zh: LandingCopy = {
     body: (count: number) => `原生支持 ${count} 种主流编程智能体，直接运行在你的 Mac、Linux 与 Windows 机器上。沿用你已有的订阅或 API key，代码与凭据留在本地；一个额度用完，另一个立刻接手。`,
     matrixArt: "一个 Space 里每台机器上的智能体，以及它们各自在做什么",
     listLabel: "任意机器，任意智能体，统一管理",
+    refusedNote: "为守住本地代码与凭据边界，xMatrix 明确拒绝支持 ZCode。",
+    refusedLink: { href: "/zh/docs/agents#明确拒绝支持的工具", label: "查看原因" },
   },
   why: {
     title: "为什么选择 xMatrix", others: "多开终端与窗口",
@@ -192,7 +203,7 @@ const zh: LandingCopy = {
     questions: [
       ["智能体需要额外付费吗？", "不需要。无论免费版还是 Pro 版，接入的智能体数量都不受限制，Pro 仅按人类成员席位计费。模型调用直接走你已有的订阅或 API key，不加价转售。"],
       ["智能体运行在哪里？代码会上传吗？", "所有智能体都运行在你自己的电脑或服务器上，直接在你授权的本地目录和仓库里工作。xMatrix 只负责跨机器协作与状态同步，代码和本地模型凭据留在原处、绝不上传至 xMatrix；开启配额显示时，本机 daemon 仅在本地用它们直连原厂查询剩余额度，且可随时关闭。"],
-      ["支持哪些编程智能体？", "支持 Claude Code、Codex、Cursor、Gemini、Grok、Kimi、Copilot、OpenCode 等 35 种主流编程智能体，全部通过同一套命令行接入。运行 xmatrix agent add 即可把本机工具加入 Space。"],
+      ["支持哪些编程智能体？", "支持 Claude Code、Codex、Cursor、Gemini、Grok、Kimi、Copilot、OpenCode 等 34 种主流编程智能体，全部通过同一套命令行接入。运行 xmatrix agent add 即可把本机工具加入 Space。出于隐私与凭据边界原则，xMatrix 明确拒绝支持 ZCode。"],
       ["我和智能体同时编辑同一段文档会冲突吗？", "不会，人永远优先。只要检测到你正在编辑某一段，智能体会主动暂停等待，等你写完再顺着你的最新内容继续，绝不覆盖你的文字。"],
       ["需要一直盯着每个对话窗口吗？", "不需要。具体执行在后台对话里并行推进，重要结论与现状自动汇总到实时文档。平时只看文档掌握全局，想查细节或亲自介入时再点开对应对话即可。"],
       ["只能用来写代码吗？", "不只写代码。发布清单、竞品调研、增长指标、招聘与日常运营都可以放进实时文档里，让智能体持续维护最新状态。"],
@@ -238,6 +249,8 @@ const zhTw: LandingCopy = {
     body: (count: number) => `原生支援 ${count} 種主流程式設計代理，直接運行在你自己的 Mac、Linux 與 Windows 機器上。沿用你既有的訂閱或 API key，程式碼與憑證留在本地；一個額度用完，另一個立刻接手。`,
     matrixArt: "一個 Space 裡每台機器上的代理，以及它們各自在做什麼",
     listLabel: "任意機器，任意代理，統一管理",
+    refusedNote: "為守住本地程式碼與憑證邊界，xMatrix 明確拒絕支援 ZCode。",
+    refusedLink: { href: "/zh-tw/docs/agents#明確拒絕支援的工具", label: "查看原因" },
   },
   why: {
     title: "為什麼選擇 xMatrix", others: "多開終端機與視窗",
@@ -273,7 +286,7 @@ const zhTw: LandingCopy = {
     questions: [
       ["代理需要額外付費嗎？", "不需要。無論免費版還是 Pro 版，接入的代理數量都不受限制，Pro 僅按人類成員席位計費。模型呼叫直接走你既有的訂閱或 API key，不加價轉售。"],
       ["代理運行在哪裡？程式碼會上傳嗎？", "所有代理都運行在你自己的電腦或伺服器上，直接在你授權的本地資料夾與儲存庫裡工作。xMatrix 只負責跨機器協作與狀態同步，程式碼與本地模型憑證留在原處、絕不上傳至 xMatrix；啟用額度顯示時，本機 daemon 僅在本地用它們直連原廠查詢剩餘額度，且可隨時關閉。"],
-      ["支援哪些程式設計代理？", "支援 Claude Code、Codex、Cursor、Gemini、Grok、Kimi、Copilot、OpenCode 等 35 種主流程式設計代理，全部透過同一套命令列接入。執行 xmatrix agent add 即可把本機工具加入 Space。"],
+      ["支援哪些程式設計代理？", "支援 Claude Code、Codex、Cursor、Gemini、Grok、Kimi、Copilot、OpenCode 等 34 種主流程式設計代理，全部透過同一套命令列接入。執行 xmatrix agent add 即可把本機工具加入 Space。出於隱私與憑證邊界原則，xMatrix 明確拒絕支援 ZCode。"],
       ["我和代理同時編輯同一段文件會衝突嗎？", "不會，人永遠優先。只要偵測到你正在編輯某一段，代理會主動暫停等待，等你寫完再順著你的最新內容繼續，絕不覆蓋你的文字。"],
       ["需要一直盯著每個對話視窗嗎？", "不需要。具體執行在背景對話裡並行推進，重要結論與現況自動彙整到即時文件。平時只看文件掌握全局，想查細節或親自介入時再點開對應對話即可。"],
       ["只能用來寫程式嗎？", "不只寫程式。發佈清單、競品調研、成長指標、招募與日常營運都可以放進即時文件裡，讓代理持續維護最新狀態。"],
@@ -319,6 +332,8 @@ const ja: LandingCopy = {
     body: (count: number) => `${count} 種類のコーディングエージェントが、あなたの Mac・Linux・Windows マシン上で動作。契約済みのサブスクリプションや API キーをそのまま使え、コードと認証情報はローカルに残ります。ひとつのクォータが尽きても、別のエージェントが即座に引き継ぎます。`,
     matrixArt: "Space 内の各マシンにあるエージェントと、それぞれの作業状況",
     listLabel: "どのマシンでも、どのエージェントでも、ひとつに統合管理",
+    refusedNote: "ローカルのコードと認証情報の境界を守るため、xMatrix は ZCode を明示的に拒否しています。",
+    refusedLink: { href: "/ja/docs/agents#非対応ハーネス", label: "理由を読む" },
   },
   why: {
     title: "なぜ xMatrix か", others: "タブとターミナルを行き来する運用",
@@ -354,7 +369,7 @@ const ja: LandingCopy = {
     questions: [
       ["エージェントに追加料金はかかりますか？", "かかりません。Free でも Pro でも接続するエージェント数は無制限で、Pro は人間メンバーのシート数のみ課金されます。モデル呼び出しは既存のサブスクリプションや API キーを直接使うため、上乗せ料金もありません。"],
       ["エージェントはどこで動きますか？コードはアップロードされますか？", "すべてのエージェントはご自身の PC やサーバー上で、許可したローカルフォルダやリポジトリの中で動きます。xMatrix はマシン間の協調と状態同期だけを担い、コードとモデルの認証情報はローカルに残り xMatrix へ送信されません。クォータ表示を有効にしている場合のみ、ローカルデーモンが端末内から各プロバイダへ残量を直接照会し、いつでも無効化できます。"],
-      ["どのコーディングエージェントに対応していますか？", "Claude Code、Codex、Cursor、Gemini、Grok、Kimi、Copilot、OpenCode など 35 種類の主要コーディングエージェントに同一 CLI で対応しています。xmatrix agent add を実行するだけで Space に接続できます。"],
+      ["どのコーディングエージェントに対応していますか？", "Claude Code、Codex、Cursor、Gemini、Grok、Kimi、Copilot、OpenCode など 34 種類の主要コーディングエージェントに同一 CLI で対応しています。xmatrix agent add を実行するだけで Space に接続できます。なお、プライバシーと認証情報の境界を守るため ZCode は明示的に拒否しています。"],
       ["人間とエージェントが同じ段落を同時編集すると競合しますか？", "しません。常に人間が優先されます。あなたが編集中の段落にエージェントが差し掛かると自動で待機し、書き終えた最新の内容を引き継いで続けるため、あなたの文章を上書きすることはありません。"],
       ["すべての会話ウィンドウを監視し続ける必要がありますか？", "不要です。実作業はバックグラウンドのスレッドで並列に進み、重要な結論と現状がライブドキュメントにまとまります。普段はドキュメントで全体を見て、詳細を確認・介入したいときだけ会話を開けば十分です。"],
       ["コーディング以外にも使えますか？", "もちろんです。リリースチェックリスト、競合調査、成長指標、採用、日々の運用ドキュメントまでライブドキュメントにまとめ、エージェントに最新状態を維持させられます。"],
@@ -400,6 +415,8 @@ const ko: LandingCopy = {
     body: (count: number) => `내 Mac, Linux, Windows 머신에서 ${count}종의 코딩 에이전트를 기존 구독과 API 키 그대로 실행하세요. 코드와 자격 증명은 로컬에 남고, 하나의 할당량이 소진되면 다른 에이전트가 즉시 이어받습니다.`,
     matrixArt: "Space의 각 머신에 있는 에이전트와 각자 하고 있는 일",
     listLabel: "어떤 머신이든, 어떤 에이전트든, 한곳에서 통합 관리",
+    refusedNote: "로컬 코드와 자격 증명 경계를 지키기 위해 xMatrix는 ZCode를 명시적으로 거부합니다.",
+    refusedLink: { href: "/ko/docs/agents#지원하지-않는-하네스", label: "이유 보기" },
   },
   why: {
     title: "왜 xMatrix인가", others: "수많은 탭과 터미널 오가기",
@@ -435,7 +452,7 @@ const ko: LandingCopy = {
     questions: [
       ["에이전트에 추가 비용이 드나요?", "아니요. 무료와 Pro 모두 연결하는 에이전트 수에 제한이 없으며 Pro는 사람 시트당 과금됩니다. 모델 호출은 기존 구독이나 API 키를 그대로 사용하며 추가 마진이 없습니다."],
       ["에이전트는 어디서 실행되나요? 코드가 업로드되나요?", "모든 에이전트는 사용자 본인의 컴퓨터나 서버에서, 권한을 부여한 로컬 폴더와 저장소 안에서 실행됩니다. xMatrix는 머신 간 협업과 상태 동기화만 담당하며 코드와 모델 자격 증명은 로컬에 남아 xMatrix로 전송되지 않습니다. 할당량 표시를 켠 경우에만 로컬 데몬이 기기 내에서 공급자에 잔여 할당량을 직접 조회하며 언제든 끌 수 있습니다."],
-      ["어떤 코딩 에이전트를 지원하나요?", "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode 등 35종의 주요 코딩 에이전트를 하나의 CLI로 지원합니다. xmatrix agent add를 실행해 내 머신의 도구를 Space에 연결하세요."],
+      ["어떤 코딩 에이전트를 지원하나요?", "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode 등 34종의 주요 코딩 에이전트를 하나의 CLI로 지원합니다. xmatrix agent add를 실행해 내 머신의 도구를 Space에 연결하세요. 개인정보 보호와 자격 증명 경계 원칙에 따라 ZCode는 명시적으로 거부합니다."],
       ["사람과 에이전트가 같은 문단을 동시에 편집하면 충돌하나요?", "아니요, 항상 사람이 우선합니다. 편집 중인 문단에 에이전트가 도달하면 자동으로 멈춰 기다렸다가 작성 완료된 최신 내용에 이어서 진행하므로 절대 덮어쓰지 않습니다."],
       ["모든 대화 창을 계속 지켜봐야 하나요?", "그럴 필요 없습니다. 실제 실행은 백그라운드 스레드에서 병렬로 진행되고 핵심 결론과 현황이 실시간 문서에 모입니다. 평소엔 문서로 전체를 보고, 세부 확인이나 개입이 필요할 때만 대화를 열면 됩니다."],
       ["코딩에만 쓸 수 있나요?", "아닙니다. 출시 체크리스트, 경쟁사 리서치, 성장 지표, 채용, 운영 문서도 실시간 문서로 두고 에이전트가 항상 최신 상태를 유지하게 할 수 있습니다."],
@@ -481,6 +498,8 @@ const es: LandingCopy = {
     body: (count: number) => `${count} agentes de código funcionando en tus propias máquinas Mac, Linux y Windows, usando las suscripciones y claves API que ya pagas. Tu código y credenciales se quedan en local, y cuando un agente agota su cuota, otro continúa el trabajo.`,
     matrixArt: "Los agentes de cada máquina de un Space y lo que hace cada uno",
     listLabel: "Cualquier máquina. Cualquier agente. Todo en un solo lugar.",
+    refusedNote: "xMatrix rechaza explícitamente ZCode para proteger tu código y tus credenciales locales.",
+    refusedLink: { href: "/es/docs/agents#harnesses-no-compatibles", label: "Por qué rechazamos ZCode" },
   },
   why: {
     title: "Por qué xMatrix", others: "Malabares entre pestañas y terminales",
@@ -516,7 +535,7 @@ const es: LandingCopy = {
     questions: [
       ["¿Los agentes cuestan extra?", "No. Todos los planes admiten agentes ilimitados y Pro cobra solo por asiento humano. Tus agentes siguen usando las suscripciones o claves API que ya tienes, sin recargos."],
       ["¿Dónde corren mis agentes?", "En tus propias máquinas, directamente dentro de las carpetas y repositorios que registres. xMatrix coordina tu Space entre máquinas mientras tu código y credenciales permanecen en local y nunca se suben a xMatrix. Si activas el indicador de cuota, el daemon local solo las usa en tu equipo para consultar el saldo con tu proveedor, y puedes desactivarlo en cualquier momento."],
-      ["¿Qué agentes funcionan con xMatrix?", "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode y decenas más, todos desde la misma CLI. Ejecuta xmatrix agent add para conectar los que ya tienes en tu máquina."],
+      ["¿Qué agentes funcionan con xMatrix?", "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode y decenas más: 34 agentes de código integrados desde la misma CLI. Ejecuta xmatrix agent add para conectar los que ya tienes en tu máquina. ZCode está rechazado explícitamente por motivos de privacidad y límites de credenciales."],
       ["¿Qué pasa si una persona y un agente editan el mismo párrafo?", "Siempre gana la persona. Si un agente llega a un párrafo que estás editando, se detiene, espera a que termines y continúa desde tu último texto sin sobrescribir tus palabras."],
       ["¿Tengo que vigilar cada conversación?", "No. La ejecución ocurre en hilos paralelos mientras los resultados se resumen en el documento vivo. Lee la página para ver el estado general y abre un hilo solo cuando quieras los detalles."],
       ["¿Es solo para código?", "Para nada. Los equipos también usan agentes para mantener al día checklists de lanzamiento, investigación, métricas, contratación y operaciones."],

@@ -6,10 +6,10 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
     verifiedDate: "2026 年 11 月 22 日",
     metaTitle: "Raft 替代方案 (2026)：Raft vs xMatrix",
     metaDescription:
-      "正在寻找 Raft (Slock) 替代方案或平替？对比 Raft vs xMatrix：用持续更新的活页面替代沉底聊天与已下线的 Wiki Agent，支持 35 种编程智能体与 35 个受控应用。",
+      "正在寻找 Raft (Slock) 替代方案或平替？对比 Raft vs xMatrix：用持续更新的活页面替代沉底聊天与已下线的 Wiki Agent，支持 34 种编程智能体与 35 个受控应用。",
     eyebrow: "Raft 替代方案 · Raft vs xMatrix",
     headline: "Raft 替代方案：让决策沉淀在活页面，而非埋没在聊天记录里",
-    lead: "Raft 把编程智能体当作群聊成员，并在 2026 年 9 月下线了 Wiki Agent。xMatrix 同样提供人与 35 种编程智能体共享的协作频道，更进一步将交付成果直接转化为活页面，跨所有机器和 35 个已连接应用持续保持最新。",
+    lead: "Raft 把编程智能体当作群聊成员，并在 2026 年 9 月下线了 Wiki Agent。xMatrix 同样提供人与 34 种编程智能体共享的协作频道，更进一步将交付成果直接转化为活页面，跨所有机器和 35 个已连接应用持续保持最新。",
     productCaption:
       "在 xMatrix 中：成员与编程智能体在频道内协同工作，同时维护同一份项目活页面，不再把上下文打散在聊天刷屏和各机器本地的 MEMORY.md 里。",
     painPoints: [
@@ -32,7 +32,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "在 Raft Pro（每人每月 $10，年付 $8.80）中，每个智能体仍计为 0.1 个席位，并且与单台电脑强绑定——那台笔记本一离线，智能体就停摆。",
         xmatrixAnswer:
-          "xMatrix 在你注册的所有 macOS、Windows 和 Linux 机器上原生支持 35 种编程智能体（并可通过 --runtime 接入任意自定义 CLI），智能体零席位费，按任务匹配度与机器余量自动路由。",
+          "xMatrix 在你注册的所有 macOS、Windows 和 Linux 机器上原生支持 34 种编程智能体（并可通过 --runtime 接入任意自定义 CLI），智能体零席位费，按任务匹配度与机器余量自动路由。",
       },
     ],
     comparisonRows: [
@@ -48,7 +48,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "编程智能体与定价",
-        xmatrix: "35 种编程智能体（+ --runtime）；Free（终身 500 次写入）/ Pro $10/人/月（年付 $8）",
+        xmatrix: "34 种编程智能体（+ --runtime）；Free（终身 500 次写入）/ Pro $10/人/月（年付 $8）",
         competitor: "支持的运行时更少；Free（30 天历史）；Pro $10/席/月（年付 $8.80）+ 每个智能体 0.1 席",
       },
       {
@@ -113,9 +113,9 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "对比 Lody 替代方案？告别单会话 worktree 孤岛与守护进程断连，迁往 xMatrix 的多人共享频道、活页面、Space 密钥与事件驱动 Norn 程序。",
     eyebrow: "Lody 替代方案 · Lody vs xMatrix",
     headline: "Lody 替代：一个频道、一份活页面，全队与所有编程智能体共用",
-    lead: "Lody 围绕孤立的“单会话单 worktree”线程组织工作，并通过闭源云中继同步。xMatrix 将团队成员与 35 种编程智能体汇聚到同一个共享频道，随工作落地自动保持活页面最新，并配备 Space 密钥与事件驱动的 Norn 程序。",
+    lead: "Lody 围绕孤立的“单会话单 worktree”线程组织工作，并通过闭源云中继同步。xMatrix 将团队成员与 34 种编程智能体汇聚到同一个共享频道，随工作落地自动保持活页面最新，并配备 Space 密钥与事件驱动的 Norn 程序。",
     productCaption:
-      "在 xMatrix 中：不必把孤立的编码会话传来传去，多名成员与 35 种编程智能体直接在同一个频道协作，并将交付成果沉淀到活页面。",
+      "在 xMatrix 中：不必把孤立的编码会话传来传去，多名成员与 34 种编程智能体直接在同一个频道协作，并将交付成果沉淀到活页面。",
     painPoints: [
       {
         title: "以单会话为中心的交互缺少共享团队频道与活页面",
@@ -157,7 +157,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "编程智能体与路由广度",
-        xmatrix: "35 种编程智能体（+ --runtime），按匹配度、机器余量与额度交接智能路由",
+        xmatrix: "34 种编程智能体（+ --runtime），按匹配度、机器余量与额度交接智能路由",
         competitor: "暂停等待同一服务商额度窗口重置后继续",
       },
       {
@@ -217,7 +217,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "正在评估 Multica 替代方案或寻找类似 Multica 的平替工具？告别无头工单运行、静默丢弃 bypassPermissions 限制 (#9559) 与明文环境变量，升级到 xMatrix 实时频道、活页面与 Space 密钥。",
     eyebrow: "Multica 替代方案 · Multica vs xMatrix",
     headline: "Multica 替代：不必把每个需求都写成工单，说一句，智能体交付，活页面自动更新",
-    lead: "Multica 迫使每项智能体任务都变成默认开启 bypassPermissions 的无头看板工单，且没有活页面文档层。xMatrix 让团队成员与 35 种编程智能体在频道中实时协作（还能用 xmatrix claude 直接挂载交互式本地会话），持续更新活页面，并以 Space 密钥统一管控 35 个外部应用。",
+    lead: "Multica 迫使每项智能体任务都变成默认开启 bypassPermissions 的无头看板工单，且没有活页面文档层。xMatrix 让团队成员与 34 种编程智能体在频道中实时协作（还能用 xmatrix claude 直接挂载交互式本地会话），持续更新活页面，并以 Space 密钥统一管控 35 个外部应用。",
     productCaption:
       "在 xMatrix 中：与同事一起在共享频道实时引导 Claude Code、Codex 及其他 33 种编程智能体，配合显式应用审批与活页面，替代盲跑的无头看板任务。",
     painPoints: [
@@ -233,7 +233,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Multica 的应用内聊天严格限定为私密 1 对 1，核心工作流要求把一切工作都变成无头看板工单。既不支持中途纠偏智能体，也无法把正在运行的本地终端会话直接拉进团队讨论。",
         xmatrixAnswer:
-          "xMatrix 让成员与 35 种编程智能体在共享频道里实时配合——执行 xmatrix claude 还能将现有本地终端会话直接挂载到频道中，同时把成果自动汇总回活页面。",
+          "xMatrix 让成员与 34 种编程智能体在共享频道里实时配合——执行 xmatrix claude 还能将现有本地终端会话直接挂载到频道中，同时把成果自动汇总回活页面。",
       },
       {
         title: "没有活页面或内置项目记忆",
@@ -427,7 +427,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "Conductor 已被 Meta 收购并于 2026 年 11 月 20 日关停云端服务。寻找 Conductor 平替？立即迁往 xMatrix，在 macOS、Windows 与 Linux 上以 $10/席继续运行 Claude Code 与 Codex 团队。",
     eyebrow: "Conductor 替代方案 · Meta 收购后迁移指南",
     headline: "Meta 关停 Conductor 后迁往何处：跨 Mac、Windows 与 Linux 的活页面协作",
-    lead: "Meta 于 2026 年 11 月收购 Conductor 后停止了新用户注册，并于 2026 年 11 月 20 日永久关停 Conductor Cloud，仅对 macOS 独占的本地应用维持有限维护至 2027 年初。xMatrix 是持续迭代、独立运营的家园，让你在 macOS、Windows 和 Linux 上继续运行 35 种编程智能体，并将团队上下文沉淀在活页面中。",
+    lead: "Meta 于 2026 年 11 月收购 Conductor 后停止了新用户注册，并于 2026 年 11 月 20 日永久关停 Conductor Cloud，仅对 macOS 独占的本地应用维持有限维护至 2027 年初。xMatrix 是持续迭代、独立运营的家园，让你在 macOS、Windows 和 Linux 上继续运行 34 种编程智能体，并将团队上下文沉淀在活页面中。",
     productCaption:
       "在 xMatrix 中：把从 Conductor 导出的仓库与现有的 Claude Code / Codex 账号直接带入跨平台工作区，覆盖 macOS、Windows、Linux、Android 与 Web。",
     painPoints: [
@@ -450,7 +450,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Conductor 关停前 Pro 定价 $50/月、Teams 高达 $60/人/月，超长对话日志还容易导致界面卡顿，且知识沉淀在孤立工作区里而非共享活页面中。",
         xmatrixAnswer:
-          "xMatrix Pro 仅每人每月 $10（年付 $8/月），支持 35 种编程智能体且不限数量，自动把交付成果汇总为活页面，同时带来 35 个受控应用连接器与 Space 密钥。",
+          "xMatrix Pro 仅每人每月 $10（年付 $8/月），支持 34 种编程智能体且不限数量，自动把交付成果汇总为活页面，同时带来 35 个受控应用连接器与 Space 密钥。",
       },
     ],
     comparisonRows: [
@@ -471,7 +471,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "多智能体产出形态",
-        xmatrix: "活页面 + 覆盖 35 种编程智能体的多人共享频道",
+        xmatrix: "活页面 + 覆盖 34 种编程智能体的多人共享频道",
         competitor: "并行 worktree 会话与 diff 视图",
       },
       {
@@ -530,7 +530,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "对比 Orca (stablyai/orca) 替代方案与团队平替？告别单机内存飙升、8,900+ 未关闭 Issue 与脆弱的局域网扫码配对，迁往 xMatrix 多人频道与活页面。",
     eyebrow: "Orca 替代方案 · Orca vs xMatrix",
     headline: "不止一人协作时的 Orca 替代方案：一个频道、一份活页面、精准路由",
-    lead: "Orca 是一款热门的开源单人 ADE，擅长把单条提示词扇出到多个本地并行 worktree，但多人协作 UI 至今缺失，将一条提示词扇出给 N 个智能体会成倍放大 Token 消耗，重度并发还容易打爆本机内存。xMatrix 从 35 种编程智能体中为每项任务路由最合适的一位，并持续为全队更新活页面。",
+    lead: "Orca 是一款热门的开源单人 ADE，擅长把单条提示词扇出到多个本地并行 worktree，但多人协作 UI 至今缺失，将一条提示词扇出给 N 个智能体会成倍放大 Token 消耗，重度并发还容易打爆本机内存。xMatrix 从 34 种编程智能体中为每项任务路由最合适的一位，并持续为全队更新活页面。",
     productCaption:
       "在 xMatrix 中：把并行编码任务分散到你名下的所有机器上，避免内嵌浏览器吃光内存，并在桌面或手机上清爽掌控全局。",
     painPoints: [
@@ -635,7 +635,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "寻找 LobeHub 或 LobeChat 替代方案？摆脱积分转售加价、2.0 PostgreSQL/S3 部署门槛与 RAG 切片污染，用 xMatrix 协调你自己的本地编程智能体与活页面。",
     eyebrow: "LobeHub (LobeChat) 替代方案 · LobeHub vs xMatrix",
     headline: "LobeHub 替代：给已订阅 Claude Code 或 Codex 的研发团队，告别积分重复付费",
-    lead: "LobeHub（原 LobeChat）是靠转售模型积分变现的通用 AI 工作台，2.0 自托管技术栈沉重，且缺少多人多智能体实时频道。xMatrix 用你现有的订阅在真实代码仓库中直接运行 35 种编程智能体，内置 Goals 交付验收机制与 35 个受控应用连接器。",
+    lead: "LobeHub（原 LobeChat）是靠转售模型积分变现的通用 AI 工作台，2.0 自托管技术栈沉重，且缺少多人多智能体实时频道。xMatrix 用你现有的订阅在真实代码仓库中直接运行 34 种编程智能体，内置 Goals 交付验收机制与 35 个受控应用连接器。",
     productCaption:
       "在 xMatrix 中：直接在实时团队频道里编排你原有的 Claude Code、Codex 和 Cursor 订阅并维护活页面——零 Token 加价，也不用折腾 Docker 运维栈。",
     painPoints: [
@@ -694,14 +694,14 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
     ],
     switchWhen: [
       "你已经在为 Claude Code、Codex 或 Cursor 付费，不想再为长代码上下文支付二次积分加价。",
-      "你希望工程师和 35 种编程智能体在实时频道协同，并维护权威活页面，而不是天天排查 RAG 召回偏差。",
+      "你希望工程师和 34 种编程智能体在实时频道协同，并维护权威活页面，而不是天天排查 RAG 召回偏差。",
       "你不想仅仅为了协调本地编程智能体，去长期运维一整套 PostgreSQL + S3 自托管服务。",
     ],
     migrationSteps: [
       {
         title: "保留原生编程 CLI 与已有订阅",
         detail:
-          "把 35 种编程智能体（Claude Code、Codex、Gemini、Cursor 等）直接注册进 xMatrix，停止为托管积分池重复付费。",
+          "把 34 种编程智能体（Claude Code、Codex、Gemini、Cursor 等）直接注册进 xMatrix，停止为托管积分池重复付费。",
       },
       {
         title: "将静态知识库升级为活页面与 Goals",
@@ -739,7 +739,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "对比 Cumora (yetone/cumora) 替代方案？让编程智能体直接在你的真实本地仓库工作，告别离线沙箱拦截 (#350)、bwrap 报错与邀请制预览。",
     eyebrow: "Cumora 替代方案 · Cumora vs xMatrix",
     headline: "Cumora 替代方案：智能体直连真实代码仓库，经受控连接器安全交付",
-    lead: "Cumora 把人格化智能体引入了团队群聊，但将本地 BYOA 运行锁在脱离真实工作目录的离线沙箱里，频繁遭遇 Bubblewrap 和 CDN 拉取报错 (#350)，且仍处于邀请制预览阶段。xMatrix 直接在你的代码仓库中运行 35 种编程智能体，并通过 35 个受控连接器与活页面持续交付。",
+    lead: "Cumora 把人格化智能体引入了团队群聊，但将本地 BYOA 运行锁在脱离真实工作目录的离线沙箱里，频繁遭遇 Bubblewrap 和 CDN 拉取报错 (#350)，且仍处于邀请制预览阶段。xMatrix 直接在你的代码仓库中运行 34 种编程智能体，并通过 35 个受控连接器与活页面持续交付。",
     productCaption:
       "在 xMatrix 中：无需邀请码、没有离线沙箱墙——你本地真实的 Claude Code 和 Codex 直接在你的仓库里与团队协同。",
     painPoints: [
@@ -768,7 +768,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
     comparisonRows: [
       {
         dimension: "本地智能体工作位置",
-        xmatrix: "直接在你注册的真实本地仓库与工具链中运行 35 种编程智能体",
+        xmatrix: "直接在你注册的真实本地仓库与工具链中运行 34 种编程智能体",
         competitor: "运行在 Cumora 自带离线沙箱中（阻断出网拉取，#350）",
       },
       {
@@ -841,9 +841,9 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "正在找 T3 Code 替代品或类似 T3 Code 的团队平替工具？一次性补齐真实成员身份、共享频道 (#27974)、项目活页面 (#15858)、Space 密钥与跨服务商接力 (#15846)。",
     eyebrow: "T3 Code 替代方案 · T3 Code vs xMatrix",
     headline: "团队版 T3 Code：真实成员身份、一个频道与一份活页面",
-    lead: "T3 Code 是一款出色的免费单人编码工作台，但每个环境只绑定单一账号、缺少共享项目活页面，且模型额度耗尽时会卡死在 Limited。xMatrix 为团队提供共享频道、活页面、Space 密钥，并在你的所有机器上原生运行 35 种编程智能体。",
+    lead: "T3 Code 是一款出色的免费单人编码工作台，但每个环境只绑定单一账号、缺少共享项目活页面，且模型额度耗尽时会卡死在 Limited。xMatrix 为团队提供共享频道、活页面、Space 密钥，并在你的所有机器上原生运行 34 种编程智能体。",
     productCaption:
-      "在 xMatrix 中：真正的多人协作频道，35 种编程智能体跨你所有的机器协同作战，持续为全队维护最新的活页面。",
+      "在 xMatrix 中：真正的多人协作频道，34 种编程智能体跨你所有的机器协同作战，持续为全队维护最新的活页面。",
     painPoints: [
       {
         title: "缺少真正的多人身份与共享团队频道",
@@ -864,7 +864,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "T3 Code 擅长本地 diff 与模拟器，但没有共享项目记忆或活页面文档（GitHub Discussion #15858），新建线程默认 Full access，免费版 T3 Connect 通道限 3 台机器，且仅聚焦写代码而不覆盖受控运维应用。",
         xmatrixAnswer:
-          "xMatrix 把已完成的对话沉淀为活页面，支持团队跨 35 种编程智能体接入任意数量机器，安全托管 Space 密钥，并统一管控 Vercel、Cloudflare、Sentry、Gmail 和 Stripe 等 35 个已连接应用。",
+          "xMatrix 把已完成的对话沉淀为活页面，支持团队跨 34 种编程智能体接入任意数量机器，安全托管 Space 密钥，并统一管控 Vercel、Cloudflare、Sentry、Gmail 和 Stripe 等 35 个已连接应用。",
       },
     ],
     comparisonRows: [
@@ -890,7 +890,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "编程智能体与远程机器",
-        xmatrix: "35 种编程智能体（+ --runtime），覆盖你所有的 macOS、Windows 与 Linux 机器",
+        xmatrix: "34 种编程智能体（+ --runtime），覆盖你所有的 macOS、Windows 与 Linux 机器",
         competitor: "10 种编程智能体 + ACP；T3 Connect 免费版上限 3 台机器",
       },
     ],
@@ -1111,7 +1111,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "保留现有 CLI 工具与订阅",
         detail:
-          "在你的 Mac 和 Linux 主机上安装 xMatrix，并用 xmatrix agent add 接入 35 种编程智能体中的任意工具（Claude Code、Codex、Grok、OpenCode、Kimi 等）。",
+          "在你的 Mac 和 Linux 主机上安装 xMatrix，并用 xmatrix agent add 接入 34 种编程智能体中的任意工具（Claude Code、Codex、Grok、OpenCode、Kimi 等）。",
       },
       {
         title: "无需自建中继即可覆盖 Web、桌面与移动端",
@@ -1173,7 +1173,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Claude Code Desktop 将本地执行局限在 Anthropic 生态内，无法在异构工具间共享 Space 密钥注入，且 Anthropic 的地区限制会直接封锁非支持区域。",
         xmatrixAnswer:
-          "xMatrix 在一套统一的 Space 密钥与覆盖 35 个已连接应用的按应用审批体系下，跨你所有的 macOS、Windows 和 Linux 机器统一协调 35 种编程智能体（并可通过 --runtime 接入任意自定义 CLI）。",
+          "xMatrix 在一套统一的 Space 密钥与覆盖 35 个已连接应用的按应用审批体系下，跨你所有的 macOS、Windows 和 Linux 机器统一协调 34 种编程智能体（并可通过 --runtime 接入任意自定义 CLI）。",
       },
     ],
     comparisonRows: [
@@ -1254,7 +1254,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "正在对比 Linear Agents 替代方案或平替？摆脱 12 个月过期的预付沙箱余额、纯云端工单执行与企业版专属审计日志，用 xMatrix 在本地机器运行实时频道与活页面。",
     eyebrow: "Linear Agents 替代方案 · Linear vs xMatrix",
     headline: "Linear Agents 替代：在自有机器与订阅上运行编程智能体，无过期余额，与 Linear 无缝协作",
-    lead: "Linear 是一流的 Issue 追踪工具，Linear Agents 能把边界清晰的工单交给云端沙箱提 PR——但每次需按 $0.25/20 分钟加 Token 从独立预付钱包扣费，且余额 12 个月过期不退。你可以继续用 Linear 追踪 Issue，同时将其接入 xMatrix，在自有机器的实时频道与活页面中运行 35 种编程智能体。",
+    lead: "Linear 是一流的 Issue 追踪工具，Linear Agents 能把边界清晰的工单交给云端沙箱提 PR——但每次需按 $0.25/20 分钟加 Token 从独立预付钱包扣费，且余额 12 个月过期不退。你可以继续用 Linear 追踪 Issue，同时将其接入 xMatrix，在自有机器的实时频道与活页面中运行 34 种编程智能体。",
     productCaption:
       "在 xMatrix 中：保持连接 Linear，同时在你自己的机器上用实时频道运行本地 Claude Code 与 Codex，零云沙箱计时费、无过期预付余额。",
     painPoints: [
@@ -1288,7 +1288,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "智能体计费模式",
-        xmatrix: "跨 35 种编程智能体自带模型订阅；Pro $10/人类席位/月（年付 $8）",
+        xmatrix: "跨 34 种编程智能体自带模型订阅；Pro $10/人类席位/月（年付 $8）",
         competitor: "席位费（$10–$16/月）+ 独立预付余额（12 个月过期、不可退款）",
       },
       {
@@ -1359,7 +1359,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "寻找 Notion Custom Agents 平替或替代品？告别 $20–$24 Business 门槛、三套积分钱包、消耗创建者个人额度导致中断以及移动端限制，换用 xMatrix 活页面。",
     eyebrow: "Notion Custom Agents 替代方案 · Notion vs xMatrix",
     headline: "Notion Custom Agents 替代：智能体交付代码即自动更新的活页面，告别三套积分钱包",
-    lead: "Notion Custom Agents 被锁在 $20–$24/席的 Business 付费墙与复杂的三套积分钱包后面：同事调用共享智能体默认烧掉创建者的个人 Select 积分，归零瞬间任务即刻暂停。在 xMatrix 中，35 种编程智能体在你的真实仓库交付代码时会自动更新活页面——无需维护任何积分钱包。",
+    lead: "Notion Custom Agents 被锁在 $20–$24/席的 Business 付费墙与复杂的三套积分钱包后面：同事调用共享智能体默认烧掉创建者的个人 Select 积分，归零瞬间任务即刻暂停。在 xMatrix 中，34 种编程智能体在你的真实仓库交付代码时会自动更新活页面——无需维护任何积分钱包。",
     productCaption:
       "在 xMatrix 中：智能体直接在你的真实仓库运行、在频道里与团队协同并维护活页面——全 Space 共用一个额度池，移动端全功能可用。",
     painPoints: [
@@ -1393,7 +1393,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "智能体执行环境",
-        xmatrix: "直接在你自己的 macOS、Windows、Linux 机器上运行 35 种编程智能体",
+        xmatrix: "直接在你自己的 macOS、Windows、Linux 机器上运行 34 种编程智能体",
         competitor: "Notion 云端浏览器/VM；编码转交外部厂商云",
       },
       {
@@ -1463,7 +1463,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "寻找 Slack Code 替代方案？告别 Slack 对自定义应用每分钟 1 次、每次 15 条历史消息的严苛限流、免费版 90 天限制与运行时缺失，改用 xMatrix。",
     eyebrow: "Slack Code 替代方案 · Slack Code vs xMatrix",
     headline: "Slack Code 替代：自有机器运行智能体、决策沉淀活页面，与 Slack 无缝协同",
-    lead: "Slack Code API 在 Slack 里增加了任务频道与 diff 预览，但 Slack 本质仍是聊天外壳——没有智能体运行时、没有活页面，还对非 Marketplace 应用祭出极严苛的 API 限流（历史接口每分钟 1 次、每次最多 15 条消息）。你可以通过 xMatrix 的原生 Slack 连接器继续联动 Slack，同时在自有机器上运行 35 种编程智能体并把决策沉淀在活页面。",
+    lead: "Slack Code API 在 Slack 里增加了任务频道与 diff 预览，但 Slack 本质仍是聊天外壳——没有智能体运行时、没有活页面，还对非 Marketplace 应用祭出极严苛的 API 限流（历史接口每分钟 1 次、每次最多 15 条消息）。你可以通过 xMatrix 的原生 Slack 连接器继续联动 Slack，同时在自有机器上运行 34 种编程智能体并把决策沉淀在活页面。",
     productCaption:
       "在 xMatrix 中：原生多人多智能体频道由你的自有机器和活页面支撑——完整读取上下文，没有 15 条历史消息的人为 API 墙。",
     painPoints: [
@@ -1497,7 +1497,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "执行运行时",
-        xmatrix: "内置跨机守护进程，原生支持 35 种编程智能体（+ --runtime）",
+        xmatrix: "内置跨机守护进程，原生支持 34 种编程智能体（+ --runtime）",
         competitor: "仅聊天界面；需另购合作智能体订阅或自建托管执行器",
       },
       {
@@ -1582,7 +1582,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Nowledge Mem 不会帮你拉起编程智能体，不能让多位同事在共享频道里协同，也无法跨机器路由任务——你还是得自己东拼西凑执行器、内网穿透和 MCP 配置。",
         xmatrixAnswer:
-          "xMatrix 是一站式协作层：共享频道、跨 35 种编程智能体的多机路由、渐进式大纲/章节页面阅读与活页面全部集成在同一产品里。",
+          "xMatrix 是一站式协作层：共享频道、跨 34 种编程智能体的多机路由、渐进式大纲/章节页面阅读与活页面全部集成在同一产品里。",
       },
       {
         title: "团队同步仍在内测，且缺少运维权限治理",
@@ -1610,7 +1610,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "智能体执行",
-        xmatrix: "跨你所有的机器拉起并路由 35 种编程智能体（+ --runtime）",
+        xmatrix: "跨你所有的机器拉起并路由 34 种编程智能体（+ --runtime）",
         competitor: "不执行也不路由编程智能体",
       },
       {
@@ -1670,7 +1670,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "寻找 EverOS 或 EverMemOS 替代方案？摆脱单机 SQLite 目录锁、持续后台记忆抽取 Token 账单与团队同步缺失，迁往 xMatrix 频道与活页面。",
     eyebrow: "EverOS (EverMemOS) 替代方案 · EverOS vs xMatrix",
     headline: "EverOS 替代：由亲手干活的编程智能体写就的跨机团队项目记忆",
-    lead: "EverOS (EverMemOS) 将 Markdown 文件与本地 SQLite、LanceDB 索引结合，但其开源 v1 明确拒绝同一目录启动第二个服务、排除多租户与分布式同步，且后台抽取会持续消耗 LLM Token。xMatrix 为团队提供覆盖 35 种编程智能体的实时多机执行与权威活页面。",
+    lead: "EverOS (EverMemOS) 将 Markdown 文件与本地 SQLite、LanceDB 索引结合，但其开源 v1 明确拒绝同一目录启动第二个服务、排除多租户与分布式同步，且后台抽取会持续消耗 LLM Token。xMatrix 为团队提供覆盖 34 种编程智能体的实时多机执行与权威活页面。",
     productCaption:
       "在 xMatrix 中：由干活的编程智能体跨多机实时维护 Markdown 活页面——没有单目录锁冲突，也没有后台记忆抽取的额外 Token 消耗。",
     painPoints: [
@@ -1693,7 +1693,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "EverOS 只是一个记忆后端（且 v1.7.1 已移除 Foresight 预测功能）；它不能跨机器召唤编程智能体，也无法在操作 Vercel、Cloudflare、Gmail 或 Stripe 前强制人工审批。",
         xmatrixAnswer:
-          "xMatrix 将覆盖 35 种编程智能体的多智能体执行、Space 密钥、35 个连接器的按应用审批与活页面整合为一个完整工作区。",
+          "xMatrix 将覆盖 34 种编程智能体的多智能体执行、Space 密钥、35 个连接器的按应用审批与活页面整合为一个完整工作区。",
       },
     ],
     comparisonRows: [
@@ -1709,7 +1709,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "智能体执行与路由",
-        xmatrix: "跨你的机器拉起并路由 35 种编程智能体（+ --runtime）",
+        xmatrix: "跨你的机器拉起并路由 34 种编程智能体（+ --runtime）",
         competitor: "仅记忆层；不执行也不协调智能体集群",
       },
       {
@@ -1729,7 +1729,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
     switchWhen: [
       "你在多台机器上工作或需要与同事协同，无法接受单机单目录 v1 的锁边界。",
       "你希望由真正完成任务的 Run 直接维护权威 Markdown 活页面，而不是为后台持续抽取循环烧 API 费用。",
-      "除了持久化项目知识外，你还需要覆盖 35 种编程智能体的真正执行能力与 35 个受控连接器。",
+      "除了持久化项目知识外，你还需要覆盖 34 种编程智能体的真正执行能力与 35 个受控连接器。",
     ],
     migrationSteps: [
       {
@@ -1807,7 +1807,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "本地代码执行",
-        xmatrix: "直接在你的本地仓库运行 35 种编程智能体（+ --runtime）",
+        xmatrix: "直接在你的本地仓库运行 34 种编程智能体（+ --runtime）",
         competitor: "仅桥接 GitHub/Linear 上下文；桌面智能体锁在 $100–$200 Max 档",
       },
       {
@@ -1864,7 +1864,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "外部智能体工具也能接入 xMatrix 吗？",
         answer:
-          "可以。xMatrix 原生内置 35 种编程智能体（并可通过 --runtime 接入任意自定义 CLI），同时对外提供标准 MCP 服务器。",
+          "可以。xMatrix 原生内置 34 种编程智能体（并可通过 --runtime 接入任意自定义 CLI），同时对外提供标准 MCP 服务器。",
       },
     ],
   },

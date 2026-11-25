@@ -36,8 +36,8 @@ Hub deploy. A new backend, inventory probe behavior or action kind still needs
 a CLI release. The recipes come only from the Hub's released registry: the
 connected frame is the Hub's own, not a Channel, Page or caller-supplied value,
 and the owner-requested action, its lease and the Machine owner checks are
-unchanged. Nothing uninstalls software. ZCode and custom runtimes have
-explicit unsupported management entries. Pi checks
+unchanged. Nothing uninstalls software. Custom runtimes have
+explicit unsupported management entries; ZCode is explicitly refused. Pi checks
 the `pi-acp` launcher and probes `pi`; Vibe checks `vibe-acp` and probes `vibe`.
 Cursor recognizes current `agent` and legacy `cursor-agent` aliases without
 changing existing registered launch contracts. Cursor inventory and update recipes
@@ -305,7 +305,7 @@ Presets with a sign-in today: antigravity (via `agy acp --login`; paste the code
 or the address the browser ends on),
 codex, claude, cline, copilot, cursor, devin (in a pseudo-terminal), grok,
 hermes, jcode, kilo, kimi, kiro, omp (paste the code or the address the browser
-ends on), opencode, qoder and zcode. gemini,
+ends on), opencode and qoder. gemini,
 goose and openclaw sign in only inside an interactive terminal; pi, vibe, junie
 and qwen have no official headless sign-in (API keys or their TUI). auggie and
 commandcode accept only a localhost browser callback (commandcode also takes a

@@ -143,6 +143,9 @@ async fn cmd_harness_cli(
 }
 
 async fn apply_harness_locally(preset_id: &str, action: &str) -> error::Result<()> {
+    if let Some(reason) = xmatrix_cli_agent::refused_agent_harness_reason(preset_id) {
+        return Err(CliError::Launch(reason.into()));
+    }
     let result = crate::apply_local(preset_id, action).await?;
     println!("{result}");
     if result.get("status").and_then(|v| v.as_str()) != Some("succeeded") {
@@ -469,6 +472,9 @@ async fn request_harness_cli_action(
     target: xmatrix_cli_args::HarnessTargetArgs,
     agent: bool,
 ) -> error::Result<()> {
+    if let Some(reason) = xmatrix_cli_agent::refused_agent_harness_reason(preset_id) {
+        return Err(CliError::Launch(reason.into()));
+    }
     if !xmatrix_cli_agent::agent_presets()
         .iter()
         .any(|preset| preset.id == preset_id)

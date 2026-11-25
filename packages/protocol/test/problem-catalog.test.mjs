@@ -71,10 +71,10 @@ test("a note's code is recorded beside it, or read from the fixed sentence older
 
 test("every startup failure code the classifier answers with has a row in both languages", () => {
   const samples = ["something odd happened", "repository_access_unavailable: no", "machine_not_answering: no",
-    "harness_missing: codex", "harness_session_in_use: held", "base_ref_unresolved", "No space left on device",
+    "harness_refused: ZCode is refused", "harness_missing: codex", "harness_session_in_use: held", "base_ref_unresolved", "No space left on device",
     "fetch_required_failed", "git fetch timed out", "remote repository x is not accessible"];
   const codes = new Set([...samples.map(sample => publicMachineStartupFailure(sample).code), "machine_unavailable"]);
-  assert.equal(codes.size, 11, "each sample reaches its own code");
+  assert.equal(codes.size, 12, "each sample reaches its own code");
   for (const code of codes) assert.ok(Object.hasOwn(STARTUP_FAILURES, code), `${code} has no row`);
   for (const [code, row] of Object.entries(STARTUP_FAILURES)) {
     assert.ok(codes.has(code), `${code} is not a startup failure code`);

@@ -14,6 +14,7 @@ import { agentFaceUrl } from "./faces.js";
 
 export {
   AGENT_PRESETS,
+  REFUSED_AGENT_HARNESSES,
   agentAccessGrant,
   agentAccessModes,
   REGISTRATION_ACCESS_ASK_CAPABILITY,
@@ -23,12 +24,15 @@ export {
   agentPresetById,
   agentPresetForLauncher,
   normalizeAgentPresetRuntime,
+  refusedAgentHarness,
+  refusedAgentHarnessMessage,
   type AgentAccessGrant,
   type AgentAccessMode,
   type AgentHarnessSpec,
   type AgentPreset,
   type AgentPresetBackend,
   type AgentPresetId,
+  type RefusedAgentHarness,
 } from "./agent-presets.js";
 
 export function agentAvatarUrlFromMetadata(

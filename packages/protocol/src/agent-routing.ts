@@ -260,7 +260,7 @@ const EXCLUSION_LABEL: Record<AgentRoutingExclusion, string> = {
 
 const HARNESS_LABEL: Record<string, string> = {
   codex: "Codex", claude: "Claude Code", claude_code: "Claude Code", grok: "Grok",
-  opencode: "OpenCode", cursor: "Cursor", "cursor-agent": "Cursor", kimi: "Kimi", zcode: "ZCode",
+  opencode: "OpenCode", cursor: "Cursor", "cursor-agent": "Cursor", kimi: "Kimi",
   copilot: "Copilot", gemini: "Gemini", qwen: "Qwen Code", goose: "goose", junie: "Junie",
   vibe: "Mistral Vibe", kiro: "Kiro", hermes: "Hermes", openclaw: "OpenClaw",
   qoder: "Qoder", codebuddy: "CodeBuddy", omp: "Oh My Pi", auggie: "Auggie", cline: "Cline", kilo: "Kilo",

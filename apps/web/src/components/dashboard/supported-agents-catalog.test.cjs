@@ -21,7 +21,7 @@ test("an installer is shown as a person pastes it, per platform", () => {
 });
 
 test("an agent with no verified installer offers no command to paste", () => {
-  assert.equal(agentInstallCommand(preset("zcode"), "unix"), undefined);
+  assert.equal(preset("zcode"), undefined);
   // Amp's hint is prose; pasting it into a terminal would fail.
   assert.equal(agentInstallCommand(preset("amp"), "unix"), undefined);
 });

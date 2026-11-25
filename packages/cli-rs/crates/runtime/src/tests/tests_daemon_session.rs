@@ -402,7 +402,7 @@ use super::{
     DaemonRoutingWorkspace, DaemonRunChild, DaemonRunRegistry, DaemonRunStatusMarker,
     DaemonSpawnClaim, DaemonSpawnInflight, DaemonSpawnResultParts, GoalCommand,
     HeadlessRuntimeBoundary, InboundChannelMessage, LONG_LIVED_REGISTER_RETRY_MAX,
-    PersistedDaemonRun, ZcodeAppSession, acp_args_from_json, acp_backend_matches,
+    PersistedDaemonRun, acp_args_from_json, acp_backend_matches,
     acp_cancel_notification, acp_initialize_params, acp_message_id_matches,
     acp_model_catalog_from_value, acp_select_permission_option_id, acp_session_new_params,
     agent_presentation_adapter_for_acp_runtime, agent_presentation_adapter_for_runtime,
@@ -440,7 +440,7 @@ use super::{
     inbound_channel_message_from_event, inbound_delivery_batch_max_messages_from_env,
     is_bounded_retryable_session_register_error, is_claude_code_agent, is_claude_launcher_token,
     is_grok_tool, is_retryable_initial_register_error, is_retryable_relay_operation_error,
-    is_zcode_tool, load_codex_resume_session_id, next_daemon_control_poll_retry_delay_ms,
+    load_codex_resume_session_id, next_daemon_control_poll_retry_delay_ms,
     parse_goal_command, parse_initial_spawn_context,
     persist_daemon_run_status_marker, protocol, read_daemon_run_status_marker, redact_data_urls,
     refresh_daemon_run_status_heartbeat, rehydrate_daemon_run_registry_from_persisted_runs,
@@ -449,8 +449,6 @@ use super::{
     should_publish_codex_runtime_trace, single_message_slash_passthrough,
     slash_command_passthrough, use_claude_print_backend_for, uses_claude_code_runtime,
     validate_codex_app_cwd, write_daemon_run_status_marker_to_path, write_local_image_files,
-    zcode_app_error_message, zcode_cancel_notification, zcode_goal_active_input_id,
-    zcode_goal_state_from_value, zcode_is_session_event, zcode_message_id_matches,
 };
 #[cfg(unix)]
 use super::{daemon_capability_key, take_daemon_agent_auth_grant};

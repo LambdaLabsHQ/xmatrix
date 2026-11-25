@@ -55,9 +55,13 @@ test("Agent runs, bad input and offline Machines are refused before anything is 
   const owner = route({ id: "owner" });
   for (const body of [{ machineId: "machine:a", presetId: "claude", action: "purge" },
     { machineId: "machine:a", presetId: "../x", action: "update" }, { presetId: "claude", action: "update" },
-    { machineId: "machine:a", hostId: 3, presetId: "claude", action: "update" }]) {
+    { machineId: "machine:a", hostId: 3, presetId: "claude", action: "update" },
+    { machineId: "machine:a", presetId: "zcode", action: "install" }]) {
     assert.equal((await owner.post(body)).status, 400);
   }
+  const zcodeAction = await owner.post({ machineId: "machine:a", presetId: "zcode", action: "login_start" });
+  assert.equal(zcodeAction.status, 400);
+  assert.match((await zcodeAction.json()).error, /explicitly refuses ZCode/u);
   const offline = route({ id: "owner" }, { daemons: [{ ...daemon, status: "offline" }] });
   assert.equal((await offline.post({ machineId: "machine:a", presetId: "claude", action: "install" })).status, 409);
   const twoHosts = route({ id: "owner" }, { daemons: [daemon, { ...daemon, id: "daemon:b", hostId: "host-b" }] });

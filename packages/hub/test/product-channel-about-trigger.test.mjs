@@ -92,14 +92,14 @@ test("a machine hint is posted to the Channel too, so a CLI or Agent sender lear
 
 test("an offline refusal posts which machine and the summon, so the Web can show how to bring it back", async () => {
   const input = { env: {}, channelId: "channel", messageId: "summon",
-    senderKind: "user", senderId: "human", actorUserId: "human", body: "@zcode fix it" };
+    senderKind: "user", senderId: "human", actorUserId: "human", body: "@codex fix it" };
   const notices = [];
   const offline = [{ machineId: "machine:laptop", machineName: "Laptop" }];
   await dispatchProductMessageLaunches(input, { registration: async () => ({ selectionCount: 1, prepared: [],
-    rejected: [{ code: "registration_daemon_offline", sourceMention: "@zcode", offline }] }) }, async value => notices.push(value));
+    rejected: [{ code: "registration_daemon_offline", sourceMention: "@codex", offline }] }) }, async value => notices.push(value));
   assert.equal(notices.length, 1);
   assert.match(notices[0].body, /^Agent launch failed: Laptop is offline/);
-  assert.deepEqual(notices[0].metadata, { kind: "xmatrix.machine-offline.v1", offline, sourceMention: "@zcode" });
+  assert.deepEqual(notices[0].metadata, { kind: "xmatrix.machine-offline.v1", offline, sourceMention: "@codex" });
   assert.equal(notices[0].replyToMessageId, "summon");
 });
 

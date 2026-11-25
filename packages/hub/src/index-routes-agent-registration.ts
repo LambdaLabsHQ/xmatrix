@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono";
 import { ControlError, RegistrationAccessError } from "@xmatrix/db";
 import { parseAgentRegistrationCommand, parseSpaceAgentRegistrationKey, groupAgentRegistrationCatalog, parseHarnessProfileCommand,
   parseAgentEnvironmentCommand, parseAgentRegistrationKey, agentAccessModes, agentPresetById, agentPresetForLauncher,
-  parseRegistrationResourceLimits, parseSpaceAgentConfiguration, type AgentRegistrationSummary } from "@xmatrix/protocol";
+  refusedAgentHarnessMessage, parseRegistrationResourceLimits, parseSpaceAgentConfiguration, type AgentRegistrationSummary } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { readBoundedRequestBody, requireAuth, requireHumanAuth, requestFailure } from "./index-shared";
 import { failureResponse } from "./error-contract";
@@ -105,6 +105,8 @@ export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, de
     let command;
     try { command = parseHarnessProfileCommand(JSON.parse(new TextDecoder().decode(bytes))); }
     catch { return c.json({ error: "Invalid harness description" }, 400); }
+    const refusedProfile = refusedAgentHarnessMessage(command.harness);
+    if (refusedProfile) return c.json({ error: refusedProfile }, 400);
     return c.json(await port.describe(c.env, { actorUserId: user.id, spaceId, command }), 200, NO_STORE);
   }));
   for (const scope of ["space", "physical"] as const) for (const action of ["commands", "query"] as const) {
@@ -150,8 +152,18 @@ export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, de
           }
         }
         if (scope === "physical" && key.ownerUserId !== user.id) return c.json({ error: "Registration not found" }, 404);
+        const launchConfig = command && "environment" in command ? command.environment.launch : undefined;
+        const allowsLegacyTeardown =
+          (runAction === "space-state" && command && "state" in command && command.state !== "enabled") ||
+          (runAction === "owner-grant" && command && "state" in command && command.state !== "active");
+        const refusedHarness = command && !allowsLegacyTeardown
+          ? refusedAgentHarnessMessage(key.harness) ??
+            refusedAgentHarnessMessage(launchConfig?.runtime) ??
+            refusedAgentHarnessMessage(launchConfig?.backend)
+          : undefined;
+        if (refusedHarness) return c.json({ error: refusedHarness }, 400);
         // A mode is confirmed only for a harness whose permission requests xMatrix can show.
-        const access = command && "environment" in command ? command.environment.launch?.access : undefined;
+        const access = launchConfig?.access;
         if (access && !agentAccessModes(agentPresetById(key.harness) ?? agentPresetForLauncher(key.harness)).includes(access)) {
           return c.json({ error: `${key.harness} can only be given full access: xMatrix cannot show its permission requests in a Channel` }, 400);
         }

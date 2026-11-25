@@ -52,7 +52,7 @@ Codex installs registration instructions and the compact reminder through
 `thread/start` and `thread/resume` developer instructions; `turn/start` and
 `turn/steer` carry user input and never accept trusted instructions.
 Grok receives only registration instructions and the official Channel contract
-as trusted rules, never the composed bootstrap/history. Generic ACP, ZCode and
+as trusted rules, never the composed bootstrap/history. Generic ACP and
 PTY retain their existing refusal when registration instructions require a
 trusted channel they cannot provide. Official bootstrap text stays in the
 initial user input on those adapters; a transport change grants no permissions.

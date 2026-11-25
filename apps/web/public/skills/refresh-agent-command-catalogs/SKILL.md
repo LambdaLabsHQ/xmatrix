@@ -1,6 +1,6 @@
 ---
 name: refresh-agent-command-catalogs
-description: Refresh data-driven vendor slash-command JSON catalogs from stable official documentation URLs. Use when a user asks to sync, refresh, update, or regenerate Codex/Claude/Grok/ZCode command lists for xMatrix Composer completion.
+description: Refresh data-driven vendor slash-command JSON catalogs from stable official documentation URLs. Use when a user asks to sync, refresh, update, or regenerate Codex/Claude/Grok/Kimi command lists for xMatrix Composer completion.
 ---
 
 # Refresh Agent Command Catalogs
@@ -16,7 +16,7 @@ Canonical files (edit these; do not invent parallel tables):
 | codex | `packages/protocol/src/agent-command-catalogs/codex.json` | https://learn.chatgpt.com/codex/reference/slash-commands |
 | claude | `packages/protocol/src/agent-command-catalogs/claude.json` | https://code.claude.com/docs/en/commands |
 | grok | `packages/protocol/src/agent-command-catalogs/grok.json` | https://docs.x.ai/build/modes-and-commands |
-| zcode | `packages/protocol/src/agent-command-catalogs/zcode.json` | https://zcode.z.ai/en/docs/commands |
+| kimi | `packages/protocol/src/agent-command-catalogs/kimi.json` | https://moonshotai.github.io/kimi-code/en/reference/slash-commands.html |
 
 Runtime loader: the CLI runtime embeds the JSON with Rust `include_str!` (`packages/cli-rs/crates/runtime/src/agent_presentation.rs`).
 
@@ -80,7 +80,6 @@ These are additive at process start / first init and must not replace the docs c
 
 - Claude: `system/init.slash_commands`
 - Grok: local skills directories → `/skill-name`
-- ZCode: `~/.zcode/commands` and project `.zcode/commands`
 
 ## Guardrails
 

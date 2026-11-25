@@ -34,7 +34,7 @@ fn zai_coding_plan_api_key() -> Option<(String, &'static str)> {
     None
 }
 
-/// Z.ai / BigModel Coding Plan quota (used by ZCode Coding Plan stats).
+/// Z.ai / BigModel Coding Plan quota.
 /// Auth header is the raw API key without a Bearer prefix (matches Z.ai monitor API).
 pub async fn read_zai_coding_plan_quota_usage(force: bool) -> Option<LlmUsage> {
     if super::quota_probes_disabled() {
@@ -160,7 +160,7 @@ pub fn zai_monitor_quota_usages(map: &serde_json::Map<String, Value>) -> Vec<Llm
         let limit = first_f64(item, &["total", "usage", "limit", "max"]);
         quotas.push(LlmQuotaUsage {
             label: Some(label),
-            window: Some("zcode".to_string()),
+            window: Some("zai".to_string()),
             used,
             limit,
             remaining: first_f64(item, &["remaining", "available", "left"]),

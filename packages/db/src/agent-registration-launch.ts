@@ -14,6 +14,7 @@ import {
   parseLaunchConditions,
   agentPresetForLauncher,
   agentPresetById,
+  refusedAgentHarness,
   harnessCommandLine,
   harnessItemObservedAt,
   harnessTooOld,
@@ -337,6 +338,9 @@ function registrationLaunchRuntime(launch: AgentRegistrationLaunch | undefined, 
  * requires to name the registration's harness; a declared runtime (e.g. an
  * absolute path) need not resolve to a preset, so the harness names it. */
 export function registrationLaunchSpawnFields(launch: AgentRegistrationLaunch | undefined, harness: string) {
+  if (refusedAgentHarness(harness) || refusedAgentHarness(launch?.runtime) || refusedAgentHarness(launch?.backend)) {
+    throw new RegistrationAccessError("registration_harness_refused", 409);
+  }
   const { access, runtimeArgs, acpArgs } = agentLaunchAccess(launch, agentPresetById(harness) ?? agentPresetForLauncher(harness));
   return { runtime: registrationLaunchRuntime(launch, harness), agentPresetId: harness,
     ...(runtimeArgs.length ? { runtimeArgs } : {}),
@@ -362,6 +366,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
 
   async prepare(raw: LaunchRequest) {
     const key = parseSpaceAgentRegistrationKey(raw.key), requirements = parseAgentRoutingRequirements(raw.requirements);
+    if (refusedAgentHarness(key.harness) || refusedAgentHarness(requirements.harness)) {
+      throw new RegistrationAccessError("registration_harness_refused", 409);
+    }
     if (key.spaceId !== this.placement.spaceId || requirements.harness && requirements.harness !== key.harness ||
       !Number.isSafeInteger(raw.selectionIndex) || raw.selectionIndex < 0 || raw.selectionIndex >= 32) {
       throw new RegistrationAccessError("invalid_registration_launch", 400);

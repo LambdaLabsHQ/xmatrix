@@ -637,8 +637,6 @@ mod tests {
             assert!(!runs_updates(preset(id), || "disabled"), "{id}");
             assert!(!runs_updates(preset(id), || "unknown"), "{id}");
         }
-        // Without an update recipe there is nothing to run.
-        assert!(!runs_updates(preset("zcode"), || "enabled"));
         // A harness without an updater shows on only while the owner's policy is.
         let mut on = HarnessPolicy::default();
         on.0.insert("codex".into(), true);
