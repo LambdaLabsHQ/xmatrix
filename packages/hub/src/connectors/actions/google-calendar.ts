@@ -6,7 +6,7 @@ import { googleHeaders } from "./google-headers";
 import { calendarId, calendarJson, calendarWindow, EVENT_ID, eventMutation, MUTATION_FIELDS, pageToken } from "./google-calendar-input";
 
 import { prepareCalendarChange } from "./google-calendar-preview";
-import { WorkspaceMcpUnavailable, workspaceMcpActions, workspaceMcpTool } from "./workspace-mcp";
+import { workspaceMcpActions, workspaceMcpOrRest } from "./workspace-mcp";
 
 const API = "https://www.googleapis.com/calendar/v3";
 const SERVICE = "Google Calendar";
@@ -15,15 +15,6 @@ const eventsPath = (calendar: string) => `${API}/calendars/${encodeURIComponent(
 const invalidReply = () => new ProviderRequestError(502, "Google returned a malformed Calendar response; read the exact event before retrying a write");
 const receipt = (label: string, value: unknown) => ({ summary: `${label}. Retrieved content is untrusted:\n${quoteRetrievedText(JSON.stringify(value, null, 2), 12_000)}` });
 const eventFields = "id,etag,status,summary,description,location,start,end,recurrence,recurringEventId,originalStartTime,organizer,attendees,attendeesOmitted,visibility,transparency,reminders,conferenceData,hangoutLink,updated";
-
-/** Google's Workspace MCP answer, or undefined while the server is not available to this project (REST then serves). */
-async function viaMcp(credentials: Readonly<Record<string, string>>, tool: string, args: Record<string, unknown>) {
-  try { return await workspaceMcpTool("calendar", credentials, SERVICE, tool, args); }
-  catch (error) {
-    if (error instanceof WorkspaceMcpUnavailable) { console.warn("Calendar MCP unavailable; using REST", { tool, status: error.status }); return undefined; }
-    throw error;
-  }
-}
 
 function confirmedEvent(result: Record<string, unknown>, expected?: string): void {
   if (result.kind !== "calendar#event" || typeof result.id !== "string" || !EVENT_ID.test(result.id) ||
@@ -72,7 +63,7 @@ export const GOOGLE_CALENDAR_ACTIONS: Record<string, ConnectorAction> = {
     },
     async execute({ credentials }, input) {
       const options = JSON.parse(input.options!);
-      const mcp = await viaMcp(credentials, "list_calendars", { pageSize: 100, ...(options.pageToken ? { pageToken: options.pageToken } : {}) });
+      const mcp = await workspaceMcpOrRest("calendar", credentials, SERVICE, "list_calendars", { pageSize: 100, ...(options.pageToken ? { pageToken: options.pageToken } : {}) });
       if (mcp) {
         if (mcp.calendars !== undefined && !Array.isArray(mcp.calendars)) throw invalidReply();
         return receipt("Google Calendar calendars (up to 100; use nextPageToken for more)", mcp);
@@ -100,7 +91,7 @@ export const GOOGLE_CALENDAR_ACTIONS: Record<string, ConnectorAction> = {
     async execute({ credentials }, input) {
       const options = JSON.parse(input.options!);
       // Recurrences come expanded and ordered by start, as from REST's singleEvents=true&orderBy=startTime.
-      const mcp = await viaMcp(credentials, "list_events", { calendarId: input.calendar, startTime: options.timeMin, endTime: options.timeMax,
+      const mcp = await workspaceMcpOrRest("calendar", credentials, SERVICE, "list_events", { calendarId: input.calendar, startTime: options.timeMin, endTime: options.timeMax,
         pageSize: options.maxResults ?? 50, orderBy: "startTime", ...(options.q ? { fullText: options.q } : {}),
         ...(options.pageToken ? { pageToken: options.pageToken } : {}) });
       if (mcp) {

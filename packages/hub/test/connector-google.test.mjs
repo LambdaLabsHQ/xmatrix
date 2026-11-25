@@ -116,19 +116,33 @@ test("read fails on denied access and mismatched or malformed document data", as
   }
 });
 
-test("create and append are declared writes, use fixed origins and never replay failed mutations", async () => {
+const mcpAnswer = structuredContent => ({ body: { jsonrpc: "2.0", id: 1, result: { structuredContent } } });
+const notEnrolled = { status: 403, body: { error: { message: "MCP is not enabled for this project" } } };
+
+test("create and append are declared writes over Google's Drive and Docs MCP, never replayed after an ambiguous answer", async () => {
   const manifest = getAppConnectorProvider("google");
   assert.equal(manifest.actions.find(action => action.id === "create_doc").effect, "write");
   assert.equal(manifest.actions.find(action => action.id === "append_doc").effect, "write");
-  const created = await fetched([{ body: { documentId: id } }], () =>
+  const created = await fetched([mcpAnswer({ id, mimeType: "application/vnd.google-apps.document", title: "Work plan" })], () =>
     GOOGLE_ACTIONS.create_doc.execute({ credentials: { oauthToken: "access" } }, { title: "Work plan" }));
-  assert.deepEqual(created.calls[0].body, { title: "Work plan" });
+  assert.equal(created.calls[0].url, "https://drivemcp.googleapis.com/mcp/v1");
+  assert.deepEqual(created.calls[0].body.params, { name: "create_file",
+    arguments: { title: "Work plan", contentMimeType: "application/vnd.google-apps.document" } });
   assert.equal(created.calls.length, 1);
   assert.equal(created.result.url, `https://docs.google.com/document/d/${id}/edit`);
-  const appended = await fetched([{ body: { documentId: id, replies: [{}] } }], () =>
+  await fetched([mcpAnswer({ id, mimeType: "application/vnd.google-apps.spreadsheet" })], () => assert.rejects(
+    GOOGLE_ACTIONS.create_doc.execute({ credentials: { oauthToken: "access" } }, { title: "Work plan" }), /check Drive before retrying/));
+  // Google refused the server itself before anything ran: the same create goes to REST once.
+  const rest = await fetched([notEnrolled, { body: { documentId: id } }], () =>
+    GOOGLE_ACTIONS.create_doc.execute({ credentials: { oauthToken: "access" } }, { title: "Work plan" }));
+  assert.deepEqual(rest.calls[1].body, { title: "Work plan" });
+  const appended = await fetched([mcpAnswer({ replies: [{ api_replies: [{}], errors: [], warnings: [] }] })], () =>
     GOOGLE_ACTIONS.append_doc.execute({ credentials: { oauthToken: "access" } }, { document: id, tab: "t.2", text: "Done\n" }));
-  assert.deepEqual(appended.calls[0].body, { requests: [{ insertText: { endOfSegmentLocation: { tabId: "t.2" }, text: "Done\n" } }] });
-  for (const response of [{ status: 403 }, { status: 429 }, { error: new DOMException("timeout", "TimeoutError") }, { body: {} }]) {
+  assert.deepEqual(appended.calls[0].body.params, { name: "update_doc", arguments: { documentId: id,
+    requests: [{ insertText: { endOfSegmentLocation: { tabId: "t.2" }, text: "Done\n" } }] } });
+  assert.match(appended.result.summary, /tab t\.2/);
+  for (const response of [{ status: 429 }, { error: new DOMException("timeout", "TimeoutError") }, { body: {} },
+    mcpAnswer({ replies: [{ api_replies: [], errors: ["x"] }] })]) {
     await fetched([response], async calls => {
       await assert.rejects(GOOGLE_ACTIONS.append_doc.execute({ credentials: { oauthToken: "access" } }, { document: id, text: "Once" }));
       assert.equal(calls.length, 1, "ambiguous write is not retried");
@@ -136,15 +150,19 @@ test("create and append are declared writes, use fixed origins and never replay 
   }
 });
 
-test("file listing is bounded, does not follow provider links, and fails on malformed lists", async () => {
-  const { result, calls } = await fetched([{ body: { files: [{ id, name: "Plan", mimeType: "application/vnd.google-apps.document",
-    webViewLink: "https://evil.test/redirect" }], nextPageToken: "more" } }], () =>
+test("file listing is Drive MCP's recent app-authorized files, bounded, and fails on malformed lists", async () => {
+  const { result, calls } = await fetched([mcpAnswer({ files: [{ id, title: "Plan", mimeType: "application/vnd.google-apps.document",
+    viewUrl: "https://evil.test/redirect" }], nextPageToken: "more" })], () =>
     GOOGLE_ACTIONS.list_files.execute({ credentials: { oauthToken: "access" } }, {}));
-  assert.equal(new URL(calls[0].url).searchParams.get("pageSize"), "20");
-  assert.equal(new URL(calls[0].url).searchParams.get("q"), "trashed = false");
+  assert.deepEqual(calls[0].body.params, { name: "list_recent_files", arguments: { pageSize: 20, excludeContentSnippets: true } });
+  assert.match(result.summary, /Plan/);
   assert.match(result.summary, /more available/);
   assert.doesNotMatch(result.summary, /evil/);
-  await fetched([{ body: {} }], () => assert.rejects(GOOGLE_ACTIONS.list_files.execute({ credentials: { oauthToken: "access" } }, {})));
+  await fetched([mcpAnswer({ files: [{ id: "x", title: "bad" }] })], () => assert.rejects(GOOGLE_ACTIONS.list_files.execute({ credentials: { oauthToken: "access" } }, {})));
+  const rest = await fetched([notEnrolled, { body: { files: [{ id, name: "Plan", mimeType: "application/vnd.google-apps.document" }] } }], () =>
+    GOOGLE_ACTIONS.list_files.execute({ credentials: { oauthToken: "access" } }, {}));
+  assert.equal(new URL(rest.calls[1].url).searchParams.get("q"), "trashed = false");
+  assert.match(rest.result.summary, /Plan/);
 });
 
 test("Google Check confirms a real minimal Drive identity without writing or accepting missing tokens", async () => {
@@ -175,7 +193,7 @@ test("Google and GCP refresh failures stop actions; refreshed grants use current
         "./http": { ProviderRequestError }, "./oauth": { refreshOAuthFields },
       };
       const exports = load(name => dependencies[name], { crypto, Date, Object });
-      await fetched([response, { body: providerId === "gcp" ? { projects: [] } : { documentId: id, replies: [{}] } }], async calls => {
+      await fetched([response, { body: providerId === "gcp" ? { projects: [] } : { jsonrpc: "2.0", id: 1, result: { structuredContent: { replies: [{ api_replies: [{}] }] } } } }], async calls => {
         const operation = async () => {
           const current = await exports.connectionCredentials(env, "space-google", providerId);
           if (providerId === "gcp") await GCP_ACTIONS.list_projects.execute({ credentials: current }, {});
