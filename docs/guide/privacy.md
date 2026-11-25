@@ -1,17 +1,35 @@
 ---
 title: "Telemetry, diagnostics and local privacy — xMatrix Docs"
-description: "What stays on your machine, how optional local quota probes and client diagnostics work, beta vs stable defaults by region, and how to turn either off."
+description: "What stays on your machine, what goes to the Hub (and why it is not end-to-end encrypted), how optional local quota probes and client diagnostics work, and how to turn either off."
 ---
 
 # Telemetry and local privacy
 
-xMatrix is a hosted collaboration hub paired with a local Rust daemon on your own machines. This page documents every diagnostic event and local file read the clients and daemon perform, and how to turn them off.
+xMatrix is a hosted collaboration hub paired with a local Rust daemon on your own machines. This page documents our trust boundary (what stays local, what goes to the Hub, and why Channels and Pages are not end-to-end encrypted), every diagnostic event and local file read the clients and daemon perform, and how to turn them off.
 
 ## What stays on your machine
 
-Your source code, git history, working directories, provider chat history, and local model credentials stay on the computers you control. xMatrix does not upload your local model API keys or OAuth tokens to the Hub, and does not read third-party credential files to fingerprint or link your identity across machines.
+Your source code, git history, working directories, uncommitted files, SSH keys, provider chat history, and local model credentials stay on the computers you control, unless a person, Agent, tool, or feature explicitly posts or attaches them. Raw terminal output is not continuously archived on the Hub: live **Instance Trace** events stay in the host process's memory (at most 500 events, 768 KiB, or 24 hours) and are streamed on demand only to authorized viewers. xMatrix does not upload your local model API keys or OAuth tokens to the Hub, and does not read third-party credential files to fingerprint or link your identity across machines.
 
 To keep a connected computer stable across reinstalls under your account, the daemon derives an owner-scoped `machineId` locally (`SHA-256` of your xMatrix user ID and an OS machine identifier). Raw OS hardware identifiers and unscoped machine fingerprints are never sent to the Hub.
+
+## What goes to the Hub and why it is not end-to-end encrypted
+
+**Encrypted in transit and at rest, not end-to-end encrypted.** Traffic between your clients, the local daemon, and the xMatrix Hub uses HTTPS/TLS. Data stored on the Hub—managed PostgreSQL on PlanetScale, Cloudflare Durable Objects, and private R2 object storage—is encrypted at rest, and Saved Secrets and daemon local replicas receive additional authenticated encryption. **Channels, Pages, and attachments are not end-to-end encrypted.**
+
+**Why xMatrix is not end-to-end encrypted.** Unlike a single-user remote terminal tunnel, xMatrix is a multi-user, multi-Agent collaboration workspace. The hosted Hub processes readable collaboration content so it can:
+
+- synchronize Channels, threads, and Pages across teammates and devices;
+- index and search Channels and Pages;
+- route `@auto` to a fitting Agent and repository, link conversations to Pages, and coordinate cross-provider handoffs;
+- run Page automations (`norn` programs) and deliver external webhooks (GitHub, Gmail, Linear, Sentry, and other connected apps).
+
+**What reaches the Hub:** Channel messages, threads, Pages, attachments, Space/Agent/Machine metadata, normalized quota facts, connected app results, and encrypted Saved Secrets (whose values are never shown in messages or Agent catalogs and are injected into a Run only under its access policy—`auto` or per-Run `ask` approval).
+
+**Machine connections and internal access boundary:**
+
+- Connecting a machine requires explicit approval by the signed-in owner (not an open default-on tunnel). You can disconnect a machine or stop any running Agent at any time, and external connectors enforce per-app read-only, ask, or read-write policies.
+- Hub-stored content is accessible only to authorized Space members and Agents under your Space and Channel permissions. xMatrix staff and support Agents do not read customer conversations unless you explicitly hand a conversation to support (see [Handing a conversation to xMatrix support](#handing-a-conversation-to-xmatrix-support)); product analysis uses non-body metadata only.
 
 ## Local provider quota probes
 

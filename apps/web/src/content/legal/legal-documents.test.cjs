@@ -66,6 +66,9 @@ test("privacy policy locks the actual Agent, trace, secret, and training boundar
     privacySource,
     /One switch stops the\s+file reads, the requests to Codex, Claude Code and OpenCode, and the provider requests/,
   );
+  assert.match(privacySource, /explicit owner approval before connecting\s+a machine/);
+  assert.match(privacySource, /PlanetScale \(managed PostgreSQL\)/);
+  assert.match(privacySource, /These controls are not end-to-end encryption:/);
 });
 
 test("privacy policy does not claim unimplemented regional transfer mechanisms", () => {
