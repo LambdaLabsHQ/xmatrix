@@ -171,10 +171,33 @@ pub fn agent_preset_for_launcher(value: &str) -> Option<&'static AgentPreset> {
     })
 }
 
+/// Stable startup-failure code when a launch targets an explicitly refused harness.
+pub const HARNESS_REFUSED: &str = "harness_refused";
+
+/// Reason xMatrix explicitly refuses a harness, or `None` when allowed.
+pub fn refused_agent_harness_reason(value: &str) -> Option<&'static str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.eq_ignore_ascii_case("zcode-app")
+        || launcher_stem_matches(
+            trimmed,
+            &["zcode", "zcode.cjs", "zcode-acp", "acp-extension-zcode"],
+        )
+    {
+        return Some(
+            "xMatrix explicitly refuses ZCode: its app-server requires host-side provider credentials \
+             and its history of unannounced workspace uploads crosses xMatrix's privacy boundary. \
+             Use another supported harness instead (https://xmatrix.page/docs/agents#unsupported-harnesses).",
+        );
+    }
+    None
+}
+
 /// Legacy `agentType` for a launcher: the preset's registered type, else the
 /// preset id. Launchers that never had a preset keep their historical type
-/// (`aider`, `windsurf`, and the ZCode-era `zai` / `glm` aliases) so persisted
-/// Agent rows do not change meaning.
+/// (`aider`, `windsurf`) so persisted Agent rows do not change meaning.
 pub fn agent_type_for_launcher(value: &str) -> String {
     if let Some(preset) = agent_preset_for_launcher(value) {
         return preset.agent_type().to_string();
@@ -182,7 +205,6 @@ pub fn agent_type_for_launcher(value: &str) -> String {
     match launcher_stem(value).as_str() {
         "aider" => "aider",
         "windsurf" => "windsurf",
-        "zai" | "glm" => "zcode",
         _ => "custom",
     }
     .to_string()
@@ -294,20 +316,8 @@ fn command_available(command: &str) -> bool {
 }
 
 /// The app-bundled script for a launcher that ships inside a desktop app
-/// rather than on PATH (ZCode.app on macOS). None for every other launcher.
-pub fn bundled_agent_command_path(command: &str) -> Option<PathBuf> {
-    if !launcher_stem_matches(command, &["zcode"]) {
-        return None;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let path = PathBuf::from("/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs");
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-
+/// rather than on PATH. Currently none.
+pub fn bundled_agent_command_path(_command: &str) -> Option<PathBuf> {
     None
 }
 
@@ -520,8 +530,25 @@ mod tests {
         assert_eq!(launcher_stem("C:\\bin\\Cursor-Agent.CMD"), "cursor-agent");
         assert_eq!(launcher_stem("/opt/homebrew/bin/opencode"), "opencode");
         assert_eq!(launcher_stem(" codex.exe "), "codex");
-        assert_eq!(launcher_stem("zcode.cjs"), "zcode.cjs");
+        assert_eq!(launcher_stem("tool.cjs"), "tool.cjs");
         assert_eq!(launcher_stem(""), "");
+    }
+
+    #[test]
+    fn refused_agent_harness_rejects_zcode_variants() {
+        for value in [
+            "zcode",
+            "ZCODE.EXE",
+            "/usr/local/bin/zcode",
+            "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
+            "zcode-acp",
+            "zcode-app",
+        ] {
+            let reason = super::refused_agent_harness_reason(value).expect("should refuse zcode");
+            assert!(reason.contains("ZCode"), "{value}: {reason}");
+        }
+        assert!(super::refused_agent_harness_reason("codex").is_none());
+        assert!(super::refused_agent_harness_reason("claude").is_none());
     }
 
     #[test]
@@ -550,9 +577,6 @@ mod tests {
         assert_eq!(agent_type_for_launcher("claude-code"), "claude_code");
         assert_eq!(agent_type_for_launcher("codex.exe"), "codex");
         assert_eq!(agent_type_for_launcher("cursor-agent.exe"), "cursor");
-        assert_eq!(agent_type_for_launcher("zcode"), "zcode");
-        assert_eq!(agent_type_for_launcher("glm"), "zcode");
-        assert_eq!(agent_type_for_launcher("zai"), "zcode");
         assert_eq!(agent_type_for_launcher("grok"), "grok");
         assert_eq!(agent_type_for_launcher("kimi"), "kimi");
         assert_eq!(agent_type_for_launcher("opencode"), "opencode");

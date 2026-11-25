@@ -38,11 +38,6 @@ const EXPECTED = [
     runtime: "kimi",
     sourceUrl: "https://moonshotai.github.io/kimi-code/en/reference/slash-commands.html",
   },
-  {
-    file: "zcode.json",
-    runtime: "zcode",
-    sourceUrl: "https://zcode.z.ai/en/docs/commands",
-  },
 ];
 
 function loadCatalog(file) {

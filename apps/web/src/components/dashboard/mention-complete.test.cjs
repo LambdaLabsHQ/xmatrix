@@ -936,21 +936,21 @@ for (const { label, name, type } of [
   });
 }
 
-test("segmented completion exposes the exact advertised ZCode goal controls", () => {
+test("segmented completion exposes the exact advertised goal controls", () => {
   const channel = decodeChannelSnapshot({
     id: "channel-1",
     spaceId: "space-1",
     mode: "open",
     memberPresence: {
-      "agent:zcode": { registration: FIXTURE_AGENT_REGISTRATION,
+      "agent:grok": { registration: FIXTURE_AGENT_REGISTRATION,
         kind: "agent",
         status: "online",
-        label: "zcode",
+        label: "grok",
         instances: [
           {
             id: "instance-one",
             channelInstanceId: "1",
-            label: "zcode:1",
+            label: "grok:1",
             status: "online",
             capabilities: [
               "goal",
@@ -968,15 +968,15 @@ test("segmented completion exposes the exact advertised ZCode goal controls", ()
   });
   const agents = [
     {
-      id: "agent:zcode",
-      name: "zcode",
-      type: "zcode",
+      id: "agent:grok",
+      name: "grok",
+      type: "grok",
       kind: "agent",
       status: "online",
     },
   ];
 
-  const result = resolveAtEnd("@zcode:1 /goal ", channel, agents);
+  const result = resolveAtEnd("@grok:1 /goal ", channel, agents);
 
   assert.deepEqual(
     result.candidates.map((candidate) => `${candidate.name}:${candidate.action}`),

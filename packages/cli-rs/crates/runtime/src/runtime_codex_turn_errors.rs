@@ -88,56 +88,6 @@ pub(crate) fn codex_app_error_message(params: &Value) -> String {
     crate::runtime_failure_detail::provider_error_detail(params)
 }
 
-pub(crate) fn zcode_message_id_matches(value: Option<&Value>, expected: &str) -> bool {
-    match value {
-        Some(Value::String(id)) => id == expected,
-        Some(Value::Number(id)) => id.to_string() == expected,
-        _ => false,
-    }
-}
-
-pub(crate) fn zcode_is_session_event(message: &Value) -> bool {
-    if message.get("method").and_then(Value::as_str) == Some("session/event") {
-        return true;
-    }
-    let Some(params) = message.get("params") else {
-        return false;
-    };
-    params.get("sessionId").and_then(Value::as_str).is_some()
-        && params.get("type").and_then(Value::as_str).is_some()
-}
-
-fn zcode_goal_containers(value: &Value) -> Vec<&Value> {
-    let mut containers = vec![value];
-    if let Some(params) = value.get("params") {
-        containers.push(params);
-        if let Some(payload) = params.get("payload") {
-            containers.push(payload);
-            if let Some(snapshot) = payload.get("snapshot") {
-                containers.push(snapshot);
-            }
-        }
-        if let Some(snapshot) = params.get("snapshot") {
-            containers.push(snapshot);
-        }
-    }
-    if let Some(snapshot) = value.get("snapshot") {
-        containers.push(snapshot);
-    }
-    containers
-}
-
-fn zcode_goal_target(value: &Value) -> Option<(&Value, &Value)> {
-    for container in zcode_goal_containers(value) {
-        for pointer in ["/session/target", "/projection/target", "/target"] {
-            if let Some(target) = container.pointer(pointer) {
-                return Some((target, container));
-            }
-        }
-    }
-    None
-}
-
 /// When a goal last changed, as the provider stamped it (text or epoch
 /// millis); a goal without a stamp is taken as changed now.
 pub(crate) fn goal_updated_at(stamp: Option<&Value>) -> Option<String> {
@@ -149,71 +99,6 @@ pub(crate) fn goal_updated_at(stamp: Option<&Value>) -> Option<String> {
                 .or_else(|| value.as_u64().map(|value| value.to_string()))
         })
         .or_else(|| Some(unix_millis_now().to_string()))
-}
-
-pub(crate) fn zcode_goal_state_from_value(
-    value: &Value,
-) -> Option<Option<protocol::AgentGoalStatus>> {
-    let (target, snapshot) = zcode_goal_target(value)?;
-    if target.is_null() {
-        return Some(None);
-    }
-    if !target.is_object() {
-        return None;
-    }
-
-    let status = target
-        .get("status")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let active = status.as_deref().map(|status| status == "active");
-    let stats = snapshot.get("goalStats").unwrap_or(&Value::Null);
-    let verification = snapshot
-        .pointer("/runtime/goalVerifications")
-        .or_else(|| snapshot.pointer("/session/runtime/goalVerifications"))
-        .and_then(Value::as_array)
-        .and_then(|items| items.last());
-    let updated_at = goal_updated_at(target.get("updatedAt"));
-
-    Some(Some(protocol::AgentGoalStatus {
-        active,
-        objective: target
-            .get("objective")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        status,
-        updated_at,
-        reason: verification
-            .and_then(|value| value.get("reason"))
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        next_action: verification
-            .and_then(|value| value.get("nextAction"))
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        tokens_used: stats
-            .get("tokensUsed")
-            .or_else(|| target.get("tokensUsed"))
-            .and_then(Value::as_u64),
-        time_used_seconds: stats
-            .get("timeUsedSeconds")
-            .or_else(|| target.get("timeUsedSeconds"))
-            .and_then(Value::as_u64),
-        iteration_count: stats.get("iterationCount").and_then(Value::as_u64),
-        context_used: stats.get("contextUsed").and_then(Value::as_u64),
-        tool_call_count: stats.get("toolCallCount").and_then(Value::as_u64),
-    }))
-}
-
-pub(crate) fn zcode_goal_active_input_id(value: &Value) -> Option<String> {
-    zcode_goal_target(value)
-        .and_then(|(target, _)| target.get("activeInputId"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-}
-
-pub(crate) fn zcode_app_error_message(params: &Value) -> String {
-    codex_app_error_message(params)
 }
 
 pub(crate) fn codex_app_error_is_transient_transport(error: &str) -> bool {

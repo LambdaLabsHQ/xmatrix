@@ -139,8 +139,7 @@ use runtime_codex_turn_errors::{
     codex_app_error_message, codex_auth_failure_requires_exit, codex_reconnect_attempts,
     codex_reconnect_wait_timeout_error, codex_turn_error_message,
     codex_turn_error_requires_restart, codex_turn_error_retryable_before_start, goal_updated_at,
-    send_codex_turn_failed_trace, zcode_app_error_message, zcode_goal_active_input_id,
-    zcode_goal_state_from_value, zcode_is_session_event, zcode_message_id_matches,
+    send_codex_turn_failed_trace,
 };
 use runtime_headless_runs::{run_claude_print_external, run_headless_external};
 use runtime_presence_updates::{TurnTrace, send_llm_trace, send_llm_trace_with_source};
@@ -160,7 +159,7 @@ use xmatrix_harness::quota::codex as codex_quota;
 use xmatrix_harness::quota::deepseek::read_deepseek_balance_for_model;
 use xmatrix_harness::quota::grok::{grok_billing_quota_usages, read_grok_build_billing_usage};
 use xmatrix_harness::quota::windows::is_rate_limit_snapshot_map;
-use xmatrix_harness::quota::zai::{read_zai_coding_plan_quota_usage, zai_monitor_quota_usages};
+use xmatrix_harness::quota::zai::zai_monitor_quota_usages;
 use xmatrix_harness::usage::has_llm_usage;
 include!("runtime_quota_rate_limits.rs");
 include!("runtime_external_cli_auth.rs");

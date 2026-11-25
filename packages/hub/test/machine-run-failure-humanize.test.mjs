@@ -20,7 +20,7 @@ test("control-plane offline still maps to machine_unavailable", () => {
 });
 
 test("vendor attribution survives startup failure presentation", () => {
-  for (const vendor of ["Codex", "Claude Code", "Grok", "Kimi", "ZCode"]) {
+  for (const vendor of ["Codex", "Claude Code", "Grok", "Kimi", "Cursor"]) {
     const detail = `${vendor} error: This request was blocked by our safety systems. Reason: Potentially unintended activity.`;
     const humanized = humanizeMachineRunFailureDetail(detail);
     assert.equal(humanized.code, "startup_failed");

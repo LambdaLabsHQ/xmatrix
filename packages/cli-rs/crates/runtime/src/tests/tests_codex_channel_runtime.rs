@@ -723,33 +723,6 @@ fn codex_app_error_message_prefers_human_readable_fields() {
 }
 
 #[test]
-fn zcode_app_helpers_accept_interrupt_session_events_and_errors() {
-    let cancel = zcode_cancel_notification("session-1");
-    assert_eq!(cancel["method"], "session/cancel");
-    assert_eq!(cancel["params"]["sessionId"], "session-1");
-    assert!(cancel.get("id").is_none());
-    assert!(zcode_message_id_matches(
-        Some(&serde_json::json!("42")),
-        "42"
-    ));
-    assert!(zcode_message_id_matches(Some(&serde_json::json!(42)), "42"));
-    assert!(zcode_is_session_event(&serde_json::json!({
-        "method": "session/event",
-        "params": {
-            "sessionId": "session-1",
-            "type": "turn.completed",
-        }
-    })));
-    assert_eq!(
-        zcode_app_error_message(&serde_json::json!({
-            "message": "Model unavailable",
-            "code": "model_error",
-        })),
-        "Model unavailable | code=model_error"
-    );
-}
-
-#[test]
 fn codex_app_transport_reconnect_errors_are_transient() {
     assert!(codex_app_error_is_transient_transport(
         "Reconnecting... 2/5 (unexpected status 403 Forbidden)"

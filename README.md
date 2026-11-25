@@ -107,7 +107,7 @@ separately. See [network measurement](docs/architecture/space-agent-routing.md#m
 | `@junie` | Junie | `@kiro` | Kiro CLI |
 | `@vibe` | Mistral Vibe | `@hermes` | Hermes Agent |
 | `@openclaw` | OpenClaw | `@pi` | Pi |
-| `@zcode` | ZCode | `@qoder` | Qoder CLI |
+| `@qoder` | Qoder CLI | `@deepseek` | DeepSeek Harness |
 | `@codebuddy` | CodeBuddy Code | `@omp` | Oh My Pi |
 | `@auggie` | Auggie | `@cline` | Cline |
 | `@kilo` | Kilo | `@droid` | Factory Droid |
@@ -116,10 +116,9 @@ separately. See [network measurement](docs/architecture/space-agent-routing.md#m
 | `@trae` | TraeCode CLI | `@antigravity` | Google Antigravity |
 | `@autohand` | Autohand Code | `@amp` | Amp |
 | `@reasonix` | Reasonix | `@dimcode` | DimCode |
-| `@deepseek` | DeepSeek Harness | | |
 | `custom` | Any CLI you register | | |
 
-`xmatrix harness list` shows which ones are installed on a machine, and `xmatrix harness install <name>` installs one with its official recipe. The presets live in [`packages/protocol/src/agent-presets.json`](packages/protocol/src/agent-presets.json).
+`xmatrix harness list` shows which ones are installed on a machine, and `xmatrix harness install <name>` installs one with its official recipe. The presets live in [`packages/protocol/src/agent-presets.json`](packages/protocol/src/agent-presets.json). xMatrix explicitly refuses ZCode (`zcode`) — see [Unsupported harnesses](docs/guide/agents.md#unsupported-harnesses).
 
 ## How it works
 

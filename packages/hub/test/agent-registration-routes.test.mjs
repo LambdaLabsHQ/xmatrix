@@ -113,6 +113,30 @@ test("an Agent Run adds an Agent for its owner on its own Machine in its own Spa
   assert.equal((await elsewhere.request(create)).status, 403, "only in its own Space");
 });
 
+test("refused harnesses like zcode cannot be created, described, or configured, while legacy teardown still works", async () => {
+  const owner = fixture();
+  const zcodeKey = { ...key, harness: "zcode" };
+  const createZcode = { action: "create", key: zcodeKey, commandId: "create-zcode", displayName: "zcode", environment: {
+    schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],
+    launch: { runtime: "zcode", runtimeArgs: [] } } };
+  const createCustomZcode = { action: "create", key: { ...key, harness: "codex" }, commandId: "create-custom-zcode",
+    displayName: "codex", environment: { schemaVersion: 1, enabled: true, models: [], description: "",
+      availability: "unknown", capabilities: [], launch: { runtime: "/usr/local/bin/zcode", runtimeArgs: [] } } };
+  for (const payload of [createZcode, createCustomZcode]) {
+    const res = await owner.request(payload);
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /explicitly refuses ZCode/u);
+  }
+  const profileRes = await owner.request({ harness: "zcode", description: "try zcode" }, "profiles");
+  assert.equal(profileRes.status, 400);
+  assert.match((await profileRes.json()).error, /explicitly refuses ZCode/u);
+  assert.equal(owner.calls.length, 0);
+  // Existing legacy zcode rows can still be disabled or revoked cleanly, never re-enabled.
+  assert.equal((await owner.request({ action: "space-state", key: zcodeKey, commandId: "disable-zcode", state: "disabled", expectedRevision: 1 })).status, 200);
+  assert.equal((await owner.request({ action: "owner-grant", key: zcodeKey, commandId: "revoke-zcode", state: "revoked", expectedRevision: 1, limits: { workspaces: [], models: [], capabilities: [] } })).status, 200);
+  assert.equal((await owner.request({ action: "space-state", key: zcodeKey, commandId: "enable-zcode", state: "enabled", expectedRevision: 2 })).status, 400);
+});
+
 test("a mode is confirmed only for a harness whose permission requests xMatrix can show", async () => {
   const create = harness => ({ action: "create", key: { ...key, harness }, commandId: "create", displayName: harness, environment: {
     schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],

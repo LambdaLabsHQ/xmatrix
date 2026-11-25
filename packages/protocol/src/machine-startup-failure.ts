@@ -17,6 +17,10 @@ export const REPOSITORY_ACCESS_UNAVAILABLE = "repository_access_unavailable";
  * program and its install. */
 const HARNESS_MISSING = "harness_missing";
 
+/** The code a Run fails with when xMatrix explicitly refuses to run the
+ * requested harness (for example ZCode). */
+export const HARNESS_REFUSED = "harness_refused";
+
 /** The code a Run fails with when its harness refuses to resume the
  * Instance's session because another live process on the machine still holds
  * it (Codex's one writer per thread). The detail names the session and, when
@@ -51,6 +55,8 @@ export function publicMachineStartupFailure(detail: unknown): PublicMachineStart
   let code = "startup_failed";
   if (/\brepository_access_unavailable\b/u.test(text)) code = REPOSITORY_ACCESS_UNAVAILABLE;
   else if (/\bmachine_not_answering\b/u.test(text)) code = MACHINE_NOT_ANSWERING;
+  // The daemon refused a disallowed harness before starting anything.
+  else if (/\bharness_refused\b/u.test(text)) code = HARNESS_REFUSED;
   // The daemon found the harness's launcher missing before starting anything.
   else if (/\bharness_missing\b/u.test(text)) code = HARNESS_MISSING;
   else if (/\bharness_session_in_use\b/u.test(text)) code = HARNESS_SESSION_IN_USE;

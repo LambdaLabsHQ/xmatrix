@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { HARNESS_ACTIONS, HUB_ROUTES, validHarnessLoginCode, type HarnessAction,
+import { HARNESS_ACTIONS, HUB_ROUTES, refusedAgentHarnessMessage, validHarnessLoginCode, type HarnessAction,
   type HarnessActionStatus } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { readHarnessActionStatus, readRecentHarnessActions } from "@xmatrix/db";
@@ -56,6 +56,8 @@ export function registerHarnessActionRoutes(app: Hono<{ Bindings: Env }>,
     if (!machineId || hostId === null || !presetId || !action || code === null) {
       return refuse("Invalid harness action request", 400);
     }
+    const refusedHarness = refusedAgentHarnessMessage(presetId);
+    if (refusedHarness) return refuse(refusedHarness, 400);
     const requestId = `harness:${crypto.randomUUID()}`;
     const refused = await issueToOnlineDaemon(port, c.env, { ownerUserId: user.id, machineId, requestId,
       commandType: "harness_action",

@@ -264,17 +264,6 @@ fn claude_runtime_detection_sees_wrapped_launchers() {
 }
 
 #[test]
-fn zcode_runtime_detection_handles_launchers() {
-    assert!(is_zcode_tool("zcode"));
-    assert!(is_zcode_tool("ZCODE.EXE"));
-    assert!(is_zcode_tool("/usr/local/bin/zcode"));
-    assert!(is_zcode_tool(
-        "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs"
-    ));
-    assert!(!is_zcode_tool("node"));
-}
-
-#[test]
 fn codex_app_spawn_args_default_to_websocket_listen() {
     let _process_env = test_process_env_lock();
     let ws = codex_app_spawn_args(CodexTransportKind::WebSocket, Some("ws://127.0.0.1:9876"));
@@ -496,12 +485,12 @@ fn grok_trusted_rules_use_native_session_metadata_not_user_input() {
 
 #[test]
 fn runtime_without_a_trusted_instruction_channel_rejects_agent_instructions() {
-    let error = ensure_runtime_supports_trusted_role("ZCode app-server", false, true)
+    let error = ensure_runtime_supports_trusted_role("Generic ACP", false, true)
         .expect_err("trusted Agent instructions must fail closed");
     let detail = error.to_string();
     assert!(detail.contains("trusted system/developer instruction channel"));
     assert!(detail.contains("ordinary user content"));
-    assert!(ensure_runtime_supports_trusted_role("ZCode app-server", false, false).is_ok());
+    assert!(ensure_runtime_supports_trusted_role("Generic ACP", false, false).is_ok());
     assert!(ensure_runtime_supports_trusted_role("Codex", true, true).is_ok());
 }
 
@@ -821,7 +810,6 @@ fn presentation_protocol_has_an_adapter_for_every_runtime_family() {
         ("claude_code", "claude", "claude_stream"),
         ("grok-acp", "grok", "grok_acp"),
         ("kimi-acp", "kimi", "kimi_acp"),
-        ("zcode", "zcode", "zcode_app"),
         ("cursor", "cursor", "cursor"),
         ("aider", "aider", "aider"),
         ("windsurf", "windsurf", "windsurf"),

@@ -41,7 +41,7 @@ The agent runs under your user account, with your login for the harness. Others 
 | `@junie` | Junie | `@kiro` | Kiro CLI |
 | `@vibe` | Mistral Vibe | `@hermes` | Hermes Agent |
 | `@openclaw` | OpenClaw | `@pi` | Pi |
-| `@zcode` | ZCode | `@qoder` | Qoder CLI |
+| `@qoder` | Qoder CLI | `@deepseek` | DeepSeek Harness |
 | `@codebuddy` | CodeBuddy Code | `@omp` | Oh My Pi |
 | `@auggie` | Auggie | `@cline` | Cline |
 | `@kilo` | Kilo | `@droid` | Factory Droid |
@@ -50,11 +50,16 @@ The agent runs under your user account, with your login for the harness. Others 
 | `@trae` | TraeCode CLI | `@antigravity` | Google Antigravity |
 | `@autohand` | Autohand Code | `@amp` | Amp |
 | `@reasonix` | Reasonix | `@dimcode` | DimCode |
-| `@deepseek` | DeepSeek Harness | | |
 
-Any other CLI can be registered with `--runtime`.
+Any other CLI can be registered with `--runtime`, except explicitly refused harnesses below.
 
 `xmatrix harness list` shows which harnesses a machine has. `xmatrix harness install <name>` and `xmatrix harness update <name>` use each tool's official recipe, and `xmatrix harness auto-update <name> on` keeps one current.
+
+## Unsupported harnesses
+
+xMatrix explicitly refuses to register, manage, or run certain harnesses—including via `--runtime`—when their architecture or data-handling behavior conflicts with xMatrix's local privacy and credential boundaries:
+
+- **ZCode (`zcode`)** — Refused. ZCode's app-server protocol expects host software to handle provider credentials directly, and its history of unannounced workspace and git-history uploads crosses xMatrix's privacy boundary. Use any of the 34 supported harnesses above instead.
 
 ## Where agents work
 

@@ -531,7 +531,7 @@ export function normalizeQuotaUsageList(value: LlmQuotaUsage[] | undefined): Llm
       ? codexQuotas
       : quotaUsages).filter((quota) => {
       const label = quotaWindowLabel(quota).toLowerCase();
-      // Codex/Claude/ZCode: 5h + weekly. Grok Build billing: monthly credits (1mo).
+      // Codex/Claude: 5h + weekly. Grok Build billing: monthly credits (1mo).
       // Grok consumer-style short windows are often 2h.
       return label === "5h" || label === "1w" || label === "2h" || label === "1mo";
     });

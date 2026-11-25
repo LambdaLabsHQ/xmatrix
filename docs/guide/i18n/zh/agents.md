@@ -41,7 +41,7 @@ Agent 在你的本机用户账号下运行，沿用你为该工具登录的账�
 | `@junie` | Junie | `@kiro` | Kiro CLI |
 | `@vibe` | Mistral Vibe | `@hermes` | Hermes Agent |
 | `@openclaw` | OpenClaw | `@pi` | Pi |
-| `@zcode` | ZCode | `@qoder` | Qoder CLI |
+| `@qoder` | Qoder CLI | `@deepseek` | DeepSeek Harness |
 | `@codebuddy` | CodeBuddy Code | `@omp` | Oh My Pi |
 | `@auggie` | Auggie | `@cline` | Cline |
 | `@kilo` | Kilo | `@droid` | Factory Droid |
@@ -50,11 +50,16 @@ Agent 在你的本机用户账号下运行，沿用你为该工具登录的账�
 | `@trae` | TraeCode CLI | `@antigravity` | Google Antigravity |
 | `@autohand` | Autohand Code | `@amp` | Amp |
 | `@reasonix` | Reasonix | `@dimcode` | DimCode |
-| `@deepseek` | DeepSeek Harness | | |
 
-任何其他 CLI 均可通过 `--runtime` 注册接入。
+除下方明确拒绝的工具外，任何其他 CLI 均可通过 `--runtime` 注册接入。
 
 `xmatrix harness list` 可查看本机已安装的工具及其状态。`xmatrix harness install <name>` 和 `xmatrix harness update <name>` 会按各工具官方方式安装或升级，开启 `xmatrix harness auto-update <name> on` 则可自动保持最新。
+
+## 明确拒绝支持的工具
+
+当某些工具的架构或数据处理行为与 xMatrix 的本地隐私和凭据边界冲突时，xMatrix 会明确拒绝注册、管理或运行它们（包括通过 `--runtime` 指定）：
+
+- **ZCode（`zcode`）** — 明确拒绝。ZCode 的 app-server 协议要求宿主程序直接处理模型提供商凭据，且其未经明确告知即上传工作区和 git 历史记录的历史事件违背了 xMatrix 的隐私底线。请改用上方 34 种受支持的编码工具。
 
 ## Agent 在哪里工作
 

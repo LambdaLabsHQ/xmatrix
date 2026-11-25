@@ -36,7 +36,7 @@ test("unknown, equal, newer and unparseable versions never claim an update exist
   }
 });
 test("unsupported automatic controls stay unavailable", () => {
-  assert.equal(harnessAutoUpdateSupported(AGENT_PRESETS.find(preset => preset.id === "zcode")), false);
+  assert.equal(harnessAutoUpdateSupported(AGENT_PRESETS.find(preset => preset.id === "custom")), false);
   assert.equal(harnessAutoUpdateSupported(AGENT_PRESETS.find(preset => preset.id === "claude")), true);
 });
 

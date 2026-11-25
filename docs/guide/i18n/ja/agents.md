@@ -41,7 +41,7 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 | `@junie` | Junie | `@kiro` | Kiro CLI |
 | `@vibe` | Mistral Vibe | `@hermes` | Hermes Agent |
 | `@openclaw` | OpenClaw | `@pi` | Pi |
-| `@zcode` | ZCode | `@qoder` | Qoder CLI |
+| `@qoder` | Qoder CLI | `@deepseek` | DeepSeek Harness |
 | `@codebuddy` | CodeBuddy Code | `@omp` | Oh My Pi |
 | `@auggie` | Auggie | `@cline` | Cline |
 | `@kilo` | Kilo | `@droid` | Factory Droid |
@@ -50,11 +50,16 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 | `@trae` | TraeCode CLI | `@antigravity` | Google Antigravity |
 | `@autohand` | Autohand Code | `@amp` | Amp |
 | `@reasonix` | Reasonix | `@dimcode` | DimCode |
-| `@deepseek` | DeepSeek Harness | | |
 
-上記以外の CLI も `--runtime` で登録できます。
+以下で明示的に拒否しているツールを除き、上記以外の CLI も `--runtime` で登録できます。
 
 `xmatrix harness list` でマシン上のハーネス一覧を確認できます。`xmatrix harness install <name>` と `xmatrix harness update <name>` は各ツールの公式手順で導入・更新を行い、`xmatrix harness auto-update <name> on` で自動最新化できます。
+
+## 非対応ハーネス
+
+アーキテクチャやデータ取り扱いが xMatrix のローカルプライバシーおよび認証情報の境界に反するハーネスについては、`--runtime` を含め登録・管理・実行を明示的に拒否しています。
+
+- **ZCode（`zcode`）** — 明示的に拒否。ZCode の app-server プロトコルはホスト側でプロバイダの認証情報を直接扱う設計となっており、事前告知なくワークスペースや git 履歴をアップロードした過去の事案も xMatrix のプライバシー基準に反するためです。上記の 34 種類の対応ハーネスをご利用ください。
 
 ## エージェントの作業場所
 

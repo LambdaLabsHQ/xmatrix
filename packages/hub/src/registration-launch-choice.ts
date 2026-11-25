@@ -4,7 +4,7 @@ import { launchHarnessParameters, launchRefusal, validateHarnessParameterValues,
   type RoutingModelOption } from "@xmatrix/protocol";
 import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser,
   type RegistrationModelFacts } from "@xmatrix/db";
-import { digestCanonicalCloneCborV1, canonicalRegistrationHarness, machineTagSelects, repoSummonReference, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS, type AutoLaunchTags } from "@xmatrix/protocol";
+import { digestCanonicalCloneCborV1, canonicalRegistrationHarness, machineTagSelects, refusedAgentHarness, repoSummonReference, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS, type AutoLaunchTags } from "@xmatrix/protocol";
 import { RoutingEvaluationFailed, RoutingEvidenceUnavailable, evaluateRoutingChoices, type RoutingAnswer,
   type RoutingChoice, type RoutingEvaluator } from "./agent-routing-evaluation";
 
@@ -279,7 +279,13 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     // Whether a model is used up is `routingQuotaVerdict`: a named summon
     // ignores billing holds, and provider windows still count.
     const quotaSummon = automaticHarness === true ? "automatic" as const : "named" as const;
-    let eligible = candidates;
+    if (refusedAgentHarness(tags.harness)) {
+      throw new RegistrationAccessError("registration_harness_refused", 409);
+    }
+    let eligible = candidates.filter(candidate => !refusedAgentHarness(candidate.key.harness));
+    if (candidates.length > 0 && eligible.length === 0) {
+      throw new RegistrationAccessError("registration_harness_refused", 409);
+    }
     const blocked = blockedRegistrations ?? [];
     const narrow = (code: string, matches: (candidate: RegistrationLaunchCandidate) => boolean) => {
       eligible = eligible.filter(matches);

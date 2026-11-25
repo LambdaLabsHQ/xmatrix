@@ -40,26 +40,6 @@ async fn restart_codex_app_session(
     Ok(())
 }
 
-async fn restart_zcode_app_session(
-    app: &mut ZcodeAppSession,
-    cmd: &str,
-    cmd_args: &[String],
-    cwd: Option<&str>,
-    agent: &protocol::SerializedAgent,
-) -> error::Result<()> {
-    app.shutdown().await;
-    let mut replacement = ZcodeAppSession::spawn(cmd, cmd_args, cwd).await?;
-    replacement.initialize(cwd).await?;
-    *app = replacement;
-    eprintln!(
-        "{} Restarted ZCode app-server backend for {} ({})",
-        "✓".green().bold(),
-        agent.name,
-        agent.id.dimmed()
-    );
-    Ok(())
-}
-
 /// Which runtime's presentation adapter and command catalog this process
 /// speaks for.
 ///
@@ -312,23 +292,6 @@ fn scan_command_tokens_from_dir(dir: &std::path::Path) -> Vec<String> {
                 tokens.push(token);
             }
         }
-    }
-    tokens.sort();
-    tokens.dedup();
-    tokens
-}
-
-fn scan_zcode_user_command_tokens() -> Vec<String> {
-    let mut tokens = Vec::new();
-    if let Some(home) = dirs::home_dir() {
-        tokens.extend(scan_command_tokens_from_dir(
-            &home.join(".zcode").join("commands"),
-        ));
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        tokens.extend(scan_command_tokens_from_dir(
-            &cwd.join(".zcode").join("commands"),
-        ));
     }
     tokens.sort();
     tokens.dedup();

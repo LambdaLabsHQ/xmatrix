@@ -90,6 +90,12 @@ test("a harness whose launcher the daemon cannot find is named with its install"
   assert.match(failure.summary, /~\/\.local\/bin/u);
 });
 
+test("a harness explicitly refused by xMatrix carries its own startup failure code", () => {
+  const failure = publicMachineStartupFailure("harness_refused: xMatrix explicitly refuses ZCode.");
+  assert.equal(failure.code, "harness_refused");
+  assert.match(failure.summary, /explicitly refuses ZCode/u);
+});
+
 test("a start the Hub ended for a machine that never answered says so, with its own code", () => {
   const silent = publicMachineStartupFailure(machineNotAnsweringDetail(3));
   assert.equal(silent.code, "machine_not_answering");

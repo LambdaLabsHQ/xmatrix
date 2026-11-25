@@ -5,7 +5,6 @@ import { execFile } from "node:child_process";
 const provider = process.argv[2];
 let codexGoal = null;
 let claudeGoal = null;
-let zcodeGoal = null;
 let grokGoal = null;
 
 function send(value) {
@@ -14,29 +13,6 @@ function send(value) {
 
 function response(message, result) {
   send({ jsonrpc: "2.0", id: message.id, result });
-}
-
-function goalSnapshot(goal) {
-  return {
-    response: goal ? `Goal ${goal.status}: ${goal.objective}` : "No goal set.",
-    startedTurn: false,
-    snapshot: {
-      session: { target: goal },
-      goalStats: {
-        tokenBudget: 4096,
-        tokensUsed: 512,
-        timeUsedSeconds: 31,
-        iterationCount: 4,
-        contextUsed: 768,
-        toolCallCount: 3,
-      },
-      runtime: {
-        goalVerifications: [
-          { reason: "fixture verification", nextAction: "fixture next action" },
-        ],
-      },
-    },
-  };
 }
 
 function handleCodexSessionRequest(message) {
@@ -459,39 +435,6 @@ function handleClaude(message) {
   });
 }
 
-function handleZcode(message) {
-  switch (message.method) {
-    case "session/create":
-      response(message, {
-        session: { sessionId: "zcode-fixture-session", target: null },
-      });
-      break;
-    case "session/subscribe":
-      response(message, {});
-      break;
-    case "session/goal": {
-      const action = message.params?.action;
-      if (action === "set" || action === "replace") {
-        zcodeGoal = {
-          objective: message.params.objective,
-          status: "active",
-          updatedAt: "1700000000000",
-        };
-      } else if (action === "pause" && zcodeGoal) {
-        zcodeGoal = { ...zcodeGoal, status: "paused" };
-      } else if (action === "resume" && zcodeGoal) {
-        zcodeGoal = { ...zcodeGoal, status: "active" };
-      } else if (action === "clear") {
-        zcodeGoal = null;
-      }
-      response(message, goalSnapshot(zcodeGoal));
-      break;
-    }
-    default:
-      if (message.id !== undefined) response(message, {});
-  }
-}
-
 function handleGrok(message) {  switch (message.method) {
     case "initialize":
     case "authenticate":
@@ -801,7 +744,6 @@ const handlers = {
   "codex-redirected-turn": handleCodexRedirectedTurn,
   "codex-goal-turn-order": handleCodexGoalTurnOrder,
   claude: handleClaude,
-  zcode: handleZcode,
   grok: handleGrok,
   acp: handleAcp,
   "acp-cursor-login": handleAcp,

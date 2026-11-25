@@ -15,7 +15,7 @@ use serde_json::Value;
 use crate::{
     AcpVendorConfig, CliError, GoalCommand, decode_channel_image_attachment_data_url, env_flag,
     error, goal_resume_turn_payload, protocol, use_acp_backend, use_codex_app_backend,
-    use_grok_app_backend, use_zcode_app_backend, uses_claude_code_runtime,
+    use_grok_app_backend, uses_claude_code_runtime,
 };
 
 /// Claude Code records the client that drives it as its entrypoint and sends
@@ -156,9 +156,6 @@ pub(crate) fn selected_runtime_supports_trusted_role(
     cmd: &str,
     cmd_args: &[String],
 ) -> bool {
-    if use_zcode_app_backend(tool) {
-        return false;
-    }
     if use_codex_app_backend(tool) || use_grok_app_backend(tool) {
         return true;
     }
