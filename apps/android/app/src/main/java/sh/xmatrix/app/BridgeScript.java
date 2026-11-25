@@ -48,6 +48,7 @@ final class BridgeScript {
     "    getNotificationSettings: () => invoke('getNotificationSettings'),\n" +
     "    requestNotifications: () => invoke('requestNotifications'),\n" +
     "    pushDevice: () => invoke('pushDevice'),\n" +
+    "    requestStoreReview: () => invoke('requestStoreReview'),\n" +
     "    notify: (payload) => invoke('notify', payload),\n" +
     "    openExternal: (url) => invoke('openExternal', { url }),\n" +
     "    authorizeInBrowser: (request) => invoke('authorizeInBrowser', request),\n" +

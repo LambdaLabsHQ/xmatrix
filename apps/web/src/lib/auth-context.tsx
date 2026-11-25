@@ -168,12 +168,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     stateRef.current = state;
   }, [state]);
 
-  // In a phone app, the device is registered for push as soon as its person is signed in.
+  // In a phone app, register push on sign-in and quietly check native store review eligibility after settling.
   const signedInUserId = state.user?.id;
   useEffect(() => {
     const accessToken = stateRef.current.session?.access_token;
     if (mockAuthState || !signedInUserId || !accessToken) return;
     void registerPhonePush(accessToken).catch(() => undefined);
+    const reviewTimer = window.setTimeout(() => {
+      void getDesktopBridge()?.requestStoreReview?.().catch(() => undefined);
+    }, 5_000);
+    return () => window.clearTimeout(reviewTimer);
   }, [mockAuthState, signedInUserId]);
 
   // In the extension's side panel, signing out there signs this frame out too.

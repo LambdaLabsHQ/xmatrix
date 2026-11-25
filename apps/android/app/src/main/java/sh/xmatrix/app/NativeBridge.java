@@ -53,6 +53,9 @@ public final class NativeBridge {
           playBilling.manage(payload);
           value = JSONObject.NULL;
           break;
+        case "requestStoreReview":
+          value = StoreReviewPrompt.requestIfEligible(activity);
+          break;
         case "pendingAppLink":
           String appLink = activity.pendingAppLink();
           value = appLink == null ? JSONObject.NULL : appLink;

@@ -17,6 +17,7 @@ public final class BridgeScriptTest {
     assertTrue(source.contains("onBackRequested: (listener)"));
     assertTrue(source.contains("__dispatchBackRequested"));
     assertTrue(source.contains("pushDevice: () => invoke('pushDevice')"));
+    assertTrue(source.contains("requestStoreReview: () => invoke('requestStoreReview')"));
     assertTrue(source.contains("window.top !== window"));
     assertTrue(source.contains("currentVersion: '0.15.68-test'"));
     assertFalse(source.contains("window.xmatrixNative.invoke"));
