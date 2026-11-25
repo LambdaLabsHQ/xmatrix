@@ -6,6 +6,8 @@ import {
   type AdminUserSummary,
 } from "@xmatrix/protocol";
 import {
+  awaitPoolClientRemovals,
+  cloudflarePostgresStream,
   createAuthorityDatabase,
   lostBeforeCommit,
   type DatabaseTransaction,
@@ -159,15 +161,17 @@ export function createAuthPostgresPool(env: Env): Pool {
     throw new Error("PostgreSQL is not the Auth authority");
   }
   const settings = postgresSettings(env);
-  return retryAuthAdapterReads(new Pool({
+  const stream = cloudflarePostgresStream();
+  return retryAuthAdapterReads(awaitPoolClientRemovals(new Pool({
     connectionString: settings.connectionString,
+    ...(stream ? { stream } : {}),
     types: AUTH_POSTGRES_TYPES,
     application_name: "xmatrix-hub-auth-adapter",
     max: 5,
     connectionTimeoutMillis: 3_000,
     idleTimeoutMillis: 30_000,
     query_timeout: 5_000,
-  }));
+  })));
 }
 
 export async function withAuthPostgresPool<T>(
