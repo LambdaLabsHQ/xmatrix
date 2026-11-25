@@ -6,7 +6,7 @@ import { integration, isolatedPostgres, seedOwnedTestSpace } from "./postgres-da
 const DAY = 86_400_000;
 const sha = (text) => createHash("sha256").update(text).digest("hex");
 
-// Google Cloud's Access Tools terms: what @gcp returned may stay stored at most
+// Google Cloud's Access Tools terms (and Workspace's AI Tools Addendum): what @gcp returned may stay stored at most
 // 30 days, and not after the connection is disconnected. Only real PostgreSQL
 // proves the tombstones, cleared summaries and released private objects together.
 integration("a retained provider's results expire at their retention and at once after disconnect", async () => {
@@ -56,12 +56,14 @@ integration("a retained provider's results expire at their retention and at once
     await execution("exec-new", "gcp", 2);
     await execution("exec-sentry", "sentry", 40);
     const oldKey = await privateResult("system:old:gcp", 29.5);
+    // An inbound event's private read (Gmail notifications) is owned by the event message id.
+    const eventKey = await privateResult("app:gcp:evt-old:chan", 29.5);
     await privateResult("system:new:gcp", 2);
     await privateResult("system:old:sentry", 29.5);
 
     const first = await content.expireAppResults({ requestId: "expire-1", spaceId, appId: "gcp", retentionDays: 29 });
     assert.deepEqual({ messages: first.messages, executions: first.executions, refs: first.refs },
-      { messages: 2, executions: 1, refs: 1 });
+      { messages: 2, executions: 1, refs: 2 });
     const messages = Object.fromEntries((await f.run(`SELECT message_id,deleted_at IS NOT NULL AS deleted,payload_kind,
         legacy_body,preview_json FROM data.messages WHERE space_id=$1`, [spaceId])).map(row => [row.message_id, row]));
     for (const id of ["system:old:gcp", "connector-event:gcp:old"]) {
@@ -81,7 +83,7 @@ integration("a retained provider's results expire at their retention and at once
     assert.deepEqual((await f.run(`SELECT owner_id FROM data.content_refs WHERE space_id=$1 ORDER BY owner_id`, [spaceId]))
       .map(row => row.owner_id), ["system:new:gcp", "system:old:sentry"]);
     // The released private original is collectable now, not 31 days later.
-    assert.deepEqual(await content.dueDecisionObjects({ requestId: "due-1", spaceId }), [oldKey]);
+    assert.deepEqual((await content.dueDecisionObjects({ requestId: "due-1", spaceId })).sort(), [oldKey, eventKey].sort());
     assert.ok(await content.claimDecisionObject({ requestId: "claim-1", spaceId, objectKey: oldKey }));
 
     const next = await content.nextAppResultsExpiry({ requestId: "next-1", spaceId, appId: "gcp", retentionDays: 29 });
