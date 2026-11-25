@@ -65,7 +65,6 @@ export interface DocsChromeCopy {
 
 export interface AlternativesChromeCopy {
   breadcrumbLabel: (name: string) => string;
-  verifiedPrefix: string;
   startFreeCta: string;
   downloadCta: string;
   readDocsCta: string;
@@ -168,7 +167,6 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
     },
     alternatives: {
       breadcrumbLabel: (name) => `${name} Alternatives`,
-      verifiedPrefix: "Verified",
       startFreeCta: "Start Free with xMatrix",
       downloadCta: "Download desktop & mobile",
       readDocsCta: "Read the docs",
@@ -259,7 +257,6 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
     },
     alternatives: {
       breadcrumbLabel: (name) => `${name} 替代方案`,
-      verifiedPrefix: "核对日期",
       startFreeCta: "免费开始使用 xMatrix",
       downloadCta: "下载桌面与移动端",
       readDocsCta: "阅读文档",
@@ -349,7 +346,6 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
     },
     alternatives: {
       breadcrumbLabel: (name) => `${name} 替代方案`,
-      verifiedPrefix: "核對日期",
       startFreeCta: "免費開始使用 xMatrix",
       downloadCta: "下載桌面與行動版",
       readDocsCta: "閱讀文件",
@@ -439,7 +435,6 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
     },
     alternatives: {
       breadcrumbLabel: (name) => `${name} 代替ツール`,
-      verifiedPrefix: "確認日",
       startFreeCta: "xMatrix を無料で始める",
       downloadCta: "デスクトップ・モバイル版を入手",
       readDocsCta: "ドキュメントを読む",
@@ -529,7 +524,6 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
     },
     alternatives: {
       breadcrumbLabel: (name) => `${name} 대안`,
-      verifiedPrefix: "확인일",
       startFreeCta: "xMatrix 무료로 시작하기",
       downloadCta: "데스크톱·모바일 다운로드",
       readDocsCta: "문서 읽기",
@@ -619,7 +613,6 @@ export const sitePagesCopy: Readonly<Record<SiteLocale, SitePagesCopy>> = {
     },
     alternatives: {
       breadcrumbLabel: (name) => `Alternativas a ${name}`,
-      verifiedPrefix: "Verificado",
       startFreeCta: "Empezar gratis con xMatrix",
       downloadCta: "Descargar escritorio y móvil",
       readDocsCta: "Leer documentación",

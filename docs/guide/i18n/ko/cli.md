@@ -49,7 +49,7 @@ description: "영역별 xmatrix 전체 명령어 레퍼런스: 로그인과 데�
 | `xmatrix agent model <harness> [<model>\|--clear] --space <id>` | 호출 시 모델이 생략되었을 때 사용할 기본 모델 조회·설정 (`--clear`로 하네스 기본값 복원, 에이전트도 소유자의 에이전트에 한해 설정 가능; [에이전트 기본 모델 설정하기](agents.md#set-an-agents-model) 참고) |
 | `xmatrix agent disable\|enable <harness> --space <id>` | 에이전트 비활성화 또는 재활성화 |
 | `xmatrix agent remove <harness> --space <id>` | 스페이스에서 에이전트 제거 |
-| `xmatrix list` | 현재 온라인인 에이전트 목록 |
+| `xmatrix list` | 실행 중인 에이전트 인스턴스 목록 |
 | `xmatrix harness list` | 머신의 하네스 목록과 상태 |
 | `xmatrix harness install\|update\|uninstall <name>` | 공식 설치 방식으로 하네스 관리 |
 | `xmatrix harness auto-update <name> on\|off` | 하네스 자동 업데이트 설정 |
@@ -72,12 +72,11 @@ description: "영역별 xmatrix 전체 명령어 레퍼런스: 로그인과 데�
 | `xmatrix channel chat <id>` | 터미널용 간단한 라인 기반 채팅 |
 | `xmatrix channel subscribe <id> <pull-request-url>` | PR의 CI 결과, 리뷰, 병합 알림을 대화로 구독 |
 | `xmatrix channel subscribe <id> <url> --wait` | 구독한 뒤 실행 또는 PR 결과가 올 때까지 대기(`--timeout <분>`, 기본 60); 하네스 자체 대기 도구로 실행 |
-| `xmatrix channel worktree <id> on\|off\|inherit` | 이 대화의 에이전트에 격리 워크트리를 사용할지 설정 |
 
 ## 메시지
 
 ```sh
-xmatrix send <conversation> "@codex repo:acme/web review the migration diff"
+xmatrix send <conversation> --launch "@codex repo:acme/web review the migration diff"
 xmatrix send <conversation> --stdin < update.md
 xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Here is the report."
 ```
@@ -88,9 +87,10 @@ xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Her
 | `--file <path>` | UTF-8 파일에서 본문 읽기 |
 | `--attachment <path>` | 본문과 함께 파일 첨부 (여러 개 첨부 시 반복) |
 | `--reply-to <message-id>` | 특정 메시지에 답장 |
+| `--launch` | 메시지가 호출하는 에이전트(`@codex`, `@auto`)를 시작. 없으면 멘션만 됩니다. `@codex:1` 같은 인스턴스 주소에는 필요 없습니다. |
 | `--wait` | 멘션한 사람과 에이전트의 응답을 기다림을 표시 (답변할 때까지 상대의 "Needs you" 목록에 유지) |
 
-CLI로 보낸 메시지에도 앱에서 입력한 메시지와 동일한 [문법](syntax.md)이 적용됩니다.
+CLI로 보낸 메시지에도 앱에서 입력한 메시지와 동일한 [문법](syntax.md)이 적용됩니다. 단, 에이전트 호출은 `--launch`를 붙였을 때만 에이전트를 시작합니다.
 
 | 명령 | 동작 |
 | --- | --- |

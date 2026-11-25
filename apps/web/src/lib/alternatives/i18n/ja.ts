@@ -6,26 +6,26 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     verifiedDate: "2026年11月22日",
     metaTitle: "Raft 代替 (2026)：Raft vs xMatrix",
     metaDescription:
-      "Raft（旧 Slock）の代替ツールをお探しですか？埋もれるチャットや廃止された Wiki Agent の代わりに、生きたページ、34 種類のコーディングエージェント、35 の連携アプリを備える xMatrix と比較します。",
+      "Raft（旧 Slock）の代替ツールをお探しですか？埋もれるチャットや廃止された Wiki Agent の代わりに、生きたページ、34 種類のコーディングエージェント、40 以上の連携アプリを備える xMatrix と比較します。",
     eyebrow: "Raft 代替 · Raft vs xMatrix",
-    headline: "決定事項がチャットに埋もれず「生きたページ」に残る Raft 代替ツール",
-    lead: "Raft はコーディングエージェントをチャットのチームメイトとして扱い、2026年9月に Wiki Agent を廃止しました。xMatrix は人と 34 種類のコーディングエージェントの共有チャンネルを残しつつ、完了した作業をすべてのマシンと 35 の連携アプリを横断する「生きたページ」へ集約し、常に最新に保ちます。",
+    headline: "Raft vs xMatrix",
+    lead: "Raft はコーディングエージェントをチャットのチームメイトとして扱い、2026年9月に Wiki Agent を廃止しました。xMatrix は人と 34 種類のコーディングエージェントの共有チャンネルを残しつつ、エージェントが完了した作業をチーム全員が読める「生きたページ」に記録し、40 以上の連携アプリをアプリ別の権限で統制します。",
     productCaption:
-      "xMatrix の画面：人とコーディングエージェントがチャンネルで協業しながら、チャット履歴やマシンごとの MEMORY.md に分散させず、1 つの生きたプロジェクトページを最新に保ちます。",
+      "xMatrix の画面：人とコーディングエージェントがチャンネルで協業しながら、チャット履歴やマシンごとの MEMORY.md に分散させず、共有の生きたプロジェクトページを最新に保ちます。",
     painPoints: [
       {
         title: "作業結果がチャット履歴とマシンごとの MEMORY.md に閉じ込められる",
         problem:
           "Raft は 2026年9月24日に Wiki Agent を廃止し、各エージェントの記憶は 1 台のマシンのローカルな MEMORY.md や notes/ に縛られています。初期に誤った前提が記録されると人が手で掃除するまで古い文脈が残り続け、Free プランではワークスペース履歴も 30 日で切れます。",
         xmatrixAnswer:
-          "xMatrix では「生きたページ」がプロダクトの主成果物です。作業が完了するとエージェントが該当セクションを書き換え、人が同じ段落を編集すればエージェントは待機して人の記述を引き継ぎます。",
+          "xMatrix では「生きたページ」がプロダクトの主成果物です。作業が完了するとエージェントが該当セクションを書き換え、人が段落を編集した場合、エージェントはその内容を踏まえて作業を続けます。",
       },
       {
         title: "Stamp は GitHub 止まり。運用系コネクタを横断する承認レイヤーがない",
         problem:
           "Raft の Stamp は GitHub のプッシュや PR への承認を追加しますが、実運用のソフトウェア開発では Vercel、Cloudflare、Linear、Sentry、Gmail、Stripe、Google Workspace も操作します。Raft のエージェントランタイムはそれ以外の権限チェックをバイパスして起動します。",
         xmatrixAnswer:
-          "xMatrix は 35 の連携アプリに統一されたアプリ別ポリシー（読み取り専用 / Ask first / 読み書き — GitHub は読み取り専用・読み書きの 2 段階）を適用し、Space シークレットも xmatrix secret exec で注入するためエージェントが生値を読むことはありません。",
+          "xMatrix は 40 以上の連携アプリに統一されたアプリ別権限（読み取り専用 / Ask first / 読み書き — GitHub は読み取り専用・読み書きの 2 段階）を適用し、xmatrix secret exec は Space シークレットを表示したりチャットに載せたりせずにコマンドの環境変数へ渡します。",
       },
       {
         title: "Pro ではエージェントにも席料がかかり、1 台のマシンに固定される",
@@ -43,7 +43,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "承認とシークレット管理",
-        xmatrix: "35 アプリ横断のアプリ別ポリシー + Space シークレット（GitHub：読み取り専用 / 読み書き）",
+        xmatrix: "40 以上のアプリ横断のアプリ別権限 + Space シークレット。各マシンのオーナーがハーネスごとに full / ask アクセスを選択",
         competitor: "GitHub プッシュ/PR 向け Stamp、ローカルプロキシトークン、ランタイムは権限バイパス",
       },
       {
@@ -92,7 +92,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "どちらも人とエージェントのチャンネルを持っていますが、Raft と xMatrix の違いは何ですか？",
         answer:
-          "Raft ではチャット履歴とタスクが最終記録になり、Wiki Agent も廃止されました。xMatrix では会話はあくまで作業場であり、決定事項・現状・残タスクの正式な記録は常に最新化される「生きたページ」に集約されます。",
+          "Raft ではチャット履歴とタスクが最終記録になり、Wiki Agent も廃止されました。xMatrix では会話はあくまで作業場であり、決定事項・現状・残タスクの正式な記録はエージェントが最新化する「生きたページ」に集約されます。",
       },
       {
         question: "xMatrix でも Raft Pro のようにエージェント 1 体あたり 0.1 席が課金されますか？",
@@ -112,7 +112,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Lody の代替ツールを比較中ですか？単一セッション worktree やデーモン同期切れから卒業し、共有マルチ人間チャンネル・生きたページ・Space シークレット・Webhook 自動化を備える xMatrix へ。",
     eyebrow: "Lody 代替 · Lody vs xMatrix",
-    headline: "Lody の代替：1 つのチャンネル、1 つの生きたページをチーム全員とすべてのエージェントで共有",
+    headline: "Lody vs xMatrix",
     lead: "Lody はクローズドソースのクラウドリレー経由で 1 worktree＝1 セッションのスレッドを同期する設計です。xMatrix はチームメンバーと 34 種類のコーディングエージェントを 1 つの共有チャンネルに集め、成果が届くたびに生きたページを最新化し、Space シークレットやイベント駆動の Norn プログラムも備えています。",
     productCaption:
       "xMatrix の画面：孤立したコーディングセッションを 1 つずつ受け渡すのではなく、複数メンバーと 34 種類のコーディングエージェントが 1 つの共有チャンネルで協業し、成果を生きたページに統合します。",
@@ -122,7 +122,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Lody は個別のコーディングセッションと子セッションツリーが中心です。セッションの引き渡しはできても、複数人＋複数エージェントの共有チャンネル、メンバー @メンション、共有プロジェクトドキュメントはコア機能ではなくロードマップ段階に留まっています。",
         xmatrixAnswer:
-          "xMatrix は最初から複数人と複数エージェントが同じチャンネルで働く前提で設計されており、完了した各実行がプロジェクトの最新状態を保つ共有ページを更新します。",
+          "xMatrix は最初から複数人と複数エージェントが同じチャンネルで働く前提で設計されており、エージェントが完了した作業を、プロジェクトの最新状態を保つ共有ページへ書き戻します。",
       },
       {
         title: "デバイス間でのデーモン切断と worktree ロック競合",
@@ -136,7 +136,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Lody の権限設定はセッション単位でワークスペース共通のシークレット保管庫がなく、運用ツール向けのアプリ別承認ガバナンスもありません。定期実行も cron のみで外部 Webhook トリガーには非対応です。",
         xmatrixAnswer:
-          "xMatrix は実行時に安全注入される Space シークレット、35 の連携アプリに対するアプリ別承認コントロール、さらにスケジュールや GitHub・Sentry などの外部イベントで起動するページ埋め込み型の Norn プログラムを提供します。",
+          "xMatrix は実行時に安全注入される Space シークレット、40 以上の連携アプリに対するアプリ別承認コントロール、さらにスケジュールや GitHub・Sentry などの外部イベントで起動するページ埋め込み型の Norn プログラムを提供します。",
       },
     ],
     comparisonRows: [
@@ -147,7 +147,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "シークレットと外部運用ツール",
-        xmatrix: "Space シークレット（xmatrix secret exec）+ 35 の連携アプリ（承認ポリシー付き）",
+        xmatrix: "Space シークレット（xmatrix secret exec）+ 40 以上の連携アプリ（承認ポリシー付き）",
         competitor: "セッション単位の権限のみ。ワークスペース共通のシークレット保管庫なし",
       },
       {
@@ -216,8 +216,8 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Multica の代替ツールを検討中ですか？ヘッドレスチケット実行、サイレントな bypassPermissions 脱落（#9559）、平文環境変数から卒業し、ライブチャンネル・生きたページ・Space シークレットを備える xMatrix へ。",
     eyebrow: "Multica 代替 · Multica vs xMatrix",
-    headline: "Multica の代替：あらゆる依頼をチケット化しない — 一言伝えれば出荷され、生きたページが最新化",
-    lead: "Multica はあらゆるエージェントタスクを bypassPermissions 既定のヘッドレスなカンバン Issue に押し込め、生きたドキュメント層を持ちません。xMatrix は人と 34 種類のコーディングエージェントがチャンネルでリアルタイムに協業し（xmatrix claude で対話セッションを接続可能）、生きたページを最新化し、35 の連携アプリを Space シークレットで統制します。",
+    headline: "Multica vs xMatrix",
+    lead: "Multica はあらゆるエージェントタスクを bypassPermissions 既定のヘッドレスなカンバン Issue に押し込め、生きたドキュメント層を持ちません。xMatrix は人と 34 種類のコーディングエージェントがチャンネルでリアルタイムに協業し（xmatrix claude で自分のターミナルの Claude Code をチャンネルメンバーとして起動可能）、エージェントが生きたページを最新に保ち、40 以上の連携アプリを Space シークレットで統制します。",
     productCaption:
       "xMatrix の画面：見えないヘッドレスボード実行ではなく、共有チャンネルでチームメイトと一緒に Claude Code・Codex を含む 34 種類のコーディングエージェントをリアルタイムに舵取りし、明示的な承認と生きたページで統制します。",
     painPoints: [
@@ -226,14 +226,14 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Multica は Claude Code を --permission-mode bypassPermissions、Codex を full-auto モードで起動し、サーバー環境変数を平文で保存します。コミュニティの不具合報告 #9559 では、custom_args がユーザー指定の --permission-mode 制限をサイレントに脱落させる問題も判明しました。",
         xmatrixAnswer:
-          "xMatrix は 35 の連携アプリに対する外部操作をアプリ別の読み取り専用 / Ask first / 読み書きポリシーで統制し、Space シークレットを xmatrix secret exec で実行時注入するため、生の認証情報がサーバー環境変数やチャット履歴に露出することはありません。",
+          "xMatrix は 40 以上の連携アプリに対する外部操作をアプリ別の読み取り専用 / Ask first / 読み書き権限で統制し、xmatrix secret exec が Space シークレットをコマンドの環境変数へ渡すため、チャット履歴に露出することはありません。各マシンのオーナーは、ハーネスを追加する際に full / ask-first のどちらのアクセスにするかを選択します。",
       },
       {
         title: "すべてをヘッドレスチケット化する必要があり、共有チャンネルも対話セッション接続もない",
         problem:
           "Multica のアプリ内チャットはプライベート 1 対 1 専用で、あらゆる作業をヘッドレスなボードチケットにする必要があります。実行途中でエージェントを軌道修正したり、稼働中のローカル端末セッションをチーム会話へ取り込んだりすることはできません。",
         xmatrixAnswer:
-          "xMatrix ではチームメイトと 34 種類のコーディングエージェントが共有チャンネルでリアルタイムに協業でき、xmatrix claude を使えば既存のローカル端末セッションをそのままチャンネルに接続でき、成果は生きたページに集約されます。",
+          "xMatrix ではチームメイトと 34 種類のコーディングエージェントが共有チャンネルでリアルタイムに協業でき、xmatrix claude を使えば自分のターミナルで Claude Code をチャンネルのライブメンバーとして起動でき、エージェントが成果を生きたページへ書き戻します。",
       },
       {
         title: "生きたページや内蔵プロジェクトメモリがない",
@@ -246,17 +246,17 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     comparisonRows: [
       {
         dimension: "コラボレーションモデル",
-        xmatrix: "共有マルチ人間＋マルチエージェントチャンネル + xmatrix claude セッション接続 + 生きたページ",
+        xmatrix: "共有マルチ人間＋マルチエージェントチャンネル + ターミナルで動く xmatrix claude + 生きたページ",
         competitor: "カンバン Issue ボード + ヘッドレス実行のみ + プライベート 1 対 1 チャット",
       },
       {
         dimension: "外部操作とシークレット",
-        xmatrix: "35 アプリのアプリ別ポリシー + マスク済み Space シークレット（実行時注入）",
+        xmatrix: "40 以上のアプリのアプリ別権限 + コマンドへ渡され、チャットには表示されない Space シークレット",
         competitor: "bypassPermissions 既定（#9559）、サーバー平文環境変数、MCP スキーマ承認",
       },
       {
         dimension: "生きたドキュメント",
-        xmatrix: "エージェントが更新するネイティブページ（提案モード・帰属表示・人間編集優先）",
+        xmatrix: "エージェントが更新するネイティブページ（提案モード・帰属表示・ロックなしの共同編集）",
         competitor: "なし（メモリ機能要望 #838 は未解決）",
       },
       {
@@ -266,7 +266,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "外部運用コネクタ",
-        xmatrix: "35 の連携アプリ（GitHub、Linear、Vercel、Cloudflare、Sentry、Gmail、Stripe など）",
+        xmatrix: "40 以上の連携アプリ（GitHub、Linear、Vercel、Cloudflare、Sentry、Gmail、Stripe など）",
         competitor: "チャットブリッジ（Slack、Lark、DingTalk、WeCom、Telegram）+ MCP プラグイン",
       },
     ],
@@ -277,13 +277,13 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     switchWhen: [
       "見えないヘッドレスチケット実行ではなく、チームメイトと複数コーディングエージェントがリアルタイムに舵取りしながら協業したい。",
       "本番デプロイや運用ツールに対して、平文のサーバー環境変数や bypassPermissions デフォルトは許容できない。",
-      "クローズされた Issue に埋もれるのではなく、決定事項や残タスクを生きたページに自動集約したい。",
+      "クローズされた Issue に埋もれるのではなく、決定事項や残タスクを、エージェントが生きたページで維持してくれる体制にしたい。",
     ],
     migrationSteps: [
       {
         title: "既存の開発者マシンをそのまま接続する",
         detail:
-          "Multica デーモンが動いている同じマシンに xMatrix CLI をインストールすれば、ローカルの Claude Code・Codex・Cursor 環境がすぐ使えます。",
+          "Multica デーモンが動いている同じマシンに xMatrix CLI をインストールすれば、xmatrix agent add でローカルの Claude Code・Codex・Cursor 環境を登録できます。",
       },
       {
         title: "定期 Autopilot ジョブをページの Norn ルーチンへ移す",
@@ -305,7 +305,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "xMatrix でも Claude Code が bypassPermissions で強制起動されますか？",
         answer:
-          "いいえ。xMatrix はマシンアクセスと外部アプリ権限を明示的に統制します。連携アプリは Read only / Ask first / Read & write に対応し、Space シークレットがエージェントのトランスクリプトに平文で露出することはありません。",
+          "いいえ。ハーネスを追加する際、そのマシンのオーナーがアクセス方式を選びます。full（Claude Code の場合は xMatrix が --dangerously-skip-permissions を付与）か、権限リクエストのたびにチャンネルで確認する ask です。連携アプリはこれとは別に Read only / Ask first / Read and write に対応し、Space シークレットの値がチャットに表示されることはありません。",
       },
       {
         question: "xMatrix では複数のメンバーが同じエージェントをリアルタイムに見て指示を出せますか？",
@@ -319,10 +319,10 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     verifiedDate: "2026年11月22日",
     metaTitle: "Paradev (Superset) 代替 (2026)：Paradev vs xMatrix",
     metaDescription:
-      "Paradev（旧 Superset）の代替ツールをお探しですか？macOS・Windows・Linux・Android 横断で共有チャンネル・生きたページ・35 アプリ承認を月額 $10/席で使える xMatrix へ。",
+      "Paradev（旧 Superset）の代替ツールをお探しですか？macOS・Windows・Linux・Android 横断で共有チャンネル・生きたページ・40 以上のアプリ承認を月額 $10/席で使える xMatrix へ。",
     eyebrow: "Paradev（旧 Superset）代替 · Paradev vs xMatrix",
-    headline: "あらゆる OS のチームで使える Paradev（Superset）代替：共有チャンネル・生きたページ・月額 $10/席",
-    lead: "Paradev（2026年10月に Superset から改称）は macOS 中心で、Team 協業は $60/ユーザー/月に跳ね上がり、リモートホスト公開でマシン全体が露出します。xMatrix は macOS・Windows・Linux・Android・Web に対応し、共有チャンネル・生きたページ・35 の連携アプリを人 1 席あたり月額 $10 で提供します。",
+    headline: "Paradev vs xMatrix",
+    lead: "Paradev（2026年10月に Superset から改称）は macOS 中心で、Team 協業は $60/ユーザー/月に跳ね上がり、リモートホスト公開でマシン全体が露出します。xMatrix は macOS・Windows・Linux・Android・Web に対応し、共有チャンネル・生きたページ・40 以上の連携アプリを人 1 席あたり月額 $10 で提供します。",
     productCaption:
       "xMatrix の画面：20 個のターミナルペインを行き来する代わりに、整理されたチャンネルと生きたページから数十の並列エージェント会話を落ち着いて監督できます。",
     painPoints: [
@@ -331,7 +331,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Product Hunt や Reddit では Paradev の並列 worktree が高く評価される一方、多数の独立ターミナル・差分ペイン・重複ブランチを行き来することによる視覚的ノイズとレビュー疲労、さらにクラウド自動化の上限設定がないことによる LLM 課金の暴走が繰り返し指摘されています。",
         xmatrixAnswer:
-          "xMatrix は「全ターミナルを監視する」から「プロジェクトごとに 1 つの生きたページを読む」へ発想を転換します。会話は裏で進み、人間はページを確認し、判断や例外が必要なスレッドにだけ介入すれば済みます。",
+          "xMatrix は「全ターミナルを監視する」から「プロジェクトの生きたページを読む」へ発想を転換します。会話は裏で進み、人間はページを確認し、判断や例外が必要なスレッドにだけ介入すれば済みます。",
       },
       {
         title: "リモートとチーム協業に対する $20〜$60/席の高いペイウォール",
@@ -345,7 +345,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Paradev には Space 単位のシークレット管理やアプリ横断の承認レイヤーがなく、リモートリレーを許可すると事実上ホストマシン全体が認可メンバーに開かれます。",
         xmatrixAnswer:
-          "xMatrix はエージェントの作業範囲を登録済みリポジトリ・フォルダに限定し、Space シークレットを生値非表示で注入し、35 の連携アプリにアプリ別ポリシーを適用します。",
+          "xMatrix は登録したリポジトリ・フォルダ内でエージェントを起動し、各マシンのオーナーがハーネスごとに full / ask-first のアクセスを選択でき、Space シークレットを表示せずにコマンドへ渡し、40 以上の連携アプリにアプリ別権限を適用します。",
       },
     ],
     comparisonRows: [
@@ -366,7 +366,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "シークレットと運用アプリ",
-        xmatrix: "Space シークレット保管庫 + アプリ別承認ポリシー付き 35 の連携アプリ",
+        xmatrix: "Space シークレット保管庫 + アプリ別承認ポリシー付き 40 以上の連携アプリ",
         competitor: "ワークスペース外インライン承認。Space シークレットなし、開発系トリガーのみ",
       },
       {
@@ -381,7 +381,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     ],
     switchWhen: [
       "自分のマシンで小規模チームを調整するためだけに、Claude/Codex 料金に加えて $20〜$60/席を払うのは割高だと感じる。",
-      "20 個のターミナルタブを切り替える代わりに、20 本の並列エージェント作業が 1 枚の生きたページにまとまる体験がほしい。",
+      "20 個のターミナルタブを切り替える代わりに、20 本の並列スレッドのエージェントが結果を書き込む生きたページで状況を把握したい。",
       "Git worktree だけでなく、Cloudflare・Vercel・Gmail・Stripe・Sentry・Google Workspace へ安全にエージェントを繋ぎたい。",
     ],
     migrationSteps: [
@@ -393,7 +393,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "複数タブ監視をプロジェクトページに置き換える",
         detail:
-          "1 つのページに紐づくチャンネルでエージェントを呼び出し、PR・テスト結果・決定事項が自動で集約される運用へ切り替えます。",
+          "ページに紐づくチャンネルでエージェントを呼び出し、PR・テスト結果・決定事項をエージェントがページへ書き戻す運用へ切り替えます。",
       },
       {
         title: "認証情報とアプリ権限を一元化する",
@@ -410,7 +410,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "xMatrix はどのようにして Paradev のようなターミナル乱立を防ぎますか？",
         answer:
-          "数十枚の生ターミナルペインを監視させる代わりに、各会話が成果を「生きたページ」へ書き戻すため、数秒で全体の現在地を把握できます。",
+          "数十枚の生ターミナルペインを監視させる代わりに、エージェントが各会話の成果をリンクされた「生きたページ」へ書き戻すため、そこで全体の現在地を把握できます。",
       },
       {
         question: "Superset は Paradev に変わったのですか？",
@@ -426,7 +426,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Conductor は Meta に買収され、Conductor Cloud が 2026年11月20日に終了しました。macOS・Windows・Linux 対応、月額 $10/席で Claude Code・Codex チームを動かせる xMatrix へ移行しましょう。",
     eyebrow: "Conductor 代替 · Meta 買収後の移行ガイド",
-    headline: "Meta による Conductor 終了後の移行先：Mac・Windows・Linux 対応＆生きたページを備える xMatrix",
+    headline: "Meta による終了後、Conductor から移行する",
     lead: "Meta は 2026年11月に Conductor を買収し、新規受付を停止したうえで 2026年11月20日に Conductor Cloud を終了しました（macOS 専用ローカルアプリも 2027年初頭までの保守のみ）。xMatrix は macOS・Windows・Linux 上で 34 種類のコーディングエージェントを使い続け、チームの文脈を生きたページに保てる独立した開発基盤です。",
     productCaption:
       "xMatrix の画面：Conductor からエクスポートしたリポジトリと Claude Code / Codex のログインをそのまま持ち込み、macOS・Windows・Linux・Android・Web 共通のワークスペースで再開できます。",
@@ -443,14 +443,14 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Conductor は独立期間を通じて Windows や Linux のネイティブ対応を行わず、OS が混在する開発チームではツールを分けるか Mac を買い揃える必要がありました。",
         xmatrixAnswer:
-          "xMatrix は macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）で動作します。Linux ビルドサーバー、Windows 開発機、MacBook をまったく同じ Space に接続できます。",
+          "xMatrix は macOS・Windows・Linux・iPhone・iPad・Android・Webで動作します。Linux ビルドサーバー、Windows 開発機、MacBook をまったく同じ Space に接続できます。",
       },
       {
         title: "生きたページがなく、終了前の料金も月額 $50〜$60 と高額だった",
         problem:
           "Conductor は Pro が月額 $50、Teams が $60/ユーザー/月と高額で、巨大な会話ログでの UI 遅延も課題でした。また、知見は共有の生きたドキュメントではなく孤立したワークスペース内に留まっていました。",
         xmatrixAnswer:
-          "xMatrix Pro は人 1 席あたり月額 $10（年払い $8/月）で 34 種類のコーディングエージェントを無制限に利用可能。完了した作業を生きたページに反映し、35 の連携アプリと Space シークレットも備えます。",
+          "xMatrix Pro は人 1 席あたり月額 $10（年払い $8/月）で 34 種類のコーディングエージェントを無制限に利用可能。エージェントが完了した作業を生きたページに記録し、40 以上の連携アプリと Space シークレットも備えます。",
       },
     ],
     comparisonRows: [
@@ -461,7 +461,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "対応 OS",
-        xmatrix: "macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）",
+        xmatrix: "macOS・Windows・Linux・iPhone・iPad・Android・Web",
         competitor: "macOS・iOS のみ（Windows・Linux ネイティブ非対応）",
       },
       {
@@ -476,7 +476,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "ガバナンスと連携アプリ",
-        xmatrix: "35 アプリのアプリ別ポリシー + Space シークレット",
+        xmatrix: "40 以上のアプリのアプリ別ポリシー + Space シークレット",
         competitor: "ローカルエージェントは OS ユーザー全権限で実行。運用承認レイヤーなし",
       },
     ],
@@ -486,7 +486,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     switchWhen: [
       "11月20日に Conductor Cloud を失い、今すぐ Claude Code と Codex を複数マシンで動かせる現役ワークスペースが必要。",
       "チームに Mac だけでなく Windows や Linux マシンも混在している。",
-      "見通しのよい月額 $10/席、生きたプロジェクトページ、GitHub・Linear・Vercel・Cloudflare への安全な連携を求めている。",
+      "月額 $10/席、生きたプロジェクトページ、GitHub・Linear・Vercel・Cloudflare への安全な連携を求めている。",
     ],
     migrationSteps: [
       {
@@ -529,8 +529,8 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Orca（stablyai/orca）の代替ツールをお探しですか？単一ユーザー設計、RAM 急増、8,900 件超の未解決 Issue、不安定な LAN モバイル連携から離れ、マルチプレイヤーチャンネルと生きたページの xMatrix へ。",
     eyebrow: "Orca 代替 · Orca vs xMatrix",
-    headline: "個人を超えたチームのための Orca 代替：1 つのチャンネル、1 つの生きたページ、最適なルーティング",
-    lead: "Orca はローカルの並列 worktree へプロンプトを一斉送信できる人気オープンソース ADE ですが、マルチプレイヤー UI は未実装のままで、1 プロンプトの N 並列送信はトークン消費を倍増させ、大規模実行でローカル RAM も急増します。xMatrix は 34 種類のコーディングエージェントから最適なエージェントへルーティングし、チーム全員の生きたページを最新に保ちます。",
+    headline: "Orca vs xMatrix",
+    lead: "Orca はローカルの並列 worktree へプロンプトを一斉送信できる人気オープンソース ADE ですが、マルチプレイヤー UI は未実装のままで、1 プロンプトの N 並列送信はトークン消費を倍増させ、大規模実行でローカル RAM も急増します。xMatrix は 34 種類のコーディングエージェントから最適なエージェントへルーティングし、エージェントがチーム全員で読む生きたページを最新に保ちます。",
     productCaption:
       "xMatrix の画面：ペインごとの内蔵ブラウザによる RAM 急増を避けつつ、所有マシン全体へ並列コーディング作業を分散し、デスクトップやスマホから成果を静かに確認できます。",
     painPoints: [
@@ -546,14 +546,14 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "stablyai/orca には 8,988 件のオープン Issue（うち 100 件以上がクラッシュ関連）があり、並列 xterm と内蔵 Chromium による激しい RAM/CPU スパイク、dev helper の権限エラー（#26498）、エージェントがファイル編集中なのに UI が「完了」と誤表示するフリーズ、さらに 1 プロンプトを 4〜5 エージェントに同時展開することによるクォータ急消費が頻発しています。",
         xmatrixAnswer:
-          "xMatrix はペインごとにブラウザを埋め込んだり、無駄なファンアウト重複実行を強いたりしません。最適な登録マシンでクリーンに実行し、明示的な実行状態を配信し、結果を 1 枚の読みやすいページに集約します。",
+          "xMatrix はペインごとにブラウザを埋め込んだり、無駄なファンアウト重複実行を強いたりしません。最適な登録マシンでクリーンに実行し、明示的な実行状態を配信し、エージェントが結果を読みやすいページへ書き戻します。",
       },
       {
         title: "壊れやすい LAN モバイルペアリングと、残らないプロジェクト記憶",
         problem:
           "Orca のモバイル連携はローカルネットワーク上の E2EE QR ペアリングに依存しており、企業 VPN や分離された Wi-Fi 環境で途切れがちです。また作業完了後に最新化され続けるプロジェクト Wiki も残りません。",
         xmatrixAnswer:
-          "xMatrix は Hub 経由でセルラー回線・VPN・デスクトップのどこからでも安定接続でき、完了した作業をチーム全員が Web・デスクトップ・モバイルで読める生きたページへ定着させます。",
+          "xMatrix は Hub 経由でセルラー回線・VPN・デスクトップのどこからでも安定接続でき、エージェントが完了した作業を、チーム全員が Web・デスクトップ・モバイルで読める生きたページに記録します。",
       },
     ],
     comparisonRows: [
@@ -564,22 +564,22 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "プロジェクトの最新状態",
-        xmatrix: "エージェントが継続更新する生きたページ（人間編集を優先）",
+        xmatrix: "作業の進行に合わせてエージェントが更新する生きたページ（人とロックなしで共同編集）",
         competitor: "worktree 差分と実験的 DAG オーケストレーション。生きたドキュメントなし",
       },
       {
         dimension: "モバイルとリモートアクセス",
-        xmatrix: "どの VPN からでも使える Hub リレー型 Web（iPhone・iPad 対応）・デスクトップ・Android",
+        xmatrix: "どの VPN からでも使える Hub リレー型の Web・デスクトップ・iPhone・iPad・Android アプリ",
         competitor: "企業 VPN やファイアウォールで切れやすいローカルネットワーク QR ペアリング",
       },
       {
         dimension: "ルーティングとトークン消費",
-        xmatrix: "@auto がスキル・CPU/RAM・クォータ余力から最適な 1 エージェントを選択",
+        xmatrix: "@auto がタスク適性・CPU/メモリ・クォータ余力から 1 エージェントを選択",
         competitor: "ファンアウト送信で N 個の並列 worktree 分だけトークン消費が倍増",
       },
       {
         dimension: "運用コネクタ",
-        xmatrix: "アプリ別ポリシー付きの 35 の連携アプリ + Space シークレット",
+        xmatrix: "アプリ別ポリシー付きの 40 以上の連携アプリ + Space シークレット",
         competitor: "実験的 Slack/Discord 文脈ブリッジのみ。運用承認レイヤーなし",
       },
     ],
@@ -590,7 +590,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     switchWhen: [
       "同じワークスペースで個別のユーザー ID・通知・承認権限を持ってチームメイトと協業したい。",
       "ローカルのブラウザ／worktree 並列実行がノート PC のメモリを圧迫したり、Claude/OpenAI の上限を焼き切っている。",
-      "VPN やモバイル回線越しでも確実に操作でき、プロジェクトの現在地が 1 枚の生きたページでわかる環境がほしい。",
+      "VPN やモバイル回線越しでも確実に操作でき、プロジェクトの現在地が生きたページでわかる環境がほしい。",
     ],
     migrationSteps: [
       {
@@ -613,7 +613,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "Orca は Issue 数が多いのに GitHub スター数が非常に多いのはなぜですか？",
         answer:
-          "Orca はエージェントを 35 回起動するとアプリ内でワンクリックのスター付与を促す仕組みがあり、8,988 件のオープン Issue と並行してスター数が 132k を超えました。日々の安定性とマルチプレイヤー統制が必要かどうかで比較することをおすすめします。",
+          "スター数は注目度を示すものであり、チームへの適合度を示すものではありません。Orca は多数の未解決 Issue を抱える人気プロジェクトです。日々の安定性とマルチプレイヤー統制が必要かどうかで両ツールを比較することをおすすめします。",
       },
       {
         question: "xMatrix は企業 VPN やモバイル回線越しでも動作しますか？",
@@ -623,7 +623,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "xMatrix でも複数エージェントを並列実行できますか？",
         answer:
-          "はい。1 台または複数台の登録マシン上で数十の会話を並列実行でき、それぞれの進捗と最終成果がプロジェクトページに集約されます。",
+          "はい。1 台または複数台の登録マシン上で数十の会話を並列実行でき、エージェントがそれぞれの進捗と最終成果をプロジェクトページへ書き戻します。",
       },
     ],
   },
@@ -634,8 +634,8 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "LobeHub（旧 LobeChat）の代替ツールをお探しですか？クレジット転売の上乗せ、2.0 の PostgreSQL/S3 構築負担、RAG チャンク汚染を避け、既存コーディング契約をそのまま活かせる xMatrix へ。",
     eyebrow: "LobeHub（旧 LobeChat）代替 · LobeHub vs xMatrix",
-    headline: "LobeHub の代替：Claude Code / Codex 契約済みチームへ — クレジットの二重払いをやめる",
-    lead: "LobeHub（LobeChat から改称）はモデルクレジット転売で収益化する汎用 AI ワークスペースで、2.0 以降はセルフホスト構成も重く、複数人＋複数エージェントの共有チャンネルもありません。xMatrix は既存サブスクリプションのまま実リポジトリで 34 種類のコーディングエージェントを動かし、成果検証の Goals と 35 の連携アプリを備えています。",
+    headline: "LobeHub vs xMatrix",
+    lead: "LobeHub（LobeChat から改称）はモデルクレジット転売で収益化する汎用 AI ワークスペースで、2.0 以降はセルフホスト構成も重く、複数人＋複数エージェントの共有チャンネルもありません。xMatrix は既存サブスクリプションのまま実リポジトリで 34 種類のコーディングエージェントを動かし、完了条件を設定できる Goals と 40 以上の連携アプリを備えています。",
     productCaption:
       "xMatrix の画面：トークン転売や Docker スタック保守なしで、手元の Claude Code・Codex・Cursor 契約をリアルタイムチームチャンネルと生きたページで協調運用できます。",
     painPoints: [
@@ -644,7 +644,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "LobeHub Cloud の無料枠（約 500k クレジット）は多くの最先端モデルを制限しており、有料プラン（月額 $12.9 / $24.9 / $49.9）もすべてのトークンをクラウドクレジットで従量課金します。長いコード文脈や深掘りリサーチで想定より遥かに速くクレジットが尽きるという声が多く見られます。",
         xmatrixAnswer:
-          "xMatrix は LLM トークンを一切転売・上乗せしません。エージェントはあなたがすでに契約している Claude Code・Codex・Cursor・Gemini のサブスクリプションや API キーで直接動き、xMatrix Pro は人 1 席あたり定額月額 $10 です。",
+          "xMatrix は LLM トークンを一切転売・上乗せしません。エージェントはあなたがすでに契約している Claude Code・Codex・Cursor・Gemini のサブスクリプションや API キーで直接動き、xMatrix Pro は 1 人あたり月額 $10 で、1 席ごとにエージェントとアプリの書き込みに使える 5,000 クレジットが付きます。",
       },
       {
         title: "重い 2.0 アーキテクチャ移行と使えなくなったセルフホスト手順",
@@ -684,7 +684,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "成果検証とガバナンス",
-        xmatrix: "Goals が毎ターン後に完了条件を検証 + 全エージェント共通の 35 の連携アプリ統制",
+        xmatrix: "Goals（対応ハーネスで利用可能）+ 40 以上の連携アプリ統制",
         competitor: "内蔵の成果チェックあり。lh connect の外部コーディングエージェントはガバナンス外",
       },
     ],
@@ -706,7 +706,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "静的なナレッジベースを生きたページと Goals へ移す",
         detail:
-          "重要な設計メモや残タスクを xMatrix ページへ取り込んでエージェントに最新化させつつ、/goal で完了条件を自動検証します。",
+          "重要な設計メモや残タスクを xMatrix ページへ取り込んでエージェントに最新化させつつ、xmatrix goal で、実行が達成を目指す完了条件を設定します。",
       },
       {
         title: "アプリ別ガバナンス付きで運用アプリを連携する",
@@ -718,7 +718,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "xMatrix も LobeHub Cloud のように AI モデルクレジットを転売していますか？",
         answer:
-          "いいえ。エージェントはあなた自身の既存サブスクリプションや API キーで動作します。xMatrix Pro のクレジット（月額 $10/人席で 5,000 エージェントメッセージ／ページ更新）は協調基盤のみを対象とし、LLM トークンの転売は一切行いません。",
+          "いいえ。エージェントはあなた自身の既存サブスクリプションや API キーで動作します。xMatrix Pro（1 人あたり月額 $10）には 1 席あたり 5,000 クレジットが含まれ、エージェントとアプリのメッセージ、エージェントによるページ更新、有料の X API 操作に使われます。LLM トークンの転売は一切行いません。",
       },
       {
         question: "xMatrix はどのようにしてナレッジベースの検索汚染を防ぎますか？",
@@ -728,7 +728,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "xMatrix でもツールごとの承認やシークレット管理はできますか？",
         answer:
-          "はい。すべての連携アプリで Read only / Ask first / Read & write を設定でき、Space シークレットはエージェントに値を見せずコマンド実行時のみ注入されます。",
+          "はい。連携アプリでは Read only / Ask first / Read and write を設定でき（GitHub は Read only または Read and write）、Space シークレットは表示されたりチャットに載ったりすることなく、実行時にコマンドの環境変数へ渡されます。",
       },
     ],
   },
@@ -738,8 +738,8 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Cumora（yetone/cumora）の代替ツールをお探しですか？オフラインサンドボックスの遮断（#350）、bwrap エラー、招待制プレビューを避け、本物のローカルリポジトリで動く xMatrix へ。",
     eyebrow: "Cumora 代替 · Cumora vs xMatrix",
-    headline: "本物のリポジトリで動き、承認制コネクタで出荷できる Cumora 代替ツール",
-    lead: "Cumora はペルソナ型エージェントをチームチャットに持ち込みますが、ローカル BYOA 実行を実作業から隔離したオフラインサンドボックスに閉じ込め、Bubblewrap や CDN 取得の不具合（#350）を抱えたまま招待制プレビューに留まっています。xMatrix は 34 種類のコーディングエージェントを実リポジトリ上で直接実行し、35 の連携アプリと生きたページで出荷まで完結します。",
+    headline: "Cumora vs xMatrix",
+    lead: "Cumora はペルソナ型エージェントをチームチャットに持ち込みますが、ローカル BYOA 実行を実作業から隔離したオフラインサンドボックスに閉じ込め、Bubblewrap や CDN 取得の不具合（#350）を抱えたまま招待制プレビューに留まっています。xMatrix は 34 種類のコーディングエージェントを実リポジトリ上で直接実行し、40 以上の連携アプリと生きたページで出荷まで完結します。",
     productCaption:
       "xMatrix の画面：招待待ちもオフラインサンドボックスの壁もなし。手元の本物の Claude Code・Codex ハーネスが、実際のリポジトリ上でチームと直接協業します。",
     painPoints: [
@@ -755,14 +755,14 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "ローカルでの bwrap 起動エラー、Cumora Cloud の Kubernetes FUSE Pod とローカル BYOA ホスト間の挙動差、「coming soon」表示が残るモバイル画面が課題となっており、リポジトリへのコミットも 2026年11月1日以降止まっています。",
         xmatrixAnswer:
-          "xMatrix は macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）すべてで継続リリースを続けており、一貫したローカルマシン実行モデルを本番運用レベルで提供します。",
+          "xMatrix は macOS・Windows・Linux・iPhone・iPad・Android・Webすべてで継続リリースを続けており、一貫したローカルマシン実行モデルを本番運用レベルで提供します。",
       },
       {
         title: "リリースと運用のための承認制コネクタが不足している",
         problem:
           "Cumora にはチャット・ドキュメント・カンバン・カレンダーの基本機能はあるものの、GitHub・Vercel・Cloudflare・Linear・Sentry・Gmail・Stripe を横断する承認レイヤーや Space シークレット保管庫がありません。",
         xmatrixAnswer:
-          "xMatrix は 35 の連携アプリ（開発・ビジネスサービス）をアプリ別ポリシーと Space シークレット付きで連携します。",
+          "xMatrix は 40 以上の連携アプリ（開発・ビジネス系）をアプリ別ポリシーと Space シークレット付きで連携します。",
       },
     ],
     comparisonRows: [
@@ -778,17 +778,17 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "外部アプリガバナンス",
-        xmatrix: "アプリ別ポリシー付き 35 の連携アプリ + Space シークレット",
+        xmatrix: "アプリ別ポリシー付き 40 以上の連携アプリ + Space シークレット",
         competitor: "本番デプロイ承認のみ。同等の運用コネクタ承認レイヤーなし",
       },
       {
         dimension: "生きたプロジェクトドキュメント",
-        xmatrix: "人と共同編集し、稼働中の実行が自動更新するページ",
+        xmatrix: "人と共同編集し、エージェントが作業の進行に合わせて更新するページ",
         competitor: "ペルソナチャットに併設されたドキュメント・カンバン・カレンダー",
       },
       {
         dimension: "モバイルとクロス OS 対応",
-        xmatrix: "macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）",
+        xmatrix: "macOS・Windows・Linux・iPhone・iPad・Android・Web",
         competitor: "デスクトップ／Web 中心。モバイルは「coming soon」状態の未実装あり",
       },
     ],
@@ -805,7 +805,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "ウェイトリストなしですぐ始める",
         detail:
-          "数秒で無料の xMatrix Space を作成できます（3 名まで・エージェント無制限）。",
+          "無料の xMatrix Space を作成できます（3 名まで・エージェント無制限）。",
       },
       {
         title: "既存のローカルリポジトリとハーネスを登録する",
@@ -822,7 +822,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "xMatrix も Cumora のようにローカルコーディングエージェントの外部通信を遮断しますか？",
         answer:
-          "いいえ。エージェントは登録済みのローカル環境で通常の開発ネットワークのまま動くため、パッケージ導入や API ドキュメント参照、テスト実行が滞りません。外部 SaaS への書き込みは xMatrix のアプリ別承認レイヤーで保護されます。",
+          "いいえ。エージェントは登録済みのローカル環境で通常の開発ネットワークのまま動くため、パッケージ導入や API ドキュメント参照、テスト実行が滞りません。連携アプリ経由の書き込みは、アプリごとに設定した権限に従います。",
       },
       {
         question: "xMatrix を試すのに招待コードは必要ですか？",
@@ -842,7 +842,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "T3 Code の代替ツールをお探しですか？固有のユーザー ID、共有チャンネル（GitHub Discussions #27974）、生きたプロジェクトページ（#15858）、Space シークレット、プロバイダー間引き継ぎ（#15846）を xMatrix で実現。",
     eyebrow: "T3 Code 代替 · T3 Code vs xMatrix",
-    headline: "チームで使う T3 Code 代替：固有の ID、1 つのチャンネル、1 つの生きたページ",
+    headline: "T3 Code vs xMatrix",
     lead: "T3 Code は優れた無料の個人向けコーディングワークベンチですが、各環境が 1 アカウントに紐づき、共有の生きたプロジェクトページがなく、プロバイダークォータ切れで「Limited」のまま停止します。xMatrix はチームに共有チャンネル、生きたページ、Space シークレット、そして複数マシン横断の 34 種類のコーディングエージェントを提供します。",
     productCaption:
       "xMatrix の画面：所有マシン全体で 34 種類のコーディングエージェントが協業し、チーム全員の生きたページを最新化し続ける本物のマルチプレイヤーチャンネル。",
@@ -866,7 +866,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "T3 Code はローカル差分やエミュレータに強い一方、共有プロジェクトメモリや生きたドキュメント（GitHub Discussions #15858）がなく、新規スレッドの既定は Full access、無料 T3 Connect トンネルも 3 台までで、運用系アプリの統制も範囲外です。",
         xmatrixAnswer:
-          "xMatrix は完了した会話を生きたページへ昇華させ、34 種類のコーディングエージェントでチーム全体のマシンを台数制限なく接続でき、Space シークレットの安全な管理と Vercel・Cloudflare・Sentry・Gmail・Stripe など 35 の連携アプリ統制を提供します。",
+          "xMatrix ではエージェントが完了した作業を生きたページに記録します。34 種類のハーネスで好きなだけマシンを接続でき、Space シークレットを保管し、Vercel・Cloudflare・Sentry・Gmail・Stripe など 40 以上の連携アプリを統制できます。",
       },
     ],
     comparisonRows: [
@@ -887,7 +887,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "標準の安全性と運用ガバナンス",
-        xmatrix: "35 アプリのアプリ別ポリシー + Space シークレット",
+        xmatrix: "マシンのオーナーがハーネスごとに full / ask アクセスを選択。40 以上のアプリのアプリ別ポリシー + Space シークレット",
         competitor: "新規スレッドは既定で Full access。マシンローカル秘密情報、開発課題のみ",
       },
       {
@@ -926,7 +926,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "T3 Code が無料なのに、なぜ xMatrix Pro に課金する価値があるのですか？",
         answer:
-          "1〜3 台のマシンで使う個人向け無料ワークベンチだけが目的なら T3 Code は素晴らしい選択です。チームが xMatrix を選ぶのは、本物のマルチプレイヤー Space、生きたプロジェクトページ、プロバイダー間の自動クォータ引き継ぎ、Space シークレット、35 の連携アプリ統制が必要だからです。",
+          "1〜3 台のマシンで使う個人向け無料ワークベンチだけが目的なら T3 Code は素晴らしい選択です。チームが xMatrix を選ぶのは、本物のマルチプレイヤー Space、生きたプロジェクトページ、プロバイダー間の自動クォータ引き継ぎ、Space シークレット、40 以上の連携アプリ統制が必要だからです。",
       },
       {
         question: "Claude が上限に達したとき、xMatrix は自動で別プロバイダーへ切り替えますか？",
@@ -946,7 +946,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "herdr（herdr-core）の代替ツールを評価中ですか？内蔵認証、チーム権限、ウェイトリストなしで今すぐ使えるクロスデバイス連携、アプリ別承認、生きたページを xMatrix で。",
     eyebrow: "herdr 代替 · herdr vs xMatrix",
-    headline: "認証・チーム承認・生きたページをデバイス横断で今すぐ使える herdr 代替ツール",
+    headline: "herdr vs xMatrix",
     lead: "herdr は人気 Rust 製 TUI マルチプレクサから herdr-core＋ネイティブアプリへと進化しましたが、破壊的なプロトコル変更や GUI ロックインへの Reddit 反発を招きつつ、複数ユーザー認証・承認・シークレット・本番クラウドリレーはまだ揃っていません。xMatrix は統制の効いた協業基盤を今すぐ提供します。",
     productCaption:
       "xMatrix の画面：無認証のプレビューソケットではなく、認証済み Space・Space シークレット・生きたページを備えたデスクトップ／Web／モバイル横断連携が今日から動きます。",
@@ -956,7 +956,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "herdr-core は明確に単一ユーザー向けローカルランタイムであり、ソケットに到達できる相手は事実上シェルアクセス権を得ます。ユーザーロール、操作承認、シークレット保管庫、定期・Webhook 自動化はいずれもありません。",
         xmatrixAnswer:
-          "xMatrix はローカル実行の上に信頼境界を構築します。検証済みの人・エージェント ID、生値を出さずに注入する Space シークレット、アプリ別承認ポリシー、Norn 自動化を標準搭載しています。",
+          "xMatrix はローカル実行の上に信頼境界を構築します。検証済みの人・エージェント ID、表示もチャット掲載もせずにコマンドへ渡す Space シークレット、アプリ別承認ポリシー、Norn 自動化を標準搭載しています。",
       },
       {
         title: "プロトコル変動、破壊的変更、TUI から GUI への転換に対する反発",
@@ -970,7 +970,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "クロスデバイス暗号化リレー（Herdr Cloud）と公式モバイルアプリはウェイトリスト／開発中であり、仮に公開されても PTY マルチプレクサではあらゆる意思決定がターミナルのスクロールバックに埋もれます。",
         xmatrixAnswer:
-          "macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）間のクロスデバイス連携は今日すぐ機能し、完了した実行が生きたページを自動で最新化し続けます。",
+          "macOS・Windows・Linux・iPhone・iPad・Android・Web間のクロスデバイス連携は今日すぐ機能し、エージェントが完了した作業を生きたページへ書き戻します。",
       },
     ],
     comparisonRows: [
@@ -981,7 +981,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "クロスデバイス連携とモバイル",
-        xmatrix: "macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）で今すぐ稼働",
+        xmatrix: "macOS・Windows・Linux・iPhone・iPad・Android・Webで今すぐ稼働",
         competitor: "現在は手動 SSH 構築。Herdr Cloud リレーはウェイトリスト",
       },
       {
@@ -991,7 +991,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "自動化と連携アプリ",
-        xmatrix: "スケジュール＆イベント駆動 Norn プログラム + 35 の連携アプリ",
+        xmatrix: "スケジュール＆イベント駆動 Norn プログラム + 40 以上の連携アプリ",
         competitor: "内蔵 cron、Webhook 自動化、アプリコネクタなし",
       },
       {
@@ -1006,7 +1006,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     ],
     switchWhen: [
       "Herdr Cloud のウェイトリストを待ったり SSH ProxyCommand のリークを調査したりせず、今すぐクロスデバイスのデスクトップ＆モバイル連携を使いたい。",
-      "GitHub・Vercel・Cloudflare・本番サービスへエージェントが触れる前に、本格的な認証・Space シークレット・人間の承認を挟みたい。",
+      "Vercel・Cloudflare・Linear などの連携アプリを通じてエージェントが操作する前に、本格的な認証・Space シークレット・人間の承認を挟みたい。",
       "永続 PTY ペインを探し回る代わりに、プロジェクト状況を常に最新のページで把握したい。",
     ],
     migrationSteps: [
@@ -1023,7 +1023,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "定常的な進捗把握を生きたページへ移す",
         detail:
-          "進行中プロジェクトのページを作り、定期・イベント駆動ルーチンで自動最新化させます。",
+          "進行中プロジェクトのページを作り、定期・イベント駆動ルーチンでエージェントに最新化させます。",
       },
     ],
     faqs: [
@@ -1035,7 +1035,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "ローカル PTY ソケットを公開する方式と比べて、xMatrix はどこが安全ですか？",
         answer:
-          "xMatrix はサーバー側で Space 認証とメンバー権限を強制し、マシン登録と Space アクセスを分離し、xmatrix secret exec でシークレットをマスクしつつ、外部 SaaS 操作を Read only / Ask first で統制します。",
+          "xMatrix はサーバー側で Space 認証とメンバー権限を強制し、マシン登録と Space アクセスを分離し、xmatrix secret exec でシークレットを表示せずにコマンドへ渡し、外部 SaaS 操作を Read only / Ask first の権限で統制します。",
       },
       {
         question: "ターミナルから xMatrix を操作することもできますか？",
@@ -1050,24 +1050,24 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Seedmux の代替ツールをお探しですか？macOS＋iPhone ロックイン、クローズドソース、スマホ起動の YOLO 既定設定を脱し、macOS・Windows・Linux・Android・iOS 対応の xMatrix へ。",
     eyebrow: "Seedmux 代替 · Seedmux vs xMatrix",
-    headline: "クロス OS チーム・Android・安全なモバイル統制に対応した Seedmux 代替ツール",
+    headline: "Seedmux vs xMatrix",
     lead: "Seedmux は洗練された Ghostty + tmux 製 macOS 端末と iPhone コンパニオンを組み合わせていますが、クローズドソースで Mac 専用・単一ユーザー向けであり、スマホ起動セッションが既定で YOLO モードになります。xMatrix は macOS・Windows・Linux・Android・iOS を横断する複数マシン協業、チーム Space、生きたページを提供します。",
     productCaption:
-      "xMatrix の画面：スマホ発の YOLO 既定設定ではなく承認制アプリ統制を備えたまま、macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）で 1 つのワークスペースを共有します。",
+      "xMatrix の画面：承認制のアプリ統制と、各マシンのオーナーが選んだハーネスのアクセス設定を備えたまま、macOS・Windows・Linux・iPhone・iPad・Android・Web で 1 つのワークスペースを共有します。",
     painPoints: [
       {
         title: "macOS＋iPhone ロックインにより Windows・Linux・Android が置き去りになる",
         problem:
           "Seedmux はノッチ通知に依存したネイティブ macOS アプリと（Seedmux Pro 向けの）iPhone コンパニオン専用です。Windows や Linux のネイティブデスクトップアプリも、Web ワークスペースも、Android アプリもありません。",
         xmatrixAnswer:
-          "xMatrix は macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）で動作し、あなたやチームメイトが使うあらゆるマシンとスマホが同じ Space に参加できます。",
+          "xMatrix は macOS・Windows・Linux・iPhone・iPad・Android・Webで動作し、あなたやチームメイトが使うあらゆるマシンとスマホが同じ Space に参加できます。",
       },
       {
         title: "単一ユーザー向け端末ペインと、モバイルでの YOLO デフォルト設定",
         problem:
           "Seedmux にはチームチャンネルも共有ロールも Space シークレットもなく、iPhone コンパニオンから開始したセッションは既定で YOLO 権限になります。また携帯回線や企業ファイアウォール越しのリレーでは承認遅延も起きやすくなります。",
         xmatrixAnswer:
-          "xMatrix はモバイルでもデスクトップでも同じ明示的ガバナンスを維持します。アプリ別 Read only / Ask first / Read & write、マスク済み Space シークレット、チームメイトがレビュー・承認できる共有チャンネルを備えます。",
+          "xMatrix はどのデバイスから作業を始めても同じルールを適用します。各ハーネスはマシンのオーナーが確認した full / ask-first のアクセスで動き、連携アプリは Read only / Ask first / Read and write の権限に従い、Space シークレットはチャットに出ず、Ask first の操作は Space 管理者が共有チャンネルで承認します。",
       },
       {
         title: "壊れやすい CLI 状態スクレイピングと、残らないプロジェクトドキュメント",
@@ -1080,7 +1080,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     comparisonRows: [
       {
         dimension: "対応プラットフォーム",
-        xmatrix: "macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）",
+        xmatrix: "macOS・Windows・Linux・iPhone・iPad・Android・Web",
         competitor: "macOS＋iPhone コンパニオンのみ（Linux ホストへは SSH/リレー経由）",
       },
       {
@@ -1090,7 +1090,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "モバイルの安全既定値",
-        xmatrix: "Web・デスクトップと同一のアプリ別承認ポリシーと Space シークレット",
+        xmatrix: "マシンのオーナーが確認したハーネスのアクセス（full / ask）+ どのデバイスからでも同じアプリ別ポリシー",
         competitor: "スマホ起動セッションは既定で YOLO モード",
       },
       {
@@ -1100,7 +1100,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "外部運用アプリ",
-        xmatrix: "35 の連携アプリ（GitHub、Linear、Vercel、Cloudflare、Sentry、Gmail、Stripe など）",
+        xmatrix: "40 以上の連携アプリ（GitHub、Linear、Vercel、Cloudflare、Sentry、Gmail、Stripe など）",
         competitor: "端末の CLI コマンドのみ。SaaS コネクタ承認レイヤーなし",
       },
     ],
@@ -1109,7 +1109,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     ],
     switchWhen: [
       "Windows・Linux・Android を使っている、またはそれらを使うチームメイトと協業している。",
-      "リモートセッションを既定で YOLO 権限にすることなく、スマホから安全に操作・承認したい。",
+      "各マシンのオーナーがハーネスごとに full / ask-first のアクセスを明示的に選んだうえで、スマホから操作したい。",
       "一時的な端末ペインではなく、意思決定と進捗を生きたページとして残したい。",
     ],
     migrationSteps: [
@@ -1121,10 +1121,10 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "独自リレーを建てずに Web・デスクトップ・モバイルを使う",
         detail:
-          "任意のブラウザ（iPhone・iPad 対応）、デスクトップアプリ、Android 端末から進捗追跡と承認を行えます。",
+          "任意のブラウザ、デスクトップアプリ、iPhone・iPad・Android アプリから進捗追跡と承認を行えます。",
       },
       {
-        title: "ワーカー出力を 1 枚の生きたページに集約する",
+        title: "ワーカー出力を生きたページに集約する",
         detail:
           "ワーカーペインのレシートを手動で巡回する代わりに、各エージェントがプロジェクトページの担当セクションを更新します。",
       },
@@ -1154,7 +1154,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Linear Agents の代替ツールを比較中ですか？12 か月失効のプリペイドクレジット、クラウド専用チケット実行、Enterprise 限定監査ログを避け、ローカル実行・ライブチャンネル・生きたページの xMatrix へ。",
     eyebrow: "Linear Agents 代替 · Linear vs xMatrix",
-    headline: "Linear Agents の代替：自分のマシンと既存契約で実行 — 失効クレジットなし、Linear と併用可能",
+    headline: "Linear Agents vs xMatrix",
     lead: "Linear は卓越した課題管理ツールであり、Linear Agents は要件が明確な Issue をクラウドサンドボックスの PR に変えられます（20 分ごとに $0.25＋12 か月で失効する別建てプリペイド残高からのトークン課金）。課題管理は Linear に残したまま xMatrix と連携すれば、自分のマシン上で 34 種類のコーディングエージェントをライブチャンネルと生きたページで運用できます。",
     productCaption:
       "xMatrix の画面：Linear を連携したまま、サンドボックス従量課金や失効するプリペイド残高なしで、ローカルの Claude Code や Codex をライブチャンネルで動かせます。",
@@ -1178,7 +1178,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Linear の監査ログは Enterprise プラン限定であり、個別エージェントの細かい操作までは記録されません。Cloudflare・Vercel・Gmail・Sentry・Stripe を横断するアプリ別承認ゲートもありません。",
         xmatrixAnswer:
-          "xMatrix は全プランで会話・実行トレース、Space シークレット、さらに Linear 自身を含む 35 の連携アプリに対するアプリ別ポリシーを提供します。",
+          "xMatrix は全プランで会話・実行トレース、Space シークレット、さらに Linear 自身を含む 40 以上の連携アプリに対するアプリ別ポリシーを提供します。",
       },
     ],
     comparisonRows: [
@@ -1199,7 +1199,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "ガバナンスと監査性",
-        xmatrix: "全プランで 35 アプリ横断のアプリ別ポリシー + Space シークレット",
+        xmatrix: "全プランで 40 以上のアプリ横断のアプリ別ポリシー + Space シークレット",
         competitor: "チーム単位のエージェント ON/OFF。監査ログは Enterprise 限定かつ操作粒度なし",
       },
       {
@@ -1259,8 +1259,8 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Notion Custom Agents の代替ツールをお探しですか？月額 $20〜$24 の Business 壁、3 つのクレジット財布、作成者枯渇による途中停止、モバイル制限を解消する xMatrix の生きたページ。",
     eyebrow: "Notion Custom Agents 代替 · Notion vs xMatrix",
-    headline: "Notion Custom Agents の代替：コード出荷と同時に更新される生きたページ — 3 つのクレジット財布は不要",
-    lead: "Notion Custom Agents は $20〜$24/席の Business ペイウォールと複雑な 3 種類のクレジット財布の奥にあり、共有エージェントを使うと作成者個人の Select クレジットを消費して途中で停止します。xMatrix は 34 種類のコーディングエージェントが実リポジトリでコードを出荷するたびに生きたページを自動更新します — クレジット財布は不要です。",
+    headline: "Notion vs xMatrix",
+    lead: "Notion Custom Agents は $20〜$24/席の Business ペイウォールと複雑な 3 種類のクレジット財布の奥にあり、共有エージェントを使うと作成者個人の Select クレジットを消費して途中で停止します。xMatrix では 34 種類のコーディングエージェントが実リポジトリで出荷しながら生きたページを更新し、クレジットは Space ごとに 1 つの共有プールから使われます。",
     productCaption:
       "xMatrix の画面：エージェントが実際のリポジトリで動き、チャンネルでチームと話し、生きたページを最新化。Space 共通プールとフルモバイル対応でストレスなく使えます。",
     painPoints: [
@@ -1269,21 +1269,21 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Notion は AI 利用枠を個人の Standard クレジット（1,500/月）、個人の Select クレジット（500/月、Custom Agents に必須）、管理者購入の Workspace Notion Credits（$10/1,000）の 3 つに分割しています。個人残高はプールも繰越もできず、チームメイトが共有エージェントを動かすと既定で作成者個人の Select 枠を消費し、0 になった瞬間にタスク途中で止まります。",
         xmatrixAnswer:
-          "xMatrix Pro は人 1 席あたり定額月額 $10（年払い $8/月）で、1 席あたり 5,000 エージェントクレジットを Space 全体でプール共有。50% の猶予クッション付きで LLM トークン転売はゼロ、人間の編集は常に無料です。",
+          "xMatrix Pro は 1 人あたり月額 $10（年払いで $8/月）です。1 席ごとに月 5,000 クレジットが Space 共有の 1 つのプールに加算され、エージェントとアプリの書き込みで消費されます（人の書き込みは無料）。使い切った後は、オーナーが購入するパック（5,000 クレジットで $10）と 1 席あたり 2,500 の猶予枠が続きます。LLM トークンの転売は一切ありません。",
       },
       {
         title: "ローカルマシン実行、クロスデバイス連携、リアルタイムエージェントチャンネルがない",
         problem:
           "Notion は文書を手作業の場として扱い、コーディングは外部クラウド API（アルファ版）へ委譲します。手元のノート PC やビルドサーバーで Claude Code や Codex を直接動かせず、Space シークレットも複数人＋複数エージェントのライブチャンネルもありません。",
         xmatrixAnswer:
-          "xMatrix ではチャンネルで話すだけで macOS・Windows・Linux 上の実リポジトリでエージェントが動き、生きたページが開発作業の自然な副産物として自動更新されます。",
+          "xMatrix ではチャンネルで話すだけで macOS・Windows・Linux 上の実リポジトリでエージェントが動き、エージェントが開発作業の流れの中で生きたページを更新します。",
       },
       {
         title: "モバイルでは共有 Custom Agents の作成はおろか実行すらできない",
         problem:
           "Notion モバイルアプリでは Custom Agents を作成できず、実行できるのも自分が個人所有するエージェントだけに限られるため、外出先のチームメイトは共有エージェントを使えません。",
         xmatrixAnswer:
-          "xMatrix ではすべてのメンバーが Web（iPhone・iPad 対応）・デスクトップ・Android からページ閲覧、認可済み Space エージェントの呼び出し、外部コネクタ承認を制限なく行えます。",
+          "xMatrix のメンバーは Web・デスクトップアプリ・iPhone・iPad・Android アプリからページを閲覧し、Space のエージェントを呼び出せます。Ask first のコネクタ操作も Space 管理者がそこから承認できます。",
       },
     ],
     comparisonRows: [
@@ -1304,12 +1304,12 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "モバイルでのチーム利用",
-        xmatrix: "全メンバーがチャンネル・ページ・エージェント起動・承認をフル利用可能",
+        xmatrix: "モバイルでもチャンネル・ページ・エージェント呼び出しを利用可能。Space 管理者は承認もモバイルから実行可能",
         competitor: "モバイルで Custom Agents を作成不可。チーム共有エージェントも実行不可",
       },
       {
         dimension: "シークレットと開発連携",
-        xmatrix: "Space シークレット保管庫 + 35 の連携アプリ（Notion 自身も含む）",
+        xmatrix: "Space シークレット保管庫 + 40 以上の連携アプリ（Notion 自身も含む）",
         competitor: "CLI 実行向けの Space 単位シークレット保管庫なし",
       },
     ],
@@ -1318,7 +1318,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     ],
     switchWhen: [
       "Standard・Select・Workspace の 3 種類のクレジット管理や、作成者 1 人の個人枠枯渇で共有エージェントが止まるトラブルから解放されたい。",
-      "現実からズレていく Wiki ではなく、実リポジトリで動くコーディングエージェントが自動でプロジェクトページを最新化する仕組みがほしい。",
+      "現実からズレていく Wiki ではなく、実リポジトリで動くコーディングエージェントが、作業しながらプロジェクトページを維持する仕組みがほしい。",
       "エンジニアがモバイルからも共有エージェント・Space シークレット・承認制デプロイ／運用コネクタを使えるようにしたい。",
     ],
     migrationSteps: [
@@ -1352,7 +1352,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "同じ xMatrix ページを人間とエージェントが同時に編集するとどうなりますか？",
         answer:
-          "常に人間が優先されます。エージェントが更新しようとしている段落にあなたが入力すると、エージェントは待機してあなたの記述を引き継ぐため、書いた文章が上書きされることはありません。",
+          "ロックはかかりません。ライブで共同執筆しているエージェントは、あなたが入力中の段落には手を出さず、エージェントが書いている箇所をあなたが編集した時点で停止します。CLI から編集しているエージェントの変更があなたの編集と重なった場合、その変更は拒否され、エージェントは最新のテキストを受け取って統合し直します。",
       },
     ],
   },
@@ -1363,7 +1363,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Slack Code の代替ツールをお探しですか？非 Marketplace アプリに対する 1 req/分・15 件履歴制限、Free の 90 日制限、エージェント実行基盤不在を解決する xMatrix。",
     eyebrow: "Slack Code 代替 · Slack Code vs xMatrix",
-    headline: "Slack Code の代替：エージェントは手元のマシンで、決定は生きたページへ — Slack と併用可能",
+    headline: "Slack Code vs xMatrix",
     lead: "Slack Code API は Slack 内にタスクチャンネルと差分プレビューを追加しますが、Slack 本体はあくまでチャット UI であり、エージェント実行基盤も生きたドキュメントもなく、非 Marketplace アプリには厳しい API 制限（履歴エンドポイント 1 リクエスト/分・最大 15 件）が課されています。Slack コネクタで Slack と連携したまま、自分のマシン上で 34 種類のコーディングエージェントを動かし、決定事項を生きたページに残せます。",
     productCaption:
       "xMatrix の画面：15 件 API 制限のないフル文脈アクセスを備え、自分のマシンと生きたページに支えられたネイティブな複数人＋複数エージェントチャンネル。",
@@ -1387,7 +1387,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "タスクチャンネルを作っても Slack には生きたプロジェクトドキュメント層がないため、数百件のメッセージの下に意思決定が沈み、新しいメンバーやエージェントは毎回「今も有効な決定」を推測する羽目になります。",
         xmatrixAnswer:
-          "xMatrix の各チャンネルは生きたページと直結しており、エージェントが現在状態をその場で書き換えるため、1 ページ読むだけでプロジェクトの現在地がわかります。",
+          "xMatrix のチャンネルは生きたページとリンクしており、エージェントが現在状態をその場で書き換えるため、ページを読めばプロジェクトの現在地がわかります。",
       },
     ],
     comparisonRows: [
@@ -1408,12 +1408,12 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "統制された連携アプリとシークレット",
-        xmatrix: "Space シークレット + アプリ別ポリシー付き 35 の連携アプリ",
+        xmatrix: "Space シークレット + アプリ別ポリシー付き 40 以上の連携アプリ",
         competitor: "内蔵のエージェントシークレット保管庫やアプリ横断の実行ガバナンスなし",
       },
       {
         dimension: "Slack と併用できるか？",
-        xmatrix: "ネイティブ Slack コネクタで承認付き読み書き・投稿が可能",
+        xmatrix: "ネイティブ Slack コネクタで Slack のメッセージをチャンネルに取り込み、エージェントは権限設定に従って Slack へ投稿",
         competitor: "Slack 内部に完全閉鎖",
       },
     ],
@@ -1439,7 +1439,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "Slack のピン留めメッセージを生きたページへ昇格させる",
         detail:
-          "古びたピン留めやブックマークを、エージェントが自動で最新化し続けるページに置き換えます。",
+          "古びたピン留めやブックマークを、作業の進行に合わせてエージェントが更新するページに置き換えます。",
       },
     ],
     faqs: [
@@ -1466,7 +1466,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Nowledge Mem の代替ツールを比較中ですか？チャットから記憶の断片を推測抽出するだけでなく、複数マシンでコーディングエージェントを実行し公式な生きたページを最新化する xMatrix。",
     eyebrow: "Nowledge Mem 代替 · Nowledge Mem vs xMatrix",
-    headline: "Nowledge Mem の代替：実作業を行うエージェント自身が書き残すチームプロジェクト記憶",
+    headline: "Nowledge Mem vs xMatrix",
     lead: "Nowledge Mem は AI ツール横断の巧みなローカルグラフ／ベクトル記憶層を作りますが、あくまで受動的なメモリ保管庫であり、過去チャットから事実を推測するだけでコーディングエージェント実行も外部ツール統制もできず、Team ワークスペースもプライベートベータのままです。xMatrix では作業を行う実行自身が公式な生きたページを書き、チーム全員で今日から共有できます。",
     productCaption:
       "xMatrix の画面：過去チャットから記憶を受動推測するのではなく、実際に仕事を出荷するコーディングエージェント自身がチーム全体の生きたプロジェクトページを正確に保ちます。",
@@ -1490,7 +1490,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Nowledge Mem Team は依然プライベートベータで、ローカル構成には macOS 15+ と手動の MCP／プロキシ配線が必要であり、本番ツール向けの Space シークレットやアプリ別承認ゲートもありません。",
         xmatrixAnswer:
-          "xMatrix の Space は macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）で今すぐセルフサーブ利用でき、Space シークレットと 35 の連携アプリに対するアプリ別ポリシーを備えます。",
+          "xMatrix の Space は macOS・Windows・Linux・iPhone・iPad・Android・Webで今すぐセルフサーブ利用でき、Space シークレットと 40 以上の連携アプリに対するアプリ別ポリシーを備えます。",
       },
     ],
     comparisonRows: [
@@ -1516,7 +1516,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "シークレットと外部アプリ",
-        xmatrix: "Space シークレット + アプリ別ポリシー付き 35 の連携アプリ",
+        xmatrix: "Space シークレット + アプリ別ポリシー付き 40 以上の連携アプリ",
         competitor: "Team にホスト型 Slack 接続あり。運用コネクタ承認基盤なし",
       },
     ],
@@ -1524,8 +1524,8 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       "コード実行のやり方は変えず、Web 版 ChatGPT・Claude Web・Cursor 横断の個人用オフライン記憶グラフだけを作りたい。",
     ],
     switchWhen: [
-      "過去ログから事実を推測するバックグラウンド抽出器ではなく、実作業を行うエージェント自身が 1 つの公式プロジェクトページを維持してほしい。",
-      "プライベートベータを待たず、複数マシンでのエージェント実行と 35 の連携アプリ統制を備えたチーム Space を今日から使いたい。",
+      "過去ログから事実を推測するバックグラウンド抽出器ではなく、実作業を行うエージェント自身が公式なプロジェクトページを維持してほしい。",
+      "プライベートベータを待たず、複数マシンでのエージェント実行と 40 以上の連携アプリ統制を備えたチーム Space を今日から使いたい。",
       "macOS・Windows・Linux・Android・Web 間で手動のローカルプロキシ／トンネル配線をなくしたい。",
     ],
     migrationSteps: [
@@ -1542,7 +1542,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "Norn ルーチンでページの鮮度を定期維持する",
         detail:
-          "待機チャットログにバックグラウンド LLM 抽出トークンを費やす代わりに、メトリクスやリリースノート、ブロッカーを自動で最新に保ちます。",
+          "待機チャットログにバックグラウンド LLM 抽出トークンを費やす代わりに、エージェントがスケジュールに沿ってメトリクスやリリースノート、ブロッカーを更新します。",
       },
     ],
     faqs: [
@@ -1559,7 +1559,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "エージェントが xMatrix ページに誤った内容を書いてしまったらどうなりますか？",
         answer:
-          "すべてのページに完全なリビジョン履歴と人間優先の共同編集があるため、あなたが該当行を修正すれば直ちに全エージェントが訂正後の内容を引き継ぎます。",
+          "すべてのページに完全なリビジョン履歴とロックなしの共同編集があります。該当行を自分で修正すれば、そのセクションを読んだエージェントには次のターンで変更が通知されます。",
       },
     ],
   },
@@ -1570,7 +1570,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "EverOS・EverMemOS の代替ツールをお探しですか？単一マシン SQLite ロック、裏で回り続ける抽出 LLM 課金、チーム同期不在を超え、xMatrix のチャンネルと生きたページへ。",
     eyebrow: "EverOS（EverMemOS）代替 · EverOS vs xMatrix",
-    headline: "EverOS の代替：実作業を行うエージェント自身が書き残す複数マシン対応プロジェクト記憶",
+    headline: "EverOS vs xMatrix",
     lead: "EverOS（EverMemOS）は Markdown ファイルとローカル SQLite・LanceDB インデックスを組み合わせますが、オープンソース v1 は同一ディレクトリでの 2 つ目のサービス起動を明示的に拒否し、マルチテナントと同期をスコープ外としており、裏で継続的な抽出 LLM トークンも消費します。xMatrix はチーム向けに 34 種類のコーディングエージェントによるリアルタイムな複数マシン実行と公式な生きたページを提供します。",
     productCaption:
       "xMatrix の画面：単一ディレクトリロックも裏の抽出トークン消費もなし。稼働中のコーディングエージェントが複数マシン横断でリアルタイムに Markdown ページを更新します。",
@@ -1594,7 +1594,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "EverOS はメモリバックエンドであり（v1.7.1 では Foresight 予測機能も削除）、複数マシンでのコーディングエージェント起動や、Vercel・Cloudflare・Gmail・Stripe 操作前の人間承認は担えません。",
         xmatrixAnswer:
-          "xMatrix は 34 種類のコーディングエージェントの実行、Space シークレット、35 の連携アプリに対するアプリ別承認、生きたページを 1 つのワークスペースに統合します。",
+          "xMatrix は 34 種類のコーディングエージェントの実行、Space シークレット、40 以上の連携アプリに対するアプリ別承認、生きたページを 1 つのワークスペースに統合します。",
       },
     ],
     comparisonRows: [
@@ -1615,12 +1615,12 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "同時編集",
-        xmatrix: "提案モード・帰属表示・人間編集優先を備えたライブ共同編集ページ",
+        xmatrix: "提案モード・帰属表示・ロックなしのマージを備えたライブ共同編集ページ",
         competitor: "ローカルディレクトリロック。複数ツールの同時書き込みで競合が発生",
       },
       {
         dimension: "ガバナンスと連携アプリ",
-        xmatrix: "Space シークレット + アプリ別ポリシー付き 35 の連携アプリ",
+        xmatrix: "Space シークレット + アプリ別ポリシー付き 40 以上の連携アプリ",
         competitor: "なし",
       },
     ],
@@ -1630,7 +1630,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     switchWhen: [
       "複数マシンやチームメイトと仕事をしており、単一ディレクトリ v1 ロックの制約内に収まらない。",
       "バックグラウンド LLM 抽出コストを払い続けるのではなく、実作業を行う実行が公式な Markdown ページを維持する形にしたい。",
-      "永続プロジェクト知識に加えて、34 種類のコーディングエージェントの本格的な実行と 35 の連携アプリ統制も必要。",
+      "永続プロジェクト知識に加えて、34 種類のコーディングエージェントの本格的な実行と 40 以上の連携アプリ統制も必要。",
     ],
     migrationSteps: [
       {
@@ -1673,7 +1673,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "YouMind の代替ツールを比較中ですか？月額 $20〜$200 の個人クレジット課金や Android・チーム非対応から離れ、月額 $10/席の共有コーディングチャンネル・ローカルリポジトリ実行・生きたページの xMatrix へ。",
     eyebrow: "YouMind 代替 · YouMind vs xMatrix",
-    headline: "チーム開発エージェント・Android・実リポジトリに対応した YouMind 代替ツール",
+    headline: "YouMind vs xMatrix",
     lead: "YouMind は動画・ポッドキャスト・Web 調査をスライドや記事へまとめる洗練された個人向けクリエイションスタジオ（月額 $20〜$200 のクレジット制）ですが、ネイティブなチーム協業も Android アプリもなく、ローカルコーディングエージェントを実行する代わりに GitHub/Linear の文脈を橋渡しするだけです。xMatrix は実コード・リサーチ・運用を 1 つのマルチプレイヤー Space で統括します。",
     productCaption:
       "xMatrix の画面：リサーチ、仕様書、複数エージェントによるソフトウェア出荷を、デスクトップ・Web・Android・iOS 共通のマルチプレイヤー Space で一元管理します。",
@@ -1697,7 +1697,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "YouMind は iOS と Chrome 拡張機能のみで公式 Android アプリがなく、Android を使う開発者は離席中に実行を監視・指示できません。",
         xmatrixAnswer:
-          "xMatrix は macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）で動作し、調査・仕様・PR・リリースを 1 つの生きたページに統合します。",
+          "xMatrix は macOS・Windows・Linux・iPhone・iPad・Android・Webで動作し、調査・仕様・PR・リリースを共有の生きたページにまとめます。",
       },
     ],
     comparisonRows: [
@@ -1723,7 +1723,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "対応プラットフォーム",
-        xmatrix: "macOS・Windows・Linux・Android・Web（iPhone・iPad 対応）",
+        xmatrix: "macOS・Windows・Linux・iPhone・iPad・Android・Web",
         competitor: "Web、iOS、Chrome 拡張機能（公式 Android アプリなし）",
       },
     ],
@@ -1748,7 +1748,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "定期リサーチとレポートを自動化する",
         detail:
-          "ページ内にスケジュール実行の Norn プログラムを埋め込み、週次ダイジェストや指標が自動最新化されるようにします。",
+          "ページ内にスケジュール実行の Norn プログラムを埋め込み、エージェントが週次ダイジェストや指標を定期的に更新するようにします。",
       },
     ],
     faqs: [
@@ -1760,7 +1760,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "xMatrix には Android アプリがありますか？",
         answer:
-          "はい。xMatrix は macOS・Windows・Linux・Web（iPhone・iPad 対応）に加え、Android アプリも提供しています。",
+          "はい。xMatrix には Android アプリ（Google Play または APK）があり、ほかに iPhone・iPad アプリ、macOS・Windows 向けデスクトップアプリ、Web、Linux マシン向けの CLI を提供しています。",
       },
       {
         question: "外部エージェントや AI アプリからも xMatrix を使えますか？",
@@ -1777,8 +1777,8 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Google Jules は 11月11日に読み取り専用となり 2026年12月31日に終了します。エクスポートしたメモリ・スケジュール・GitHub リポジトリを xMatrix へ移し、Antigravity・Claude Code・Codex を併用しましょう。",
     eyebrow: "Google Jules 代替 · 12月31日終了に向けた移行ガイド",
-    headline: "12月31日前に Google Jules の非同期 GitHub 作業を移行 — スマホからの起動もそのまま継続",
-    lead: "Google Jules は 2026年11月11日に新規セッション受付を終了し、2026年12月31日に完全停止します。しかもメモリ・スケジュール・タスクの自動移行は提供されません。xMatrix ならエクスポートした文脈を生きたページへ取り込み、常時稼働のコンピュータまたは自前 VPS 上で Google Antigravity と他 34 種類のコーディングエージェントを動かしながら、スマホや Web から非同期の GitHub PR 作成を継続できます。",
+    headline: "Google Jules からの移行",
+    lead: "Google Jules は 2026年11月11日に新規セッション受付を終了し、2026年12月31日に完全停止します。しかもメモリ・スケジュール・タスクの自動移行は提供されません。xMatrix ならエクスポートした文脈を生きたページへ取り込み、常時稼働のコンピュータまたは自前 VPS 上で Google Antigravity と他 33 種類のコーディングエージェントを動かしながら、スマホや Web から非同期の GitHub PR 作成を継続できます。",
     productCaption:
       "xMatrix の画面：自分の常時稼働マシンまたは自前 VPS 上で Google Antigravity・Claude Code・Codex を含む 34 種類のコーディングエージェントを動かしながら、Web やモバイルから非同期に GitHub Issue を片付け続けられます。",
     painPoints: [
@@ -1794,14 +1794,14 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Hacker News、Reddit、Google AI フォーラムでは、Jules の見通しやすい日次非同期タスク枠を失うことへの不満や、すべてを単一ベンダーの統合クォータプールへ寄せることで予期せぬ上限や超過が起きる懸念が広がっています。",
         xmatrixAnswer:
-          "xMatrix は Google Antigravity を他 34 種類のコーディングエージェント（Claude Code・Codex・Cursor・Gemini CLI など）と並べてネイティブ実行でき、1 社のクォータ枠が埋まった際に別プロバイダーへ作業を引き継げます。",
+          "xMatrix は Google Antigravity を他 33 種類のコーディングエージェント（Claude Code・Codex・Cursor・Gemini CLI など）と並べてネイティブ実行でき、1 社のクォータ枠が埋まった際に別プロバイダーへ作業を引き継げます。",
       },
       {
         title: "軽快なモバイル起点・非同期 GitHub バックログ消化の再構築",
         problem:
           "早期移行者からは、Jules を離れたことで「ローカル IDE に張り付かずスマホから非同期に GitHub Issue を PR に変える」軽快な習慣が途切れてしまったという声が出ています。",
         xmatrixAnswer:
-          "常時稼働のコンピュータまたは自前 Linux VPS を 1 台接続しておけば、Android や Web（iPhone・iPad 対応）から @auto repo:owner/repo とメンションするか、GitHub イベントで自動起動するだけで、PR・CI 結果・ページ更新が非同期に届きます。",
+          "常時稼働のコンピュータまたは自前 Linux VPS を 1 台接続しておけば、iPhone・iPad・Android アプリや Web から @auto repo:owner/repo とメンションするか、GitHub イベントで自動起動するだけで、PR・CI 結果・ページ更新が非同期に届きます。",
       },
     ],
     comparisonRows: [
@@ -1812,7 +1812,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "ハーネスとモデルの選択肢",
-        xmatrix: "Google Antigravity + 他 34 種類のコーディングエージェント（+ --runtime）+ クォータ引き継ぎ",
+        xmatrix: "Google Antigravity + 他 33 種類のコーディングエージェント（+ --runtime）+ クォータ引き継ぎ",
         competitor: "Google 専用クラウドエージェント（Google Antigravity へ統合廃止）",
       },
       {
@@ -1835,7 +1835,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       "2026年12月31日以降も Jules に留まる選択肢はありません。アクセス終了前に npm install -g @google/jules で必ずデータをエクスポートしてください。なお、xMatrix はホスト型クラウド VM ではなく、ご自身の常時稼働コンピュータまたは自前 VPS が必要です。",
     ],
     switchWhen: [
-      "単一ベンダーにすべてを賭けるのではなく、Google Antigravity を他 34 種類のコーディングエージェントと併用したい。",
+      "単一ベンダーにすべてを賭けるのではなく、Google Antigravity を他 33 種類のコーディングエージェントと併用したい。",
       "エクスポートした Jules のメモリ、環境変数シークレット、定期 GitHub バックログ処理の永続的な移行先が必要。",
       "Mac Studio、デスクトップ、安価な Linux VPS をすでに持っており、クラウドベータの終了で奪われないスマホ起点の非同期 PR ワークフローを求めている。",
     ],
@@ -1860,7 +1860,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "Jules から移行した後も、xMatrix 内で Google Antigravity を動かせますか？",
         answer:
-          "はい。xMatrix は自分のマシン上で Google Antigravity（agy）を他 34 種類のコーディングエージェント（Claude Code・Codex・Cursor・Gemini など）と並べてネイティブサポートしています。",
+          "はい。xMatrix は自分のマシン上で Google Antigravity（agy）を他 33 種類のコーディングエージェント（Claude Code・Codex・Cursor・Gemini など）と並べてネイティブサポートしています。",
       },
       {
         question: "xMatrix でも Jules のようなホスト型クラウド VM は提供されますか？",

@@ -5,7 +5,7 @@ description: "Instala xMatrix, conecta Claude Code, Codex u otro agente de progr
 
 # Primeros pasos
 
-xMatrix es un chat grupal donde personas y agentes de programación trabajan juntos. Mencionas a un agente en una conversación, este arranca en la máquina de su propietario dentro de tu repositorio y responde en el hilo. Las páginas mantienen lo que es vigente hoy y los agentes las mantienen actualizadas.
+xMatrix es un chat grupal donde personas y agentes de programación trabajan juntos. Mencionas a un agente en una conversación, este arranca en la máquina de su propietario dentro de tu repositorio y responde en el hilo. Las páginas mantienen lo que es vigente hoy y los agentes las actualizan a medida que su trabajo avanza.
 
 Esta guía cubre todo lo que escribes y ejecutas como usuario:
 

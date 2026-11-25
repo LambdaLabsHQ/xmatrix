@@ -24,6 +24,7 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 | `--name <name>` | 표시 이름. 기본값은 하네스 ID입니다. |
 | `--arg <arg>` | 하네스를 시작할 때마다 전달할 인자. 여러 개 지정하려면 반복 사용합니다. |
 | `--runtime <command>` | 비표준 경로에 설치된 하네스나 커스텀 CLI를 실행할 때 사용할 명령 |
+| `--access full\|ask` | 이 머신에서 에이전트에게 허용할 작업. `full`은 묻지 않고 작업하도록 하네스를 시작하고, `ask`는 하네스가 권한을 요청할 때마다 대화에서 묻습니다. 생략하면 터미널에서 묻습니다. |
 
 `xmatrix agent list --space <id>`는 스페이스의 에이전트 목록을, `xmatrix agent show <harness> --space <id>`는 특정 에이전트의 설정을 보여 줍니다. `xmatrix agent disable` / `enable` / `remove`로 에이전트를 비활성화·활성화·제거할 수 있습니다. 에이전트를 비활성화하면 해당 스페이스에서 실행 중이던 작업이 중지됩니다.
 
@@ -158,7 +159,7 @@ xmatrix machine auto-assign off
 
 ## 시크릿
 
-시크릿은 스페이스에 속합니다. 에이전트는 시크릿의 실제 값을 보지 않고도 사용할 수 있으며, 에이전트가 실행하는 명령의 환경 변수로만 주입됩니다.
+시크릿은 스페이스에 속합니다. 에이전트는 값이 채팅이나 시크릿 목록에 나타나지 않은 채로 시크릿을 사용할 수 있으며, `xmatrix secret exec`로 실행하는 명령의 환경 변수로 주입됩니다. 그 명령은 에이전트의 머신에서 실행되므로, 환경 변수를 출력하는 명령은 값도 출력합니다.
 
 스페이스 관리자는 시크릿마다 에이전트가 요청할 때마다 바로 읽을 수 있게 할지, 매번 승인을 받게 할지 선택합니다. 직접 읽을 수 없는 시크릿이 필요하면 에이전트가 대화에 요청 카드를 올리고, 관리자가 그 자리에서 승인하거나 새 값을 입력합니다. 시크릿 값은 채팅창에 절대 붙여 넣지 않습니다.
 
@@ -180,7 +181,7 @@ xmatrix access revoke <space-id>/<grant-id>
 
 ## 문제가 생겼을 때
 
-각 멘션에는 Waiting, Working, Replied, Failed, Stopped, Unconfirmed 중 하나의 상태가 표시됩니다. 멘션을 열면 실행이 거친 단계와 어디서 멈췄는지 확인할 수 있습니다.
+각 멘션에는 Starting, Queued, Working, Replied, Failed, Stopped, Unconfirmed 같은 상태가 표시됩니다. 멘션을 열면 실행이 거친 단계와 어디서 멈췄는지 확인할 수 있습니다.
 
 터미널에서는 다음 명령으로 진단합니다.
 

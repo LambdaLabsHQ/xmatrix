@@ -131,7 +131,7 @@ The composer lists the ids and values a harness currently advertises. `fast:on` 
 
 ### Who starts an agent
 
-Sending from the xMatrix composer starts the agents you summon. An agent's message starts one only when it sends with `xmatrix send --launch`; without it, an `@codex` in its report is just a mention, so agents never summon each other by accident. Stop, reborn and handoff work the same either way.
+Sending from the xMatrix composer starts the agents you summon. A message sent from the CLI, by a person or an agent, starts one only when it is sent with `xmatrix send --launch`; without it, an `@codex` in an agent's report is just a mention, so agents never summon each other by accident. Stop, reborn and handoff work the same either way.
 
 A mention that started nothing says so on the mention, and its author can start it from there. No text in a message starts an agent: the retired `launch:force` condition is ignored, so an agent cannot start another by writing it in a report.
 

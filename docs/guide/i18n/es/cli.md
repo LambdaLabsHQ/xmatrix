@@ -49,7 +49,7 @@ Donde un comando acepta un id de conversación, también acepta la dirección de
 | `xmatrix agent model <harness> [<model>\|--clear] --space <id>` | Muestra o fija el modelo que usa un agente en un Space cuando el lanzamiento no indica ninguno; `--clear` vuelve al valor por defecto del harness. Un agente puede fijarlo para los agentes de su propietario. Consulta [Configura el modelo de un agente](agents.md#set-an-agents-model). |
 | `xmatrix agent disable\|enable <harness> --space <id>` | Retira un agente del servicio o vuelve a habilitarlo |
 | `xmatrix agent remove <harness> --space <id>` | Lo elimina del Space |
-| `xmatrix list` | Agentes que están en línea ahora |
+| `xmatrix list` | Instancias de agentes activas |
 | `xmatrix harness list` | Harnesses en una máquina y su estado |
 | `xmatrix harness install\|update\|uninstall <name>` | Gestiona un harness con su receta oficial |
 | `xmatrix harness auto-update <name> on\|off` | Mantiene un harness actualizado |
@@ -72,12 +72,11 @@ Donde un comando acepta un id de conversación, también acepta la dirección de
 | `xmatrix channel chat <id>` | Un chat sencillo por líneas en la terminal |
 | `xmatrix channel subscribe <id> <pull-request-url>` | Envía a la conversación el resultado de CI, las revisiones y la fusión de un pull request |
 | `xmatrix channel subscribe <id> <url> --wait` | Suscribe y espera hasta que la ejecución o el pull request informe (`--timeout <minutos>`, 60 por defecto); ejecútalo con la espera propia de tu harness |
-| `xmatrix channel worktree <id> on\|off\|inherit` | Si los agentes de esta conversación obtienen worktrees aislados |
 
 ## Mensajes
 
 ```sh
-xmatrix send <conversation> "@codex repo:acme/web revisa el diff de la migración"
+xmatrix send <conversation> --launch "@codex repo:acme/web revisa el diff de la migración"
 xmatrix send <conversation> --stdin < update.md
 xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Aquí está el informe."
 ```
@@ -88,9 +87,10 @@ xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Aqu
 | `--file <path>` | Lee el cuerpo desde un archivo UTF-8. |
 | `--attachment <path>` | Adjunta un archivo junto al cuerpo. Repítelo para varios. |
 | `--reply-to <message-id>` | Responde a un mensaje |
+| `--launch` | Inicia los agentes que el mensaje convoca (`@codex`, `@auto`). Sin él solo se mencionan; `@codex:1` y otras direcciones de instancia no lo necesitan. |
 | `--wait` | Indica que esperas respuesta de las personas y agentes mencionados en el mensaje. Permanece en su lista «Te necesita» hasta que respondan. |
 
-Un mensaje enviado desde la CLI se interpreta con la misma [sintaxis](syntax.md) que uno escrito en la aplicación.
+Un mensaje enviado desde la CLI se interpreta con la misma [sintaxis](syntax.md) que uno escrito en la aplicación, salvo que una convocatoria inicia un agente solo con `--launch`.
 
 | Comando | Qué hace |
 | --- | --- |

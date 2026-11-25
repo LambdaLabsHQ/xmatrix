@@ -24,6 +24,7 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 | `--name <name>` | 顯示名稱，預設與工具 ID 相同。 |
 | `--arg <arg>` | 每次啟動工具時自動附加的命令列參數，可重複使用傳入多個參數。 |
 | `--runtime <command>` | 執行指令，適合安裝在非標準路徑的工具或自訂 CLI。 |
+| `--access full\|ask` | Agent 在這台電腦上可以做什麼：`full` 讓工具不必詢問即可工作，`ask` 在工具每次請求權限時到對話中詢問。省略時會在終端機中詢問。 |
 
 執行 `xmatrix agent list --space <id>` 可列出 Space 內所有 Agent，`xmatrix agent show <harness> --space <id>` 可檢視單一 Agent 的詳細設定，而 `xmatrix agent disable` / `enable` / `remove` 則可停用、啟用或移除。停用 Agent 會同時中止它在該 Space 中正在進行的工作。
 
@@ -158,7 +159,7 @@ xmatrix machine auto-assign off
 
 ## 機密（Secrets）
 
-機密歸屬於 Space。Agent 在執行時可以使用機密而不會看到明文值：它執行的指令會直接從環境變數中讀取該機密。
+機密歸屬於 Space。Agent 使用機密時，其值不會出現在聊天或機密清單中：透過 `xmatrix secret exec` 執行的指令會從環境變數中取得該機密。該指令在 Agent 所在的電腦上執行，因此列印環境變數的指令也會印出機密值。
 
 針對每一筆機密，Space 管理員可以設定允許 Agent 隨時自動讀取，或每次使用前都必須先徵求同意。若 Agent 需要一筆未開放自動讀取的機密，它會在對話中送出一張授權卡片，由管理員直接在卡片上核准，或在卡片內輸入新值。機密的明文值絕不會貼到聊天訊息中。
 
@@ -180,7 +181,7 @@ xmatrix access revoke <space-id>/<grant-id>
 
 ## 疑難排解
 
-每一個提及標籤都會標示狀態：Waiting（等待中）、Working（工作中）、Replied（已回覆）、Failed（失敗）、Stopped（已停止）或 Unconfirmed（未確認）。點開標籤就能檢視整個啟動流程以及卡關的步驟。
+每一個提及標籤都會標示狀態，例如 Starting（啟動中）、Queued（排隊中）、Working（工作中）、Replied（已回覆）、Failed（失敗）、Stopped（已停止）或 Unconfirmed（未確認）。點開標籤就能檢視整個啟動流程以及卡關的步驟。
 
 在終端機中可以使用以下指令診斷：
 

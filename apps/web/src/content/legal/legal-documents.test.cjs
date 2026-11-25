@@ -54,7 +54,7 @@ test("privacy policy locks the actual Agent, trace, secret, and training boundar
   assert.doesNotMatch(privacySource, /unless we first obtain explicit permission/);
   assert.doesNotMatch(privacySource, /Management Agent/);
   assert.match(privacySource, /separate one-shot approval/);
-  assert.match(privacySource, /at most 500 events, 768 KiB, or 24 hours/);
+  assert.match(privacySource, /at most 5,000 events, 16 MiB, or 24 hours/);
   assert.match(privacySource, /does not currently keep a Relay authority, R2, or other persistent copy/);
   assert.match(privacySource, /does not automatically gain trace\s+access/);
   assert.match(privacySource, /Secret values are not ordinary message or Profile\s+fields/);

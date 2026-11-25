@@ -9,13 +9,13 @@ xMatrix 由托管协作 Hub 与运行在你自己电脑上的 Rust 本地 daemon
 
 ## 哪些数据留在你本机
 
-你的源代码、Git 历史、工作目录、未提交文件、SSH 密钥、模型工具历史与本地模型凭据均留在你自己控制的电脑上，除非人、Agent、工具或功能主动将它们发出或作为附件上传。原始终端输出不会持续归档到 Hub：实时的 **Instance Trace** 仅保存在宿主进程内存中（最多 500 条事件、768 KiB 或 24 小时），只在有权限的人按需查看时转发。xMatrix 绝不将本机模型 API Key 或 OAuth token 上传至 Hub，也不会读取第三方凭证文件来做跨机器身份归因或指纹关联。
+你的源代码、Git 历史、工作目录、未提交文件、SSH 密钥、模型工具历史与本地模型凭据均留在你自己控制的电脑上，除非人、Agent、工具或功能主动将它们发出或作为附件上传。原始终端输出不会持续归档到 Hub：实时的 **Instance Trace** 仅保存在宿主进程内存中（每个 Instance 最多 5,000 条事件、16 MiB 或 24 小时），只在有权限的人按需查看时转发。xMatrix 绝不将本机模型 API Key 或 OAuth token 上传至 Hub，也不会读取第三方凭证文件来做跨机器身份归因或指纹关联。
 
 为保证同一台电脑在重装后仍稳定对应到你的账号下，本地 daemon 仅在本地将你的 xMatrix 用户 ID 与系统机器标识混合做 SHA-256 派生出按账号隔离的 `machineId`；原始硬件标识与未按账号隔离的机器指纹绝不上传至 Hub。
 
 ## 哪些数据进入 Hub，以及为什么不做端到端加密
 
-**传输加密 + 静态加密，但不是端到端加密。** 客户端、本地 daemon 与 xMatrix Hub 之间的流量均走 HTTPS/TLS；Hub 存储层（PlanetScale 托管 PostgreSQL、Cloudflare Durable Objects 与私有 R2 对象存储）提供静态加密；Space 密钥（Saved Secrets）与 daemon 本地副本还额外使用受保护密钥做认证加密。**频道消息、Pages 与附件不是端到端加密（E2EE）。**
+**传输加密 + 静态加密，但不是端到端加密。** 客户端、本地 daemon 与 xMatrix Hub 之间的流量均走 HTTPS/TLS；Hub 存储层（PlanetScale 托管 PostgreSQL、Cloudflare Durable Objects 与私有 R2 对象存储）提供静态加密；Space 密钥（Saved Secrets）的值还额外使用受保护密钥做认证加密。**频道消息、Pages 与附件不是端到端加密（E2EE）。**
 
 **为什么不做端到端加密。** 与单人远程连本机终端的隧道不同，xMatrix 是多人多 Agent 的云端协作工作区。托管 Hub 需要读取协作内容，才能完成以下核心功能：
 
