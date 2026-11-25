@@ -50,7 +50,7 @@ function lifecycleDatabase(run) {
       if (query.name === "machine_lifecycle_run_lock_v2") return [{ run_id: "run-1", owner_user_id: "user-1",
         channel_id: "channel-1", version: 3, metadata_json: resumable, instance_id: "instance-1",
         instance_status: "online", instance_version: 2, channel_instance_id: 4, agent_name: "Codex", ...run }];
-      if (query.name === "machine_lifecycle_instance_rest_v1") return [{ instance_id: "instance-1" }];
+      if (query.name === "machine_lifecycle_instance_rest_v2") return [{ instance_id: "instance-1" }];
       if (query.name === "machine_lifecycle_head_advance_v1") return [{ commit_sequence: 15 }];
       return [];
     } });
@@ -63,7 +63,7 @@ async function applyReport(run, eventType, payload, extra = {}) {
     machineId: "machine-1", hostId: "host-1", channelId: "channel-1", eventType,
     principal: { kind: "machine", ownerUserId: "user-1", machineId: "machine-1", hostId: "host-1" },
     payload: { runId: "run-1", executionKey: "execution-1", ...payload }, ...extra });
-  return db.calls.find((query) => query.name === "machine_lifecycle_instance_rest_v1");
+  return db.calls.find((query) => query.name === "machine_lifecycle_instance_rest_v2");
 }
 
 test("the daemon's sleep report leaves the Instance sleeping", async () => {
@@ -84,6 +84,26 @@ test("a sleep report after a snapshot retired the same Run refines interrupted t
     { restReason: "sleeping" });
   assert.equal(rest.values[0], "sleeping");
   assert.equal(rest.values[4], true, "only an interrupted or unset rest may be refined");
+});
+
+test("a startup fault can refine a snapshot exit", async () => {
+  const report = { statusPhase: "wrapper_startup_failed", runStatusDetail: "Protocol input closed" };
+  const late = await applyReport({ status: "exited", instance_status: "offline" }, "machine_run_exited", report);
+  assert.equal(late.values[0], "wake_failed");
+  assert.equal(late.values[4], true);
+  assert.equal(late.values[5], "Protocol input closed");
+
+});
+
+for (const [reason, evidence] of [
+  ["the provider reached readiness", { startupSteps: [{ phase: "runtime_ready", atMillis: Date.now() }] }],
+  ["the startup error was retryable", { operationFailure: { code: "connection_unavailable", retryable: true,
+    stage: "wrapper_startup_failed", diagnosticId: "diag_12345678-1234-1234-1234-123456789abc" } }],
+]) test(`an established Instance remains wakeable when ${reason}`, async () => {
+  const rest = await applyReport({ status: "running" }, "machine_run_exited", {
+    statusPhase: "wrapper_startup_failed", ...evidence,
+  });
+  assert.equal(rest.values[0], "interrupted");
 });
 
 test("a confirmed stop leaves the Instance stopped unless it is a reborn predecessor", async () => {

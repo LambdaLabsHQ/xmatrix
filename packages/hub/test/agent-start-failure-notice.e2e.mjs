@@ -4,7 +4,9 @@ import {
   assert,
   connectAgent,
   json,
+  mintAgentRunToken,
   MOCK_TOKEN,
+  postChannelMessage,
   randomUUID,
   runAgentConnection,
   sleep,
@@ -132,6 +134,72 @@ test("a Workstation startup failure is persisted in-channel as a product notice"
       "wrapper startup failure must not leave a ghost online Instance");
   } finally {
     await stopAgentWorker(worker, agent, daemon);
+  }
+});
+
+test("a failed wrapper startup ends automatic wakes of an established Instance", async () => {
+  const worker = await startMockUserHubWorker({ id: `failed-wake-${randomUUID()}`,
+    email: "failed-wake@example.com", name: "Failed Wake" });
+  let daemon;
+  let firstAgent;
+  let wakingAgent;
+  try {
+    const scenario = await createPgSpawnableScenario(worker, { agentName: "codex-wake-failure" });
+    ({ daemon } = scenario);
+    const { auth, channelId } = scenario;
+    const reportExit = async (command, statusPhase, runStatusDetail) => {
+      const requestId = `exit:${command.runId}`;
+      daemon.ws.send(JSON.stringify({ type: "machine_run_exited", requestId, runId: command.runId,
+        executionKey: command.executionKey, agentId: command.identityId, agentName: command.agentName,
+        pid: 4242, status: "exit code: 1", exitCode: 1,
+        statusPhase, runStatusDetail }));
+      await daemon.inbox.waitFor(message => message.type === "machine_run_report_acked" &&
+        message.requestId === requestId, "exit report accepted");
+    };
+
+    const { command: first, token } = await launchScenarioRun(worker, scenario);
+    sendSpawnResult(daemon, first, { ok: true, pid: 4242 });
+    firstAgent = await connectAgent(worker, runAgentConnection(first, channelId), token);
+    await reportExit(first, "turn_running");
+    let rest;
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const [instance] = await inTestTransaction(tx => tx.query({
+        text: "SELECT rest_state FROM data.instances WHERE run_id=$1", values: [first.runId] }));
+      rest = instance?.rest_state;
+      if (rest === "interrupted") break;
+      await sleep(100);
+    }
+    assert.equal(rest, "interrupted", "the first exit's lifecycle must commit before sending the waking message");
+    firstAgent.ws.close();
+    const isWake = message => message.type === "machine_spawn_agent" && message.identityId === first.identityId &&
+      message.runId !== first.runId;
+    await postChannelMessage(worker, MOCK_TOKEN, channelId, "Continue the interrupted work", { launch: false });
+    const wake = await daemon.inbox.waitFor(isWake, "first automatic wake");
+    const wakeToken = await mintAgentRunToken(worker, daemon, wake, channelId);
+    sendSpawnResult(daemon, wake, { ok: true, pid: 4242 });
+    wakingAgent = await connectAgent(worker, runAgentConnection(wake, channelId), wakeToken);
+    const error = "app-server exited during initialize: Protocol input closed";
+    await reportExit(wake, "wrapper_startup_failed", error);
+
+    const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channelId,
+      message => message.metadata?.source === "machine_run_failure" && message.metadata.runId === wake.runId,
+      "failed wake's startup notice");
+    assert.ok(notice.body.includes(error));
+    const { channels } = await json(await worker.fetch("/api/channels", { headers: auth }));
+    const channel = channels.find(candidate => candidate.id === channelId);
+    const instances = Object.values(channel.memberPresence).flatMap(member => member.instances ?? []);
+    const failed = instances.find(instance => instance.id === first.identityId);
+    assert.equal(failed?.rest, "wake_failed");
+    assert.equal(failed.restReason, error);
+
+    await postChannelMessage(worker, MOCK_TOKEN, channelId, "A later message", { launch: false });
+    await assert.rejects(daemon.inbox.waitFor(message => isWake(message) && message.runId !== wake.runId,
+      "unexpected second wake", 500), /Timed out/u);
+    const history = await json(await worker.fetch(`/api/channels/${channelId}/history?limit=20`, { headers: auth }));
+    assert.equal(history.messages.filter(message => message.metadata?.source === "machine_run_failure").length, 1);
+  } finally {
+    await stopAgentWorker(worker, firstAgent, wakingAgent, daemon);
   }
 });
 
