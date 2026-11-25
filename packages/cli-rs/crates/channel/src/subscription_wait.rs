@@ -6,6 +6,7 @@
 // Instance as waiting (`runtime_waiting.rs`); the subscription itself stays
 // on the Hub, so the report still wakes the Instance if this process dies.
 
+use std::future::Future;
 use std::time::{Duration, Instant};
 
 use colored::Colorize;
@@ -86,13 +87,30 @@ pub(crate) fn report_failed(target: &WaitTarget, body: &str) -> bool {
     }
 }
 
-pub(crate) async fn cmd_channel_subscribe_wait(
+/// Whether a Hub read was refused for its credential. An Agent Run's token is
+/// short-lived, so a wait longer than it asks for a fresh one.
+fn refused_credential(error: &CliError) -> bool {
+    match error {
+        CliError::Auth(_) => true,
+        CliError::HttpStatus(status) => status.status == 401,
+        _ => false,
+    }
+}
+
+/// Subscribe and wait. `fresh_token` gives a current credential whenever the
+/// one in hand is refused, since an Agent Run's token outlives no long wait.
+pub async fn cmd_channel_subscribe_wait<F, Fut>(
     hub_url: &str,
-    token: &str,
+    fresh_token: F,
     channel_id: &str,
     url: &str,
     timeout: Duration,
-) -> error::Result<()> {
+) -> error::Result<()>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = error::Result<String>>,
+{
+    let mut token = fresh_token().await?;
     let target = wait_target(url).ok_or_else(|| {
         CliError::Launch(format!(
             "--wait needs a pull request or workflow run URL on github.com, not {url}"
@@ -100,14 +118,14 @@ pub(crate) async fn cmd_channel_subscribe_wait(
     })?;
     // Read where the conversation stands first, so a report that lands while
     // subscribing is not missed.
-    let recent = fetch_channel_chat_history(hub_url, token, channel_id, READ_LIMIT, None).await?;
+    let recent = fetch_channel_chat_history(hub_url, &token, channel_id, READ_LIMIT, None).await?;
     let mut after = recent
         .iter()
         .filter_map(|message| message.sequence)
         .max()
         .unwrap_or(0);
     if let Subscribed::Completed(conclusion) =
-        cmd_channel_subscribe(hub_url, token, channel_id, url).await?
+        cmd_channel_subscribe(hub_url, &token, channel_id, url).await?
     {
         return match conclusion.as_str() {
             "success" | "skipped" | "neutral" => Ok(()),
@@ -131,18 +149,32 @@ pub(crate) async fn cmd_channel_subscribe_wait(
     let started = Instant::now();
     let mut said = Instant::now();
     loop {
-        let mut messages =
-            match fetch_channel_chat_history(hub_url, token, channel_id, READ_LIMIT, Some(after))
-                .await
-            {
-                Ok(messages) => messages,
-                // A failed read is retried on the next pass; the subscription
-                // itself is safe on the Hub.
-                Err(error) => {
-                    eprintln!("Reading the conversation failed, retrying: {error}");
-                    Vec::new()
-                }
-            };
+        let mut messages = match fetch_channel_chat_history(
+            hub_url,
+            &token,
+            channel_id,
+            READ_LIMIT,
+            Some(after),
+        )
+        .await
+        {
+            Ok(messages) => messages,
+            Err(error) if refused_credential(&error) => {
+                // A credential that cannot be renewed ends the wait; the
+                // subscription itself stays on the Hub.
+                token = fresh_token().await.map_err(|renew| {
+                        CliError::Auth(format!(
+                            "The wait's credential expired and could not be renewed ({renew}). The subscription stays, so the report still arrives in this conversation."
+                        ))
+                    })?;
+                continue;
+            }
+            // Another failed read is retried on the next pass.
+            Err(error) => {
+                eprintln!("Reading the conversation failed, retrying: {error}");
+                Vec::new()
+            }
+        };
         messages.sort_by(protocol::compare_channel_messages);
         if let Some(report) = messages
             .iter()
@@ -260,6 +292,12 @@ mod tests {
             )
         ));
         assert!(!is_report(&pr, "c1", &message("user-message", ci)));
+    }
+
+    #[test]
+    fn renews_only_refused_credentials() {
+        assert!(refused_credential(&CliError::Auth("expired".into())));
+        assert!(!refused_credential(&CliError::Http("reset".into())));
     }
 
     #[test]
