@@ -20,9 +20,9 @@ use crate::{
     GoalCommand, ImageBlockShape, LocalImageFiles, PresencePatch, ack_inbound_channel_messages,
     active_turn_steer_message, agent_instance_connection, await_turn_with_events, clean_run_effort,
     clean_run_model, config, error, event_requests_active_turn_interrupt_with_replay,
-    inbound_execution_sources, materialize_local_image_files, merge_llm_usage,
-    prompt_content_blocks, protocol, reassert_busy_on_reconnect, resume_session_path,
-    send_llm_trace_with_source, send_presence, steered_turn_input, trace_attachment_summaries,
+    materialize_local_image_files, merge_llm_usage, prompt_content_blocks, protocol,
+    reassert_busy_on_reconnect, resume_session_path, send_llm_trace_with_source, send_presence,
+    trace_attachment_summaries,
 };
 
 /// Prefixed to the turn after an interrupt. Claude answers the cancelled tool
@@ -179,29 +179,13 @@ pub(crate) async fn run_claude_stream_turn(
             {
                 // A question card Claude waits on is superseded by the message.
                 interrupter.cancel_questions().await;
-                let instruction = inbound_execution_sources(std::slice::from_ref(&message))
-                    .into_iter()
-                    .next()
-                    .and_then(|source| runtime_state.join_message_turn_source(source));
-                let inbound_images = if message
-                    .attachments
-                    .as_deref()
-                    .is_some_and(|items| !items.is_empty())
-                {
-                    Some(
-                        crate::materialize_inbound_image_files(
-                            message.attachments.as_deref(),
-                            relay,
-                        )
-                        .await,
-                    )
-                } else {
-                    None
-                };
-                let input = steered_turn_input(
-                    &message.prompt_text(agent, inbound_images.as_ref()),
-                    instruction.as_deref(),
-                );
+                let (input, inbound_images) = crate::prepare_steered_turn_input(
+                    &message,
+                    agent,
+                    Some(relay.as_ref()),
+                    &runtime_state,
+                )
+                .await;
                 let steer_blocks = match prompt_content_blocks(
                     &input,
                     message.attachments.as_deref(),

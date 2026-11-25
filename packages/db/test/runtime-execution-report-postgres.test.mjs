@@ -5,37 +5,44 @@ import { createAuthorityDatabase } from "../dist/index.js";
 import { acknowledgeMachineExecution } from "../dist/runtime-message-executions.js";
 import { integration, isolatedPostgres, seedTestSpacePlacement } from "./postgres-database.fixture.mjs";
 
+async function seedExecutionRun(client, { harness = "codex", launchPadding = 0 } = {}) {
+  const sql = (text, values) => client.query(text, values);
+  await seedTestSpacePlacement(client, "space", new Date().toISOString());
+  await sql(`INSERT INTO data.spaces(space_id,owner_user_id,name,search_rank_sequence,version,created_at,updated_at)
+    VALUES ('space','owner','Test','space',1,now(),now())`);
+  await sql(`INSERT INTO data.channels(channel_id,space_id,name,name_key,mode,search_rank_sequence,version,created_at,updated_at)
+    VALUES ('channel','space','Channel','channel','open','channel',1,now(),now())`);
+  await sql(`INSERT INTO data.agent_registrations VALUES ('owner','machine',$1,1,now(),now())`, [harness]);
+  await sql(`INSERT INTO data.space_agent_registrations
+    VALUES ('space','owner','machine',$1,$1,'{}',1,now(),now())`, [harness]);
+  const metadata = launchPadding > 0
+    ? { executionKey: "execution-key", machineId: "machine", launch: "x".repeat(launchPadding) }
+    : { executionKey: "execution-key", machineId: "machine" };
+  await sql(`INSERT INTO data.runs(run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at)
+    VALUES ('channel:1#1','owner','channel','running',1,$1::jsonb,now(),now())`, [JSON.stringify(metadata)]);
+  await sql(`INSERT INTO data.instances(instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
+    VALUES ('channel:1','channel:1#1','channel',1,'online',1,now(),now())`);
+  await sql(`INSERT INTO data.run_agent_registrations(run_id,space_id,owner_user_id,machine_id,harness,
+    actor_user_id,allocation_id,authorization_digest,grant_revision,grant_execution_revision,
+    policy_revision,policy_execution_revision,requested_json)
+    VALUES ('channel:1#1','space','owner','machine',$1,'owner','allocation',repeat('a',64),1,1,1,1,
+      '{"workspaces":[],"models":[],"capabilities":[]}')`, [harness]);
+  return sql;
+}
+
 // Every daemon execution report authorizes against its Run. The owner read
 // returned the Run's whole metadata, kilobytes, to check one key, and it is
 // among the most frequent statements: its result bytes are what PlanetScale
 // bills as egress.
 integration("an execution report reads its Run's execution key, not the Run's metadata", async () => {
   const fixture = await isolatedPostgres("execution_report_bytes");
-  const sql = (text, values) => fixture.client.query(text, values);
   const observations = [];
   const database = createAuthorityDatabase({ connectionString: fixture.url.toString(), shardId: "shard-0",
     observer: (point) => observations.push(point) });
   const placement = { spaceId: "space", shardId: "shard-0", placementEpoch: 1 };
   try {
-    await seedTestSpacePlacement(fixture.client, "space", new Date().toISOString());
-    await sql(`INSERT INTO data.spaces(space_id,owner_user_id,name,search_rank_sequence,version,created_at,updated_at)
-      VALUES ('space','owner','Test','space',1,now(),now())`);
-    await sql(`INSERT INTO data.channels(channel_id,space_id,name,name_key,mode,search_rank_sequence,version,created_at,updated_at)
-      VALUES ('channel','space','Channel','channel','open','channel',1,now(),now())`);
-    await sql(`INSERT INTO data.agent_registrations VALUES ('owner','machine','codex',1,now(),now())`);
-    await sql(`INSERT INTO data.space_agent_registrations
-      VALUES ('space','owner','machine','codex','codex','{}',1,now(),now())`);
     // A Run's metadata carries its launch and presentation; 64 KB stands for a large one.
-    await sql(`INSERT INTO data.runs(run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at)
-      VALUES ('channel:1#1','owner','channel','running',1,
-        jsonb_build_object('executionKey','execution-key','machineId','machine','launch',repeat('x',65536)),now(),now())`);
-    await sql(`INSERT INTO data.instances(instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
-      VALUES ('channel:1','channel:1#1','channel',1,'online',1,now(),now())`);
-    await sql(`INSERT INTO data.run_agent_registrations(run_id,space_id,owner_user_id,machine_id,harness,
-      actor_user_id,allocation_id,authorization_digest,grant_revision,grant_execution_revision,
-      policy_revision,policy_execution_revision,requested_json)
-      VALUES ('channel:1#1','space','owner','machine','codex','owner','allocation',repeat('a',64),1,1,1,1,
-        '{"workspaces":[],"models":[],"capabilities":[]}')`);
+    await seedExecutionRun(fixture.client, { harness: "codex", launchPadding: 65536 });
     const now = Date.now();
     const payload = { schemaVersion: 1, requestId: randomUUID(), scope: { channelId: "channel", runId: "channel:1#1",
       instanceId: "channel:1", agentId: "channel:1",
@@ -58,15 +65,10 @@ integration("an execution report reads its Run's execution key, not the Run's me
 
 integration("mid-turn steered sources append to an active execution and terminalize every source", async () => {
   const fixture = await isolatedPostgres("exec_steered");
-  const sql = (text, values) => fixture.client.query(text, values);
   const database = createAuthorityDatabase({ connectionString: fixture.url.toString(), shardId: "shard-0" });
   const placement = { spaceId: "space", shardId: "shard-0", placementEpoch: 1 };
   try {
-    await seedTestSpacePlacement(fixture.client, "space", new Date().toISOString());
-    await sql(`INSERT INTO data.spaces(space_id,owner_user_id,name,search_rank_sequence,version,created_at,updated_at)
-      VALUES ('space','owner','Test','space',1,now(),now())`);
-    await sql(`INSERT INTO data.channels(channel_id,space_id,name,name_key,mode,search_rank_sequence,version,created_at,updated_at)
-      VALUES ('channel','space','Channel','channel','open','channel',1,now(),now())`);
+    const sql = await seedExecutionRun(fixture.client, { harness: "antigravity" });
     const bodyHash1 = "1".repeat(64);
     const bodyHash2 = "2".repeat(64);
     const bodyHash3 = "3".repeat(64);
@@ -78,19 +80,6 @@ integration("mid-turn steered sources append to an active execution and terminal
         ('space','channel','msg-2',2,1,'user','owner','xmatrix.message.text',$2,$2,'inline','fixture',now(),now(),now(),'msg-2'),
         ('space','channel','msg-3',3,1,'user','owner','xmatrix.message.text',$3,$3,'inline','fixture',now(),now(),now(),'msg-3')`,
       [bodyHash1, bodyHash2, bodyHash3]);
-    await sql(`INSERT INTO data.agent_registrations VALUES ('owner','machine','antigravity',1,now(),now())`);
-    await sql(`INSERT INTO data.space_agent_registrations
-      VALUES ('space','owner','machine','antigravity','antigravity','{}',1,now(),now())`);
-    await sql(`INSERT INTO data.runs(run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at)
-      VALUES ('channel:1#1','owner','channel','running',1,
-        jsonb_build_object('executionKey','execution-key','machineId','machine'),now(),now())`);
-    await sql(`INSERT INTO data.instances(instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
-      VALUES ('channel:1','channel:1#1','channel',1,'online',1,now(),now())`);
-    await sql(`INSERT INTO data.run_agent_registrations(run_id,space_id,owner_user_id,machine_id,harness,
-      actor_user_id,allocation_id,authorization_digest,grant_revision,grant_execution_revision,
-      policy_revision,policy_execution_revision,requested_json)
-      VALUES ('channel:1#1','space','owner','machine','antigravity','owner','allocation',repeat('a',64),1,1,1,1,
-        '{"workspaces":[],"models":[],"capabilities":[]}')`);
 
     const startedAt = Date.now();
     const executionId = randomUUID();

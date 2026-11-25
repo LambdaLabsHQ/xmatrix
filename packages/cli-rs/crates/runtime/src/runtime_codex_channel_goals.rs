@@ -323,6 +323,35 @@ fn steered_turn_input(message_text: &str, final_reply_instruction: Option<&str>)
     input
 }
 
+/// Bind a steered message onto the running execution, materialize its inbound
+/// attachments when present, and format the steered prompt text.
+async fn prepare_steered_turn_input(
+    message: &InboundChannelMessage,
+    agent: &protocol::SerializedAgent,
+    relay: Option<&agent_instance_connection::AgentInstanceConnectionClient>,
+    runtime_state: &AgentRuntimeStateTracker,
+) -> (String, Option<LocalImageFiles>) {
+    let instruction = inbound_execution_sources(std::slice::from_ref(message))
+        .into_iter()
+        .next()
+        .and_then(|source| runtime_state.join_message_turn_source(source));
+    let inbound_images = if message
+        .attachments
+        .as_deref()
+        .is_some_and(|items| !items.is_empty())
+        && let Some(relay) = relay
+    {
+        Some(materialize_inbound_image_files(message.attachments.as_deref(), relay).await)
+    } else {
+        None
+    };
+    let input = steered_turn_input(
+        &message.prompt_text(agent, inbound_images.as_ref()),
+        instruction.as_deref(),
+    );
+    (input, inbound_images)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum GoalCommand {
     Set {

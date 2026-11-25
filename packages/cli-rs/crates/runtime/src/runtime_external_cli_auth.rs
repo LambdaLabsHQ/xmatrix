@@ -3271,26 +3271,8 @@ async fn submit_acp_turn_interruptible(
             )
         {
             interrupter.cancel_questions().await;
-            let instruction = crate::inbound_execution_sources(std::slice::from_ref(&message))
-                .into_iter()
-                .next()
-                .and_then(|source| runtime_state.join_message_turn_source(source));
-            let inbound_images = if message
-                .attachments
-                .as_deref()
-                .is_some_and(|items| !items.is_empty())
-                && let Some(relay) = relay
-            {
-                Some(
-                    materialize_inbound_image_files(message.attachments.as_deref(), relay).await,
-                )
-            } else {
-                None
-            };
-            let input = crate::steered_turn_input(
-                &message.prompt_text(agent, inbound_images.as_ref()),
-                instruction.as_deref(),
-            );
+            let (input, inbound_images) =
+                crate::prepare_steered_turn_input(&message, agent, relay, runtime_state).await;
             let steer_blocks = match acp_prompt_content_blocks(
                 &input,
                 message.attachments.as_deref(),
