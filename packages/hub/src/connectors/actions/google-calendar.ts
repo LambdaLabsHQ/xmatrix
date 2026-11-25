@@ -6,6 +6,7 @@ import { googleHeaders } from "./google-headers";
 import { calendarId, calendarJson, calendarWindow, EVENT_ID, eventMutation, MUTATION_FIELDS, pageToken } from "./google-calendar-input";
 
 import { prepareCalendarChange } from "./google-calendar-preview";
+import { workspaceMcpActions } from "./workspace-mcp";
 
 const API = "https://www.googleapis.com/calendar/v3";
 const SERVICE = "Google Calendar";
@@ -52,6 +53,7 @@ function mutation(mode: "create" | "update" | "delete"): ConnectorAction {
 }
 
 export const GOOGLE_CALENDAR_ACTIONS: Record<string, ConnectorAction> = {
+  ...workspaceMcpActions(["calendar"], SERVICE),
   list_calendars: {
     effect: "read", requires: ["oauthToken"],
     parse(statement) {

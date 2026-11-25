@@ -68,7 +68,7 @@ function permissionFixture(providerId = "googlecalendar") {
   const imports = { "@xmatrix/protocol": protocol, "./app-connectors": connectors,
     "./index-shared": { ...shared, requireAuth: async () => ({ id: "admin", email: "admin@example.test", ...(agent ? { agentRun: {} } : {}) }) },
     "./connectors/credentials": { connectorPermissionRepository: () => repository },
-    "./connectors/action-catalog": { connectorActionCatalog: () => new Map(providerId === "github" ? [] : ["create_event", "update_event", "delete_event"].map(id => [id, { executor: {} }])) },
+    "./connectors/action-catalog": { connectorActionCatalog: () => new Map(providerId === "github" ? [] : ["create_event", "update_event", "delete_event", "mcp_write"].map(id => [id, { executor: {} }])) },
     "./connectors/registry": { connectorProvider: () => ({ actions: {} }) } };
   const app = new Hono(); permissionRoute(name => imports[name] ?? new Proxy({}, { get: () => noop })).registerConnectorRoutes(app);
   return { calls, agent: () => { agent = true; }, request: (method, body) => app.fetch(new Request(`https://hub.test/api/spaces/space/app-connections/${providerId}/policies`, {
