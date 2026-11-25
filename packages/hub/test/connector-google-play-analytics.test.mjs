@@ -101,9 +101,23 @@ test("error_issues, anomalies, reviews and voided_purchases format Play operatio
         voidedSource: 0, voidedReason: 1,
       }],
     },
-  }], () => ACTIONS.voided_purchases.execute({ credentials }, statement("@googleplay:voided_purchases:sh.xmatrix.app days=30")));
+  }], () => ACTIONS.voided_purchases.execute({ credentials }, statement("@googleplay:voided_purchases:sh.xmatrix.app days=28")));
   assert.match(voided.calls[0].url, /voidedpurchases\?.*type=1/u);
   assert.match(voided.result.summary, /GPA\.1234-5678[\s\S]*user\tremorse/u);
+  assert.equal(typeof statement("@googleplay:voided_purchases:sh.xmatrix.app days=30"), "string");
+
+  // Overview handles non-game 403 on slowRenderingRateMetricSet and includes mandatory startType on slowStartRateMetricSet.
+  const fresh = { freshnessInfo: { freshnesses: [{ aggregationPeriod: "DAILY", latestEndTime: { year: 2026, month: 11, day: 24, timeZone: { id: "America/Los_Angeles" } } }] } };
+  const overview = await fetched([
+    { body: fresh }, { body: fresh }, { body: fresh },
+    { status: 403, body: { error: { status: "PERMISSION_DENIED", message: "slowRenderingRateMetricSet resource is only accessible to games" } } },
+    { body: fresh }, { body: { anomalies: [] } },
+    { body: { rows: [] } }, { body: { rows: [] } }, { body: { rows: [] } }, { body: { rows: [] } },
+  ], () => ACTIONS.vitals.execute({ credentials }, statement("@googleplay:vitals:sh.xmatrix.app")));
+  assert.match(overview.result.summary, /Slow rendering\t-\t\(games only\)/u);
+  const slowStartCall = overview.calls.find(c => c.url.includes("slowStartRateMetricSet:query"));
+  assert.deepEqual(slowStartCall.body.dimensions, ["startType"]);
+  assert.equal(slowStartCall.body.filter, "startType = COLD");
 });
 
 test("store_reports decodes Play Console UTF-16LE CSVs, rejects non-Play buckets and prompts when optional credentials are missing", async () => {

@@ -33,6 +33,9 @@ interface VitalSpec {
   readonly metrics: readonly string[];
   readonly rateMetrics: ReadonlySet<string>;
   readonly supportsCountry: boolean;
+  readonly requiredDimensions?: readonly string[];
+  readonly overviewFilter?: string;
+  readonly gamesOnly?: boolean;
 }
 
 const VITALS: Readonly<Record<string, VitalSpec>> = {
@@ -53,12 +56,15 @@ const VITALS: Readonly<Record<string, VitalSpec>> = {
     metrics: ["slowStartRate", "slowStartRate7dUserWeighted", "distinctUsers"],
     rateMetrics: new Set(["slowStartRate", "slowStartRate7dUserWeighted"]),
     supportsCountry: true,
+    requiredDimensions: ["startType"],
+    overviewFilter: "startType = COLD",
   },
   slow_rendering: {
     resource: "slowRenderingRateMetricSet", label: "Slow rendering",
     metrics: ["slowRenderingRate20Fps", "slowRenderingRate30Fps", "slowRenderingRate20Fps7dUserWeighted", "distinctUsers"],
     rateMetrics: new Set(["slowRenderingRate20Fps", "slowRenderingRate30Fps", "slowRenderingRate20Fps7dUserWeighted"]),
     supportsCountry: true,
+    gamesOnly: true,
   },
   lmk: {
     resource: "lmkRateMetricSet", label: "LMK (low memory killer)",
@@ -83,6 +89,7 @@ const VITALS: Readonly<Record<string, VitalSpec>> = {
     metrics: ["errorReportCount", "distinctUsers"],
     rateMetrics: new Set(),
     supportsCountry: false,
+    requiredDimensions: ["reportType"],
   },
 };
 
@@ -149,15 +156,17 @@ function dimensionText(row: Record<string, unknown>): string {
 }
 
 async function queryVitalMetric(credentials: Readonly<Record<string, string>>, packageName: string, spec: VitalSpec,
-  days: number, dimension: string | undefined, now = Date.now()): Promise<{ end: GoogleDateTime; rows: Record<string, unknown>[] }> {
+  days: number, dimension: string | undefined, options: { overview?: boolean; now?: number } = {}): Promise<{ end: GoogleDateTime; rows: Record<string, unknown>[] }> {
   const basePath = `/v1beta1/apps/${encodeURIComponent(packageName)}/${spec.resource}`;
   const metadata = await playReporting(credentials, basePath);
-  const end = dailyLatestEnd(metadata, now);
+  const end = dailyLatestEnd(metadata, options.now ?? Date.now());
   const start = shiftDate(end, -days);
+  const dims = [...new Set([...(spec.requiredDimensions ?? []), ...(dimension ? [dimension] : [])])];
   const body = {
     timelineSpec: { aggregationPeriod: "DAILY", startTime: start, endTime: end },
     metrics: [...spec.metrics],
-    ...(dimension ? { dimensions: [dimension] } : {}),
+    ...(dims.length ? { dimensions: dims } : {}),
+    ...(options.overview && spec.overviewFilter ? { filter: spec.overviewFilter } : {}),
     pageSize: 100,
   };
   const response = await playReporting(credentials, `${basePath}:query`, { method: "POST", body });
@@ -378,19 +387,26 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
         const [results, anomaliesResp] = await Promise.all([
           Promise.all(OVERVIEW_KEYS.map(async key => {
             const spec = VITALS[key]!;
-            const { end, rows } = await queryVitalMetric(credentials, packageName, spec, options.days, undefined);
-            const newest = rows.at(-1);
-            const metrics = newest ? rowMetricsMap(newest) : new Map<string, unknown>();
-            const primary = spec.metrics[0]!;
-            const secondary = spec.metrics.find(m => m.includes("userPerceived")) ?? spec.metrics[1]!;
-            return [
-              spec.label,
-              formatDateTime(end),
-              newest ? formatMetricValue(primary, metrics.get(primary), spec.rateMetrics) : "(no data)",
-              newest && secondary !== primary ? formatMetricValue(secondary, metrics.get(secondary), spec.rateMetrics) : "-",
-              newest ? formatMetricValue("distinctUsers", metrics.get("distinctUsers"), spec.rateMetrics) : "-",
-              String(rows.length),
-            ].join("\t");
+            try {
+              const { end, rows } = await queryVitalMetric(credentials, packageName, spec, options.days, undefined, { overview: true });
+              const newest = rows.at(-1);
+              const metrics = newest ? rowMetricsMap(newest) : new Map<string, unknown>();
+              const primary = spec.metrics[0]!;
+              const secondary = spec.metrics.find(m => m.includes("userPerceived")) ?? spec.metrics[1]!;
+              return [
+                spec.label,
+                formatDateTime(end),
+                newest ? formatMetricValue(primary, metrics.get(primary), spec.rateMetrics) : "(no data)",
+                newest && secondary !== primary ? formatMetricValue(secondary, metrics.get(secondary), spec.rateMetrics) : "-",
+                newest ? formatMetricValue("distinctUsers", metrics.get("distinctUsers"), spec.rateMetrics) : "-",
+                String(rows.length),
+              ].join("\t");
+            } catch (error) {
+              if (spec.gamesOnly && error instanceof ProviderRequestError && error.status === 403 && /only accessible to games/iu.test(error.message)) {
+                return `${spec.label}\t-\t(games only)\t-\t-\t0`;
+              }
+              throw error;
+            }
           })),
           playReporting(credentials, `/v1beta1/apps/${encodeURIComponent(packageName)}/anomalies`, { query: { pageSize: "20" } }),
         ]);
@@ -406,14 +422,15 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
       }
       const spec = VITALS[options.metric]!;
       const { end, rows } = await queryVitalMetric(credentials, packageName, spec, options.days, options.by);
-      const header = ["date", ...(options.by ? [options.by] : []), ...spec.metrics].join("\t");
+      const activeDims = [...new Set([...(spec.requiredDimensions ?? []), ...(options.by ? [options.by] : [])])];
+      const header = ["date", ...(activeDims.length ? [activeDims.join("/")] : []), ...spec.metrics].join("\t");
       const sorted = [...rows].reverse();
       const lines = sorted.map(row => {
         const dt = parseDateTime(row.startTime);
         const metrics = rowMetricsMap(row);
         return [
           dt ? formatDateTime(dt) : "-",
-          ...(options.by ? [dimensionText(row) || "-"] : []),
+          ...(activeDims.length ? [dimensionText(row) || "-"] : []),
           ...spec.metrics.map(m => formatMetricValue(m, metrics.get(m), spec.rateMetrics)),
         ].join("\t");
       });
@@ -548,11 +565,11 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
   voided_purchases: {
     effect: "read", requires: ["oauthToken"],
     parse(statement) {
-      const usage = "use <com.example.app> [days=1-30] [limit=1-50]";
+      const usage = "use <com.example.app> [days=1-29] [limit=1-50]";
       if (!PACKAGE_NAME.test(statement.target)) return usage;
       const options = keyedOptions(statement.text, ["days", "limit"], usage);
       if (typeof options === "string") return options;
-      const days = positiveIntOption(options, "days", 30, 30);
+      const days = positiveIntOption(options, "days", 28, 29);
       if (typeof days === "string") return days;
       const limit = positiveIntOption(options, "limit", 30, 50);
       if (typeof limit === "string") return limit;
