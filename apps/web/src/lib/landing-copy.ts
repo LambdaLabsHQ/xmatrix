@@ -92,9 +92,9 @@ const en: LandingCopy = {
   why: {
     title: "Why xMatrix", others: "Juggling tabs & terminals",
     rows: [
-      ["Where things stand", "One live document per project, always up to date.", "Scattered across terminals, chat threads, and PRs."],
+      ["Where things stand", "Live Pages record where things stand; agents update them as their work lands.", "Scattered across terminals, chat threads, and PRs."],
       ["Your attention", "Check the page on your schedule—no constant interruptions.", "Every agent pings you for input, one window at a time."],
-      ["Parallel work", "Dozens of threads running in parallel, reporting to one page.", "One agent per tab, with you copy-pasting between them."],
+      ["Parallel work", "Dozens of threads running in parallel, each writing results back to the Pages.", "One agent per tab, with you copy-pasting between them."],
       ["Across machines", "Agents on every machine you own work in one shared Space.", "Each agent is trapped on the single machine it runs on."],
       ["Shared decisions", "Write a decision once; every human and agent reads it.", "Re-explain to every agent, then repeat in the next session."],
       ["Human in the loop", "Edit any line directly—an agent on that paragraph waits for you.", "Interrupt the agent, explain again, and start over."],
@@ -172,7 +172,7 @@ const zh: LandingCopy = {
   why: {
     title: "为什么选择 xMatrix", others: "多开终端与窗口",
     rows: [
-      ["项目现状", "每个项目一份实时文档，随工作推进自动更新。", "分散在终端、聊天记录和各个 PR 里，全靠手动拼凑。"],
+      ["项目现状", "实时页面记录项目现状，智能体完成工作时随手更新。", "分散在终端、聊天记录和各个 PR 里，全靠手动拼凑。"],
       ["你的注意力", "想看时打开文档即可，不再被窗口轮番打断。", "每个智能体都在催你回复，一个窗口接一个窗口。"],
       ["多线并行", "几十条对话同时推进，各自把结果写回文档。", "一个标签页盯一个智能体，上下文全靠复制粘贴。"],
       ["跨机协作", "名下所有机器的智能体，接入同一个 Space。", "每个智能体被困在单台机器里，彼此看不见。"],
@@ -255,7 +255,7 @@ const zhTw: LandingCopy = {
   why: {
     title: "為什麼選擇 xMatrix", others: "多開終端機與視窗",
     rows: [
-      ["專案現況", "每個專案一份即時文件，隨工作推進自動更新。", "分散在終端機、聊天紀錄與各個 PR 裡，全靠手動拼湊。"],
+      ["專案現況", "即時頁面記錄專案現況，代理完成工作時隨手更新。", "分散在終端機、聊天紀錄與各個 PR 裡，全靠手動拼湊。"],
       ["你的注意力", "想看時打開文件即可，不再被視窗輪番打斷。", "每個代理都在催你回覆，一個視窗接一個視窗。"],
       ["多線並行", "數十條對話同時推進，各自把結果寫回文件。", "一個分頁盯一個代理，上下文全靠複製貼上。"],
       ["跨機協作", "名下所有機器的代理，接入同一個 Space。", "每個代理被困在單台機器裡，彼此看不見。"],
