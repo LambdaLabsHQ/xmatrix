@@ -418,3 +418,33 @@ test("handoff completion lists parameters on empty query and insertHandoffIntoDr
     cursor: "@Codex:1:handoff:@".length,
   });
 });
+
+test("a later condition completes from its value alone, like the first", () => {
+  const { launchFieldCandidates } = require("./auto-launch-completion.ts");
+  const registrations = [{ key: { spaceId: "s", ownerUserId: "u", machineId: "machine:1", harness: "codex" },
+    machineName: "Laptop", state: "enabled", routingReady: true, models: ["gpt-5.5"], modelCatalog: [],
+    live: { machine: { online: true } } }];
+  const targets = { repos: [{ value: "owner/lapis" }, { value: "owner/web" }], workspaces: [] };
+  for (const body of ["@codex repo:owner/web Lap", "@machine:Laptop repo:owner/web gpt", "@auto effort:high 高"]) {
+    const active = findLaunchFieldCompletion(body, body.length);
+    assert.ok(active, body);
+    assert.equal(active.query, body.slice(body.lastIndexOf(" ") + 1));
+  }
+  // Prose after a word, or an unknown field, is still not a condition.
+  assert.equal(findLaunchFieldCompletion("@codex Fix the Lap", 18), null);
+  assert.equal(findLaunchFieldCompletion("@codex mode:once", 16), null);
+  assert.equal(findLaunchFieldCompletion("Lap", 3), null);
+
+  const all = autoLaunchCandidates(targets, { harness: "codex", repo: "owner/web" }, registrations);
+  assert.deepEqual(launchFieldCandidates(all, "Lap").map(item => item.name), ["machine:Laptop"]);
+  assert.deepEqual(launchFieldCandidates(all, "gpt").map(item => item.name), ["model:gpt-5.5"]);
+  assert.deepEqual(launchFieldCandidates(all, "zzz"), []);
+  // Field names still work, and a value starting like a field is offered too.
+  assert.ok(launchFieldCandidates(all, "mach").some(item => item.name === "machine:Laptop"));
+  const fresh = autoLaunchCandidates(targets, { harness: "codex" }, registrations);
+  assert.deepEqual(launchFieldCandidates(fresh, "lap").map(item => item.name).sort(), ["machine:Laptop", "repo:owner/lapis"]);
+  const body = "@codex repo:owner/web Lap";
+  const picked = completeLaunchFragment(body, findLaunchFieldCompletion(body, body.length),
+    launchFieldCandidates(all, "Lap")[0].launchTags);
+  assert.equal(picked.value, "@codex repo:owner/web machine:Laptop ");
+});

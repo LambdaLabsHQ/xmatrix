@@ -26,11 +26,15 @@ import type { ActiveMention, MentionCandidate } from "./mention-complete";
 export function findLaunchFieldCompletion(body: string, cursor: number): ActiveMention | null {
   if (cursor < 0) return null;
   const before = body.slice(0, cursor);
-  const match = /(?:^|\s)([a-zA-Z][a-zA-Z0-9_.-]*)(?::("(?:[^"]|"")*"?|[^\s]*))?$/u.exec(before);
+  const match = /(?:^|\s)([a-zA-Z][a-zA-Z0-9_.-]*)(?::("(?:[^"]|"")*"?|[^\s]*))?$/u.exec(before) ??
+    // A bare value (`Laptop`, `/work/app`, `高`) also continues a summon: the
+    // field is implied by whichever condition the value names.
+    /(?:^|\s)([^\s@＠:"]+)$/u.exec(before);
   if (!match) return null;
   const field = match[1]!;
   const hasColon = match[0].includes(":");
-  if (!field.startsWith("param.") && field !== "param" && field !== "fast" && !AUTO_LAUNCH_FIELDS.some(key => key !== "parameters" && (hasColon ? key === field : key.startsWith(field)))) return null;
+  if (hasColon && !field.startsWith("param.") && field !== "param" && field !== "fast" &&
+      !AUTO_LAUNCH_FIELDS.some(key => key !== "parameters" && key === field)) return null;
   const start = match.index + (/^\s/u.test(match[0]) ? 1 : 0);
   const prefix = body.slice(0, start);
   if (!summonAtCompletion(prefix, start)) return null;
@@ -47,6 +51,36 @@ export function findLaunchFieldCompletion(body: string, cursor: number): ActiveM
     tokenEnd = index + 1;
   }
   return { start, end: cursor, tokenEnd, query: before.slice(start) };
+}
+
+/** A word that names a field or may still become one (`rep`, `param.`, `repo:x`), not only a value. */
+export function launchFieldPrefix(word: string): boolean {
+  if (word.includes(":")) return true;
+  const typed = word.toLowerCase();
+  return typed.startsWith("param.") || "param".startsWith(typed) || "fast".startsWith(typed) ||
+    AUTO_LAUNCH_FIELDS.some(key => key !== "parameters" && key.startsWith(typed));
+}
+
+/** Does a condition row's value (or Agent name) begin with, or have a word beginning with, `typed`? */
+function launchValueMatches(candidate: MentionCandidate, typed: string): boolean {
+  const name = candidate.name.replace(/^[@＠]/u, "");
+  const separator = name.indexOf(":");
+  const value = (separator >= 0 ? name.slice(separator + 1) : name).toLowerCase();
+  return value.startsWith(typed) || value.split(/[^\p{L}\p{N}]+/u).some(word => word && word.startsWith(typed));
+}
+
+/**
+ * Candidates for a word typed after a summon. A field name or `field:value`
+ * filters as before; a bare value (`Lap`) finds every condition whose value
+ * it names, so the second condition needs no more typing than the first.
+ */
+export function launchFieldCandidates(candidates: MentionCandidate[], query: string): MentionCandidate[] {
+  if (!query || query.includes(":")) return filterLaunchCandidates(candidates, query);
+  const typed = query.toLowerCase();
+  const byValue = candidates.filter(candidate => candidate.id !== "launch:auto" && launchValueMatches(candidate, typed));
+  if (!launchFieldPrefix(query)) return byValue;
+  const byField = filterLaunchCandidates(candidates, query);
+  return [...byField, ...byValue.filter(candidate => !byField.includes(candidate))];
 }
 
 export function filterLaunchCandidates(candidates: MentionCandidate[], query: string): MentionCandidate[] {

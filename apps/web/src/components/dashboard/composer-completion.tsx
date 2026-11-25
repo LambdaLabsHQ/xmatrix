@@ -49,7 +49,7 @@ import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
 import { HARNESS_PROFILE_COPY } from "@/lib/harness-profile-copy";
 import { useOnboardingLocale } from "@/lib/onboarding-locale";
-import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, handoffSuccessorConditionCandidates, summonAtCompletion, summonConditionCandidates, summonStartCandidates } from "./auto-launch-completion";
+import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, launchFieldCandidates, launchFieldPrefix, completeLaunchFragment, handoffSuccessorConditionCandidates, summonAtCompletion, summonConditionCandidates, summonStartCandidates } from "./auto-launch-completion";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
@@ -264,7 +264,9 @@ export function useComposerCompletion({
   );
   /* Launch targets are the Space's, so a new conversation — no Channel yet —
      completes the same repos as every conversation in its Space. */
-  const launchCompletionActive = Boolean(fieldCompletion || continuingLaunch ||
+  // A bare word after a summon may be a value or the start of prose: it lists
+  // matching conditions but never opens the targets' loading/error status.
+  const launchCompletionActive = Boolean(fieldCompletion && launchFieldPrefix(fieldCompletion.query) || continuingLaunch ||
     preliminaryMentionCompletion.stage === "target" && preliminaryMentionCompletion.active);
   const launchTargetSpaceId = space?.id ?? channel?.spaceId;
   const launchTargetsQuery = useQuery(spaceLaunchTargetsQuery(user?.id, token, launchTargetSpaceId, enabled));
@@ -382,7 +384,7 @@ export function useComposerCompletion({
     // auto starts a summon; it is not a condition on one. After a summon it is
     // offered only to an `@` typed there, which begins the next summon.
     const typingSummon = !fieldCompletion && Boolean(registrationMentionCompletion.active);
-    const choices = [...filterLaunchCandidates((bodySummon ? allChoices.filter(item =>
+    const choices = [...(fieldCompletion ? launchFieldCandidates : filterLaunchCandidates)((bodySummon ? allChoices.filter(item =>
       item.id !== "launch:auto" || typingSummon) : summonStartCandidates(allChoices)).filter(item =>
       bodySummon || !item.launchTags?.harness ||
       !registrationMentionCompletion.candidates.some(candidate => candidate.invocationTarget &&
