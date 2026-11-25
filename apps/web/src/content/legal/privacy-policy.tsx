@@ -544,6 +544,15 @@ export function PrivacyPolicyContent() {
           retention features that the product does not provide.
         </p>
         <p>
+          Some connected providers limit how long results obtained through their APIs may be stored.
+          For those connectors, currently Google Cloud, Gmail, Google Docs, Drive and Sheets, and Google
+          Calendar, xMatrix deletes the original results (command receipts, inbound events, execution
+          summaries, and private results) 29 days after they were returned, and at once when the
+          connection is disconnected. Records that you, your members, or your Agents write from those
+          results, such as Pages, notes, or files, are your Customer Data: you decide what to keep and
+          are responsible for keeping it consistent with that provider&apos;s terms.
+        </p>
+        <p>
           Client replicas and media caches follow their documented bounded lifecycle and current access
           controls. Offline or lost devices may retain previously downloaded data until local cleanup.
           Instance Trace follows the exact host and browser boundaries in Section 5.
