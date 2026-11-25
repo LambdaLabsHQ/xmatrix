@@ -86,6 +86,38 @@ function rendered(result: Record<string, unknown>): string {
   }).join("\n");
 }
 
+/** Google refused the server itself (project not enrolled, client not an agent, service off): the REST path still serves. */
+export class WorkspaceMcpUnavailable extends ProviderRequestError {}
+
+/**
+ * Call one tool and return its structured answer. A refusal of the server
+ * rather than of the call becomes `WorkspaceMcpUnavailable`, so a curated
+ * read can fall back to REST while Google rolls access out.
+ */
+export async function workspaceMcpTool(server: WorkspaceMcpServer, credentials: Readonly<Record<string, string>>, product: string,
+  tool: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  let result: Record<string, unknown>;
+  try {
+    result = await workspaceMcp(server, credentials, product, "tools/call", { name: tool, arguments: args });
+  } catch (error) {
+    if (error instanceof ProviderRequestError && [401, 403, 404].includes(error.status)) {
+      throw new WorkspaceMcpUnavailable(error.status, error.message);
+    }
+    throw error;
+  }
+  const text = rendered(result);
+  if (result.isError === true) {
+    if (/Developer Preview Program|not enabled|has not been used in project|AI-powered agent/iu.test(text)) {
+      throw new WorkspaceMcpUnavailable(503, `Google's ${server} MCP server is not available to this project: ${text.slice(0, 200)}`);
+    }
+    throw new ProviderRequestError(422, `${tool} failed: ${text.slice(0, 300)}`);
+  }
+  if (result.structuredContent && typeof result.structuredContent === "object") return record(result.structuredContent);
+  try { return record(JSON.parse(text)); } catch {
+    throw new ProviderRequestError(502, `Google's ${server} MCP ${tool} returned no structured answer`);
+  }
+}
+
 /** `mcp_tools`, `mcp_read` and `mcp_write` for a connector whose token serves `servers`. */
 export function workspaceMcpActions(servers: readonly WorkspaceMcpServer[], product: string): Record<string, ConnectorAction> {
   const serverOf = (value: string) => (servers as readonly string[]).includes(value) ? value as WorkspaceMcpServer : undefined;
