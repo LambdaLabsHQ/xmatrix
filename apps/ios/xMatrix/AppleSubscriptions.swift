@@ -132,3 +132,44 @@ final class AppleSubscriptions {
         NSError(domain: "sh.xmatrix.app.subscriptions", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 }
+
+/// Gentle, locally-throttled App Store review prompt triggered only after
+/// signed-in engagement across multiple distinct days.
+enum StoreReviewPrompt {
+    static let minActiveDays = 3
+    static let cooldownSeconds: TimeInterval = 90 * 86_400
+    private static let maxStoredDays = 10
+    private static let activeDaysKey = "xmatrix.storeReview.activeDays"
+    private static let lastPromptedKey = "xmatrix.storeReview.lastPromptedAt"
+
+    static func utcDayKey(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    static func recordAndShouldPrompt(defaults: UserDefaults = .standard, now: Date = Date()) -> Bool {
+        var days = Set(defaults.stringArray(forKey: activeDaysKey) ?? [])
+        days.insert(utcDayKey(now))
+        let trimmed = Array(days.sorted().suffix(maxStoredDays))
+        defaults.set(trimmed, forKey: activeDaysKey)
+
+        guard trimmed.count >= minActiveDays else { return false }
+        let lastPrompted = defaults.double(forKey: lastPromptedKey)
+        let nowSeconds = now.timeIntervalSince1970
+        guard lastPrompted <= 0 || nowSeconds - lastPrompted >= cooldownSeconds else { return false }
+
+        defaults.set(nowSeconds, forKey: lastPromptedKey)
+        return true
+    }
+
+    @MainActor
+    static func requestIfEligible(in scene: UIWindowScene?, defaults: UserDefaults = .standard, now: Date = Date()) -> Bool {
+        guard let scene, recordAndShouldPrompt(defaults: defaults, now: now) else { return false }
+        AppStore.requestReview(in: scene)
+        return true
+    }
+}

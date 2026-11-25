@@ -766,4 +766,23 @@ final class WebContainerTests: XCTestCase {
             ) == true
         )
     }
+
+    func testStoreReviewPromptRequiresThreeDistinctDaysAndRespectsCooldown() throws {
+        let suite = "sh.xmatrix.app.tests.review.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let day1 = Date(timeIntervalSince1970: 1_795_564_800) // 2026-11-25T00:00:00Z
+        let day2 = day1.addingTimeInterval(86_400)
+        let day3 = day1.addingTimeInterval(2 * 86_400)
+
+        XCTAssertFalse(StoreReviewPrompt.recordAndShouldPrompt(defaults: defaults, now: day1))
+        XCTAssertFalse(StoreReviewPrompt.recordAndShouldPrompt(defaults: defaults, now: day1.addingTimeInterval(3_600)))
+        XCTAssertFalse(StoreReviewPrompt.recordAndShouldPrompt(defaults: defaults, now: day2))
+        XCTAssertTrue(StoreReviewPrompt.recordAndShouldPrompt(defaults: defaults, now: day3))
+        XCTAssertFalse(StoreReviewPrompt.recordAndShouldPrompt(defaults: defaults, now: day3.addingTimeInterval(3_600)))
+        XCTAssertFalse(StoreReviewPrompt.recordAndShouldPrompt(defaults: defaults, now: day3.addingTimeInterval(89 * 86_400)))
+        XCTAssertTrue(StoreReviewPrompt.recordAndShouldPrompt(defaults: defaults, now: day3.addingTimeInterval(90 * 86_400)))
+        XCTAssertTrue(NativeBridge.injectionScript.contains("requestStoreReview: () => invoke(\"requestStoreReview\")"))
+    }
 }

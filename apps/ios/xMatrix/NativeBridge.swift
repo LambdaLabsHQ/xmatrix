@@ -77,6 +77,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         getNotificationSettings: () => invoke("getNotificationSettings"),
         requestNotifications: () => invoke("requestNotifications"),
         pushDevice: () => invoke("pushDevice"),
+        requestStoreReview: () => invoke("requestStoreReview"),
         notify: (payload) => invoke("notify", payload),
         openExternal: (url) => invoke("openExternal", { url }),
         authorizeInBrowser: (request) => invoke("authorizeInBrowser", request),
@@ -202,6 +203,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
                 return NSNull()
             }
             return ["platform": "apns", "token": token]
+
+        case "requestStoreReview":
+            return StoreReviewPrompt.requestIfEligible(in: webView?.window?.windowScene)
 
         case "openExternal":
             guard

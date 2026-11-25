@@ -103,6 +103,11 @@ export type DesktopBridge = {
    * The Mac app says so with `app`, since Apple addresses it separately.
    */
   pushDevice?: () => Promise<{ platform: "apns" | "fcm"; token: string; app?: "mac" } | null>;
+  /**
+   * Ask the native mobile shell to show the OS store review prompt if its
+   * local engagement threshold and cooldown are met. Silently no-ops otherwise.
+   */
+  requestStoreReview?: () => Promise<boolean | void>;
   notify: (payload: DesktopNotification) => Promise<boolean | void>;
   openExternal: (url: string) => Promise<void>;
   getClipboardImages?: () => Promise<DesktopClipboardImage[]>;
