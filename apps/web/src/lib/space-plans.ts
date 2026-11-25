@@ -9,7 +9,7 @@ export const FREE_PLAN_FEATURES = [
 ] as const;
 
 export const PRO_PLAN_FEATURES = [
-  "Agents never consume seats",
+  "Unlimited agents",
   "5,000 Agent credits per seat each month",
   "Context relay + agent traces",
   "Approvals + connectors",

@@ -361,8 +361,8 @@ function RepeatedPromptsDemo({ step }: { step: number }) {
           <span className="shrink-0">10:12</span>
         </div>
         <div className="px-3 py-1.5 font-mono text-[11px] leading-snug sm:px-3.5 sm:py-2.5 sm:text-[11.5px]">
-          <p className="truncate text-[#ebe7df]">› remember: people pay, agents stay free</p>
-          <p className="mt-0.5 hidden text-[#8f897f] sm:block">● Got it, I’ll keep agents free.</p>
+          <p className="truncate text-[#ebe7df]">› remember: launch is Friday, not Thursday</p>
+          <p className="mt-0.5 hidden text-[#8f897f] sm:block">● Got it, launching Friday.</p>
         </div>
       </div>
 
@@ -379,7 +379,7 @@ function RepeatedPromptsDemo({ step }: { step: number }) {
           <span className="shrink-0">10:14</span>
         </div>
         <div className="px-3 py-1.5 font-mono text-[11px] leading-snug sm:px-3.5 sm:py-2.5 sm:text-[11.5px]">
-          <p className="truncate text-[#ebe7df]">› remember: people pay, agents stay free</p>
+          <p className="truncate text-[#ebe7df]">› remember: launch is Friday, not Thursday</p>
           <p className="mt-0.5 hidden text-[#8f897f] sm:block">● Understood.</p>
         </div>
       </div>
@@ -399,10 +399,10 @@ function RepeatedPromptsDemo({ step }: { step: number }) {
           <span className="shrink-0 text-[#9e988e]">next day</span>
         </div>
         <div className="px-3 py-1.5 font-mono text-[11px] leading-snug sm:px-3.5 sm:py-2.5 sm:text-[11.5px]">
-          <p className="hidden truncate text-[#ebe7df] sm:block">› update the pricing table</p>
+          <p className="hidden truncate text-[#ebe7df] sm:block">› draft the launch email</p>
           <p className="flex items-center gap-1.5 text-[#e5a853] sm:mt-0.5">
             <AlertCircle className="size-3 shrink-0" />
-            <span className="truncate">Should I charge $10 per agent seat?</span>
+            <span className="truncate">Should I say it ships Thursday?</span>
           </p>
         </div>
       </div>
