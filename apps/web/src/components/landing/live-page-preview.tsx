@@ -36,7 +36,7 @@ type Slots = typeof START;
 // Where a pass ends, which is all a reader who asks for less motion sees.
 const DONE: Slots = { ...START,
   stands: "> Mobile and video are done. Docs go out Thursday. Launching Friday.",
-  decided: "- Ship to every Space on Friday, behind one switch.\n- People pay. Agents stay free.",
+  decided: "- Ship to every Space on Friday, behind one switch.\n- Docs stay in plain words.",
   web: "- [x] **Web editor** · @claude — merged, live in `v1.0.464`",
   mobile: "- [x] **Mobile app** · @codex — merged, in `TestFlight 2.4`",
   video: "- [x] **Launch video** · @cursor — done, on the launch page" };
@@ -158,8 +158,8 @@ async function play(stage: Stage, stopped: () => boolean) {
   // A person settles a question, once, for everyone.
   stage.say(PERSON, "editing", "one switch.");
   await sleep(400);
-  await stream(PERSON, "decided", "- Ship to every Space on Friday, behind one switch.\n- ", "People pay. Agents stay free.", 60);
-  settle(PERSON, "stay free.");
+  await stream(PERSON, "decided", "- Ship to every Space on Friday, behind one switch.\n- ", "Docs stay in plain words.", 60);
+  settle(PERSON, "plain words.");
   await sleep(500);
   const mobile = stream(CODEX, "mobile", "- [x] **Mobile app** · @codex — ", "merged, in `TestFlight 2.4`", 32);
   await sleep(600);

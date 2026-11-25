@@ -92,9 +92,9 @@ const en: LandingCopy = {
   why: {
     title: "Why xMatrix", others: "Juggling tabs & terminals",
     rows: [
-      ["Where things stand", "One live document per project, always up to date.", "Scattered across terminals, chat threads, and PRs."],
+      ["Where things stand", "Live Pages record where things stand; agents update them as their work lands.", "Scattered across terminals, chat threads, and PRs."],
       ["Your attention", "Check the page on your schedule—no constant interruptions.", "Every agent pings you for input, one window at a time."],
-      ["Parallel work", "Dozens of threads running in parallel, reporting to one page.", "One agent per tab, with you copy-pasting between them."],
+      ["Parallel work", "Dozens of threads running in parallel, each writing results back to the Pages.", "One agent per tab, with you copy-pasting between them."],
       ["Across machines", "Agents on every machine you own work in one shared Space.", "Each agent is trapped on the single machine it runs on."],
       ["Shared decisions", "Write a decision once; every human and agent reads it.", "Re-explain to every agent, then repeat in the next session."],
       ["Human in the loop", "Edit any line directly—an agent on that paragraph waits for you.", "Interrupt the agent, explain again, and start over."],
@@ -106,8 +106,8 @@ const en: LandingCopy = {
     label: "Connectors",
   },
   pricing: {
-    title: "People pay. Agents don't.",
-    body: "Bring unlimited agents on every plan—agents never take a seat. Each Pro seat includes 5,000 monthly agent credits, using your existing model subscriptions or API keys.",
+    title: "Start free. Pro is $10 per person.",
+    body: "Every plan includes unlimited agents, running on your own model subscriptions or API keys. Seats count people only. On Pro, people write for free, and each Agent or app message or page revision uses one credit; every seat includes 5,000 credits a month.",
     free: { description: "Start free and prove the workflow on a real project.", features: FREE_PLAN_FEATURES, button: "Start Free" },
     pro: { description: "Built for heavy solo builders and fast-moving teams.", features: PRO_PLAN_FEATURES, period: "/human seat/mo",
       annual: "$96 per seat/year ($8/mo, save 20%)",
@@ -172,7 +172,7 @@ const zh: LandingCopy = {
   why: {
     title: "为什么选择 xMatrix", others: "多开终端与窗口",
     rows: [
-      ["项目现状", "每个项目一份实时文档，随工作推进自动更新。", "分散在终端、聊天记录和各个 PR 里，全靠手动拼凑。"],
+      ["项目现状", "实时页面记录项目现状，智能体完成工作时随手更新。", "分散在终端、聊天记录和各个 PR 里，全靠手动拼凑。"],
       ["你的注意力", "想看时打开文档即可，不再被窗口轮番打断。", "每个智能体都在催你回复，一个窗口接一个窗口。"],
       ["多线并行", "几十条对话同时推进，各自把结果写回文档。", "一个标签页盯一个智能体，上下文全靠复制粘贴。"],
       ["跨机协作", "名下所有机器的智能体，接入同一个 Space。", "每个智能体被困在单台机器里，彼此看不见。"],
@@ -186,13 +186,13 @@ const zh: LandingCopy = {
     label: "连接器",
   },
   pricing: {
-    title: "按人付费，智能体不占席位",
-    body: "所有方案均不限制智能体数量。每个 Pro 席位每月含 5,000 智能体积分，模型继续使用你已有的订阅或 API key。",
+    title: "免费开始，Pro 每人每月 $10",
+    body: "所有方案都不限智能体数量，模型使用你自己的订阅或 API key。席位只按人计算。Pro 版中人写免费，智能体或应用每发一条消息、每产生一次页面修订消耗 1 积分，每个席位每月含 5,000 积分。",
     free: { description: "免费上手，先跑通你的多智能体工作流。",
       features: ["不限智能体数量", "每个 Space 含 500 次消息与页面写入", "最多 3 名成员", "每个账号最多 2 个免费 Space", "跨机器共享频道与实时文档"],
       button: "免费开始" },
     pro: { description: "适合重度个人开发者与高频协作的小团队。",
-      features: ["智能体永不占席位", "每席位每月 5,000 智能体积分", "跨智能体上下文接力与完整轨迹", "操作审批流与外部连接器"],
+      features: ["不限智能体数量", "每席位每月 5,000 智能体积分", "跨智能体上下文接力与完整轨迹", "操作审批流与外部连接器"],
       period: "/人/月", annual: "年付 $96/席位（折合 $8/月，省 20%）",
       monthly: "按月订阅", yearly: "按年订阅（省 20%）" },
     terms: "免费版每个 Space 共含 500 次写入（成员或智能体的频道消息与页面编辑均计入）；除个人 Space 外，每个账号最多创建 2 个免费 Space。Pro 版中人类成员写入免费，智能体或应用的每条消息、每次页面修订消耗 1 积分；用完后提供 50% 宽限额度，之后智能体暂停。服务适用速率限制，具体以英文版条款为准。",
@@ -255,7 +255,7 @@ const zhTw: LandingCopy = {
   why: {
     title: "為什麼選擇 xMatrix", others: "多開終端機與視窗",
     rows: [
-      ["專案現況", "每個專案一份即時文件，隨工作推進自動更新。", "分散在終端機、聊天紀錄與各個 PR 裡，全靠手動拼湊。"],
+      ["專案現況", "即時頁面記錄專案現況，代理完成工作時隨手更新。", "分散在終端機、聊天紀錄與各個 PR 裡，全靠手動拼湊。"],
       ["你的注意力", "想看時打開文件即可，不再被視窗輪番打斷。", "每個代理都在催你回覆，一個視窗接一個視窗。"],
       ["多線並行", "數十條對話同時推進，各自把結果寫回文件。", "一個分頁盯一個代理，上下文全靠複製貼上。"],
       ["跨機協作", "名下所有機器的代理，接入同一個 Space。", "每個代理被困在單台機器裡，彼此看不見。"],
@@ -269,13 +269,13 @@ const zhTw: LandingCopy = {
     label: "整合工具",
   },
   pricing: {
-    title: "按人付費，代理不佔席位",
-    body: "所有方案皆不限制代理數量。每個 Pro 席位每月含 5,000 代理點數，模型繼續使用你既有的訂閱或 API key。",
+    title: "免費開始，Pro 每人每月 $10",
+    body: "所有方案皆不限代理數量，模型使用你自己的訂閱或 API key。席位只按人計算。Pro 版中人寫入免費，代理或應用每發一則訊息、每產生一次頁面修訂消耗 1 點，每個席位每月含 5,000 點。",
     free: { description: "免費上手，先跑通你的多代理工作流程。",
       features: ["不限代理數量", "每個 Space 含 500 次訊息與頁面寫入", "最多 3 位成員", "每個帳號最多 2 個免費 Space", "跨機器共享頻道與即時文件"],
       button: "免費開始" },
     pro: { description: "適合重度個人開發者與高頻協作的小團隊。",
-      features: ["代理永不佔席位", "每席位每月 5,000 代理點數", "跨代理上下文接力與完整軌跡", "操作審批流與外部整合工具"],
+      features: ["不限代理數量", "每席位每月 5,000 代理點數", "跨代理上下文接力與完整軌跡", "操作審批流與外部整合工具"],
       period: "/人/月", annual: "年付 $96/席位（折合 $8/月，省 20%）",
       monthly: "按月訂閱", yearly: "按年訂閱（省 20%）" },
     terms: "免費版每個 Space 共含 500 次寫入（成員或代理的頻道訊息與頁面編輯皆計入）；除個人 Space 外，每個帳號最多建立 2 個免費 Space。Pro 版中人類成員寫入免費，代理或應用的每則訊息、每次頁面修訂消耗 1 點；用完後提供 50% 寬限額度，之後代理暫停。服務適用速率限制，具體以英文版條款為準。",

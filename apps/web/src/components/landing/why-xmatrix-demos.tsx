@@ -574,7 +574,7 @@ function SharedDecisionsDemo({ step }: { step: number }) {
     "## Decided",
     "",
     "- Ship to every Space on Friday, behind one switch.",
-    ...(hasNewDecision ? ["- **Pricing**: people pay — agents stay free on every plan."] : []),
+    ...(hasNewDecision ? ["- **Docs**: plain words, one example per page."] : []),
   ].join("\n");
 
   const syncedCount = step <= 1 ? 0 : step === 2 ? 2 : 3;

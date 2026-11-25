@@ -328,7 +328,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         problem:
           "Product Hunt 與 Reddit 開發者雖然肯定 Paradev 的並行 worktree 能力，卻普遍反映同時盯著數十個獨立終端機、diff 面板與重疊分支會造成嚴重的視覺雜亂與審查疲勞，而且缺乏內建的雲端自動化支出上限，底層 LLM 帳單很容易失控。",
         xmatrixAnswer:
-          "xMatrix 把操作重心從「盯緊每個終端機」翻轉為「每個專案只讀一份即時頁面」。對話在背景推進，你只需瀏覽頁面，有決策或例外狀況時再切入討論串。",
+          "xMatrix 把操作重心從「盯緊每個終端機」翻轉為「讀專案的即時頁面」。對話在背景推進，你只需瀏覽頁面，有決策或例外狀況時再切入討論串。",
       },
       {
         title: "遠端與團隊協作需跨過 US$20–$60／席位的高額付費牆",
@@ -898,7 +898,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
         detail: "把你的筆電、建置主機與自管伺服器全數註冊到同一 Space，讓 @auto 自動路由至最有餘裕的主機與供應商。",
       },
       {
-        title: "為每個專案建立一份即時頁面",
+        title: "用即時頁面記錄專案",
         detail: "不必再在每個新討論串重複交代架構決策——在專案頁面寫一次，所有工具都會自動讀取。",
       },
     ],

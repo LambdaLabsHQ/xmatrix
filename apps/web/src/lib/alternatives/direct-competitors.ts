@@ -330,7 +330,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
         problem:
           "Developers on Product Hunt and Reddit praise Paradev's parallel worktrees, yet consistently report visual clutter and review fatigue when juggling dozens of independent terminals, diff panes, and overlapping branches—plus runaway underlying LLM bills with no built-in cloud automation spend cap.",
         xmatrixAnswer:
-          "xMatrix flips the interface from watching every terminal to reading one living Page per project. Conversations run in the background; you inspect the Page and step into a thread only for decisions or exceptions.",
+          "xMatrix flips the interface from watching every terminal to reading the project's living Pages. Conversations run in the background; you inspect the Page and step into a thread only for decisions or exceptions.",
       },
       {
         title: "Steep $20–$60/seat paywalls for remote and team collaboration",
