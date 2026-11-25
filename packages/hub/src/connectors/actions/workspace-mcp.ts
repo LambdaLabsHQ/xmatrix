@@ -1,8 +1,8 @@
-import { record } from "../command-support";
-import { providerJson, ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
-import { quoteRetrievedText, requireText } from "./common";
 import { googleHeaders } from "./google-headers";
+import { quoteRetrievedText, requireText } from "./common";
+import { ProviderRequestError, providerJson } from "../http";
+import { record } from "../command-support";
 
 /*
  * Google Workspace MCP servers (https://developers.google.com/workspace/guides/configure-mcp-servers).
