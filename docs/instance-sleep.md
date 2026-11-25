@@ -36,16 +36,18 @@ Channel message wakes it.
 | --- | --- | --- | --- |
 | `sleeping` | Its daemon reported a natural exit with `restReason: "sleeping"` | Yes | Greyed avatar |
 | `interrupted` | A persistent, resumable registration Run exited without a stop and without a sleep (crash, machine or wrapper restart) | Yes | Greyed avatar with a warning badge |
-| `wake_failed` | A wake was refused or its resume failed; `rest_reason` holds the failure code and what the failing step said | No; only `:reborn` | Greyed avatar with a red warning badge; the dock tooltip shows the reason |
+| `wake_failed` | A wake was refused, its resume failed, or a resumable Run's wrapper reported a failure before its provider was ready. `rest_reason` shows what failed. | No; only `:reborn` | Greyed avatar with a red warning badge; the dock tooltip shows the reason |
 | `stopped` | An exact stop succeeded (`@name:N:stop`, the dock Stop, `/kill all`, from a Human or an Agent), or a stop targeted an Instance that was already resting | No; only `:reborn` | Not in the dock or Channel list |
-| `NULL` | The Instance is live, or its offline state predates rest states, or its Run was never resumable (automation, the retired management agent and Channel About Runs, startup failure) | No | Not shown |
+| `NULL` | The Instance is live, its offline state predates rest states, or its Run was never resumable (automation, the retired management agent and Channel About Runs, or a first start that ended without an explicit wrapper failure) | No | Not shown |
 
 A live connection claim clears `rest_state` and `rest_reason`. A wake or reborn
 keeps them until the successor connects, so a waking Instance stays visible.
 
 "Persistent, resumable" means: the Run has a `resumeSessionKey`, is not routed as a management/Focus/Channel About Run
-or an Automation occurrence, and got past wrapper startup (its exit phase is not
-a startup-failure phase).
+or an Automation occurrence. An interruption can be woken after startup. If the
+wrapper reports a startup failure before its provider is ready, the Instance
+shows the sanitized error and requires an explicit reborn. A typed sign-in
+refusal keeps its sign-in recovery flow.
 
 ## 2. Sleep (Hub decides, daemon carries it out)
 
@@ -152,7 +154,8 @@ remain context. Live and catch-up App work queues behind any active turn:
    deleted, access revoked) and a wake whose resume fails after it was accepted
    both leave the Instance `wake_failed` with the reason, so its Channel sees
    why and later messages do not repeat the failure. `:reborn` resumes it; a
-   stop removes it.
+   stop removes it. If a wrapper starts and then reports a startup error, its
+   exit records `wake_failed` and delivers the startup diagnostic once.
 6. A wake refused because the Instance's machine is offline
    (`registration_daemon_offline`) is not permanent: the Instance keeps its
    rest with `rest_reason = 'machine_offline'`. Its presence carries

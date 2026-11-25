@@ -39,7 +39,7 @@ function respond(query) {
     metadata_json: resumable, instance_id: "instance-1", instance_status: "online", instance_version: 2,
     channel_instance_id: 4, agent_name: "Codex",
   }];
-  if (query.name === "machine_lifecycle_instance_rest_v1") return [{ instance_id: "instance-1" }];
+  if (query.name === "machine_lifecycle_instance_rest_v2") return [{ instance_id: "instance-1" }];
   if (query.name === "machine_lifecycle_head_advance_v1") return [{ commit_sequence: 15 }];
   if (query.name === "machine_lifecycle_terminal_instances_v1") return [{ instance_id: "instance-1" }];
   return [];

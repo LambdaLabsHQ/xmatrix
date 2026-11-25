@@ -5,6 +5,7 @@ import { acknowledgeMachineExecution, recordMessageExecutions } from "./runtime-
 import type { QueryResultRow } from "pg";
 import {
   automationRunIdentity,
+  cleanRuntimeOperationFailure,
   publicMachineStartupFailure,
   isTerminalRunStatus,
   machineExecutionCompleted,
@@ -496,6 +497,19 @@ export class PostgresMachineLifecycleRepository {
     const terminalProgress = input.eventType === "machine_run_exited"
       ? invocationProgress(input.payload, input.at) ?? { observedAt: input.at } : undefined;
     const previousProgress = readInvocationProgress(body.invocationProgress);
+    // The wrapper's outer error handler also writes this phase for errors that
+    // escape after the provider was ready. Its startup steps distinguish them.
+    const startupSteps = terminalProgress?.startupSteps as Array<{ phase: string }> | undefined;
+    const providerStarted = startupSteps?.some(step => step.phase === "runtime_ready" || step.phase === "turn_running");
+    const wrapperStartupFailed = terminalProgress?.phase === "wrapper_startup_failed" && !providerStarted &&
+      !cancellation && !refusedAsSignedOut({ invocationProgress: terminalProgress }) &&
+      cleanRuntimeOperationFailure(terminalProgress.operationFailure)?.retryable !== true;
+    const lateStartupFailure = wrapperStartupFailed && run.status === "exited" &&
+      body.daemonTerminalEvidence === undefined && body.stopRequest === undefined;
+    const exitRest = input.eventType === "machine_run_exited" && (status || lateStartupFailure)
+      ? runEndRestState({ metadata: body, runId, previousRunStatus: String(run.status),
+        nextRunStatus: status ?? "exited", restReason: input.payload.restReason,
+        statusPhase: providerStarted ? undefined : input.payload.statusPhase, wrapperStartupFailed }) : null;
     const terminalEvidence = input.eventType === "machine_run_exited" ||
       input.eventType === "machine_stop_result" && input.payload.ok === true ? {
         schemaVersion: 1,
@@ -528,7 +542,7 @@ export class PostgresMachineLifecycleRepository {
         ...(input.eventType === "machine_stop_result" ? { daemonStopEvidence: terminalEvidence } : {}),
       } : {}),
       };
-    if (status || input.repoPool || cleanupConfirmed || spawnResult) await tx.query({ name: "machine_lifecycle_run_update_v1", text: `UPDATE
+    if (status || input.repoPool || cleanupConfirmed || spawnResult || lateStartupFailure && exitRest === "wake_failed") await tx.query({ name: "machine_lifecycle_run_update_v1", text: `UPDATE
       data.runs SET status=COALESCE($1,status),metadata_json=$2::jsonb,version=version+1,
       updated_at=$3,finished_at=COALESCE($4,finished_at) WHERE run_id=$5 AND owner_user_id=$6
       AND version=$7 RETURNING run_id`, values: [status ?? null, JSON.stringify(hostnameMetadata(nextBody)), input.at,
@@ -571,14 +585,12 @@ export class PostgresMachineLifecycleRepository {
         AND version=$4 RETURNING instance_id`, values: [input.at, run.instance_id, runId,
       run.instance_version], maxRows: 1 });
     const restChanged = run.instance_id && !deletionPending
-      ? await this.recordRestState(tx, input, runId, body, String(run.status), String(run.instance_id), status)
+      ? await this.recordRestState(tx, input, runId, body, String(run.status), String(run.instance_id), status, exitRest)
       : false;
     // A Run that ended for good waits on nobody. An Instance a message can still
     // wake (sleeping, interrupted) keeps its waits: the answer is what wakes it.
-    if (run.instance_id && input.eventType === "machine_run_exited" && status &&
-        !["sleeping", "interrupted"].includes(String(runEndRestState({ metadata: body, runId,
-          previousRunStatus: String(run.status), nextRunStatus: status, restReason: input.payload.restReason,
-          statusPhase: input.payload.statusPhase })))) {
+    if (run.instance_id && input.eventType === "machine_run_exited" && (status || restChanged && lateStartupFailure) &&
+        exitRest !== "sleeping" && exitRest !== "interrupted") {
       await releaseDeclaredWaits(tx, { spaceId: input.spaceId, channelId: input.channelId, authorKind: "agent",
         authorIds: [String(run.instance_id)], at: input.at });
     }
@@ -601,20 +613,16 @@ export class PostgresMachineLifecycleRepository {
 
   /**
    * Why this Run's end leaves its Instance offline (docs/instance-sleep.md §1).
-   * Only the report that ends the Run decides, with one exception: a sleep
-   * report that arrives after a snapshot already retired the same Run as
-   * interrupted refines it to sleeping. Nothing overwrites `stopped`, and a
+   * A sleep or confirmed startup failure report may refine the interrupted
+   * state a snapshot recorded for the same Run. A stop still wins, and a
    * reborn predecessor's stop leaves the state to its successor.
    */
   private async recordRestState(tx: DatabaseTransaction, input: MachineLifecycleInput & { at: string },
     runId: string, body: Record<string, unknown>, previousRunStatus: string, instanceId: string,
-    nextRunStatus: string | undefined): Promise<boolean> {
-    let rest: InstanceRestState | null = null;
-    let refineOnly = false;
-    if (input.eventType === "machine_run_exited" && nextRunStatus) {
-      rest = runEndRestState({ metadata: body, previousRunStatus, nextRunStatus, runId,
-        restReason: input.payload.restReason, statusPhase: input.payload.statusPhase });
-    } else if (input.eventType === "machine_run_exited" && input.payload.restReason === "sleeping" &&
+    nextRunStatus: string | undefined, exitRest: InstanceRestState | null): Promise<boolean> {
+    let rest = exitRest;
+    let refineOnly = rest !== null && nextRunStatus === undefined;
+    if (!rest && input.eventType === "machine_run_exited" && !nextRunStatus && input.payload.restReason === "sleeping" &&
         previousRunStatus === "exited" && resumableChannelRun(body)) {
       rest = "sleeping";
       refineOnly = true;
@@ -623,13 +631,14 @@ export class PostgresMachineLifecycleRepository {
       rest = "stopped";
     }
     if (!rest) return false;
-    const changed = await tx.query({ name: "machine_lifecycle_instance_rest_v1", text: `UPDATE data.instances SET
-      rest_state=$1,rest_reason=NULL,version=version+1,updated_at=GREATEST(updated_at,$2)
+    const reason = rest === "wake_failed" ? Array.from(failureDetail(input.payload)).slice(0, 200).join("") : null;
+    const changed = await tx.query({ name: "machine_lifecycle_instance_rest_v2", text: `UPDATE data.instances SET
+      rest_state=$1,rest_reason=$6,version=version+1,updated_at=GREATEST(updated_at,$2)
       WHERE instance_id=$3 AND run_id=$4 AND status='offline' AND rest_state IS DISTINCT FROM $1
         AND (rest_state IS NULL OR rest_state<>'stopped')
         AND ($1='stopped' OR rest_state IS NULL OR rest_state<>'wake_failed')
         AND (NOT $5::boolean OR rest_state IS NULL OR rest_state='interrupted')
-      RETURNING instance_id`, values: [rest, input.at, instanceId, runId, refineOnly], maxRows: 1 });
+      RETURNING instance_id`, values: [rest, input.at, instanceId, runId, refineOnly, reason], maxRows: 1 });
     return changed.length > 0;
   }
 
