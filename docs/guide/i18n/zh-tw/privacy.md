@@ -1,17 +1,35 @@
 ---
 title: "遙測、診斷與本地隱私 — xMatrix 文件"
-description: "哪些資料留在本機、可選的本地額度探測與用戶端診斷如何運作，以及如何隨時關閉。"
+description: "哪些資料留在本機、哪些進入 Hub（以及為何不做端對端加密）、可選的本地額度探測與用戶端診斷如何運作，以及如何隨時關閉。"
 ---
 
 # 遙測與本地隱私
 
-xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon 組成。本頁公開列出用戶端與 daemon 的所有診斷回報與本機檔案讀取行為，以及關閉方式。
+xMatrix 由託管協作 Hub 與運行在你自己電腦上的 Rust 本地 daemon 組成。本頁公開列出我們的信任邊界（哪些留在本機、哪些進入 Hub、為何頻道與 Pages 不是端對端加密），以及用戶端與 daemon 的所有診斷回報、本機檔案讀取行為與關閉方式。
 
 ## 哪些資料留在本機
 
-你的原始碼、Git 歷史、工作目錄、模型工具紀錄與本機模型憑證皆留在你自己控制的電腦上。xMatrix 絕不將本機模型 API Key 或 OAuth token 上傳至 Hub，也不會讀取第三方憑證檔來做跨機器身分歸因或指紋關聯。
+你的原始碼、Git 歷史、工作目錄、未提交檔案、SSH 金鑰、模型工具紀錄與本機模型憑證皆留在你自己控制的電腦上，除非人、Agent、工具或功能主動將其送出或作為附件上傳。原始終端輸出不會持續歸檔到 Hub：即時的 **Instance Trace** 僅保留在宿主行程記憶體中（最多 500 筆事件、768 KiB 或 24 小時），僅於獲授權者按需檢視時轉發。xMatrix 絕不將本機模型 API Key 或 OAuth token 上傳至 Hub，也不會讀取第三方憑證檔來做跨機器身分歸因或指紋關聯。
 
 為確保同一台電腦重裝後仍穩定對應到你的帳號，本機 daemon 僅於本機將你的 xMatrix 使用者 ID 與系統機器識別碼混合做 SHA-256 派生出按帳號隔離的 `machineId`；原始硬體識別碼與未按帳號隔離的機器指紋絕不上傳至 Hub。
+
+## 哪些資料進入 Hub，以及為何不做端對端加密
+
+**傳輸加密 + 靜態加密，但不是端對端加密。** 用戶端、本機 daemon 與 xMatrix Hub 之間的流量皆走 HTTPS/TLS；Hub 儲存層（PlanetScale 託管 PostgreSQL、Cloudflare Durable Objects 與私有 R2 物件儲存）提供靜態加密；Space 金鑰（Saved Secrets）與 daemon 本機副本亦額外使用受保護金鑰做認證加密。**頻道訊息、Pages 與附件不是端對端加密（E2EE）。**
+
+**為何不做端對端加密。** 與單人遠端連線本機終端的隧道不同，xMatrix 是多人多 Agent 的雲端協作工作區。託管 Hub 需要讀取協作內容，才能提供以下核心功能：
+
+- 在多名成員與多台裝置之間即時同步頻道、子討論串與 Pages；
+- 為頻道與 Pages 建立索引並提供全文搜尋；
+- 讓 `@auto` 依任務語意路由至合適的 Agent 與儲存庫、自動關聯 Page，以及於額度用盡時跨廠商交接；
+- 解析並執行 Page 中的自動化程式（`norn` 程式），以及接收 GitHub、Gmail、Linear、Sentry 等外部應用的 webhook 事件。
+
+**進入 Hub 的資料：** 頻道訊息、子討論串、Pages、附件、Space／Agent／機器中繼資料、正規化後的剩餘額度、已連接應用回傳的結果，以及加密保存的 Space 金鑰（金鑰明文絕不出現在訊息或 Agent 目錄中，僅依 `auto` 或逐次 `ask` 審批策略注入對應 Run）。
+
+**連線審批與內部存取邊界：**
+
+- 接入一台機器須由已登入的機器擁有者明確核准，並非預設開放的常駐隧道；你隨時可中斷機器連線或停止任何執行中的 Agent，外部應用連接器亦依「唯讀／先問／讀寫」逐應用管控。
+- Hub 上儲存的內容僅對符合你 Space 與頻道權限的成員和 Agent 可見。除非你主動將某個對話交給支援（見下方[把對話交給 xMatrix 支援](#把對話交給-xmatrix-支援)），否則 xMatrix 工作人員與支援 Agent 不會讀取客戶對話；產品分析僅使用不含內文的中繼資料。
 
 ## 本地服務商額度探測
 
@@ -108,7 +126,6 @@ xMatrix 不使用廣告 Cookie、跨站追蹤、工作階段錄影，也未整�
 ### 開啟或關閉診斷與當機回報
 
 - **Web、桌面版、iOS 與 Android**：前往 **Settings → Legal and privacy**，切換 **Send diagnostics and crash reports**。你的選擇儲存在帳號上，所有用戶端都會遵循。在桌面版中，此開關也會同步更新本機 daemon 的 `telemetry` 設定。
-- **CLI 與 daemon**：預設關閉；可透過 `xmatrix config telemetry on` 或 `XMATRIX_TELEMETRY=1` 開啟，並隨時以 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 關閉。
 - **CLI 與 daemon**：以 `xmatrix config telemetry on` 或 `XMATRIX_TELEMETRY=1` 開啟；以 `xmatrix config telemetry off`、`XMATRIX_TELEMETRY=0` 或 `DO_NOT_TRACK=1` 關閉。`xmatrix config telemetry on|off` 也會把選擇儲存到帳號。
 
 ## 把對話交給 xMatrix 支援
