@@ -186,6 +186,25 @@ test("once anything follows the message, the line is gone: the summon says who s
   await expect(page.locator(".launch-line")).toHaveCount(0);
 });
 
+test("xMatrix's summon under the first message does not quote the author's words again", async ({ page }) => {
+  await page.clock.install({ time: new Date(Date.parse(E2E_NOW) + 5_000) });
+  await install(page, [openChoice({ recommendation: { start: true, harness: "codex" },
+    choice: { start: true, harness: "codex", by: "jev", at: deadlineAt } })]);
+  const xmatrix = { kind: "system", identityId: "system:xmatrix", userId: "", email: "", label: "xMatrix", name: "xMatrix" };
+  await fixtureJson(page, "first-history-summoned", "**/api/xmatrix/channels/channel-general/history**", {
+    messages: [
+      { messageId, channelId: E2E_CHANNEL.id, sequence: 1, body, sentAt: E2E_NOW, from: E2E_USER_SENDER },
+      { messageId: `xmatrix-summon:${messageId}`, channelId: E2E_CHANNEL.id, sequence: 2, body: "@codex", sentAt: E2E_NOW,
+        from: xmatrix, replyToMessageId: messageId },
+    ], hasMore: false,
+  });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".app-mention-chip").first()).toBeVisible();
+  // The author's words appear once: the summon right under them needs no quote.
+  await expect(page.getByText(body, { exact: true })).toHaveCount(1);
+  await expect(page.locator(".launch-line")).toHaveCount(0);
+});
+
 test("a picture stays with the words and the choice follows both", async ({ page }) => {
   const src = "/e2e-launch-choice.png";
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");

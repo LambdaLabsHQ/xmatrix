@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: xMatrix's summon under a first message no longer quotes it
+
+When xMatrix started an Agent for a new conversation's first message, its `@<harness>` reply quoted that message in a large block right under it, so the author saw their own words twice before anything happened. The web now shows that summon alone: xMatrix, then the Agent's launch status. Web only; the Hub still records the reply. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: one retention notice; records kept from results are the Customer's
 
 Decided by Daniel on 2026-11-25. xMatrix, as the tool, deletes the original
