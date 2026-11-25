@@ -1,5 +1,6 @@
 import { ControlError } from "./control-error.js";
-import { findSupportGrant, type SupportAccessNote, useSupportGrant } from "./support-handoff-grants.js";
+import { endedSupportGrant, findSupportGrant, type SupportAccessNote, supportHandoffEndedText, useSupportGrant }
+  from "./support-handoff-grants.js";
 import type { SupportHandoffPart } from "@xmatrix/protocol";
 import { storedIso as iso } from "./stored-values.js";
 import type { QueryResultRow } from "pg";
@@ -431,6 +432,10 @@ export class PostgresCrossSpaceReadRepository {
           return { ownerUserId: handoff.ownerUserId, spaceId, grantId: handoff.grantId,
             accessNote: handoff.accessNote };
         }
+        // A handoff that ended is not something to ask the owner for: only the
+        // customer can hand the conversation over again.
+        const ended = await endedSupportGrant(tx, query);
+        if (ended) throw new CrossSpaceReadError("support_handoff_ended", 403, supportHandoffEndedText(ended));
       }
       if (!rows[0]) throw new CrossSpaceReadError("cross_space_read_grant_required", 403,
         "This Run has no approved grant to read outside its own Space; " +
