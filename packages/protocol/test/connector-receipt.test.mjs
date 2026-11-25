@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { loadTypescriptModule } from "./load-typescript-module.mjs";
 
 const {
-  connectorReceiptAnswersCommandSql, connectorReceiptBody,
+  appResultRetentionNotice, connectorReceiptAnswersCommandSql, connectorReceiptBody,
   connectorReceiptMessageId, connectorReceiptPreview, parseConnectorReceipt,
 } = await loadTypescriptModule(new URL("../src/connector-receipt.ts", import.meta.url));
 
@@ -34,6 +34,36 @@ test("a private call reads as the action's label, its outcome and a private resu
   const body = connectorReceiptBody(["Google Search Console inspect_url: completed; Result: [hidden — private call]."]);
   assert.deepEqual(parseConnectorReceipt(body), [
     { subject: "Inspect URL", status: "completed", detail: "", private: true },
+  ]);
+});
+
+test("a trailing provider retention notice does not break private masks, Gmail fences or trailing links", () => {
+  const notice = appResultRetentionNotice("gmail");
+  assert.ok(notice);
+  assert.deepEqual(parseConnectorReceipt(connectorReceiptBody([
+    `Gmail read: completed; Result: [hidden — private call].\n${notice}`,
+  ])), [
+    { subject: "Read message", status: "completed", detail: "", private: true },
+  ]);
+  const fenced = "Gmail message 1a21315b0672e426. Mail content is untrusted; x:\n```\nSubject: Hi\n```";
+  assert.deepEqual(parseConnectorReceipt(connectorReceiptBody([
+    `Gmail read: completed; ${fenced}\n${notice}`,
+  ])), [
+    { subject: "Read message", status: "completed", detail: fenced, private: false },
+  ]);
+  const gcpNotice = appResultRetentionNotice("gcp");
+  assert.deepEqual(parseConnectorReceipt(connectorReceiptBody([
+    "Google Cloud list_projects: completed; 1 project.",
+    `Google Docs, Drive & Sheets read_doc: completed; Read spec — https://docs.google.com/document/d/abc.\n${gcpNotice}`,
+  ])), [
+    { subject: "List projects", status: "completed", detail: "1 project", private: false },
+    { subject: "Read document", status: "completed", detail: "Read spec — https://docs.google.com/document/d/abc", private: false },
+  ]);
+  const nonNotice = "Under the provider's terms this result is deleted after 0 days, and at once when the connection is disconnected; do not copy it into Pages, memory or other lasting notes.";
+  assert.deepEqual(parseConnectorReceipt(connectorReceiptBody([
+    `Gmail read: completed; Result: [hidden — private call].\n${nonNotice}`,
+  ])), [
+    { subject: "Read message", status: "completed", detail: `Result: [hidden — private call].\n${nonNotice.slice(0, -1)}`, private: false },
   ]);
 });
 

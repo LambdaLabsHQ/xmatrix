@@ -50,11 +50,23 @@ export function appResultRetentionDays(appId: string): number | undefined {
   return APP_CONNECTOR_PROVIDER_MANIFESTS.find((manifest) => manifest.id === appId)?.resultRetentionDays;
 }
 
+const RETENTION_NOTICE_PREFIX = "Under the provider's terms this result is deleted after ";
+const RETENTION_NOTICE_SUFFIX = " days, and at once when the connection is disconnected; do not copy it into Pages, memory or other lasting notes.";
+
 /** What an Agent is told about such a provider's results, so it does not keep copies longer. */
 export function appResultRetentionNotice(appId: string): string | undefined {
   const days = appResultRetentionDays(appId);
-  return days === undefined ? undefined
-    : `Under the provider's terms this result is deleted after ${days} days, and at once when the connection is disconnected; do not copy it into Pages, memory or other lasting notes.`;
+  return days === undefined ? undefined : `${RETENTION_NOTICE_PREFIX}${days}${RETENTION_NOTICE_SUFFIX}`;
+}
+
+/** Strips one trailing `appResultRetentionNotice` line that `publishCommandStatus` appended for Agents. */
+function stripTrailingRetentionNotice(line: string): string {
+  const split = line.lastIndexOf("\n");
+  if (split < 0) return line;
+  const tail = line.slice(split + 1);
+  if (!tail.startsWith(RETENTION_NOTICE_PREFIX) || !tail.endsWith(RETENTION_NOTICE_SUFFIX)) return line;
+  const days = tail.slice(RETENTION_NOTICE_PREFIX.length, tail.length - RETENTION_NOTICE_SUFFIX.length);
+  return /^[1-9]\d*$/u.test(days) ? line.slice(0, split) : line;
 }
 
 export function connectorReceiptBody(lines: readonly string[]): string {
@@ -73,6 +85,7 @@ export function parseConnectorReceipt(body: string): ConnectorReceiptEntry[] | u
     if (line.startsWith("- ")) lines.push(line.slice(2));
     else lines[lines.length - 1] += `\n${line}`;
   }
+  if (lines.length > 0) lines[lines.length - 1] = stripTrailingRetentionNotice(lines[lines.length - 1]!);
   return lines.map((line) => {
     const match = RECEIPT_LINE.exec(line.trim());
     if (!match) return { subject: "", detail: line.trim(), private: false };
