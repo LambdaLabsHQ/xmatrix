@@ -116,7 +116,8 @@ Agent to start now (`START_INTENT_CATEGORIES`: `summon` or `conversation`) in
 the same call that chooses the harness. A decided harness is never launched
 from there: xMatrix replies to the first message with an ordinary
 `@<harness>` message, appended with `launch: true` because whether to start is
-already decided. That message's author is xMatrix itself (`system:xmatrix`),
+already decided. The web shows that reply without quoting the
+first message, which is directly above it. That message's author is xMatrix itself (`system:xmatrix`),
 and it launches as the first message's author: the launch authority accepts a
 `system:xmatrix` source only as `xmatrix-summon:<first-message-id>`, and only
 for the author of that message's recorded `start` decision. The message goes

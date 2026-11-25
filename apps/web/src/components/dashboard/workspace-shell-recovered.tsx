@@ -943,8 +943,13 @@ export function buildTimeline(
     const replyTarget = message.replyToMessageId
       ? historyById.get(message.replyToMessageId)
       : undefined;
-    const replyTo =
-      message.replyTo && isValidMessageSender(message.replyTo.from)
+    // xMatrix's summon for a new conversation's first message replies to the
+    // message right above it: quoting the author's words again under them only
+    // says them twice, so the summon is shown alone.
+    const repliedTo = message.replyToMessageId ?? message.replyTo?.messageId;
+    const replyTo = repliedTo && message.messageId === `xmatrix-summon:${repliedTo}`
+      ? undefined
+      : message.replyTo && isValidMessageSender(message.replyTo.from)
         ? {
             messageId: message.replyTo.messageId,
             author: message.replyTo.from.label,
