@@ -3,7 +3,7 @@ import { oauthStateProviderId, signOAuthState, verifyOAuthStateClaims } from "./
 import type { Env } from "../types";
 import { metered, type UpstreamMeter } from "../usage-cost-metering";
 import { ConnectorRemedy, providerJson, ProviderRequestError } from "./http";
-import { vercelEventScopeId, vercelOAuthFields } from "./vercel-api";
+import { vercelEventScopeId, vercelInstallationToken, vercelOAuthFields } from "./vercel-api";
 import { pkceChallenge, pkceGrantProof, validPkceClaims, oauthGrantState } from "./oauth-pkce";
 import { pagerDutyGrantContext, validatePagerDutyCredentials, validatePagerDutyGrant } from "./pagerduty-oauth";
 import { discordCompanyApp, discordGrantContext, isDiscordInstallationGrant, validateDiscordCredentials } from "./discord-oauth";
@@ -324,7 +324,7 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
   if (GOOGLE_GRANTS[client.manifest.id]) validateGoogleGrant(client.manifest.id, payload, true);
   if (client.manifest.id === "bitbucket") validateBitbucketGrant(payload, true);
   const fields = oauthTokenFields(client, payload);
-  const vercelFields = client.manifest.oauth.flow === "vercel-integration" ? await vercelOAuthFields(client.clientId, payload) : {};
+  const vercelFields = client.manifest.oauth.flow === "vercel-integration" ? await vercelOAuthFields(client, payload) : {};
   let installationId: unknown;
   if (client.manifest.id === "slack") {
     // This route supports workspace installs, not organization-wide Enterprise Grid installs.
@@ -394,6 +394,11 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
     return refreshSentryInstallation(env, values, now, options.unauthorized === true);
   }
   if (providerId === "cloudflare" && values.logins) return refreshCloudflareLogins(env, values.logins, now);
+  if (providerId === "vercel" && values.oauthConfigurationId) {
+    const client = oauthClient(env, "vercel");
+    if (!client) throw new ProviderRequestError(503, "The xMatrix Vercel integration is not configured on this Hub");
+    return vercelInstallationToken(client, values, now, options.unauthorized === true);
+  }
   const expiresAt = Number(values.oauthExpiresAt);
   if (providerId === "discord" && isDiscordInstallationGrant(values)) {
     const configured = discordCompanyApp(env);

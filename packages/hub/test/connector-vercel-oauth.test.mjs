@@ -4,7 +4,7 @@ import { HUB_ROUTES, appViewAddress } from "@xmatrix/protocol";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { gmailPollCallback } from "../src/connectors/gmail-poll-oauth.ts";
 import { test } from "node:test";
-import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, verifyOAuthState } from "../src/connectors/oauth.ts";
+import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, refreshOAuthFields, verifyOAuthState } from "../src/connectors/oauth.ts";
 import { vercelApiUrl, vercelCompletionUrl, verifyVercel } from "../src/connectors/vercel-api.ts";
 import { connectorProvider } from "../src/connectors/registry.ts";
 import { sentryInstallationClient } from "../src/connectors/sentry-installation.ts";
@@ -17,7 +17,10 @@ const exchangeOAuthCode = async (...args) => (await exchangeOAuthGrant(...args))
 const env = { CONNECTOR_VERCEL_CLIENT_ID: "oac_fixture", CONNECTOR_VERCEL_CLIENT_SECRET: "fixture-secret" };
 const client = oauthClient(env, "vercel");
 const configuration = { id: "icfg_fixture", integrationId: "oac_fixture", teamId: "team_fixture", userId: "user_fixture" };
-const grant = { access_token: "fixture-token", installation_id: "icfg_fixture", team_id: "team_fixture", user_id: "user_fixture" };
+const grant = { access_token: "fixture-token", installation_id: "icfg_fixture", team_id: "team_fixture", user_id: "user_fixture", expires_in: 3600 };
+/* Vercel's client_credentials response for the installation (short-lived-access-tokens guide). */
+const shortLived = (extra = {}) => ({ body: { access_token: "fixture-short", token_type: "Bearer", expires_in: 3600,
+  installation_id: "icfg_fixture", user_id: "user_fixture", team_id: "team_fixture", scope: "read:project", ...extra } });
 function stubFetch(responses) {
   const original = globalThis.fetch;
   const calls = [];
@@ -46,14 +49,21 @@ test("Vercel external install uses the registered slug and signed Space/admin st
 });
 
 test("Vercel code is exchanged server-side and the provider confirms configuration and team", async () => {
-  const fetch = stubFetch([{ body: grant }, { body: configuration }]);
+  const fetch = stubFetch([{ body: grant }, shortLived(), { body: configuration }]);
   try {
+    const before = Date.now();
     const fields = await exchangeOAuthCode(client, "fixture-code", "https://hub.test/callback");
     assert.equal(fetch.calls[0].url, "https://api.vercel.com/v2/oauth/access_token");
     assert.equal(fetch.calls[0].headers.get("content-type"), "application/x-www-form-urlencoded");
     assert.deepEqual(Object.fromEntries(fetch.calls[0].body), { code: "fixture-code", redirect_uri: "https://hub.test/callback", client_id: "oac_fixture", client_secret: "fixture-secret" });
-    assert.equal(fetch.calls[1].url, "https://api.vercel.com/v1/integrations/configuration/icfg_fixture?teamId=team_fixture");
-    assert.equal(fetch.calls[1].headers.get("authorization"), "Bearer fixture-token");
+    // The code's own token is never used: the installation's client_credentials token confirms it.
+    assert.equal(fetch.calls[1].url, "https://api.vercel.com/v2/oauth/access_token");
+    assert.equal(fetch.calls[1].headers.get("authorization"), `Basic ${btoa("oac_fixture:fixture-secret")}`);
+    assert.deepEqual(Object.fromEntries(fetch.calls[1].body), { grant_type: "client_credentials", installation_id: "icfg_fixture" });
+    assert.equal(fetch.calls[2].url, "https://api.vercel.com/v1/integrations/configuration/icfg_fixture?teamId=team_fixture");
+    assert.equal(fetch.calls[2].headers.get("authorization"), "Bearer fixture-short");
+    assert.equal(fields.oauthToken, "fixture-short");
+    assert.ok(Number(fields.oauthExpiresAt) >= before + 3_600_000 && Number(fields.oauthExpiresAt) <= Date.now() + 3_600_000);
     assert.equal(fields.oauthConfigurationId, "icfg_fixture");
     assert.equal(fields.oauthAppClientId, "oac_fixture");
     assert.equal(fields.oauthTeamId, "team_fixture");
@@ -82,7 +92,7 @@ test("invalid scopes, other applications, disabled or removed configurations and
     { body: { ...configuration, deleteRequestedAt: 1 } }, { status: 403, body: { error: "disabled" } },
     { body: { ...configuration, teamId: "team_other" } },
   ]) {
-    const fetch = stubFetch([{ body: grant }, response]);
+    const fetch = stubFetch([{ body: grant }, shortLived(), response]);
     try { await assert.rejects(exchangeOAuthCode(client, "code", "https://hub.test/callback")); }
     finally { fetch.restore(); }
   }
@@ -90,16 +100,64 @@ test("invalid scopes, other applications, disabled or removed configurations and
 
 test("personal OAuth ignores stale manually supplied team scope and checks the installed application", async () => {
   const personal = { ...configuration, teamId: null };
-  const fetch = stubFetch([{ body: { ...grant, team_id: null } }, { body: personal }, { body: personal }]);
+  const fetch = stubFetch([{ body: { ...grant, team_id: null } }, shortLived({ team_id: null }), { body: personal }, { body: personal }]);
   try {
     const fields = await exchangeOAuthCode(client, "code", "https://hub.test/callback");
     assert.equal(fields.oauthTeamId, null);
     assert.equal(fields.oauthUserId, "user_fixture");
-    assert.equal(new URL(fetch.calls[1].url).searchParams.has("teamId"), false);
-    await verifyVercel({ ...fields, teamId: "team_unrelated" });
     assert.equal(new URL(fetch.calls[2].url).searchParams.has("teamId"), false);
+    await verifyVercel({ ...fields, teamId: "team_unrelated" });
+    assert.equal(new URL(fetch.calls[3].url).searchParams.has("teamId"), false);
     assert.equal(vercelCompletionUrl({ configurationId: "icfg_fixture", next: "https://vercel.com/done" }, fields), "https://vercel.com/done");
   } finally { fetch.restore(); }
+});
+
+test("a client_credentials token that names another installation or team cannot connect", async () => {
+  for (const wrong of [shortLived({ installation_id: "icfg_other" }), shortLived({ team_id: "team_other" }),
+    shortLived({ expires_in: undefined }), shortLived({ access_token: "" })]) {
+    const fetch = stubFetch([{ body: grant }, wrong]);
+    try { await assert.rejects(exchangeOAuthCode(client, "code", "https://hub.test/callback"), /did not issue a token/); assert.equal(fetch.calls.length, 2); }
+    finally { fetch.restore(); }
+  }
+});
+
+test("each action renews a due, missing or long-lived Vercel token with client_credentials and keeps a fresh one", async () => {
+  const now = Date.UTC(2026, 10, 25);
+  const saved = { oauthToken: "old", oauthConfigurationId: "icfg_fixture", oauthAppClientId: "oac_fixture", oauthTeamId: "team_fixture" };
+  assert.equal(await refreshOAuthFields(env, "vercel", { ...saved, oauthExpiresAt: String(now + 10 * 60_000) }, now), undefined);
+  for (const expiry of [undefined, "", String(now + 4 * 60_000), String(now - 1)]) {
+    const fetch = stubFetch([shortLived()]);
+    try {
+      const fields = await refreshOAuthFields(env, "vercel", { ...saved, ...(expiry === undefined ? {} : { oauthExpiresAt: expiry }) }, now);
+      assert.deepEqual(fields, { oauthToken: "fixture-short", oauthExpiresAt: String(now + 3_600_000) });
+      assert.deepEqual(Object.fromEntries(fetch.calls[0].body), { grant_type: "client_credentials", installation_id: "icfg_fixture" });
+    } finally { fetch.restore(); }
+  }
+  // A 401 on a still-fresh token asks once more, as Notion and Sentry do.
+  const fetch = stubFetch([shortLived()]);
+  try {
+    assert.equal((await refreshOAuthFields(env, "vercel", { ...saved, oauthExpiresAt: String(now + 30 * 60_000) }, now, { unauthorized: true })).oauthToken, "fixture-short");
+  } finally { fetch.restore(); }
+  // Manual access-token connections have no installation and are left alone.
+  assert.equal(await refreshOAuthFields(env, "vercel", { accessToken: "manual" }, now), undefined);
+});
+
+test("Vercel token refusals name who can fix them and removed installations ask to reconnect", async () => {
+  const saved = { oauthToken: "old", oauthConfigurationId: "icfg_fixture", oauthAppClientId: "oac_fixture", oauthTeamId: "team_fixture" };
+  for (const [error, pattern, remedy] of [["invalid_grant", /removed, disabled.*reconnect Vercel/, "reconnect"],
+    ["unauthorized_client", /Access Tokens \(client credentials\) enabled/, undefined],
+    ["invalid_client", /client credentials; the company app/, undefined]]) {
+    const fetch = stubFetch([{ status: 400, body: { error, error_description: "fixture" } }]);
+    try {
+      await assert.rejects(refreshOAuthFields(env, "vercel", saved), (failure) => {
+        assert.match(failure.message, pattern);
+        assert.equal(failure.fix?.kind, remedy);
+        return true;
+      });
+    } finally { fetch.restore(); }
+  }
+  await assert.rejects(refreshOAuthFields(env, "vercel", { ...saved, oauthAppClientId: "oac_other" }), /another or no xMatrix integration/);
+  await assert.rejects(refreshOAuthFields({}, "vercel", saved), /not configured on this Hub/);
 });
 
 test("API-only Check validates a manual token while webhook-only setups retain their delivery path", async () => {
