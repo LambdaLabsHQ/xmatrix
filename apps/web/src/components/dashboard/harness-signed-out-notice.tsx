@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import type { HarnessSignedOut } from "@xmatrix/protocol";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
+import { HandleInSidePanelButton } from "./ask-card";
 import { HarnessSignedOutBody, type HarnessSignInTarget } from "./harness-sign-in";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 
@@ -13,7 +14,7 @@ import { useInstalledHarnesses } from "./use-installed-harnesses";
    Signing in belongs to the machine, so its owner needs no Agent for the
    program in this Space. Where they have one, work it could not take also
    offers turning it off; an Agent's own request is only for the sign-in. */
-export function HarnessSignedOutNotice({ signedOut, requestedBy, spaceId, token, userId, onSignedIn, notice }: {
+export function HarnessSignedOutNotice({ signedOut, requestedBy, spaceId, token, userId, onSignedIn, notice, onHandleInSidePanel }: {
   signedOut: HarnessSignedOut; spaceId: string | null; token: string | null; userId: string;
   /** The Agent that asked for this sign-in, when one did. */
   requestedBy?: string;
@@ -21,6 +22,8 @@ export function HarnessSignedOutNotice({ signedOut, requestedBy, spaceId, token,
   onSignedIn?: () => Promise<boolean>;
   /** The notice as written, for a viewer who cannot sign this program in. */
   notice: ReactNode;
+  /** When set (inline web-page popover), delegates sign-in to the side panel. */
+  onHandleInSidePanel?: () => void;
 }) {
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
@@ -30,6 +33,16 @@ export function HarnessSignedOutNotice({ signedOut, requestedBy, spaceId, token,
     candidate.key.harness === signedOut.harness);
   const target: HarnessSignInTarget | undefined = agent ?? ownedMachineTarget(fleet.daemons.data, userId, signedOut);
   if (!target || !token) return <>{notice}</>;
+  if (onHandleInSidePanel) {
+    return (
+      <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-testid="harness-signed-out-notice">
+        {notice}
+        <div className="mt-3">
+          <HandleInSidePanelButton onClick={onHandleInSidePanel} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-testid="harness-signed-out-notice">
       {requestedBy && notice}

@@ -53,7 +53,15 @@ import { NO_BUSY_INSTANCES } from "./agent-work-view";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { AUTH_TOKEN_REJECTED_EVENT, useAuth } from "@/lib/auth-context";
-import { forwardEmbedBrowserRead, isExtensionCompanion } from "@/lib/extension-embed";
+import {
+  announceEmbedChannelDisplayed,
+  announceEmbedClearPageThread,
+  announceEmbedOutboxAck,
+  announceEmbedPendingSends,
+  forwardEmbedBrowserRead,
+  isExtensionCompanion,
+  isExtensionInlinePopover,
+} from "@/lib/extension-embed";
 import { untilCallerAborts } from "@/lib/query/caller-abort";
 import { userErrorMessage } from "../../lib/user-facing-error";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -1609,6 +1617,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     historyCacheRef.current.delete(channelId);
     historyTailBaseGenerationRef.current.delete(channelId);
     purgeProductTailCacheChannel(channelId);
+    setOutgoingMessages((current) => current.filter((item) => item.channelId !== channelId));
     setChannels((current) => current.filter((channel) => channel.id !== channelId));
     window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
       detail: { kind: "structure" },
@@ -1620,6 +1629,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       setHistory([]);
       setHasOlderMessages(false);
       setSelectedChannelId(null);
+      if (isExtensionCompanion()) announceEmbedClearPageThread();
     }
     const route = appRouteInfo(currentBrowserLocation());
     const routeKey = route.channelKey || route.legacyChannelId;
@@ -1632,7 +1642,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setBrowserPath(list);
   }, [historyTailBaseGenerationRef, invalidateAgentTraceChannels, purgeProductTailCacheChannel, setChannels]);
 
-  const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, setHistoryError, setLoadingHistory });
+  const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, onChannelNotFound: forgetDeletedChannel, setHistoryError, setLoadingHistory });
 
   useEffect(() => {
     if (!hasToken || !user) return;
@@ -2153,6 +2163,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             setOutgoingMessages((current) =>
               current.filter((outgoing) => outgoing.clientMessageId !== message.clientMessageId)
             );
+            announceEmbedOutboxAck(message.clientMessageId);
           }
           const cached = historyCacheRef.current.get(entry.channelId);
           const selected = selectedChannelIdRef.current === entry.channelId &&
@@ -2175,6 +2186,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               setOutgoingMessages((current) =>
                 current.filter((item) => item.clientMessageId !== claimedOutboundClientId)
               );
+              announceEmbedOutboxAck(claimedOutboundClientId);
             }
           }
           const merged = mergeAndRememberChannelHistory(entry.channelId, [entry], undefined, false);
@@ -3141,6 +3153,31 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     });
     schedulePersistComposerDrafts();
   }, [schedulePersistComposerDrafts]);
+
+  const pendingSendCount = useMemo(
+    () => creatingChannelIds.size + outgoingMessages.filter((item) => item.status === "pending").length,
+    [creatingChannelIds.size, outgoingMessages],
+  );
+  useEffect(() => {
+    if (!isExtensionInlinePopover()) return;
+    announceEmbedPendingSends(pendingSendCount);
+  }, [pendingSendCount]);
+
+  const selectedChannelHasDisplayedRows = Boolean(
+    selectedChannel && (
+      historyRenderAuthorized ||
+      history.length > 0 ||
+      outgoingMessages.some((item) => item.channelId === selectedChannel.id)
+    )
+  );
+  useEffect(() => {
+    if (!isExtensionCompanion() || isExtensionInlinePopover() || !selectedChannel || !selectedChannelHasDisplayedRows) {
+      return;
+    }
+    announceEmbedChannelDisplayed(
+      `/app/${encodeURIComponent(selectedChannel.spaceId)}/channels/${encodeURIComponent(selectedChannel.id)}`
+    );
+  }, [selectedChannel, selectedChannelHasDisplayedRows]);
 
   return {
     children,

@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import type { ClientDefectAction } from "@xmatrix/protocol";
+import { PanelRightOpen } from "lucide-react";
 
+import { actionClass } from "@/components/ui/action-tone";
 import { ErrorNotice } from "@/components/ui/error-notice";
 import { statusChipClass, type StatusTone } from "@/components/ui/status-tone";
 
@@ -56,4 +58,27 @@ export function AskError({ error, loadError, action, onRetry }: {
   const className = "mt-2 text-xs text-destructive";
   return error ? <div role="alert" className={className}>{error}</div>
     : <ErrorNotice error={loadError} action={action} className={className} onRetry={onRetry} />;
+}
+
+/**
+ * Shown in place of interactive approval / decision controls when a conversation
+ * is rendered inside an untrusted web page's inline popover card: clicking opens
+ * this tab's Chrome side panel directly to the card so decisions never happen in
+ * a page-hosted overlay.
+ */
+export function HandleInSidePanelButton({ onClick, className }: {
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      data-handle-in-side-panel="true"
+      onClick={onClick}
+      className={actionClass({ variant: "primary", size: "sm" }, className)}
+    >
+      <PanelRightOpen className="size-3.5" />
+      Handle in side panel
+    </button>
+  );
 }

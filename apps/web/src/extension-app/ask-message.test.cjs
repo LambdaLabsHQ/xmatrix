@@ -22,3 +22,24 @@ test("an Agent picked in the question still names the same words after the quote
   assert.equal(body.slice(selection.start, selection.end), "@claude");
   assert.ok(selection.start > body.indexOf("is this right?"));
 });
+
+function claudeSelection(start = 0) {
+  return {
+    schemaVersion: 1,
+    sourceRevision: 1,
+    sourceBodyHash: "unused",
+    selections: [{ start, end: start + 7, text: "@claude", target: { kind: "capability", harness: "claude" } }],
+  };
+}
+
+test("an oversized quote shortens cleanly without dropping explicit @ Agent selections", async () => {
+  const hugePassage = { text: "a".repeat(70 * 1024), label: "Huge page", href: "https://a.test/huge" };
+  const { body, invocationSelections } = await askMessage(hugePassage, "@claude summarize this", claudeSelection(), "space-1");
+  assert.ok(invocationSelections, "explicit @ invocation selection is preserved");
+  const [selection] = invocationSelections.selections;
+  assert.equal(body.slice(selection.start, selection.end), "@claude");
+});
+
+test("without a spaceId, explicit @ Agent selections throw instead of silently dropping quote or mention", async () => {
+  await assert.rejects(() => askMessage(passage, "@claude check this", claudeSelection(), null), /Couldn't attach the selected quote/);
+});

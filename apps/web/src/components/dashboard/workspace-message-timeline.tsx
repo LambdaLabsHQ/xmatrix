@@ -507,6 +507,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   threadRootChannel,
   inPageMargin = false,
   compactLayout = false,
+  onHandleApprovalInSidePanel,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -552,6 +553,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   inPageMargin?: boolean;
   /** Narrow desktop browser companion (Chrome side panel): avatar sits inline beside the sender name so prose uses the full width. */
   compactLayout?: boolean;
+  /** Inline web-page popover card: approval/decision/secret/sign-in cards render read-only and delegate to the side panel. */
+  onHandleApprovalInSidePanel?: (messageId?: string) => void;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -1139,6 +1142,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                 contextOnly
                 initiallyExpanded
                 compactLayout={compactLayout}
+                onHandleApprovalInSidePanel={onHandleApprovalInSidePanel}
                 currentUserIdentityId={currentUserIdentityId}
                 channel={threadRootChannel}
                 token={token}
@@ -1225,6 +1229,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
                   foldsDiscussionHead={inPageMargin}
                   compactLayout={compactLayout}
+                  onHandleApprovalInSidePanel={onHandleApprovalInSidePanel}
                   turnContinued={continuedTurnFailures.has(message.id)}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
@@ -1818,6 +1823,7 @@ export const MessageRow = memo(function MessageRow({
   initiallyExpanded = false,
   foldsDiscussionHead = false,
   compactLayout = false,
+  onHandleApprovalInSidePanel,
   turnContinued = false,
   currentUserIdentityId,
   channel,
@@ -1880,6 +1886,8 @@ export const MessageRow = memo(function MessageRow({
   foldsDiscussionHead?: boolean;
   /** Narrow desktop browser companion: inline small avatar, full-width message body, desktop hover actions. */
   compactLayout?: boolean;
+  /** Inline web-page popover card: approval/decision/secret/sign-in cards render read-only and delegate to the side panel. */
+  onHandleApprovalInSidePanel?: (messageId?: string) => void;
   /** This row's turn-failure notice was followed by that Agent's own later message. */
   turnContinued?: boolean;
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
@@ -2645,26 +2653,33 @@ export const MessageRow = memo(function MessageRow({
       </div>
     );
   };
+  const handleThisCardInSidePanel = onHandleApprovalInSidePanel
+    ? () => onHandleApprovalInSidePanel(message.messageId)
+    : undefined;
   const baseCardBody = onboardingStage ? (
     <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
       userId={currentUserIdentityId.replace(/^user:/, "")} />
   ) : supportHandoff ? (
     <SupportHandoffCard card={supportHandoff} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
+      onHandleInSidePanel={handleThisCardInSidePanel}
       body={<RichMessageContent body={displayBody} components={markdownComponents} />} />
   ) : crossSpaceRead ? (
     <CrossSpaceReadCard
       request={crossSpaceRead}
       token={token}
       userId={currentUserIdentityId.replace(/^user:/, "")}
+      onHandleInSidePanel={handleThisCardInSidePanel}
     />
   ) : nornRequest && channel ? (
     <NornRequestCard request={nornRequest} channelId={channel.id} token={token}
       render={(text) => <RichMessageContent body={text} components={markdownComponents} />}
       userId={currentUserIdentityId.replace(/^user:/, "")}
+      onHandleInSidePanel={handleThisCardInSidePanel}
       {...(message.commandNotices?.[0]?.body ? { outcome: message.commandNotices[0].body } : {})} />
   ) : settingsRequest && channel && token && message.messageId && message.sequence ? (
     <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
       userId={currentUserIdentityId.replace(/^user:/, "")} agentName={settingsRequest.agentName}
+      onHandleInSidePanel={handleThisCardInSidePanel}
       {...(settingsRequest.reason ? { reason: settingsRequest.reason } : {})} />
   ) : secretRequest ? (
     <SecretRequestCardView
@@ -2672,6 +2687,7 @@ export const MessageRow = memo(function MessageRow({
       messageId={message.messageId}
       token={token}
       userId={currentUserIdentityId.replace(/^user:/, "")}
+      onHandleInSidePanel={handleThisCardInSidePanel}
     />
   ) : secretAccessRequest ? (
     <SecretAccessRequestCardView
@@ -2679,12 +2695,14 @@ export const MessageRow = memo(function MessageRow({
       messageId={message.messageId}
       token={token}
       userId={currentUserIdentityId.replace(/^user:/, "")}
+      onHandleInSidePanel={handleThisCardInSidePanel}
     />
   ) : questionnaire ? (
     <QuestionnaireMessage
       questionnaire={questionnaire}
       message={message}
       onAnswer={onQuestionnaireAnswer}
+      onHandleInSidePanel={handleThisCardInSidePanel}
     />
   ) : routingDecision ? (
     <RoutingDecisionBoard decision={routingDecision} />
@@ -2695,6 +2713,7 @@ export const MessageRow = memo(function MessageRow({
     <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} requestedBy={signedOutNotice.requestedBy}
       spaceId={channel?.spaceId ?? null} token={token}
       userId={currentUserIdentityId.replace(/^user:/, "")}
+      onHandleInSidePanel={handleThisCardInSidePanel}
       onSignedIn={signedOutNotice.summon && onResendRefusedSummon && (() => onResendRefusedSummon(
         signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
       notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
@@ -2721,7 +2740,8 @@ export const MessageRow = memo(function MessageRow({
       {channel && token && !contextOnly && message.messageId && message.sequence &&
         connectorReceiptFixesOf(message.metadata).length ? (
         <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
-          userId={currentUserIdentityId.replace(/^user:/, "")} />
+          userId={currentUserIdentityId.replace(/^user:/, "")}
+          onHandleInSidePanel={handleThisCardInSidePanel} />
       ) : null}
     </div>
   ) : isMachineRunFailureNotice(message) ? (
@@ -2731,7 +2751,7 @@ export const MessageRow = memo(function MessageRow({
   const cardBody = channel && !contextOnly && (isSupportableFailureNotice(hubMetadata) || turnFailure) ? (
     <div className="space-y-2">
       {baseCardBody ?? <RichMessageContent body={displayBody} components={markdownComponents} />}
-      <SupportHandoffOffer channelId={channel.id} />
+      <SupportHandoffOffer channelId={channel.id} onHandleInSidePanel={handleThisCardInSidePanel} />
     </div>
   ) : baseCardBody;
   const hasCardBody = cardBody !== null || Boolean(message.isEvent);

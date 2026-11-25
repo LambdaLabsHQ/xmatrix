@@ -236,3 +236,37 @@ test("saveConnectorCredentials writes directly when connected and creates the ro
     "PUT /api/spaces/s1/app-connections/googleplay/credentials",
   ]);
 });
+
+test("createConversation sends x-xmatrix-idempotency-key when requestKey is provided and retries transient 503", async () => {
+  const { createConversation } = await import("../src/hub-client.js");
+  let attempts = 0;
+  const seenHeaders = [];
+  const deps = {
+    hubUrl: "https://hub.test",
+    version: "4.12.2",
+    fetch: async (_url, init) => {
+      attempts += 1;
+      seenHeaders.push(init.headers);
+      if (attempts === 1) {
+        return new Response(JSON.stringify({ error: "busy", retryable: true }), { status: 503 });
+      }
+      return new Response(JSON.stringify({ channel: { id: "ch-idem", spaceId: "sp-1", name: "Page" } }), { status: 200 });
+    },
+  };
+  const created = await createConversation(
+    deps,
+    "tok",
+    {
+      spaceId: "sp-1",
+      name: "Page",
+      memberName: "Daniel",
+      requestKey: "rk-idem-1",
+      metadata: { autoName: true, createdBy: "chrome-extension" },
+    },
+    { sleep: async () => {} },
+  );
+  assert.equal(created.id, "ch-idem");
+  assert.equal(attempts, 2);
+  assert.equal(seenHeaders[0]["x-xmatrix-idempotency-key"], "rk-idem-1");
+  assert.equal(seenHeaders[1]["x-xmatrix-idempotency-key"], "rk-idem-1");
+});
