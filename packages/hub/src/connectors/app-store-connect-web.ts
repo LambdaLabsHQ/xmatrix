@@ -169,6 +169,36 @@ export function plainText(html: string): string {
     .split("\n").map(line => line.replace(/\s+/gu, " ").trim()).filter(Boolean).join("\n");
 }
 
+const VENDOR_NUMBER = /^\d{6,12}$/u;
+
+/** Every 6–12 digit value under a key that names a vendor, anywhere in Apple's Payments response. */
+function extractVendorNumbers(value: unknown, key = ""): string[] {
+  if (Array.isArray(value)) return [...new Set(value.flatMap(item => extractVendorNumbers(item, key)))];
+  if (value && typeof value === "object") {
+    return [...new Set(Object.entries(value).flatMap(([name, item]) => extractVendorNumbers(item, /vendor/iu.test(name) ? name : key)))];
+  }
+  const number = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : "";
+  return key && VENDOR_NUMBER.test(number) ? [number] : [];
+}
+
+/** SAP vendor numbers listed on Apple's Payments page for the signed-in team. */
+export async function sapVendorNumbers(session: WebSession, providerId: unknown): Promise<string[]> {
+  const id = text(providerId) || (typeof providerId === "number" ? String(providerId) : "");
+  if (!/^\d{1,20}$/u.test(id)) return [];
+  return extractVendorNumbers(await session.read(`/WebObjects/iTunesConnect.woa/ra/paymentConsolidation/providers/${id}/sapVendorNumbers`));
+}
+
+/** Best-effort lookup of a single vendor number right when a fresh App Store Connect web session is saved. */
+export async function discoverAppStoreVendorNumber(webSessionHeader: string): Promise<string | undefined> {
+  if (!webSessionHeader.trim()) return undefined;
+  const session = webSession({ credentials: { webSession: webSessionHeader } });
+  try {
+    const info = await session.read("/olympus/v1/session");
+    const found = await sapVendorNumbers(session, record(info.provider).providerId);
+    return found.length === 1 ? found[0] : undefined;
+  } catch { return undefined; }
+}
+
 export const APP_STORE_CONNECT_WEB_ACTIONS: Record<string, ConnectorAction> = {
   web_session: {
     effect: "read", requires: ["webSession"],
@@ -178,7 +208,16 @@ export const APP_STORE_CONNECT_WEB_ACTIONS: Record<string, ConnectorAction> = {
       try {
         const info = await session.read("/olympus/v1/session");
         const user = record(info.user), provider = record(info.provider);
+        let savedVendor = "";
+        if (!context.credentials.vendorNumber?.trim() && context.saveCredentials) {
+          const found = await sapVendorNumbers(session, provider.providerId).catch(() => []);
+          if (found.length === 1) {
+            savedVendor = found[0]!;
+            await context.saveCredentials({ vendorNumber: savedVendor }).catch(() => { savedVendor = ""; });
+          }
+        }
         return { summary: `The App Store Connect web session works: signed in as ${cell(user.fullName) || "an Apple ID"}, team ${cell(provider.name) || "?"}. ` +
+          (savedVendor ? `Saved vendor number ${savedVendor} automatically for sales and finance reports. ` : "") +
           "Apple keeps it a day to a month; when it lapses, review_messages says so." };
       } finally { await session.settle(); }
     },
