@@ -5,12 +5,28 @@
       "dependsOn": ["^build"],
       "outputs": [".next/**", "dist/**", "!.next/cache/**"]
     },
+    "@xmatrix/web#build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/guide/**"],
+      "outputs": [".next/**", "dist/**", "!.next/cache/**"]
+    },
     "ci:build": {
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "@xmatrix/web#ci:build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/guide/**"],
+      "outputs": []
+    },
     "e2e:build": {
       "dependsOn": ["^build"],
+      "env": ["XMATRIX_NEXT_BUILD_SKIP_CHECKS"],
+      "outputs": [".next/**", "!.next/cache/**"]
+    },
+    "@xmatrix/web#e2e:build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/guide/**"],
       "env": ["XMATRIX_NEXT_BUILD_SKIP_CHECKS"],
       "outputs": [".next/**", "!.next/cache/**"]
     },
@@ -28,8 +44,18 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "@xmatrix/web#test:ci": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/guide/**"],
+      "outputs": []
+    },
     "test": {
       "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "@xmatrix/web#test": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/guide/**"],
       "outputs": []
     }
   }

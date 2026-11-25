@@ -25,6 +25,7 @@ test("decision-model changes run the Node checks containing the evaluation tests
 
 test("web changes select unit, build, and browser partitions for CI", () => {
   assert.deepEqual(affectedPartitions(["apps/web/src/app.tsx"]), ["node-checks", "web", "web-browser", "duplicates"]);
+  assert.deepEqual(affectedPartitions(["docs/guide/privacy.md"]), ["node-checks", "web", "web-browser", "duplicates"]);
 });
 
 test("shared database and protocol source, manifests, and tests run every dependent Node partition", () => {
