@@ -8,6 +8,18 @@
 
 Hub (`@xmatrix/db`, bootstrap prompts) and CLI / daemon; no schema migration. Recovery is a CI-validated beta reverting this change.
 
+## Unreleased: Workspace receipts say what may be kept
+
+The retention notice on Gmail, Google Docs/Drive/Sheets and Calendar receipts
+told Agents not to copy results into Pages or memory at all, stricter than
+Google's Workspace AI Tools Addendum, whose 30-day bound covers Google
+Technical Information, not user data. A manifest can now declare
+`resultRetentionMayKeep`; the Workspace connectors say lasting notes may keep
+the business facts a task concluded (an amount, a date, a status) with their
+source id, never the retrieved text. `@gcp` keeps "do not copy": Google
+Cloud's §17 counts costs, IAM and architecture conclusions as technical
+information. Protocol and Hub only.
+
 ## Unreleased: Google Docs/Drive/Sheets and Calendar reach Google's Workspace MCP servers
 
 From 2027-02-01 Google's Workspace AI Tools Addendum has AI agents reach

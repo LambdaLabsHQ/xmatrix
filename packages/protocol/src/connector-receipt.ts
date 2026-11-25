@@ -52,9 +52,11 @@ export function appResultRetentionDays(appId: string): number | undefined {
 
 /** What an Agent is told about such a provider's results, so it does not keep copies longer. */
 export function appResultRetentionNotice(appId: string): string | undefined {
-  const days = appResultRetentionDays(appId);
-  return days === undefined ? undefined
-    : `Under the provider's terms this result is deleted after ${days} days, and at once when the connection is disconnected; do not copy it into Pages, memory or other lasting notes.`;
+  const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((entry) => entry.id === appId);
+  if (manifest?.resultRetentionDays === undefined) return undefined;
+  return `Under the provider's terms this result is deleted after ${manifest.resultRetentionDays} days, and at once when the connection is disconnected; ` +
+    (manifest.resultRetentionMayKeep ? `Pages, memory and other lasting notes may keep only ${manifest.resultRetentionMayKeep}.`
+      : "do not copy it into Pages, memory or other lasting notes.");
 }
 
 export function connectorReceiptBody(lines: readonly string[]): string {
