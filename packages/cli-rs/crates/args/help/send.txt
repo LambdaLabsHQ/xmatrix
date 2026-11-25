@@ -11,8 +11,9 @@ Channel command text (sent visibly, then interpreted by the Hub):
 
 A summon (@auto, @<agent>, @<agent> repo:/pwd:/machine:) starts an Agent only
 when the send says --launch. Without it, use @<agent>:<instance> to address an
-existing Instance; a summon without an Instance number is refused before the
-message is sent. Text such as launch:force does not replace --launch. Stop,
+existing Instance; a summon without an Instance number is sent as a plain
+mention and starts nothing (the reply says so). Text such as launch:force does
+not replace --launch. Stop,
 reborn and handoff need no --launch. Put mention examples in code or quotes.
 
 Lifecycle actions use current Channel/Run permissions. The Hub decides access
