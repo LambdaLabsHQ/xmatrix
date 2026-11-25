@@ -7,6 +7,8 @@ test("Google Cloud and Workspace results are retained 29 days, inside the terms'
   assert.deepEqual(new Map(RETAINED_APP_RESULTS), new Map([["gcp", 29], ["gmail", 29], ["google", 29], ["googlecalendar", 29]]));
   assert.match(appResultRetentionNotice("gcp"), /deleted after 29 days.*disconnected.*do not copy it into Pages, memory/);
   assert.equal(appResultRetentionNotice("slack"), undefined);
+  assert.match(appResultRetentionNotice("gmail"), /deleted after 29 days.*may keep only the business facts .* source id, never the retrieved text\./);
+  assert.doesNotMatch(appResultRetentionNotice("gmail"), /do not copy/);
 });
 
 test("an Agent listing Google Cloud's commands is told how long its results last", async () => {

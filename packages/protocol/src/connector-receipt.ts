@@ -51,12 +51,17 @@ export function appResultRetentionDays(appId: string): number | undefined {
 }
 
 const RETENTION_NOTICE_PREFIX = "Under the provider's terms this result is deleted after ";
-const RETENTION_NOTICE_SUFFIX = " days, and at once when the connection is disconnected; do not copy it into Pages, memory or other lasting notes.";
+const RETENTION_NOTICE_MID = " days, and at once when the connection is disconnected; ";
+const RETENTION_NOTICE_NO_COPY = "do not copy it into Pages, memory or other lasting notes.";
+const RETENTION_NOTICE_MAY_KEEP_PREFIX = "Pages, memory and other lasting notes may keep only ";
 
 /** What an Agent is told about such a provider's results, so it does not keep copies longer. */
 export function appResultRetentionNotice(appId: string): string | undefined {
-  const days = appResultRetentionDays(appId);
-  return days === undefined ? undefined : `${RETENTION_NOTICE_PREFIX}${days}${RETENTION_NOTICE_SUFFIX}`;
+  const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((entry) => entry.id === appId);
+  if (manifest?.resultRetentionDays === undefined) return undefined;
+  return `${RETENTION_NOTICE_PREFIX}${manifest.resultRetentionDays}${RETENTION_NOTICE_MID}` +
+    (manifest.resultRetentionMayKeep ? `${RETENTION_NOTICE_MAY_KEEP_PREFIX}${manifest.resultRetentionMayKeep}.`
+      : RETENTION_NOTICE_NO_COPY);
 }
 
 /** Strips one trailing `appResultRetentionNotice` line that `publishCommandStatus` appended for Agents. */
@@ -64,9 +69,14 @@ function stripTrailingRetentionNotice(line: string): string {
   const split = line.lastIndexOf("\n");
   if (split < 0) return line;
   const tail = line.slice(split + 1);
-  if (!tail.startsWith(RETENTION_NOTICE_PREFIX) || !tail.endsWith(RETENTION_NOTICE_SUFFIX)) return line;
-  const days = tail.slice(RETENTION_NOTICE_PREFIX.length, tail.length - RETENTION_NOTICE_SUFFIX.length);
-  return /^[1-9]\d*$/u.test(days) ? line.slice(0, split) : line;
+  if (!tail.startsWith(RETENTION_NOTICE_PREFIX)) return line;
+  const mid = tail.indexOf(RETENTION_NOTICE_MID, RETENTION_NOTICE_PREFIX.length);
+  if (mid < 0 || !/^[1-9]\d*$/u.test(tail.slice(RETENTION_NOTICE_PREFIX.length, mid))) return line;
+  const guidance = tail.slice(mid + RETENTION_NOTICE_MID.length);
+  const knownGuidance = guidance === RETENTION_NOTICE_NO_COPY
+    || (guidance.startsWith(RETENTION_NOTICE_MAY_KEEP_PREFIX) && guidance.endsWith(".")
+      && guidance.length > RETENTION_NOTICE_MAY_KEEP_PREFIX.length + 1);
+  return knownGuidance ? line.slice(0, split) : line;
 }
 
 export function connectorReceiptBody(lines: readonly string[]): string {
