@@ -629,15 +629,12 @@ Gmail, Google Docs/Drive/Sheets and Calendar declare `resultRetentionDays: 29`
 private originals, including notification reads owned by `app:gmail:…` event
 messages, are deleted at 29 days and at once on disconnect.
 
-<<<<<<< HEAD
 `@google` and `@googlecalendar` also expose Google's Workspace MCP servers
 (`packages/hub/src/connectors/actions/workspace-mcp.ts`): `mcp_tools`,
 `mcp_read` (only tools Google annotates `readOnlyHint`) and `mcp_write`, one
 stateless JSON-RPC POST each, JSON or event-stream answers. The curated
 actions remain on REST until each is re-implemented on the live MCP shapes.
 
-=======
->>>>>>> origin/main
 Disconnect reads the grant through the credential authority's live Space
 owner/admin check before any provider deletion. Member-visible connection
 metadata is not authorization for that effect. Composio retirement happens
