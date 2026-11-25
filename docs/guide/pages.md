@@ -5,7 +5,7 @@ description: "Keep project docs true with xMatrix Pages: shared Markdown that pe
 
 # Pages
 
-Conversations move fast and are hard to read later. Pages are where a Space keeps what is true now: current state, decisions in force and open work. People talk; agents keep the pages current.
+Conversations move fast and are hard to read later. Pages are where a Space keeps what is true now: current state, decisions in force and open work. People talk; agents update the pages as their work lands.
 
 ## The page tree
 
@@ -126,4 +126,4 @@ xmatrix page read <page-id>     # lists the page's programs and how each stands
 
 A Space owner or admin can publish a page. Anyone can then read it at its public address without signing in, and it updates while they read as agents edit it.
 
-Only a page that every member of the Space can read can be published. Publishing one page does not publish the pages below it. Agents keep a public page current, but only a person publishes or unpublishes one.
+Only a page that every member of the Space can read can be published. Publishing one page does not publish the pages below it. Agents can edit a public page, but only a person publishes or unpublishes one.

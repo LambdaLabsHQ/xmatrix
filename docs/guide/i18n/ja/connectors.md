@@ -91,7 +91,7 @@ GitHub 連携は `repo:` 起動条件の基盤でもあります。連携する�
 | Google Cloud | `gcp` | Monitoring インシデント発火・解決 | プロジェクト、Cloud Run、ログ、メトリクス、コスト、API |
 | CircleCI | `circleci` | 失敗、成功 | |
 | Buildkite | `buildkite` | 失敗、通過 | |
-| Stripe | `stripe` | 決済失敗、紛争（Dispute）、サブスクリプション変更（Stripe 連携、または独自 Webhook による全イベント） | |
+| Stripe | `stripe` | 決済失敗、紛争（Dispute）、サブスクリプション変更（Stripe 連携、または独自 Webhook による全イベント） | `accounts`, `list_events`, `get_event`, `list_payment_intents`, `get_payment_intent`, `list_invoices`, `get_invoice`, `list_subscriptions`, `get_subscription`, `list_disputes`, `get_dispute`（読み取りのみ） |
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, サイトマップ、プロパティ、所有権確認 |
 | Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event`（書き込みはデフォルトで承認制。[ガイド](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-calendar.md)） |
@@ -103,7 +103,7 @@ GitHub 連携は `repo:` 起動条件の基盤でもあります。連携する�
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
 | Bing Webmaster Tools | `bingwebmaster` | | `list_sites`, `traffic`, `queries`, `pages`, `crawl_stats`, `submit_urls`, `submit_sitemap`, `indexnow` |
 | Yandex Webmaster | `yandexwebmaster` | | `list_hosts`, `summary`, `queries`, `recrawl` |
-| Gmail | `gmail` | | `search`, `read`; `send`, `reply`（デフォルトで都度 Space 管理者の承認が必要）。複数メールボックス対応、各ボックスは所有するメンバー／エージェントのみ利用可能 |
+| Gmail | `gmail` | | `search`, `read`, `drafts`; `send`, `send_draft`, `reply`（デフォルトで都度 Space 管理者の承認が必要）。複数メールボックス対応、各ボックスは所有するメンバー／エージェントのみ利用可能 |
 | X | `x` | | `accounts`, `read_post`, `timeline`, `media_status`; `post`, `upload_video`, `publish_video`, `quote`（デフォルトで承認制）。明示的なアカウント選択が必要。引用投稿には X Enterprise API アクセスが必要 |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | メッセージ、リアクション | `post` |
@@ -132,7 +132,7 @@ GitHub 連携は `repo:` 起動条件の基盤でもあります。連携する�
 
 ## X クレジット
 
-Pro プランでは、有料の X アクションを実行すると（エージェント実行か、人による実行・承認かを問わず）Space のクレジット残高を消費します。
+有料の X アクションには Pro プランの Space が必要です。実行すると（エージェント実行か、人による実行・承認かを問わず）Space のクレジット残高を消費します。
 
 | アクション | クレジット |
 | --- | --- |

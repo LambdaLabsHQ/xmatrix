@@ -49,7 +49,7 @@ description: "按功能整理的 xmatrix 全部命令参考：登录与守护进
 | `xmatrix agent model <harness> [<model>\|--clear] --space <id>` | 查看或设置 Agent 在未指定模型时的默认模型；`--clear` 恢复工具默认。Agent 也可为其所有者名下的 Agent 设置。详见[设置智能体的默认模型](agents.md#设置智能体的默认模型)。 |
 | `xmatrix agent disable\|enable <harness> --space <id>` | 停用或重新启用 Agent |
 | `xmatrix agent remove <harness> --space <id>` | 从 Space 中移除该 Agent |
-| `xmatrix list` | 查看当前在线的 Agent |
+| `xmatrix list` | 查看正在运行的 Agent 实例 |
 | `xmatrix harness list` | 列出机器上的编码工具及其状态 |
 | `xmatrix harness install\|update\|uninstall <name>` | 按官方方式安装、升级或卸载编码工具 |
 | `xmatrix harness auto-update <name> on\|off` | 开启或关闭工具自动更新 |
@@ -72,12 +72,11 @@ description: "按功能整理的 xmatrix 全部命令参考：登录与守护进
 | `xmatrix channel chat <id>` | 在终端中进行简洁的逐行聊天 |
 | `xmatrix channel subscribe <id> <pull-request-url>` | 将指定 Pull Request 的 CI 结果、评审与合入状态订阅到对话 |
 | `xmatrix channel subscribe <id> <url> --wait` | 订阅后一直等到工作流运行或 Pull Request 回报结果（`--timeout <分钟>`，默认 60）；请用 harness 自带的等待方式运行 |
-| `xmatrix channel worktree <id> on\|off\|inherit` | 控制该对话中的 Agent 是否使用隔离的 Git worktree |
 
 ## 消息收发
 
 ```sh
-xmatrix send <conversation> "@codex repo:acme/web review the migration diff"
+xmatrix send <conversation> --launch "@codex repo:acme/web review the migration diff"
 xmatrix send <conversation> --stdin < update.md
 xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Here is the report."
 ```
@@ -88,9 +87,10 @@ xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Her
 | `--file <path>` | 从 UTF-8 文件读取正文。 |
 | `--attachment <path>` | 随正文附带文件，可重复指定多个。 |
 | `--reply-to <message-id>` | 回复指定消息 |
+| `--launch` | 启动消息中召唤的 Agent（`@codex`、`@auto`）。不加时它们只会被提及；`@codex:1` 等实例地址不需要此选项。 |
 | `--wait` | 标记你正在等待消息提及的成员与 Agent 回复，在对方作答前会保留在其“待你处理”列表中。 |
 
-通过 CLI 发送的消息与在应用中输入的消息遵循完全相同的[消息语法](syntax.md)。
+通过 CLI 发送的消息与在应用中输入的消息遵循相同的[消息语法](syntax.md)，只是召唤 Agent 时需要加上 `--launch` 才会启动。
 
 | 命令 | 作用 |
 | --- | --- |
