@@ -16,6 +16,7 @@ import { googleHeaders } from "./actions/google-headers";
  */
 
 export const PLAY_ORIGIN = "https://androidpublisher.googleapis.com";
+export const PLAY_REPORTING_ORIGIN = "https://playdeveloperreporting.googleapis.com";
 export const PACKAGE_NAME = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/u;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const FIELD_MASK = /^[A-Za-z][A-Za-z0-9_.,/()*]{0,499}$/u;
@@ -129,19 +130,35 @@ export function play(credentials: Readonly<Record<string, string>>, id: GooglePl
   return sendPlay(credentials, playRequest(id, input));
 }
 
-/** One page of the apps the connected account can see, from the Play Developer Reporting API (the publishing API lists none). */
-export async function playApps(credentials: Readonly<Record<string, string>>, pageToken?: string) {
-  const url = new URL("https://playdeveloperreporting.googleapis.com/v1beta1/apps:search");
-  url.searchParams.set("pageSize", "100");
-  if (pageToken) url.searchParams.set("pageToken", pageToken);
-  let result: Record<string, unknown>;
+/** One read or query call against the Google Play Developer Reporting API (v1beta1) with the connection's OAuth token. */
+export async function playReporting(credentials: Readonly<Record<string, string>>, path: string,
+  init: { method?: "GET" | "POST"; query?: Record<string, string>; body?: unknown } = {}): Promise<Record<string, unknown>> {
+  const url = new URL(path, PLAY_REPORTING_ORIGIN);
+  if (url.origin !== PLAY_REPORTING_ORIGIN || !url.pathname.startsWith("/v1beta1/") || url.username || url.password || url.hash) {
+    throw new ProviderRequestError(500, "Google Play reporting path left its API");
+  }
+  for (const [name, value] of Object.entries(init.query ?? {})) url.searchParams.set(name, value);
   try {
-    result = await providerJson(url, { headers: googleHeaders(credentials, "Google Play Console"), describeError: describePlayError });
+    return await providerJson(url, { method: init.method ?? "GET", maxBytes: MAX_RESPONSE_BYTES,
+      headers: googleHeaders(credentials, "Google Play Console"), describeError: describePlayError,
+      ...(init.body === undefined ? {} : { json: init.body }) });
   } catch (error) {
     if (!(error instanceof ProviderRequestError)) throw error;
     if (error.status === 401) throw new ConnectorRemedy(401, "Google no longer accepts the Google Play Console sign-in; reconnect", { kind: "reconnect" });
-    throw apiNotEnabled(error) ?? new ProviderRequestError(error.status, error.message.replace(/^Provider returned/u, "Google Play Developer Reporting API returned"));
+    const disabled = apiNotEnabled(error);
+    if (disabled) throw disabled;
+    const quota = error.status === 429 || /quota|rate limit|RESOURCE_EXHAUSTED/iu.test(error.message);
+    const hint = quota ? " (Google's reporting quota is used up; try again later)"
+      : error.status === 403 ? " (the connected Google account needs View app information permission in Play Console → Users and permissions)" : "";
+    throw new ProviderRequestError(error.status, `${error.message.replace(/^Provider returned/u, "Google Play Developer Reporting API returned")}${hint}`);
   }
+}
+
+/** One page of the apps the connected account can see, from the Play Developer Reporting API (the publishing API lists none). */
+export async function playApps(credentials: Readonly<Record<string, string>>, pageToken?: string) {
+  const result = await playReporting(credentials, "/v1beta1/apps:search", {
+    query: { pageSize: "100", ...(pageToken ? { pageToken } : {}) },
+  });
   if (result.apps !== undefined && !Array.isArray(result.apps)) throw new ProviderRequestError(502, "Google Play did not return an app list");
   const apps = ((result.apps ?? []) as unknown[]).map(record).map(app => ({ packageName: text(app.packageName), displayName: text(app.displayName) }))
     .filter(app => PACKAGE_NAME.test(app.packageName));

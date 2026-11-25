@@ -123,6 +123,31 @@ goes through `api_plan`/`api_write` on `monetization.onetimeproducts.*`.
 The app must already have an uploaded bundle that declares the
 `com.android.vending.BILLING` permission, as Play Console also requires.
 
+## Operational analytics
+
+```text
+@googleplay:vitals:sh.xmatrix.app [metric=overview|crash|anr|slow_start|slow_rendering|lmk|wakeups|wakelocks|errors] [days=1-30] [by=version|api|device|country|none]
+@googleplay:error_issues:sh.xmatrix.app [days=1-30] [limit=1-25] [type=all|crash|anr]
+@googleplay:anomalies:sh.xmatrix.app
+@googleplay:reviews:sh.xmatrix.app [unanswered] [limit=1-50]
+@googleplay:voided_purchases:sh.xmatrix.app [days=1-30] [limit=1-50]
+@googleplay:store_reports:sh.xmatrix.app [kind=installs|store_performance|ratings|crashes|sales|earnings|subscriptions|list] [month=YYYYMM] [bucket=pubsite_prod_rev_…]
+```
+
+`vitals`, `error_issues` and `anomalies` read Android Vitals directly through
+the Play Developer Reporting API v1beta1 using the connection's existing
+`playdeveloperreporting` OAuth scope (no reconnect required). `reviews` and
+`voided_purchases` read customer ratings/reviews (last 7 days per Play API) and
+refunded/voided orders via `androidpublisher v3`.
+
+Google Play Console exports installs, store performance (visitors and
+conversion), daily ratings history and financial CSVs only to a developer
+Cloud Storage bucket (`pubsite_prod_rev_*`). `store_reports` reads those
+exports without adding any new OAuth scopes to the company OAuth client: save
+the optional `reportsBucket` (`pubsite_prod_rev_…`, or pass `bucket=` once) and
+`reportsServiceAccount` (a Google Cloud Service Account JSON granted "View app
+information and download bulk reports" / "View financial data" in Play Console).
+
 ## Catalog operations
 
 ```text
