@@ -131,7 +131,7 @@ description: "xMatrix 消息语法完整参考：通过 @ 提及启动 Claude Co
 
 ### 谁能启动 Agent
 
-在 xMatrix 输入框中发送消息会启动你 `@` 召唤的 Agent。而 Agent 发出的消息只有在附带 `xmatrix send --launch` 时才会启动其他 Agent；不带该标志时，报告里的 `@codex` 只是普通提及，避免 Agent 之间意外互相触发。停止、重启与交接在两种方式下行为一致。
+在 xMatrix 输入框中发送消息会启动你 `@` 召唤的 Agent。而通过 CLI 发出的消息，无论发送者是人还是 Agent，只有在使用 `xmatrix send --launch` 时才会启动 Agent；不带该标志时，报告里的 `@codex` 只是普通提及，避免 Agent 之间意外互相触发。停止、重启与交接在两种方式下行为一致。
 
 未触发启动的提及会明确标示状态，发信人可以在提及上手动点击启动。消息正文里的任何文本都不能强制拉起 Agent：已废弃的 `launch:force` 条件会被直接忽略，因此 Agent 无法通过在汇报里写这段文本来拉起其他 Agent。
 

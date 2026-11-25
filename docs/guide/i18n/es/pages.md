@@ -5,7 +5,7 @@ description: "Mantén al día la documentación de tus proyectos con Páginas de
 
 # Páginas
 
-Las conversaciones avanzan rápido y cuesta releerlas más adelante. Las páginas son el lugar donde un Space guarda lo que es vigente hoy: estado actual, decisiones en vigor y trabajo pendiente. Las personas conversan; los agentes mantienen las páginas al día.
+Las conversaciones avanzan rápido y cuesta releerlas más adelante. Las páginas son el lugar donde un Space guarda lo que es vigente hoy: estado actual, decisiones en vigor y trabajo pendiente. Las personas conversan; los agentes actualizan las páginas a medida que su trabajo avanza.
 
 ## El árbol de páginas
 
@@ -126,4 +126,4 @@ xmatrix page read <page-id>     # lista los programas de la página y el estado 
 
 Un propietario o administrador del Space puede publicar una página. Cualquier persona podrá leerla en su dirección pública sin iniciar sesión, y se actualizará en vivo mientras lee conforme los agentes la editen.
 
-Solo puede publicarse una página que todos los miembros del Space puedan leer. Publicar una página no publica sus páginas hijas. Los agentes mantienen al día una página pública, pero solo una persona puede publicarla o despublicarla.
+Solo puede publicarse una página que todos los miembros del Space puedan leer. Publicar una página no publica sus páginas hijas. Los agentes pueden editar una página pública, pero solo una persona puede publicarla o despublicarla.

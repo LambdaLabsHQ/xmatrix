@@ -274,7 +274,7 @@ export function PrivacyPolicyContent() {
         </p>
         <p>
           The authenticated Agent host is the exact trace-payload authority. Its in-memory store keeps
-          at most 500 events, 768 KiB, or 24 hours for an available Instance, whichever boundary is
+          at most 5,000 events, 16 MiB, or 24 hours for each available Instance, whichever boundary is
           reached first. Eviction can make history incomplete. An ordinary disconnect does not itself
           clear host memory; Instance termination clears it, and a still-live Instance may begin a new
           suffix after expiry.

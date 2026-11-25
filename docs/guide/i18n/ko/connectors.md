@@ -91,7 +91,7 @@ GitHub 연결은 `repo:` 기능의 기반이기도 합니다. 연결하면 스�
 | Google Cloud | `gcp` | 모니터링 인시던트 발생, 해결 | 프로젝트, Cloud Run, 로그, 메트릭, 비용, API |
 | CircleCI | `circleci` | 실패, 성공 | |
 | Buildkite | `buildkite` | 실패, 통과 | |
-| Stripe | `stripe` | 결제 실패, 분쟁, 구독 변경 (Stripe 연결 또는 직접 생성한 웹훅의 객체별 모든 이벤트) | |
+| Stripe | `stripe` | 결제 실패, 분쟁, 구독 변경 (Stripe 연결 또는 직접 생성한 웹훅의 객체별 모든 이벤트) | `accounts`, `list_events`, `get_event`, `list_payment_intents`, `get_payment_intent`, `list_invoices`, `get_invoice`, `list_subscriptions`, `get_subscription`, `list_disputes`, `get_dispute` (읽기 전용) |
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, 사이트맵, 속성, 인증 |
 | Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event` (쓰기는 기본 승인 필요; [가이드](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-calendar.md)) |
@@ -103,7 +103,7 @@ GitHub 연결은 `repo:` 기능의 기반이기도 합니다. 연결하면 스�
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
 | Bing Webmaster Tools | `bingwebmaster` | | `list_sites`, `traffic`, `queries`, `pages`, `crawl_stats`, `submit_urls`, `submit_sitemap`, `indexnow` |
 | Yandex Webmaster | `yandexwebmaster` | | `list_hosts`, `summary`, `queries`, `recrawl` |
-| Gmail | `gmail` | | `search`, `read`; `send`, `reply` (기본값으로 매번 스페이스 관리자 승인 필요). 여러 메일함을 연결할 수 있으며 각 메일함은 소유 멤버나 에이전트만 사용 |
+| Gmail | `gmail` | | `search`, `read`, `drafts`; `send`, `send_draft`, `reply` (기본값으로 매번 스페이스 관리자 승인 필요). 여러 메일함을 연결할 수 있으며 각 메일함은 소유 멤버나 에이전트만 사용 |
 | X | `x` | | `accounts`, `read_post`, `timeline`, `media_status`; `post`, `upload_video`, `publish_video`, `quote` (기본 승인 필요). 명시적 계정 선택 필요; 인용 게시(`quote`)는 X Enterprise API 권한 필요 |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | 메시지, 리액션 | `post` |
@@ -132,7 +132,7 @@ GitHub 연결은 `repo:` 기능의 기반이기도 합니다. 연결하면 스�
 
 ## X 크레딧
 
-Pro 플랜에서 유료 X 작업은 에이전트가 실행하든 사람이 실행·승인하든 스페이스의 크레딧 잔액에서 차감됩니다.
+유료 X 작업에는 Pro 플랜 스페이스가 필요하며, 에이전트가 실행하든 사람이 실행·승인하든 스페이스의 크레딧 잔액에서 차감됩니다.
 
 | 작업 | 크레딧 |
 | --- | --- |

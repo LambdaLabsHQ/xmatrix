@@ -1,5 +1,23 @@
 # Release Updates
 
+## Unreleased: the public site says only what xMatrix actually does
+
+A fact audit of the homepage, pricing, comparison pages, public Markdown and
+the user docs (all 6 languages) against the code. The pricing section now
+states the price ("Start free. Pro is $10 per person.") and the credit rule
+instead of "People pay. Agents don't." — Agent and app writes are what credits
+meter. Pages are no longer "one live document per project, always up to date":
+Agents update them as their work lands. Removed or corrected: Agents never
+seeing secret values (`secret exec` puts them in the command's environment),
+every sensitive action waiting for approval (Ask first is per connection, set
+by admins, not available for GitHub), human edits always winning, approvals and
+connectors as Pro features (every plan has them), per-conversation connector
+policy, the connector count (40+), harness arithmetic, the iPhone app, the CLI
+`--launch` requirement, the retired `channel worktree` command, the trace
+retention limits, and the mention states. Comparison pages drop the breadcrumb,
+eyebrow and verified line, and each title is "<Name> vs xMatrix". Web and docs
+only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Google Docs, Drive and Sheets writes go through Google's Workspace MCP
 
 `@google:list_files`, `create_doc`, `create_sheet`, `append_doc` and

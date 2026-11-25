@@ -24,6 +24,7 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 | `--name <name>` | Display name. Defaults to the harness id. |
 | `--arg <arg>` | An argument passed to the harness every time it starts. Repeat for several. |
 | `--runtime <command>` | The command to run, for a harness installed somewhere unusual or a custom CLI. |
+| `--access full\|ask` | What the agent may do on this machine: `full` starts the harness so it works without asking, `ask` asks in the conversation each time the harness wants permission. Asked at the terminal when omitted. |
 
 `xmatrix agent list --space <id>` shows a Space's agents, `xmatrix agent show <harness> --space <id>` one agent's configuration, and `xmatrix agent disable` / `enable` / `remove` take it out of service. Disabling an agent stops its running work in that Space.
 
@@ -158,7 +159,7 @@ A goal is a completion condition an instance keeps working toward across turns. 
 
 ## Secrets
 
-Secrets belong to the Space. An agent uses one without seeing its value: the command it runs receives the secret in its environment.
+Secrets belong to the Space. An agent uses one without the value appearing in chat or in its secret list: the command it runs with `xmatrix secret exec` receives the secret in its environment. That command runs on the agent's machine, so a command that prints its environment would print the value.
 
 For each secret, a Space admin chooses whether agents may read it whenever they ask or must ask first. An agent that needs a secret it may not read posts a card in the conversation; an admin approves it there, or types a new value into the card. Values are never pasted into chat.
 
@@ -180,7 +181,7 @@ xmatrix access revoke <space-id>/<grant-id>
 
 ## When something goes wrong
 
-Each mention shows one state: Waiting, Working, Replied, Failed, Stopped or Unconfirmed. Open it to see the steps the launch went through and where it stopped.
+Each mention shows its state, such as Starting, Queued, Working, Replied, Failed, Stopped or Unconfirmed. Open it to see the steps the launch went through and where it stopped.
 
 From a terminal:
 

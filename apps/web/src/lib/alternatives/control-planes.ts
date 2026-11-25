@@ -10,7 +10,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Looking for T3 Code alternatives? Give your team real user identities, shared Channels, living project Pages, Space secrets and cross-provider handoff.",
     eyebrow: "T3 Code Alternative · T3 Code vs xMatrix",
-    headline: "T3 Code for Teams: Real Identities, One Channel, and One Living Page",
+    headline: "T3 Code vs xMatrix",
     lead: "T3 Code is an impressive free single-player coding workbench, but it binds each environment to one account, has no shared living project pages, and stalls at 'Limited' when a provider quota runs out. xMatrix gives your team shared Channels, living Pages, Space secrets, and 34 coding harnesses across your machines.",
     productCaption: "Inside xMatrix: real multiplayer Channels where 34 coding harnesses work across all your machines and keep living Pages current for the whole team.",
     painPoints: [
@@ -33,7 +33,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
         problem:
           "T3 Code excels at local diffs and emulators, but has no shared project memory or living documentation (GitHub Discussion #15858), defaults new threads to Full access, caps free T3 Connect tunnels at 3 machines, and focuses strictly on code rather than governed ops apps.",
         xmatrixAnswer:
-          "xMatrix turns completed conversations into living Pages, connects unlimited machines across 34 harnesses, stores Space-level secrets safely, and governs 35 connected apps like Vercel, Cloudflare, Sentry, Gmail, and Stripe.",
+          "In xMatrix, agents record completed work in living Pages; you connect as many machines as you like across 34 harnesses, store Space-level secrets, and govern 40+ connected apps like Vercel, Cloudflare, Sentry, Gmail, and Stripe.",
       },
     ],
     comparisonRows: [
@@ -54,7 +54,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Default safety & ops governance",
-        xmatrix: "Per-app policies across 35 apps + Space secrets",
+        xmatrix: "Machine owner picks full or ask access per harness; per-app policies across 40+ apps + Space secrets",
         competitor: "New threads default to Full access; machine-local secrets; dev issues only",
       },
       {
@@ -90,7 +90,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       {
         question: "Why pay for xMatrix Pro when T3 Code is free?",
         answer:
-          "If you only want a free solo coding workbench on 1–3 machines, T3 Code is great. Teams choose xMatrix when they need real multiplayer Spaces, living project Pages, cross-provider quota handoff, Space secrets, and 35 governed operational connectors.",
+          "If you only want a free solo coding workbench on 1–3 machines, T3 Code is great. Teams choose xMatrix when they need real multiplayer Spaces, living project Pages, cross-provider quota handoff, Space secrets, and 40+ governed operational connectors.",
       },
       {
         question: "Does xMatrix automatically switch providers when Claude hits its limit?",
@@ -113,7 +113,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Evaluating herdr alternatives? xMatrix ships built-in auth, team permissions, live cross-device relay with no waitlist, per-app approvals and living Pages.",
     eyebrow: "herdr Alternative · herdr vs xMatrix",
-    headline: "herdr Alternative With Team Auth, Approvals, and Living Pages — Live Across Devices Today",
+    headline: "herdr vs xMatrix",
     lead: "herdr evolved from a beloved Rust TUI multiplexer into herdr-core plus native apps, bringing breaking protocol changes and Reddit pushback over GUI lock-in—while still lacking multi-user auth, approvals, secrets, and a live cloud relay. xMatrix gives you a complete, governed collaboration layer today.",
     productCaption: "Inside xMatrix: cross-device desktop, web, and mobile coordination live today—with authenticated Spaces, Space secrets, and living Pages instead of an unauthenticated preview socket.",
     painPoints: [
@@ -122,7 +122,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
         problem:
           "herdr-core is explicitly a single-user local runtime: anyone who can reach its socket effectively has shell access. There are no user roles, no action approvals, no secret vault, and no scheduled or webhook-triggered automation.",
         xmatrixAnswer:
-          "xMatrix builds the trust boundary on top of local execution: verified human and agent identities, Space-level secrets injected without exposing values, per-app approval policies, and Norn automation.",
+          "xMatrix builds the trust boundary on top of local execution: verified human and agent identities, Space-level secrets passed into commands without being printed or put in chat, per-app approval policies, and Norn automation.",
       },
       {
         title: "Protocol churn, breaking changes, and TUI-to-GUI backlash",
@@ -136,7 +136,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
         problem:
           "Cross-device encrypted relaying (Herdr Cloud) and the official mobile app remain waitlisted/in-progress, and even once live, a PTY multiplexer leaves every decision buried inside terminal scrollback.",
         xmatrixAnswer:
-          "Cross-machine relaying across macOS, Windows, Linux, Android, and Web (including iPhone & iPad) works in xMatrix today, and finished runs keep living Pages up to date automatically.",
+          "Cross-machine relaying across macOS, Windows, Linux, iPhone & iPad, Android, and Web works in xMatrix today, and agents write finished work back to living Pages.",
       },
     ],
     comparisonRows: [
@@ -147,7 +147,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Cross-device relay & mobile",
-        xmatrix: "Live today across macOS, Windows, Linux, Android, and Web (including iPhone & iPad)",
+        xmatrix: "Live today across macOS, Windows, Linux, iPhone & iPad, Android, and Web",
         competitor: "SSH manual setup today; Herdr Cloud relay on waitlist",
       },
       {
@@ -157,7 +157,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Automation & connectors",
-        xmatrix: "Scheduled/event-driven Norn programs + 35 connected apps",
+        xmatrix: "Scheduled/event-driven Norn programs + 40+ connected apps",
         competitor: "No built-in cron, webhook automation, or app connectors",
       },
       {
@@ -172,7 +172,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     ],
     switchWhen: [
       "You want cross-device desktop and mobile access today without waiting on the Herdr Cloud waitlist or debugging SSH ProxyCommand leaks.",
-      "You need real auth, Space secrets, and human-in-the-loop approvals before agents touch GitHub, Vercel, Cloudflare, or production services.",
+      "You need real auth, Space secrets, and human-in-the-loop approvals before agents act through Vercel, Cloudflare, Linear, or other connected apps.",
       "You want project status summarized in living Pages rather than hunting through persistent PTY panes.",
     ],
     migrationSteps: [
@@ -198,7 +198,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       {
         question: "How is xMatrix safer than exposing a local PTY socket?",
         answer:
-          "xMatrix enforces server-side Space authentication and membership, separates machine registration from Space access, masks Space secrets via xmatrix secret exec, and gates connected SaaS actions with Read-only or Ask-first policies.",
+          "xMatrix enforces server-side Space authentication and membership, separates machine registration from Space access, passes Space secrets into commands via xmatrix secret exec without printing them, and gates connected SaaS actions with Read only or Ask first permissions.",
       },
       {
         question: "Can I still use xMatrix from the terminal?",
@@ -216,23 +216,23 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Looking for Seedmux alternatives? Escape macOS + iPhone lock-in, closed binaries and YOLO phone defaults with xMatrix on macOS, Windows, Linux and Android.",
     eyebrow: "Seedmux Alternative · Seedmux vs xMatrix",
-    headline: "The Seedmux Alternative for Cross-OS Teams, Android, and Governed Mobile Control",
+    headline: "Seedmux vs xMatrix",
     lead: "Seedmux pairs a slick Ghostty + tmux macOS terminal with an iPhone companion app, but it is closed-source, Mac-only, single-player, and launches phone-initiated sessions in YOLO mode by default. xMatrix brings cross-OS multi-machine coordination, real team Spaces, and living Pages to macOS, Windows, Linux, Android, and iOS.",
-    productCaption: "Inside xMatrix: one workspace across macOS, Windows, Linux, Android, and Web (including iPhone & iPad)—with governed app approvals instead of YOLO phone defaults.",
+    productCaption: "Inside xMatrix: one workspace across macOS, Windows, Linux, iPhone & iPad, Android, and Web—with governed app approvals and harness access each machine's owner chooses.",
     painPoints: [
       {
         title: "macOS + iPhone lock-in leaves Windows, Linux, and Android behind",
         problem:
           "Seedmux is strictly a native macOS app with notch-dependent alerts and an iPhone companion (behind Seedmux Pro). There is no native Windows or Linux desktop app, no web workspace, and no Android app.",
         xmatrixAnswer:
-          "xMatrix runs across macOS, Windows, Linux, Android, and Web (including iPhone & iPad)—so every machine and phone you or your teammates use joins the exact same Space.",
+          "xMatrix runs across macOS, Windows, Linux, iPhone & iPad, Android, and Web—so every machine and phone you or your teammates use joins the exact same Space.",
       },
       {
         title: "Single-player terminal panes with YOLO defaults on mobile",
         problem:
           "Seedmux has no team channels, no shared roles, and no Space secrets; sessions started from the iPhone companion default to YOLO permissions, and cellular/corporate-firewall relays can add approval latency.",
         xmatrixAnswer:
-          "xMatrix keeps explicit governance on mobile and desktop alike: per-app Read-only / Ask first / Read & write policies, masked Space secrets, and multi-human Channels where teammates can review and approve actions.",
+          "xMatrix applies the same rules whichever device starts the work: each harness runs with the full or ask-first access its machine's owner confirmed, connected apps follow Read only / Ask first / Read and write permissions, Space secrets stay out of chat, and Space admins approve Ask-first actions in shared Channels.",
       },
       {
         title: "Fragile CLI state scraping and no living project documentation",
@@ -245,7 +245,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     comparisonRows: [
       {
         dimension: "Supported platforms",
-        xmatrix: "macOS, Windows, Linux, Android, and Web (including iPhone & iPad)",
+        xmatrix: "macOS, Windows, Linux, iPhone & iPad, Android, and Web",
         competitor: "macOS + iPhone companion only (SSH/relay to Linux hosts)",
       },
       {
@@ -255,7 +255,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Mobile safety defaults",
-        xmatrix: "Same per-app approval policies and Space secrets on mobile and web",
+        xmatrix: "Harness access its machine owner confirmed (full or ask) + the same per-app policies from any device",
         competitor: "Phone-initiated sessions default to YOLO mode",
       },
       {
@@ -265,7 +265,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "External ops apps",
-        xmatrix: "35 connected apps (GitHub, Linear, Vercel, Cloudflare, Sentry, Gmail, Stripe, etc.)",
+        xmatrix: "40+ connected apps (GitHub, Linear, Vercel, Cloudflare, Sentry, Gmail, Stripe, etc.)",
         competitor: "Terminal CLI commands only; no SaaS connector approval layer",
       },
     ],
@@ -274,7 +274,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     ],
     switchWhen: [
       "You work on Windows, Linux, or Android—or collaborate with teammates who do.",
-      "You want mobile control without defaulting remote sessions into YOLO permissions.",
+      "You want mobile control where each machine's owner has explicitly chosen full or ask-first access for every harness.",
       "You want decisions and project progress maintained in living Pages rather than ephemeral terminal splits.",
     ],
     migrationSteps: [
@@ -284,10 +284,10 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         title: "Use Web, Desktop, or Mobile without self-hosting a relay",
-        detail: "Follow progress and answer approvals from any browser (including iPhone & iPad), desktop app, or Android device.",
+        detail: "Follow progress and answer approvals from any browser, the desktop app, or the iPhone, iPad, and Android apps.",
       },
       {
-        title: "Collect worker outputs in one living Page",
+        title: "Collect worker outputs in living Pages",
         detail: "Instead of checking worker pane receipts manually, let each agent update its section on the project Page.",
       },
     ],

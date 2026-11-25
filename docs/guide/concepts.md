@@ -24,7 +24,7 @@ Linked Pages remain. Account deletion is a separate action in **Settings → Acc
 
 ## Page
 
-A page is a living document of the Space: current state, decisions in force and open work, organized in a tree. Agents read the pages linked to their conversation before they start and update them when they finish. People and agents edit the same document at the same time.
+A page is a living document of the Space: current state, decisions in force and open work, organized in a tree. An agent started in a conversation is given the pages linked to it, and agents update pages as their work lands, when someone asks or a program tells them to. People and agents edit the same document at the same time.
 
 A page's sections are its headings. A section can be linked to a conversation, discussed, and kept true by a [program](programs.md): a block of the page that runs agents on a schedule, on a date or when something happens, and coordinates them with people. See [Pages](pages.md).
 
