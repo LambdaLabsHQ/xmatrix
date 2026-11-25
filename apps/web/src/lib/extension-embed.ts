@@ -312,22 +312,14 @@ const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-
 /** A conversation open address, optionally targeting a specific card/message (`#message:<id>`). */
 const APP_CONVERSATION_OPEN_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-9_-]{1,128}(?:#message:[A-Za-z0-9_.:-]{1,128})?$/u;
 
-let inlineHostTabId: number | null = (() => {
-  if (typeof window === "undefined") return null;
-  const raw = Number(new URLSearchParams(window.location.search).get("tab"));
-  return Number.isInteger(raw) && raw > 0 ? raw : null;
-})();
+let inlineHostTabId: number | null = null;
 
-if (typeof window !== "undefined") {
-  const parent = extensionEmbedParent();
-  if (parent) {
-    window.addEventListener("message", (event: MessageEvent) => {
-      const data = fromParent(event, parent);
-      if (data?.type === "host-tab" && typeof data.tabId === "number" && Number.isInteger(data.tabId) && data.tabId > 0) {
-        inlineHostTabId = data.tabId;
-      }
-    });
-  }
+function resolveInlineHostTabId(): number | null {
+  if (inlineHostTabId !== null) return inlineHostTabId;
+  const search = typeof window !== "undefined" ? window.location?.search : undefined;
+  if (!search) return null;
+  const raw = Number(new URLSearchParams(search).get("tab"));
+  return Number.isInteger(raw) && raw > 0 ? raw : null;
 }
 
 /**
@@ -348,11 +340,12 @@ export function openEmbedSidePanel(options?: { spaceId?: string; channelId?: str
       ...(cleanMessageId ? { messageId: cleanMessageId } : {}),
     });
   }
-  if (inlineHostTabId !== null) {
+  const hostTabId = resolveInlineHostTabId();
+  if (hostTabId !== null) {
     const sidePanel = (globalThis as unknown as {
       chrome?: { sidePanel?: { open?: (opts: { tabId: number }) => Promise<void> } };
     }).chrome?.sidePanel;
-    void sidePanel?.open?.({ tabId: inlineHostTabId })?.catch?.(() => undefined);
+    void sidePanel?.open?.({ tabId: hostTabId })?.catch?.(() => undefined);
   }
 }
 
@@ -403,9 +396,15 @@ export function subscribeEmbedOpen(onOpen: AddressOpener): () => void {
       onOpen(data.path, parseOpenedChannel(data.channel, data.path), parseEmbedPendingMessage(data.pending));
     }
   });
+  const stopHostTab = subscribeParent("host-tab", (data) => {
+    if (typeof data.tabId === "number" && Number.isInteger(data.tabId) && data.tabId > 0) {
+      inlineHostTabId = data.tabId;
+    }
+  });
   return () => {
     addressOpeners.delete(onOpen);
     stop();
+    stopHostTab();
   };
 }
 

@@ -23,28 +23,23 @@ test("an Agent picked in the question still names the same words after the quote
   assert.ok(selection.start > body.indexOf("is this right?"));
 });
 
-test("an oversized quote shortens cleanly without dropping explicit @ Agent selections", async () => {
-  const hugePassage = { text: "a".repeat(70 * 1024), label: "Huge page", href: "https://a.test/huge" };
-  const question = "@claude summarize this";
-  const picked = {
+function claudeSelection(start = 0) {
+  return {
     schemaVersion: 1,
     sourceRevision: 1,
     sourceBodyHash: "unused",
-    selections: [{ start: 0, end: 7, text: "@claude", target: { kind: "capability", harness: "claude" } }],
+    selections: [{ start, end: start + 7, text: "@claude", target: { kind: "capability", harness: "claude" } }],
   };
-  const { body, invocationSelections } = await askMessage(hugePassage, question, picked, "space-1");
+}
+
+test("an oversized quote shortens cleanly without dropping explicit @ Agent selections", async () => {
+  const hugePassage = { text: "a".repeat(70 * 1024), label: "Huge page", href: "https://a.test/huge" };
+  const { body, invocationSelections } = await askMessage(hugePassage, "@claude summarize this", claudeSelection(), "space-1");
   assert.ok(invocationSelections, "explicit @ invocation selection is preserved");
   const [selection] = invocationSelections.selections;
   assert.equal(body.slice(selection.start, selection.end), "@claude");
 });
 
 test("without a spaceId, explicit @ Agent selections throw instead of silently dropping quote or mention", async () => {
-  const question = "@claude check this";
-  const picked = {
-    schemaVersion: 1,
-    sourceRevision: 1,
-    sourceBodyHash: "unused",
-    selections: [{ start: 0, end: 7, text: "@claude", target: { kind: "capability", harness: "claude" } }],
-  };
-  await assert.rejects(() => askMessage(passage, question, picked, null), /Couldn't attach the selected quote/);
+  await assert.rejects(() => askMessage(passage, "@claude check this", claudeSelection(), null), /Couldn't attach the selected quote/);
 });

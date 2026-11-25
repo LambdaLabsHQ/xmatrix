@@ -1295,6 +1295,15 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     />
   );
 
+  const handleInlineApprovalInSidePanel = inlinePopover && selectedChannel
+    ? (messageId?: string) => {
+      openEmbedSidePanel({ spaceId: selectedChannel.spaceId, channelId: selectedChannel.id, messageId });
+    }
+    : undefined;
+  const handleDockedApprovalInSidePanel = handleInlineApprovalInSidePanel
+    ? () => handleInlineApprovalInSidePanel()
+    : undefined;
+
   // One conversation surface, shown as the Conversations view or docked beside
   // the page it is about (pages-live-document.md §4.4).
   // A page's conversation opens in the page's margin at what it is about, docks beside the page when
@@ -1444,13 +1453,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         threadRootChannel={selectedThreadRootContext?.channel}
         inPageMargin={placement === "page-margin"}
         compactLayout={Boolean(companion)}
-        onHandleApprovalInSidePanel={inlinePopover ? (messageId?: string) => {
-          openEmbedSidePanel({
-            ...(selectedChannel?.spaceId ? { spaceId: selectedChannel.spaceId } : {}),
-            ...(selectedChannel?.id ? { channelId: selectedChannel.id } : {}),
-            ...(messageId ? { messageId } : {}),
-          });
-        } : undefined}
+        onHandleApprovalInSidePanel={handleInlineApprovalInSidePanel}
       />
       )}
       <AgentWorkDetailsDock
@@ -1464,17 +1467,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           >
             {pendingConnectorActions.map(request => <ConnectorActionApproval key={request.requestId} request={request}
               token={token} userId={model.authenticatedUserId ?? ""}
-              onHandleInSidePanel={inlinePopover ? () => openEmbedSidePanel({
-                ...(selectedChannel?.spaceId ? { spaceId: selectedChannel.spaceId } : {}),
-                ...(selectedChannel?.id ? { channelId: selectedChannel.id } : {}),
-              }) : undefined} />)}
+              onHandleInSidePanel={handleDockedApprovalInSidePanel} />)}
             {pendingCrossSpaceReads.map((request) => (
               <CrossSpaceReadCard key={request.grantId} request={request} token={token}
                 userId={model.authenticatedUserId ?? ""}
-                onHandleInSidePanel={inlinePopover ? () => openEmbedSidePanel({
-                  ...(selectedChannel?.spaceId ? { spaceId: selectedChannel.spaceId } : {}),
-                  ...(selectedChannel?.id ? { channelId: selectedChannel.id } : {}),
-                }) : undefined} />
+                onHandleInSidePanel={handleDockedApprovalInSidePanel} />
             ))}
           </ChannelApprovalsDock>}
         </>) : null}

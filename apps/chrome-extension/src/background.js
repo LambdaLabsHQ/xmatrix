@@ -836,6 +836,12 @@ chrome.runtime.onMessageExternal.addListener((message, sender, reply) => {
   return replyAsync(() => showWebPage(chrome, href), reply, { includeValue: false });
 });
 
+async function tabAskPageState(tabId) {
+  const thread = await tabPageThread(chrome, tabId);
+  if (thread && !openPanels.has(tabId)) await enablePanel(tabId).catch(() => undefined);
+  return { panelOpen: openPanels.has(tabId), hasThread: Boolean(thread) };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== chrome.runtime.id) return false;
   const answer = (work) => replyAsync(() => work, reply);
@@ -853,17 +859,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         title: typeof message.title === "string" ? message.title : undefined,
         url,
       });
-      const thread = await tabPageThread(chrome, sender.tab.id);
-      if (thread && !openPanels.has(sender.tab.id)) await enablePanel(sender.tab.id).catch(() => undefined);
-      return { panelOpen: openPanels.has(sender.tab.id), hasThread: Boolean(thread) };
+      return tabAskPageState(sender.tab.id);
     })());
   }
   if (message?.type === "askPageState" && sender.tab && !isExtensionPage(sender)) {
-    return answer((async () => {
-      const thread = await tabPageThread(chrome, sender.tab.id);
-      if (thread && !openPanels.has(sender.tab.id)) await enablePanel(sender.tab.id).catch(() => undefined);
-      return { panelOpen: openPanels.has(sender.tab.id), hasThread: Boolean(thread) };
-    })());
+    return answer(tabAskPageState(sender.tab.id));
   }
   // The question box is this extension's page, framed in that tab: it reads and sends that tab's ask only.
   if (isExtensionPage(sender) && sender.tab?.id !== undefined) {

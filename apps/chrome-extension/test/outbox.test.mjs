@@ -57,21 +57,18 @@ function fakeClock(start = 1_700_000_000_000) {
     },
     async advance(ms) {
       current += ms;
-      for (const [id, timer] of [...timers.entries()]) {
+      for (const [id, timer] of Array.from(timers.entries())) {
         if (timer.at <= current) {
           timers.delete(id);
           await timer.fn();
         }
       }
     },
-    timerCount: () => timers.size,
   };
 }
 
-test("normal send acked before fallback delay never triggers background Hub calls and clears alarm", async () => {
-  const storage = memoryStorage();
-  const alarms = fakeAlarms();
-  const clock = fakeClock();
+function makeTestOutbox({ storage = memoryStorage(), alarms = fakeAlarms(), start = 1_700_000_000_000, deliver, ...rest } = {}) {
+  const clock = fakeClock(start);
   const delivered = [];
   const outbox = createOutbox({
     storage,
@@ -79,24 +76,20 @@ test("normal send acked before fallback delay never triggers background Hub call
     now: clock.now,
     setTimer: clock.setTimer,
     clearTimer: clock.clearTimer,
-    fallbackDelayMs: 8_000,
-    deliver: async (entry) => {
-      delivered.push(entry);
-    },
+    deliver: deliver ?? (async (entry) => { delivered.push(entry); }),
+    ...rest,
   });
+  return { storage, alarms, clock, delivered, outbox };
+}
 
+test("normal send acked before fallback delay never triggers background Hub calls and clears alarm", async () => {
+  const { alarms, clock, delivered, outbox } = makeTestOutbox({ fallbackDelayMs: 8_000 });
   await outbox.register({
     clientMessageId: "cm-normal-1",
     userId: "u1",
     tabId: 12,
     source: "inline",
-    channelCreate: {
-      requestKey: "rk-normal-1",
-      spaceId: "sp-1",
-      name: "Article",
-      mode: "open",
-      memberName: "Daniel",
-    },
+    channelCreate: { requestKey: "rk-normal-1", spaceId: "sp-1", name: "Article", mode: "open", memberName: "Daniel" },
     body: "Hello?",
   });
   assert.equal((await outbox.list()).length, 1);
@@ -111,23 +104,7 @@ test("normal send acked before fallback delay never triggers background Hub call
 });
 
 test("closing or navigating the tab immediately flushes pending initial and follow-up sends", async () => {
-  const storage = memoryStorage();
-  const alarms = fakeAlarms();
-  const clock = fakeClock();
-  const delivered = [];
-  const outbox = createOutbox({
-    storage,
-    alarms,
-    now: clock.now,
-    setTimer: clock.setTimer,
-    clearTimer: clock.clearTimer,
-    fallbackDelayMs: 8_000,
-    deliver: async (entry) => {
-      delivered.push(entry);
-    },
-  });
-
-  // Initial ask registered on Enter in tab 5, then tab navigated 400ms later.
+  const { clock, delivered, outbox } = makeTestOutbox({ fallbackDelayMs: 8_000 });
   await outbox.register({
     clientMessageId: "cm-nav-1",
     userId: "u1",
@@ -144,7 +121,6 @@ test("closing or navigating the tab immediately flushes pending initial and foll
     body: "Question before navigating",
     metadata: { browserPage: { title: "Page A", href: "https://a.test" } },
   });
-  // Side-panel send on the same tab should NOT be flushed by inline-only navigation.
   await outbox.register({
     clientMessageId: "cm-panel-1",
     userId: "u1",
@@ -161,29 +137,13 @@ test("closing or navigating the tab immediately flushes pending initial and foll
   assert.equal(delivered[0].channelCreate.requestKey, "rk-nav-1");
   assert.deepEqual((await outbox.list()).map((item) => item.clientMessageId), ["cm-panel-1"]);
 
-  // Closing the tab flushes remaining sends (including side-panel sends bound to that tab).
   await outbox.flushForTab(5, { tabRemoved: true });
   assert.deepEqual(delivered.map((item) => item.clientMessageId), ["cm-nav-1", "cm-panel-1"]);
   assert.equal((await outbox.list()).length, 0);
 });
 
 test("register arriving milliseconds after tabs.onRemoved still flushes immediately", async () => {
-  const storage = memoryStorage();
-  const alarms = fakeAlarms();
-  const clock = fakeClock();
-  const delivered = [];
-  const outbox = createOutbox({
-    storage,
-    alarms,
-    now: clock.now,
-    setTimer: clock.setTimer,
-    clearTimer: clock.clearTimer,
-    fallbackDelayMs: 8_000,
-    deliver: async (entry) => {
-      delivered.push(entry);
-    },
-  });
-
+  const { delivered, outbox } = makeTestOutbox({ fallbackDelayMs: 8_000 });
   await outbox.flushForTab(77, { tabRemoved: true });
   await outbox.register({
     clientMessageId: "cm-race-1",
@@ -198,69 +158,37 @@ test("register arriving milliseconds after tabs.onRemoved still flushes immediat
 });
 
 test("persisted entries survive service worker restart and recover() delivers them", async () => {
-  const storage = memoryStorage();
-  const alarms = fakeAlarms();
-  const clock1 = fakeClock(1_700_000_000_000);
-
-  const sw1 = createOutbox({
-    storage,
-    alarms,
-    now: clock1.now,
-    setTimer: clock1.setTimer,
-    clearTimer: clock1.clearTimer,
+  const first = makeTestOutbox({
     fallbackDelayMs: 8_000,
     deliver: async () => {
       throw new Error("sw1 should not deliver before hibernation");
     },
   });
-  await sw1.register({
+  await first.outbox.register({
     clientMessageId: "cm-hibernated-1",
     userId: "u1",
     tabId: 9,
     source: "inline",
-    channelCreate: {
-      requestKey: "rk-hibernated-1",
-      spaceId: "sp-1",
-      name: "Sleepy Tab",
-      mode: "open",
-      memberName: "Daniel",
-    },
+    channelCreate: { requestKey: "rk-hibernated-1", spaceId: "sp-1", name: "Sleepy Tab", mode: "open", memberName: "Daniel" },
     body: "Survives SW sleep",
   });
-  assert.equal(storage.peek().length, 1);
+  assert.equal(first.storage.peek().length, 1);
 
-  // Simulate SW hibernation (all in-memory timers lost) + wake 10 seconds later with a brand-new instance.
-  const clock2 = fakeClock(1_700_000_010_000);
-  const delivered = [];
-  const sw2 = createOutbox({
-    storage,
-    alarms,
-    now: clock2.now,
-    setTimer: clock2.setTimer,
-    clearTimer: clock2.clearTimer,
+  const second = makeTestOutbox({
+    storage: first.storage,
+    alarms: first.alarms,
+    start: 1_700_000_010_000,
     fallbackDelayMs: 8_000,
-    deliver: async (entry) => {
-      delivered.push(entry);
-    },
   });
-  await sw2.recover();
-  assert.deepEqual(delivered.map((item) => item.clientMessageId), ["cm-hibernated-1"]);
-  assert.equal(storage.peek(), undefined);
+  await second.outbox.recover();
+  assert.deepEqual(second.delivered.map((item) => item.clientMessageId), ["cm-hibernated-1"]);
+  assert.equal(first.storage.peek(), undefined);
 });
 
 test("transient delivery failure retries with backoff and remembers channelCreated progress", async () => {
-  const storage = memoryStorage();
-  const alarms = fakeAlarms();
-  const clock = fakeClock();
   const calls = [];
   let attempt = 0;
-
-  const outbox = createOutbox({
-    storage,
-    alarms,
-    now: clock.now,
-    setTimer: clock.setTimer,
-    clearTimer: clock.clearTimer,
+  const { clock, outbox } = makeTestOutbox({
     fallbackDelayMs: 8_000,
     deliver: async (entry, { onChannelCreated }) => {
       attempt += 1;
@@ -277,13 +205,7 @@ test("transient delivery failure retries with backoff and remembers channelCreat
     userId: "u1",
     tabId: 10,
     source: "inline",
-    channelCreate: {
-      requestKey: "rk-retry-1",
-      spaceId: "sp-1",
-      name: "Flaky",
-      mode: "open",
-      memberName: "Daniel",
-    },
+    channelCreate: { requestKey: "rk-retry-1", spaceId: "sp-1", name: "Flaky", mode: "open", memberName: "Daniel" },
     body: "Retry me",
   });
 
@@ -295,7 +217,6 @@ test("transient delivery failure retries with backoff and remembers channelCreat
   assert.equal(stored[0].channelId, "ch-created-1");
   assert.equal(stored[0].attempts, 1);
 
-  // Backoff timer (3000ms) fires and succeeds without re-creating the channel.
   await clock.advance(3_000);
   assert.equal(attempt, 2);
   assert.deepEqual(calls, [
@@ -306,17 +227,8 @@ test("transient delivery failure retries with backoff and remembers channelCreat
 });
 
 test("permanent 4xx errors record a dismissible failure notice while silent drops and clearAll() do not leak", async () => {
-  const storage = memoryStorage();
-  const alarms = fakeAlarms();
-  const clock = fakeClock();
   let calls = 0;
-
-  const outbox = createOutbox({
-    storage,
-    alarms,
-    now: clock.now,
-    setTimer: clock.setTimer,
-    clearTimer: clock.clearTimer,
+  const { storage, alarms, outbox } = makeTestOutbox({
     fallbackDelayMs: 20_000,
     deliver: async (entry) => {
       calls += 1;
@@ -344,12 +256,10 @@ test("permanent 4xx errors record a dismissible failure notice while silent drop
   assert.equal(failures[0].clientMessageId, "cm-perm-1");
   assert.equal(failures[0].preview, "Why did this fail?");
 
-  // Dismissing clears persisted failures.
   await outbox.clearFailures();
   assert.equal((await outbox.listFailures()).length, 0);
   assert.equal(storage.peek(OUTBOX_FAILURES_STORAGE_KEY), undefined);
 
-  // Account mismatch drops silently without showing a failure notice to the new account.
   await outbox.register({
     clientMessageId: "cm-mismatch-1",
     userId: "u1",
@@ -361,7 +271,6 @@ test("permanent 4xx errors record a dismissible failure notice while silent drop
   await outbox.flushForTab(12, { tabRemoved: true });
   assert.equal((await outbox.listFailures()).length, 0);
 
-  // Sign-out clearAll wipes pending entries and failure notices alike.
   await outbox.register({
     clientMessageId: "cm-signout-1",
     userId: "u1",
@@ -377,17 +286,8 @@ test("permanent 4xx errors record a dismissible failure notice while silent drop
 
 test("default fallback waits 20s to avoid racing slow live sends, and records failure after exhausting retries", async () => {
   assert.equal(DEFAULT_FALLBACK_DELAY_MS, 20_000);
-  const storage = memoryStorage();
-  const alarms = fakeAlarms();
-  const clock = fakeClock();
   let calls = 0;
-
-  const outbox = createOutbox({
-    storage,
-    alarms,
-    now: clock.now,
-    setTimer: clock.setTimer,
-    clearTimer: clock.clearTimer,
+  const { clock, outbox } = makeTestOutbox({
     maxAttempts: 2,
     deliver: async () => {
       calls += 1;
@@ -404,11 +304,9 @@ test("default fallback waits 20s to avoid racing slow live sends, and records fa
     body: "Offline question",
   });
 
-  // At 8s (when a slow live send is still finishing), background stays quiet.
   await clock.advance(8_000);
   assert.equal(calls, 0);
 
-  // At 20s total, fallback fires attempt 1, then retries after 3s backoff for attempt 2 and gives up with a notice.
   await clock.advance(12_000);
   assert.equal(calls, 1);
   assert.equal((await outbox.listFailures()).length, 0);
