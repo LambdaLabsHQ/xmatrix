@@ -28,6 +28,12 @@ export interface AppConnectorProviderManifest {
    * deleted at that age, and at once when the connection is disconnected.
    */
   resultRetentionDays?: number;
+  /**
+   * What lasting notes (Pages, memory) may keep from those results. Unset:
+   * nothing (Google Cloud's technical information, even its conclusions).
+   * Workspace user data may become the user's own records for their task.
+   */
+  resultRetentionMayKeep?: string;
   auth: {
     type: "oauth" | "api-token";
     scopes: string[];
