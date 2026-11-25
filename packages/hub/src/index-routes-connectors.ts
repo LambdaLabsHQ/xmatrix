@@ -14,6 +14,7 @@ import { connectorPermission, HUB_ROUTES } from "@xmatrix/protocol";
 import { getAppConnectorProvider } from "./app-connectors";
 import { connectorPermissionRepository, connectorIngressUrl, INGRESS_KEY_FIELD } from "./connectors/credentials";
 import { credentialPolicy, readConnectorReadback, saveConnectorCredentials, type CredentialPolicy } from "./connectors/credential-policy";
+import { discoverAppStoreVendorNumber } from "./connectors/app-store-connect-web";
 import { handleAppConnectorDelivery, handleConnectorDelivery } from "./connectors/event-ingress";
 import { handleStripeAppDelivery } from "./connectors/stripe-app-ingress";
 import { handleStripePublisherDelivery } from "./connectors/stripe-publisher-ingress";
@@ -214,6 +215,13 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
         const regenerate = Array.isArray(body.regenerate) ? body.regenerate.map(String) : [];
         if (regenerate.some((name) => !policy.generated.includes(name))) {
           return c.json({ error: "regenerate names a field the Hub does not generate" }, 400);
+        }
+        if (policy.manifest.id === "appstoreconnect" && typeof fields.webSession === "string" && fields.webSession.trim() && !fields.vendorNumber) {
+          const existing = await readGenerated().catch(() => ({} as Record<string, string>));
+          if (!existing.vendorNumber) {
+            const vendor = await discoverAppStoreVendorNumber(fields.webSession).catch(() => undefined);
+            if (vendor) fields.vendorNumber = vendor;
+          }
         }
         const result = await saveConnectorCredentials(c.env, { spaceId: c.req.param("spaceId"), policy,
           actorUserId: user.id, fields, regenerate });

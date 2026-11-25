@@ -330,7 +330,7 @@ function currentMonthYyyymm(now = Date.now()): string {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-async function fetchGcsObject(bucket: string, objectName: string, token: string): Promise<Uint8Array | undefined> {
+async function fetchGcsObject(bucket: string, objectName: string, token: string, authMode: "oauth" | "service_account"): Promise<Uint8Array | undefined> {
   const url = new URL(`/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectName)}`, GCS_ORIGIN);
   url.searchParams.set("alt", "media");
   const signal = AbortSignal.timeout(25_000);
@@ -339,6 +339,11 @@ async function fetchGcsObject(bucket: string, objectName: string, token: string)
   if (response.status === 404) { void response.body?.cancel().catch(() => undefined); return undefined; }
   const bytes = await readBoundedStream(response.body, MAX_GCS_BYTES, () => new ProviderRequestError(502, "Play Console report file is too large"), signal);
   if (!response.ok) {
+    if (response.status === 403 && authMode === "oauth") {
+      throw new ConnectorRemedy(403,
+        "Google Cloud Storage refused the current Google Play OAuth token (the connected grant does not include devstorage.read_only yet, or lacks View app information & download bulk reports in Play Console). Save optional reportsServiceAccount as a fallback until storage scope is enabled",
+        { kind: "credential", field: "reportsServiceAccount" });
+    }
     const hint = response.status === 403 ? " (grant the service account View app information & download bulk reports / View financial data in Play Console)" : "";
     throw new ProviderRequestError(response.status, `Google Cloud Storage returned ${response.status} for ${objectName}${hint}`);
   }
@@ -629,20 +634,37 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
           "Set reportsBucket (from Play Console → Download reports → Copy Cloud Storage URI, e.g. pubsite_prod_rev_…) or pass bucket=pubsite_prod_rev_… once; the connection keeps it",
           { kind: "credential", field: "reportsBucket" });
       }
-      if (!credentials.reportsServiceAccount?.trim()) {
+      let token: string;
+      let authMode: "oauth" | "service_account";
+      if (credentials.reportsServiceAccount?.trim()) {
+        const sa = parseServiceAccount(credentials.reportsServiceAccount);
+        token = await serviceAccountStorageToken(sa);
+        authMode = "service_account";
+      } else if (credentials.oauthToken?.trim()) {
+        token = credentials.oauthToken.trim();
+        authMode = "oauth";
+      } else {
         throw new ConnectorRemedy(400,
-          "Save reportsServiceAccount (Google Cloud Service Account JSON granted View app information & download bulk reports / View financial data in Play Console) to read Play Console Cloud Storage exports",
+          "Connect Google Play Console or save reportsServiceAccount (Google Cloud Service Account JSON granted View app information & download bulk reports / View financial data in Play Console) to read Play Console Cloud Storage exports",
           { kind: "credential", field: "reportsServiceAccount" });
       }
-      const sa = parseServiceAccount(credentials.reportsServiceAccount);
-      const token = await serviceAccountStorageToken(sa);
       if (input.bucket && bucket !== savedBucket && saveCredentials) {
         await saveCredentials({ reportsBucket: bucket }).catch(() => undefined);
       }
       if (kind === "list") {
-        const listed = await providerJson(new URL(`/storage/v1/b/${encodeURIComponent(bucket)}/o?maxResults=100&prefix=stats/`, GCS_ORIGIN), {
-          headers: { authorization: `Bearer ${token}` },
-        });
+        let listed: Record<string, unknown>;
+        try {
+          listed = await providerJson(new URL(`/storage/v1/b/${encodeURIComponent(bucket)}/o?maxResults=100&prefix=stats/`, GCS_ORIGIN), {
+            headers: { authorization: `Bearer ${token}` },
+          });
+        } catch (error) {
+          if (authMode === "oauth" && error instanceof ProviderRequestError && error.status === 403) {
+            throw new ConnectorRemedy(403,
+              "Google Cloud Storage refused the current Google Play OAuth token (the connected grant does not include devstorage.read_only yet, or lacks View app information & download bulk reports in Play Console). Save optional reportsServiceAccount as a fallback until storage scope is enabled",
+              { kind: "credential", field: "reportsServiceAccount" });
+          }
+          throw error;
+        }
         const names = (Array.isArray(listed.items) ? listed.items : []).map(item => text(record(item).name))
           .filter(name => name.includes(packageName)).slice(-40).reverse();
         return { summary: `Play Console export objects for ${packageName} in ${bucket} (newest first):\n` +
@@ -652,7 +674,7 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
       let foundName = "";
       let foundBytes: Uint8Array | undefined;
       for (const name of candidates) {
-        const bytes = await fetchGcsObject(bucket, name, token);
+        const bytes = await fetchGcsObject(bucket, name, token, authMode);
         if (bytes) { foundName = name; foundBytes = bytes; break; }
       }
       if (!foundBytes) {

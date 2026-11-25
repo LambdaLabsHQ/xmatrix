@@ -120,7 +120,7 @@ test("error_issues, anomalies, reviews and voided_purchases format Play operatio
   assert.equal(slowStartCall.body.filter, "startType = COLD");
 });
 
-test("store_reports decodes Play Console UTF-16LE CSVs, rejects non-Play buckets and prompts when optional credentials are missing", async () => {
+test("store_reports decodes Play Console UTF-16LE CSVs, uses OAuth token directly when authorized, and falls back to service account", async () => {
   const csv = 'Date,Package Name,Daily Device Installs,Daily Device Uninstalls\r\n2026-11-23,sh.xmatrix.app,42,3\r\n2026-11-24,sh.xmatrix.app,"18",1\r\n';
   const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(csv, "utf16le")]);
   assert.equal(decodePlayCsv(utf16), csv);
@@ -129,29 +129,46 @@ test("store_reports decodes Play Console UTF-16LE CSVs, rejects non-Play buckets
   assert.equal(typeof statement("@googleplay:store_reports:sh.xmatrix.app bucket=arbitrary-bucket"), "string");
   await assert.rejects(ACTIONS.store_reports.execute({ credentials }, statement("@googleplay:store_reports:sh.xmatrix.app")),
     error => error.fix?.field === "reportsBucket");
-  await assert.rejects(ACTIONS.store_reports.execute({ credentials }, statement("@googleplay:store_reports:sh.xmatrix.app bucket=pubsite_prod_rev_1234567890")),
-    error => error.fix?.field === "reportsServiceAccount");
 
   const saved = [];
   const origFetch = globalThis.fetch;
   const calls = [];
+  let oauthStatus = 200;
   globalThis.fetch = async (url, init = {}) => {
-    calls.push({ url: String(url), method: init.method ?? "GET", headers: new Headers(init.headers) });
+    const headers = new Headers(init.headers);
+    calls.push({ url: String(url), method: init.method ?? "GET", headers });
     if (String(url).startsWith("https://oauth2.googleapis.com/token")) {
       return Response.json({ access_token: "gcs-token", expires_in: 300, token_type: "Bearer" });
+    }
+    if (headers.get("authorization") === "Bearer play-access" && oauthStatus !== 200) {
+      return Response.json({ error: { code: oauthStatus, message: "Insufficient Permission" } }, { status: oauthStatus });
     }
     return new Response(utf16, { status: 200, headers: { "content-type": "text/csv" } });
   };
   try {
-    const res = await ACTIONS.store_reports.execute(
-      { credentials: { ...credentials, reportsServiceAccount: saJson }, saveCredentials: async fields => { saved.push(fields); } },
+    // OAuth token works directly without any Service Account JSON when the grant includes storage read access.
+    const oauthRes = await ACTIONS.store_reports.execute(
+      { credentials, saveCredentials: async fields => { saved.push(fields); } },
       statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=pubsite_prod_rev_1234567890"),
     );
     assert.deepEqual(saved, [{ reportsBucket: "pubsite_prod_rev_1234567890" }]);
-    assert.match(calls[1].url, /storage\.googleapis\.com\/storage\/v1\/b\/pubsite_prod_rev_1234567890\/o\/stats%2Finstalls%2Finstalls_sh\.xmatrix\.app_202611_overview\.csv\?alt=media$/u);
-    assert.equal(calls[1].headers.get("authorization"), "Bearer gcs-token");
-    assert.match(res.summary, /2026-11-24\t18\t1/u);
-    assert.match(res.summary, /Totals across 2 row\(s\): Daily Device Installs: 60, Daily Device Uninstalls: 4/u);
+    assert.equal(calls[0].headers.get("authorization"), "Bearer play-access");
+    assert.match(oauthRes.summary, /Totals across 2 row\(s\): Daily Device Installs: 60, Daily Device Uninstalls: 4/u);
+
+    // When the OAuth token lacks storage scope (403), surface the reportsServiceAccount fallback remedy.
+    oauthStatus = 403;
+    await assert.rejects(
+      ACTIONS.store_reports.execute({ credentials }, statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=pubsite_prod_rev_1234567890")),
+      error => error.fix?.field === "reportsServiceAccount" && /devstorage\.read_only/u.test(error.message),
+    );
+
+    // Explicit reportsServiceAccount still works as fallback.
+    const saRes = await ACTIONS.store_reports.execute(
+      { credentials: { ...credentials, reportsServiceAccount: saJson } },
+      statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=pubsite_prod_rev_1234567890"),
+    );
+    assert.equal(calls.at(-1).headers.get("authorization"), "Bearer gcs-token");
+    assert.match(saRes.summary, /2026-11-24\t18\t1/u);
   } finally {
     globalThis.fetch = origFetch;
   }

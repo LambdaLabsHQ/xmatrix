@@ -62,8 +62,15 @@ test("an expired or missing session says how to renew it, and nothing is saved f
   assert.deepEqual(empty.saved, []);
 });
 
-test("web_session says whose session it is", async () => {
+test("web_session says whose session it is and saves a single vendor number automatically", async () => {
   const checked = await run("web_session", {}, { "GET /olympus/v1/session": { user: { fullName: "Daniel Hu", emailAddress: "x@example.com" }, provider: { name: "MadeByRobot, LLC" } } });
   assert.match(checked.value.summary, /signed in as Daniel Hu, team MadeByRobot, LLC\./u);
   assert.doesNotMatch(checked.value.summary, /x@example\.com/u);
+
+  const withVendor = await run("web_session", {}, {
+    "GET /olympus/v1/session": { user: { fullName: "Daniel Hu" }, provider: { providerId: 1234567, name: "MadeByRobot, LLC" } },
+    "GET /WebObjects/iTunesConnect.woa/ra/paymentConsolidation/providers/1234567/sapVendorNumbers": { data: [{ sapVendorNumber: "94249739" }] },
+  });
+  assert.match(withVendor.value.summary, /Saved vendor number 94249739 automatically/u);
+  assert.deepEqual(withVendor.saved, [{ vendorNumber: "94249739" }]);
 });
