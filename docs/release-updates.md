@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: the site footer compares xMatrix with Notion
+
+Notion competes with xMatrix on Pages, so the footer's "Compare xMatrix with"
+row lists it again, after LobeHub, and its comparison page is named "Notion"
+instead of "Notion Custom Agents". Web only. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: the site footer lists our real competitors; Claude Code has no competitor page
 
 The footer's comparison row listed Claude Code (a harness xMatrix runs),
