@@ -147,7 +147,12 @@ connection's own Google OAuth token first (for grants carrying
 `devstorage.read_only`) and also accepts an optional `reportsServiceAccount`
 (a Google Cloud Service Account JSON granted "View app information and download
 bulk reports" / "View financial data" in Play Console) alongside `reportsBucket`
-(`pubsite_prod_rev_…`, or pass `bucket=` once).
+(`pubsite_prod_rev_…`, or a `gs://pubsite_prod_rev_…` URI, or pass `bucket=` once).
+With the xMatrix Chrome extension installed, a Space admin can sync
+`reportsBucket` in one click from an open Play Console → Download reports tab
+(from Apps → Google Play Console, from the extension's side panel bar, or via
+the Play Console page context menu); the extension extracts only the plain
+`pubsite_prod_rev_*` bucket identifier and never reads or stores Google cookies.
 
 ## Catalog operations
 

@@ -41,6 +41,21 @@
   </section>
 
   <section id="view-app" class="app" hidden>
+    <div id="play-bucket-bar" class="play-bar" hidden>
+      <div class="play-bar-row">
+        <div class="play-bar-copy">
+          <span id="play-bucket-title" class="play-bar-title">Google Play reports bucket</span>
+          <span id="play-bucket-detail" class="play-bar-detail"></span>
+        </div>
+        <div class="play-bar-actions">
+          <select id="play-bucket-select" class="play-bar-select" aria-label="Google Play reports bucket" hidden></select>
+          <button id="play-bucket-action" type="button" class="play-bar-btn primary"></button>
+          <button id="play-bucket-secondary" type="button" class="play-bar-btn" hidden></button>
+          <button id="play-bucket-dismiss" type="button" class="play-bar-close" aria-label="Dismiss">&times;</button>
+        </div>
+      </div>
+      <p id="play-bucket-error" class="play-bar-error" role="alert" hidden></p>
+    </div>
     <iframe id="app" title="xMatrix" allow="clipboard-write"></iframe>
   </section>
 

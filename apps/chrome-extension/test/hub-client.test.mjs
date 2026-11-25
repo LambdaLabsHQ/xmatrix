@@ -189,3 +189,50 @@ test("a message the Hub asks to send again is sent again, with the same clientMe
     /Failed to fetch/u);
   assert.equal(calls.length, 3);
 });
+
+test("saveConnectorCredentials writes directly when connected and creates the row only on 404", async () => {
+  const { readConnectorCredentials, saveConnectorCredentials } = await import("../src/hub-client.js");
+  // Existing connection: PUT succeeds directly without touching connection status via PATCH.
+  const existing = fakeHub({
+    "GET /api/spaces/s1/app-connections/googleplay/credentials": () => ({
+      json: { plain: { reportsBucket: "pubsite_prod_rev_1111111111" }, credentialFields: ["oauthToken", "reportsBucket"] },
+    }),
+    "PUT /api/spaces/s1/app-connections/googleplay/credentials": () => ({
+      json: { plain: { reportsBucket: "pubsite_prod_rev_2222222222" }, credentialFields: ["oauthToken", "reportsBucket"] },
+    }),
+  });
+  const current = await readConnectorCredentials(existing.deps, "t", { spaceId: "s1", providerId: "googleplay" });
+  assert.equal(current.plain.reportsBucket, "pubsite_prod_rev_1111111111");
+  await saveConnectorCredentials(existing.deps, "t", {
+    spaceId: "s1", providerId: "googleplay", providerName: "Google Play Console",
+    fields: { reportsBucket: "pubsite_prod_rev_2222222222" },
+  });
+  assert.deepEqual(existing.calls.map((c) => `${c.method} ${c.path}`), [
+    "GET /api/spaces/s1/app-connections/googleplay/credentials",
+    "PUT /api/spaces/s1/app-connections/googleplay/credentials",
+  ]);
+
+  // Missing row: PUT returns 404, creates disconnected row via PATCH, then retries PUT.
+  let putCount = 0;
+  const missing = fakeHub({
+    "GET /api/spaces/s1/app-connections/googleplay/credentials": () => ({ status: 404, json: { error: "App connection not found" } }),
+    "PUT /api/spaces/s1/app-connections/googleplay/credentials": () => {
+      putCount += 1;
+      return putCount === 1
+        ? { status: 404, json: { error: "App connection not found" } }
+        : { json: { plain: { reportsBucket: "pubsite_prod_rev_2222222222" } } };
+    },
+    "PATCH /api/spaces/s1/app-connections/googleplay": () => ({ json: { connection: { providerId: "googleplay", status: "disconnected" } } }),
+  });
+  assert.equal(await readConnectorCredentials(missing.deps, "t", { spaceId: "s1", providerId: "googleplay" }), null);
+  await saveConnectorCredentials(missing.deps, "t", {
+    spaceId: "s1", providerId: "googleplay", providerName: "Google Play Console",
+    fields: { reportsBucket: "pubsite_prod_rev_2222222222" },
+  });
+  assert.deepEqual(missing.calls.map((c) => `${c.method} ${c.path}`), [
+    "GET /api/spaces/s1/app-connections/googleplay/credentials",
+    "PUT /api/spaces/s1/app-connections/googleplay/credentials",
+    "PATCH /api/spaces/s1/app-connections/googleplay",
+    "PUT /api/spaces/s1/app-connections/googleplay/credentials",
+  ]);
+});

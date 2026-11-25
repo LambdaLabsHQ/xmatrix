@@ -246,7 +246,7 @@ function ExecutionFix({ execution, credentials, retrying, onFixed, onRetry, onRe
         ) : null}
       </div>
       {field && editing ? (
-        <CredentialValueForm field={field} busy={busy} saving={save.isPending} autoFocus
+        <CredentialValueForm field={field} busy={busy} saving={save.isPending} autoFocus plain={field.plain}
           submitLabel={execution.retryable ? "Save and retry" : "Save"}
           save={(value) => save.mutateAsync({ fields: { [field.id]: value } }).then(() => { setEditing(false); onFixed(); })}>
           <ConnectorAction onClick={() => setEditing(false)}>Cancel</ConnectorAction>

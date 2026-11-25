@@ -15,6 +15,7 @@ import { getAppConnectorProvider } from "./app-connectors";
 import { connectorPermissionRepository, connectorIngressUrl, INGRESS_KEY_FIELD } from "./connectors/credentials";
 import { credentialPolicy, readConnectorReadback, saveConnectorCredentials, type CredentialPolicy } from "./connectors/credential-policy";
 import { discoverAppStoreVendorNumber } from "./connectors/app-store-connect-web";
+import { normalizePlayReportsBucket } from "./connectors/actions/google-play-analytics";
 import { handleAppConnectorDelivery, handleConnectorDelivery } from "./connectors/event-ingress";
 import { handleStripeAppDelivery } from "./connectors/stripe-app-ingress";
 import { handleStripePublisherDelivery } from "./connectors/stripe-publisher-ingress";
@@ -222,6 +223,13 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
             const vendor = await discoverAppStoreVendorNumber(fields.webSession).catch(() => undefined);
             if (vendor) fields.vendorNumber = vendor;
           }
+        }
+        if (policy.manifest.id === "googleplay" && typeof fields.reportsBucket === "string") {
+          const normalized = normalizePlayReportsBucket(fields.reportsBucket);
+          if (!normalized) {
+            return c.json({ error: "reportsBucket must be a Google Play Console Cloud Storage bucket id (pubsite_prod_rev_… or gs://pubsite_prod_rev_…)" }, 400);
+          }
+          fields.reportsBucket = normalized;
         }
         const result = await saveConnectorCredentials(c.env, { spaceId: c.req.param("spaceId"), policy,
           actorUserId: user.id, fields, regenerate });
