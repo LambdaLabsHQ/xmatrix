@@ -128,7 +128,7 @@ const en: LandingCopy = {
   },
   footer: {
     tagline: "The multi-agent workspace built around live documents. Decisions, progress, and next steps stay current as work moves.",
-    product: "Product", getApp: "Get the app", legal: "Legal", compare: "Compare", agents: "Agents", language: "Languages",
+    product: "Product", getApp: "Get the app", legal: "Legal", compare: "Compare xMatrix with", agents: "Agents", language: "Languages",
     links: { app: "Online App", download: "Download", pricing: "Pricing", docs: "Docs", support: "Support", console: "Console", signIn: "Sign In" },
     legalLinks: { privacy: "Privacy Policy", terms: "Terms of Service", cookies: "Cookies and Storage", subprocessors: "Subprocessors" },
     askAi: "See what ChatGPT, Claude, Perplexity, Gemini or Grok say about xMatrix.",
@@ -211,7 +211,7 @@ const zh: LandingCopy = {
   },
   footer: {
     tagline: "用实时文档协作的多智能体工作空间。进展、决策与待办随工作推进自动更新。",
-    product: "产品", getApp: "下载 App", legal: "法律", compare: "竞品对比", agents: "Agents", language: "语言",
+    product: "产品", getApp: "下载 App", legal: "法律", compare: "xMatrix 对比", agents: "Agents", language: "语言",
     links: { app: "在线应用", download: "下载", pricing: "价格", docs: "文档", support: "支持", console: "控制台", signIn: "登录" },
     legalLinks: { privacy: "隐私政策（英文）", terms: "服务条款（英文）", cookies: "Cookie 与存储（英文）", subprocessors: "子处理方（英文）" },
     askAi: "看看 ChatGPT、Claude、Perplexity、Gemini 或 Grok 怎么介绍 xMatrix。",
@@ -294,7 +294,7 @@ const zhTw: LandingCopy = {
   },
   footer: {
     tagline: "用即時文件協作的多代理工作空間。進度、決策與待辦隨工作推進自動更新。",
-    product: "產品", getApp: "下載 App", legal: "法律條款", compare: "競品比較", agents: "Agents", language: "語言",
+    product: "產品", getApp: "下載 App", legal: "法律條款", compare: "xMatrix 比較", agents: "Agents", language: "語言",
     links: { app: "線上應用", download: "下載", pricing: "定價", docs: "文件", support: "支援", console: "主控台", signIn: "登入" },
     legalLinks: { privacy: "隱私權政策（英文）", terms: "服務條款（英文）", cookies: "Cookie 與儲存（英文）", subprocessors: "子處理者（英文）" },
     askAi: "看看 ChatGPT、Claude、Perplexity、Gemini 或 Grok 怎麼評價 xMatrix。",
@@ -377,7 +377,7 @@ const ja: LandingCopy = {
   },
   footer: {
     tagline: "ライブドキュメントで協働するマルチエージェント・ワークスペース。進捗、決定事項、次のアクションが作業に合わせて自動更新されます。",
-    product: "製品", getApp: "アプリを入手", legal: "法務", compare: "他ツール比較", agents: "Agents", language: "言語",
+    product: "製品", getApp: "アプリを入手", legal: "法務", compare: "xMatrix と比較", agents: "Agents", language: "言語",
     links: { app: "Web アプリ", download: "ダウンロード", pricing: "料金", docs: "ドキュメント", support: "サポート", console: "コンソール", signIn: "ログイン" },
     legalLinks: { privacy: "プライバシーポリシー (EN)", terms: "利用規約 (EN)", cookies: "Cookie とストレージ (EN)", subprocessors: "サブプロセッサ (EN)" },
     askAi: "ChatGPT、Claude、Perplexity、Gemini、Grok に xMatrix について聞いてみる。",
@@ -460,7 +460,7 @@ const ko: LandingCopy = {
   },
   footer: {
     tagline: "실시간 문서 중심으로 협업하는 멀티 에이전트 워크스페이스. 진행 상황, 결정 사항, 다음 단계가 작업에 맞춰 자동 업데이트됩니다.",
-    product: "제품", getApp: "앱 받기", legal: "법적 고지", compare: "대안 비교", agents: "Agents", language: "언어",
+    product: "제품", getApp: "앱 받기", legal: "법적 고지", compare: "xMatrix와 비교", agents: "Agents", language: "언어",
     links: { app: "웹 앱", download: "다운로드", pricing: "요금제", docs: "문서", support: "지원", console: "콘솔", signIn: "로그인" },
     legalLinks: { privacy: "개인정보처리방침 (EN)", terms: "이용약관 (EN)", cookies: "쿠키 및 저장소 (EN)", subprocessors: "하위 처리자 (EN)" },
     askAi: "ChatGPT, Claude, Perplexity, Gemini 또는 Grok에게 xMatrix에 대해 물어보세요.",
@@ -543,7 +543,7 @@ const es: LandingCopy = {
   },
   footer: {
     tagline: "El espacio de trabajo multiagente construido en torno a documentos vivos. Decisiones, avances y próximos pasos siempre actualizados.",
-    product: "Producto", getApp: "Obtén la app", legal: "Legal", compare: "Comparativas", agents: "Agents", language: "Idiomas",
+    product: "Producto", getApp: "Obtén la app", legal: "Legal", compare: "Compara xMatrix con", agents: "Agents", language: "Idiomas",
     links: { app: "App web", download: "Descargar", pricing: "Precios", docs: "Documentación", support: "Soporte", console: "Consola", signIn: "Iniciar sesión" },
     legalLinks: { privacy: "Privacidad (EN)", terms: "Términos (EN)", cookies: "Cookies (EN)", subprocessors: "Subprocesadores (EN)" },
     askAi: "Mira qué dicen ChatGPT, Claude, Perplexity, Gemini o Grok sobre xMatrix.",

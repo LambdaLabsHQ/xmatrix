@@ -2,16 +2,17 @@ import type { AlternativeSlug, AlternativeSource } from "./types";
 
 export const ALTERNATIVE_VERIFIED_DATE_ISO = "2026-11-22";
 
-/** Flagship and time-window comparisons linked from the site-wide footer. */
+/** Direct competitors (multi-agent coordination products) linked from the site-wide footer. */
 export const FOOTER_ALTERNATIVE_SLUGS: readonly AlternativeSlug[] = [
-  "conductor",
-  "jules",
-  "claude-code",
-  "t3-code",
-  "paradev",
   "raft",
-  "linear",
-  "notion",
+  "lody",
+  "multica",
+  "paradev",
+  "conductor",
+  "lobehub",
+  "orca",
+  "t3-code",
+  "cumora",
 ];
 
 /**
@@ -85,11 +86,6 @@ export const alternativePainPointSources: Readonly<
     [{ label: "Seedmux", href: "https://seedmux.com/" }],
     [{ label: "Seedmux", href: "https://seedmux.com/" }],
     [{ label: "Seedmux", href: "https://seedmux.com/" }],
-  ],
-  "claude-code": [
-    [{ label: "Claude Code Docs", href: "https://docs.anthropic.com/en/docs/claude-code/overview" }],
-    [{ label: "Claude Code Docs", href: "https://docs.anthropic.com/en/docs/claude-code/overview" }],
-    [{ label: "Claude Code Docs", href: "https://docs.anthropic.com/en/docs/claude-code/overview" }],
   ],
   linear: [
     [{ label: "Linear Agents Docs", href: "https://linear.app/docs/agents-in-linear" }],

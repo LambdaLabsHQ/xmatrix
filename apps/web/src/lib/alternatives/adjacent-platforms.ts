@@ -616,7 +616,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
           "Yes. xMatrix works with 34 built-in coding harnesses (plus any custom CLI via --runtime) and exposes an MCP server for external tools.",
       },
     ],
-    relatedSlugs: ["notion", "lobehub", "nowledge-mem", "claude-code"],
+    relatedSlugs: ["notion", "lobehub", "nowledge-mem", "everos"],
   },
   {
     slug: "jules",
@@ -719,6 +719,6 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
           "Add a Norn program block directly inside the project Page in xMatrix—it runs on your schedule or on GitHub events and updates that Page with the results.",
       },
     ],
-    relatedSlugs: ["conductor", "claude-code", "linear", "t3-code"],
+    relatedSlugs: ["conductor", "paradev", "linear", "t3-code"],
   },
 ];

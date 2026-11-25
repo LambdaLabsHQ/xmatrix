@@ -62,13 +62,15 @@ export const footerAlternativePages: readonly AlternativePage[] = FOOTER_ALTERNA
   return page;
 });
 
-/** Legacy product names that redirect permanently to the current competitor page. */
+/** Retired competitor routes that redirect permanently to their current page. */
 const legacyRouteRedirects: Readonly<Record<string, string>> = {
   "superset-alternatives": "/paradev-alternatives",
   "slock-alternatives": "/raft-alternatives",
   "lobechat-alternatives": "/lobehub-alternatives",
   "evermemos-alternatives": "/everos-alternatives",
   "google-jules-alternatives": "/jules-alternatives",
+  // Claude Code is a harness xMatrix runs, not a competitor: send it to the guide for using it.
+  "claude-code-alternatives": "/docs/agents",
 };
 
 const bySlug = new Map<AlternativeSlug, AlternativeEntry>(allEntries.map((entry) => [entry.slug, entry]));

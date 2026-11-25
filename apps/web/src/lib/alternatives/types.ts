@@ -10,7 +10,6 @@ export const ALTERNATIVE_SLUGS = [
   "t3-code",
   "herdr",
   "seedmux",
-  "claude-code",
   "linear",
   "notion",
   "slack-code",
