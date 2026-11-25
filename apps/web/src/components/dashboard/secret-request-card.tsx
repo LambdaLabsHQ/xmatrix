@@ -13,7 +13,7 @@ import { actionClass } from "@/components/ui/action-tone";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { userErrorMessage } from "@/lib/user-facing-error";
-import { AskCard, AskError } from "./ask-card";
+import { AskCard, AskError, HandleInSidePanelButton } from "./ask-card";
 
 /**
  * A card an Agent posts when it needs a Space secret it may not read yet. A
@@ -59,12 +59,13 @@ function statusQueryKey(userId: string, request: SecretRequestCard) {
   return ["secret-request-status", userId, request.runId, request.secretRef];
 }
 
-export function SecretRequestCardView({ request, messageId, token, userId }: {
+export function SecretRequestCardView({ request, messageId, token, userId, onHandleInSidePanel }: {
   request: SecretRequestCard;
   /** The card's own message, so answering it clears the wait this card declared and no other. */
   messageId?: string;
   token?: string | null;
   userId: string;
+  onHandleInSidePanel?: () => void;
 }) {
   const fetch = useXMatrixQueryFetch(userId);
   const queryClient = useQueryClient();
@@ -131,6 +132,7 @@ export function SecretRequestCardView({ request, messageId, token, userId }: {
       canApprove={status && canApprove}
       query={statusQuery}
       error={error}
+      onHandleInSidePanel={onHandleInSidePanel}
     >
       <form
         className="mt-3 space-y-2"
@@ -172,7 +174,7 @@ export function SecretRequestCardView({ request, messageId, token, userId }: {
  * and the way on to the Space's secrets. `children` are the answer's controls,
  * shown to a Space admin while the ask is open; `list` shows in every state.
  */
-function SecretAsk({ who, kind, question, detail, settled, canApprove, query, error, list, children }: {
+function SecretAsk({ who, kind, question, detail, settled, canApprove, query, error, list, onHandleInSidePanel, children }: {
   who?: string;
   kind: string;
   question: ReactNode;
@@ -184,6 +186,7 @@ function SecretAsk({ who, kind, question, detail, settled, canApprove, query, er
   query: Pick<UseQueryResult<unknown>, "isLoading" | "error" | "refetch">;
   error: string | null;
   list?: ReactNode;
+  onHandleInSidePanel?: () => void;
   children: ReactNode;
 }) {
   return (
@@ -201,7 +204,15 @@ function SecretAsk({ who, kind, question, detail, settled, canApprove, query, er
       <AskError error={error} loadError={query.error} action="Couldn't load this secret request"
         onRetry={() => void query.refetch()} />
       {list}
-      {canApprove && (settled ? <div className="mt-3"><ManageSecretsButton /></div> : children)}
+      {onHandleInSidePanel ? (
+        canApprove && !settled ? (
+          <div className="mt-3">
+            <HandleInSidePanelButton onClick={onHandleInSidePanel} />
+          </div>
+        ) : null
+      ) : (
+        canApprove && (settled ? <div className="mt-3"><ManageSecretsButton /></div> : children)
+      )}
     </AskCard>
   );
 }
@@ -230,12 +241,13 @@ function accessStatus(payload: Record<string, unknown>): SecretAccessStatus {
  * with its tick; one secret is named by the question alone. Once answered the
  * names fold to a line, so a long list does not stay spread over the stream.
  */
-export function SecretAccessRequestCardView({ request, messageId, token, userId }: {
+export function SecretAccessRequestCardView({ request, messageId, token, userId, onHandleInSidePanel }: {
   request: SecretAccessRequestCard;
   /** The card's own message, so answering it clears the wait this card declared and no other. */
   messageId?: string;
   token?: string | null;
   userId: string;
+  onHandleInSidePanel?: () => void;
 }) {
   const fetch = useXMatrixQueryFetch(userId);
   const queryClient = useQueryClient();
@@ -291,6 +303,7 @@ export function SecretAccessRequestCardView({ request, messageId, token, userId 
       canApprove={status && canApprove}
       query={statusQuery}
       error={error}
+      onHandleInSidePanel={onHandleInSidePanel}
       list={status && !lone && (done ? (
         <details className="mt-2 text-[13px]">
           <summary className="cursor-pointer text-muted-foreground">{request.secretRefs.length} secrets</summary>
@@ -298,6 +311,10 @@ export function SecretAccessRequestCardView({ request, messageId, token, userId 
             {request.secretRefs.map((ref) => <li key={ref}>{ref}</li>)}
           </ul>
         </details>
+      ) : onHandleInSidePanel ? (
+        <ul className="mt-2 space-y-0.5 text-[13px] font-mono [overflow-wrap:anywhere]">
+          {request.secretRefs.map((ref) => <li key={ref}>{ref}</li>)}
+        </ul>
       ) : (
         <ul className="mt-2 space-y-1">
           {request.secretRefs.map((ref) => {

@@ -4,7 +4,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { NORN_DELEGATED_NOTE, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { ArrowUp, Forward, Loader2, MessageCircleQuestion, Pencil, Undo2, X } from "lucide-react";
 
-import { AskCard, AskError } from "./ask-card";
+import { AskCard, AskError, HandleInSidePanelButton } from "./ask-card";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { userErrorMessage } from "@/lib/user-facing-error";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
@@ -65,7 +65,7 @@ export function nornRequestWords(text: string): { asked: string; more: string } 
   return { asked: asked.trim(), more: more.join("\n\n").trim() };
 }
 
-export function NornRequestCard({ request, channelId, outcome, token, userId, render = (text) => text }: {
+export function NornRequestCard({ request, channelId, outcome, token, userId, render = (text) => text, onHandleInSidePanel }: {
   request: NornRequestMetadata;
   /** Draws the program's words as the conversation draws a message's: a Page or Channel it names is a link. */
   render?: (text: string) => ReactNode;
@@ -74,6 +74,8 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
   outcome?: string;
   token?: string | null;
   userId: string;
+  /** When set (e.g. inline web-page popover card), renders read-only with one button to answer in the side panel. */
+  onHandleInSidePanel?: () => void;
 }) {
   const fetch = useXMatrixQueryFetch(userId);
   const [busy, setBusy] = useState(false);
@@ -165,7 +167,7 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
       kind={request.about ?? undefined}
       icon={<MessageCircleQuestion className="size-3.5" />}
       open={open}
-      aside={open && decline}
+      aside={open && !onHandleInSidePanel && decline}
       question={<div className="app-ask-question">{render(asked)}</div>}
       detail={<>
         {request.delegatedBy && <div>{request.delegatedBy.replace(/^@/u, "")} delegated this to you: you answer it for them.</div>}
@@ -181,6 +183,14 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
         : choices.length === 0 && { tone: "attention", label: "Waiting for your answer" }}
     >
       <AskError error={error} loadError={null} action="Couldn't send your answer" onRetry={() => setError(null)} />
+      {onHandleInSidePanel ? (
+        (open || delegatedAway) ? (
+          <div className="mt-3">
+            <HandleInSidePanelButton onClick={onHandleInSidePanel} />
+          </div>
+        ) : null
+      ) : (
+        <>
       {delegatedAway && <TakeBack requestRef={request.ref} onTakeBack={() => post(WEB_PROXY_ROUTES.channel_norn_request_reclaim(channelId, request.ref), {})} />}
       {open && delegating && (
         <form
@@ -267,6 +277,8 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
             </div>
           )}
         </div>
+      )}
+        </>
       )}
     </AskCard>
   );

@@ -41,6 +41,17 @@
   </section>
 
   <section id="view-app" class="app" hidden>
+    <div id="outbox-failure-bar" class="play-bar" role="alert" hidden>
+      <div class="play-bar-row">
+        <div class="play-bar-copy">
+          <span id="outbox-failure-title" class="play-bar-title danger">A question could not be sent</span>
+          <span id="outbox-failure-detail" class="play-bar-detail"></span>
+        </div>
+        <div class="play-bar-actions">
+          <button id="outbox-failure-dismiss" type="button" class="play-bar-close" aria-label="Dismiss">&times;</button>
+        </div>
+      </div>
+    </div>
     <div id="play-bucket-bar" class="play-bar" hidden>
       <div class="play-bar-row">
         <div class="play-bar-copy">

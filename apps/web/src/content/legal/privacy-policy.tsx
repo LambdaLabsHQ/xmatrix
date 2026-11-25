@@ -499,25 +499,34 @@ export function PrivacyPolicyContent() {
           clients request device permissions only for a feature you choose.
         </p>
         <p>
-          The xMatrix Chrome extension opens xMatrix in Chrome&apos;s side panel. It reads a web page
-          only when you act on it: its menu item or its panel button. If you turn on its optional
-          question box, which asks for access to web pages first, it reads the text you select on a
-          page to show it in the box under the selection; that text stays in your browser. Only when
-          you send a question does it pass the page title, address, and selected text to xMatrix with
-          it. Each message you write in its side panel carries the title and address of the page
-          beside it, shown above what you write; you can take the page off before sending. While the
-          side panel is open, an Agent in your conversation may read that page, or the page the
-          conversation was started from if it is still open in a tab: the extension reads what the
+          The xMatrix Chrome extension opens xMatrix in Chrome&apos;s side panel and, when you ask
+          about selected text, directly in an inline conversation card on the page (which can be
+          minimized to an edge tab or moved into the side panel; approvals, confirmations, and secret
+          requests are always handled in the side panel rather than in a page overlay). It reads a
+          web page only when you act on it: its menu item or its panel button. If you turn on its
+          optional question box, which asks for access to web pages first, it reads the text you
+          select on a page to show it in the box under the selection; that text stays in your
+          browser. Only when you send a question does it pass the page title, address, and selected
+          text to xMatrix with it. Whichever conversation is open in a tab&apos;s inline card or side
+          panel becomes bound to that tab while it remains open, and each message you write there
+          carries the title and address of the page in that tab (you can take the page off in the
+          side panel before sending). While a tab has a bound conversation or an open side panel, an
+          Agent in that conversation may read that tab&apos;s page: the extension reads what the
           browser exposes to assistive technology (headings, text, links, form fields and their
           values as shown), not hidden content or the page&apos;s code. An Agent may also ask to read
-          another page you have open; the panel asks you first and reads it only if you allow it. A
-          page read this way goes to that Agent only, and xMatrix does not store it. The extension never
-          opens a page for an Agent, does not read pages in the background, record your browsing
-          history, or contact any server other than xMatrix. It keeps your sign-in session, and text you picked until the
-          panel takes it, in the browser&apos;s extension storage on that device; signing out ends the
-          session and removes it. The xMatrix app in the panel keeps the same local copies there as
-          it does in a browser tab. The extension does not sell this data or use it for advertising.
-          What you send is handled as Customer Data under this Policy.
+          another page you have open; the side panel asks you first and reads it only if you allow
+          it. A page read this way goes to that Agent only, and xMatrix does not store it. The
+          extension never opens a page for an Agent, does not read pages in the background, record
+          your browsing history, or contact any server other than xMatrix. It keeps your sign-in
+          session, tab-to-conversation bindings, and text you picked until the panel takes it in the
+          browser&apos;s extension storage on that device. To prevent losing questions if you close
+          or navigate away from a page on a slow network, an in-flight message is also temporarily
+          stored in local extension storage and deleted immediately once delivered (or after at most
+          10 minutes if delivery does not succeed, in which case a short delivery-failure notice is
+          kept locally for at most 24 hours unless dismissed). Signing out ends the session and
+          clears this extension storage. The xMatrix app in the card and panel keeps the same local
+          copies there as it does in a browser tab. The extension does not sell this data or use it
+          for advertising. What you send is handled as Customer Data under this Policy.
         </p>
         <p>
           The{" "}

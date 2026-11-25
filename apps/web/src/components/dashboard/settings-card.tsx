@@ -12,6 +12,7 @@ import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { HandleInSidePanelButton } from "./ask-card";
 import { CredentialValueForm } from "./connector-credentials";
 import { HarnessSignInSection } from "./harness-sign-in";
 
@@ -145,7 +146,7 @@ function heading(settings: readonly CardSetting[], satisfied: boolean): string {
  * conversation only ever shows the outcome. When every setting is in, a
  * stopped read runs again, and an Agent's card is answered, which wakes it.
  */
-export function SettingsCard({ channelId, messageId, sequence, token, userId, agentName, reason }: {
+export function SettingsCard({ channelId, messageId, sequence, token, userId, agentName, reason, onHandleInSidePanel }: {
   channelId: string;
   messageId: string;
   sequence: number;
@@ -154,6 +155,7 @@ export function SettingsCard({ channelId, messageId, sequence, token, userId, ag
   /** The Agent that asked, from the Hub's own card. */
   agentName?: string;
   reason?: string;
+  onHandleInSidePanel?: () => void;
 }) {
   const queryClient = useQueryClient();
   const key = xmatrixQueryKeys.domain({ userId }, "settings-card", [channelId, messageId]);
@@ -218,7 +220,7 @@ export function SettingsCard({ channelId, messageId, sequence, token, userId, ag
                   ? "Checking…" : stateWord(setting)}
               </span>
             </div>
-            {!setting.satisfied && setting.canWrite && Control ? (
+            {!setting.satisfied && setting.canWrite && !onHandleInSidePanel && Control ? (
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Control setting={setting} busy={make.isPending} make={makeOne} refresh={() => void card.refetch()}
                   suggestedBy={asked} token={token} userId={userId} />
@@ -233,6 +235,11 @@ export function SettingsCard({ channelId, messageId, sequence, token, userId, ag
           </div>
         );
       })}
+      {onHandleInSidePanel && !view.satisfied && view.settings.some((setting) => !setting.satisfied && setting.canWrite) ? (
+        <div className="mt-3">
+          <HandleInSidePanelButton onClick={onHandleInSidePanel} />
+        </div>
+      ) : null}
       {view.satisfied && rerun.data ? <p className="mt-2 text-[13px] text-muted-foreground">Ran it again: {rerun.data.summary}</p> : null}
       {error ? <p role="alert" className="mt-2 text-[13px] font-medium text-destructive">{error}</p> : null}
     </section>

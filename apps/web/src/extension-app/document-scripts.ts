@@ -7,5 +7,12 @@ import { browserBackEntryScript } from "@/components/dashboard/browser-back-entr
 import { HIGHLIGHT_INHERITANCE_MODE_SCRIPT } from "@/components/ui/highlight-inheritance-mode";
 import { OVERLAY_SCROLLBARS_MODE_SCRIPT } from "@/components/ui/overlay-scrollbars-mode";
 
-export const DOCUMENT_HEAD_SCRIPT = [OVERLAY_SCROLLBARS_MODE_SCRIPT, HIGHLIGHT_INHERITANCE_MODE_SCRIPT, browserBackEntryScript]
-  .join("\n");
+const INLINE_POPOVER_MODE_SCRIPT =
+  'try{if(new URLSearchParams(location.search).get("inline")==="1")document.documentElement.dataset.inlinePopover="true";}catch{}';
+
+export const DOCUMENT_HEAD_SCRIPT = [
+  OVERLAY_SCROLLBARS_MODE_SCRIPT,
+  HIGHLIGHT_INHERITANCE_MODE_SCRIPT,
+  browserBackEntryScript,
+  INLINE_POPOVER_MODE_SCRIPT,
+].join("\n");

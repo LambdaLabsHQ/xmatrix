@@ -21,7 +21,7 @@ import { CompanionHeader } from "./companion-header";
 import { useExtensionCompanion } from "./use-extension-companion";
 import { absoluteChannelUrl } from "./channel-links";
 import { appAddressHref } from "@/lib/app-address";
-import { announceEmbedPageThread, embedBrowserPage, openEmbedAddress, openEmbedInTab } from "@/lib/extension-embed";
+import { announceEmbedMinimize, announceEmbedPageThread, embedBrowserPage, isExtensionInlinePopover, openEmbedAddress, openEmbedInTab, openEmbedSidePanel } from "@/lib/extension-embed";
 import type { AgentTraceTarget } from "./workspace-composer-dialogs";
 import { channelRecentActivityMs } from "./workspace-shell-helpers-extra";
 import { CrossSpaceReadCard, useChannelPendingCrossSpaceReads } from "./cross-space-read-card";
@@ -48,7 +48,7 @@ import { ConnectionStatus } from "./connection-status";
 import { DiagnosticsConsentPrompt } from "./diagnostics-consent-prompt";
 import { markStartup, reportStartupTiming, STARTUP_REPORT_SETTLE_MS } from "@/lib/startup-timing";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
-import { Maximize2, X } from "lucide-react";
+import { Loader2, Maximize2, X } from "lucide-react";
 import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { writeChannelComposerDraft } from "@/components/dashboard/channel-composer-drafts";
 import {
@@ -874,26 +874,51 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // it; an Agent reads the page itself with `xmatrix browse` (Daniel 2026-11-24: a web page is not a file).
   const [companionAsk, setCompanionAsk] = useState<string | null>(null);
   const askAboutPage = useStableCallback(() => {
-    if (!companionPage) return;
-    // Already asking about this page (the idle panel opened it): + keeps what is written there.
-    if (composingConversation && companionAsk === companionPage.href) return;
+    const targetKey = companionPage?.href ?? "tab";
+    // Already asking in a fresh conversation for this tab: + keeps what is written there.
+    if (composingConversation && companionAsk === targetKey) return;
     setNewConversationDraft("");
     setNewConversationError(null);
-    setCompanionAsk(companionPage.href);
+    setCompanionAsk(targetKey);
     openNewConversation();
   });
-  // With no conversation open, the panel offers one about the page beside it.
-  const companionIdle = Boolean(companion && !selectedChannel && !composingConversation);
+  // With no conversation open, the side panel offers one about the page beside it.
+  // An inline popover iframe pre-warmed at `/app` stays on a clean blank canvas until `open` arrives (A7).
+  const inlinePopover = isExtensionInlinePopover();
+  const companionBoundChannelRoute = Boolean(
+    companion && !composingConversation &&
+    (routeInfo.channelKey || routeInfo.legacyChannelId || routeInfo.conversationKey || companionPage?.path)
+  );
+  const companionIdle = Boolean(
+    companion && !inlinePopover && !selectedChannel && !composingConversation && !companionBoundChannelRoute
+  );
   useEffect(() => {
     if (companionIdle && companionPage) askAboutPage();
   }, [companionIdle, companionPage, askAboutPage]);
+  // In the inline popover card, pressing Escape when focus is anywhere in the card
+  // (empty composer, timeline, header) and no overlay handled it minimizes the card to dock.
+  useEffect(() => {
+    if (!inlinePopover) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('[role="dialog"], [role="menu"], [role="listbox"], .app-composer-box-mentions-open')) return;
+      if (target?.closest(".composer-textarea") && draftRef.current.trim().length > 0) return;
+      event.preventDefault();
+      announceEmbedMinimize();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [inlinePopover, draftRef]);
   const createCompanionConversation = useStableCallback(async (body: string, mode: "open" | "closed") => {
     const channel = await createConversationFromComposer(body, mode);
-    // Started beside a page it carries: the page's conversation now (unless the person took the page off).
+    // Started in this tab's side panel: bind this tab to the new conversation.
     const page = companionAsk ? embedBrowserPage() : null;
-    if (page) {
-      announceEmbedPageThread({ path: `/app/${channel.spaceId}/channels/${channel.id}`, title: page.title, href: page.href });
-    }
+    announceEmbedPageThread({
+      path: `/app/${channel.spaceId}/channels/${channel.id}`,
+      title: page?.title ?? channel.name ?? "",
+      href: page?.href ?? "",
+    });
     setCompanionAsk(null);
     return channel;
   });
@@ -909,10 +934,39 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     }
     return [...pages.values()];
   }, [renderableHistory, user?.id]);
+  const companionPageRef = useRef(companionPage);
+  companionPageRef.current = companionPage;
+  const lastBoundThreadPathRef = useRef<string | null>(null);
+  // Single invariant: whichever conversation this tab's side panel shows IS this tab's bound thread
+  // (including switching via channel links, threads, or Recent), so side panel / inline card / dock stay in sync.
+  useEffect(() => {
+    if (!companion || isExtensionInlinePopover() || composingConversation) return;
+    if (!selectedChannel) {
+      lastBoundThreadPathRef.current = null;
+      return;
+    }
+    const path = `/app/${selectedChannel.spaceId}/channels/${selectedChannel.id}`;
+    if (lastBoundThreadPathRef.current === path) return;
+    lastBoundThreadPathRef.current = path;
+    const page = companionPageRef.current;
+    announceEmbedPageThread({
+      path,
+      title: selectedChannel.name || page?.title || "",
+      href: page?.href ?? "",
+      recordRecent: false,
+    });
+  }, [companion, composingConversation, selectedChannel]);
+
   const companionBar = useMemo(() => companion ? {
     recent: companion.recent,
-    onOpenRecent: (path: string) => void openEmbedAddress(path),
-    onAskPage: companionPage ? askAboutPage : undefined,
+    onOpenRecent: (path: string) => {
+      const found = companion.recent.find((item) => item.path === path);
+      announceEmbedPageThread({ path, title: found?.title ?? "", href: companionPage?.href ?? found?.href ?? "", recordRecent: false });
+      void openEmbedAddress(path);
+    },
+    onAskPage: () => {
+      askAboutPage();
+    },
     onOpenInApp: () => openEmbedInTab(selectedChannel && !composingConversation
       ? absoluteChannelUrl(selectedChannel, spaces) : appAddressHref()),
   } : undefined, [companion, companionPage, askAboutPage, selectedChannel, composingConversation, spaces]);
@@ -1241,6 +1295,15 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     />
   );
 
+  const handleInlineApprovalInSidePanel = inlinePopover && selectedChannel
+    ? (messageId?: string) => {
+      openEmbedSidePanel({ spaceId: selectedChannel.spaceId, channelId: selectedChannel.id, messageId });
+    }
+    : undefined;
+  const handleDockedApprovalInSidePanel = handleInlineApprovalInSidePanel
+    ? () => handleInlineApprovalInSidePanel()
+    : undefined;
+
   // One conversation surface, shown as the Conversations view or docked beside
   // the page it is about (pages-live-document.md §4.4).
   // A page's conversation opens in the page's margin at what it is about, docks beside the page when
@@ -1342,8 +1405,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         localContext={localMentionContext}
         isJoined={canUseSelectedChannel}
         // Until the list has answered, "no conversations" would be a guess:
-        // the empty pane waits on the skeleton instead.
-        loading={loadingWorkspace || (!selectedChannel && channels.length === 0 && catalogPending) || Boolean(
+        // the empty pane waits on the skeleton instead. Once local cache or
+        // live state already has rows for the selected channel, paint them at once.
+        loading={((loadingWorkspace && !(selectedChannel && timeline.length > 0)) || (!selectedChannel && channels.length === 0 && catalogPending)) || Boolean(
           selectedChannel &&
           // A failed read is an answer: its error shows in place of the skeleton.
           !historyError &&
@@ -1389,6 +1453,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         threadRootChannel={selectedThreadRootContext?.channel}
         inPageMargin={placement === "page-margin"}
         compactLayout={Boolean(companion)}
+        onHandleApprovalInSidePanel={handleInlineApprovalInSidePanel}
       />
       )}
       <AgentWorkDetailsDock
@@ -1401,10 +1466,12 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
               ...pendingConnectorActions.map(request => ({ key: request.requestId, agent: request.providerId, what: request.actionId }))]}
           >
             {pendingConnectorActions.map(request => <ConnectorActionApproval key={request.requestId} request={request}
-              token={token} userId={model.authenticatedUserId ?? ""} />)}
+              token={token} userId={model.authenticatedUserId ?? ""}
+              onHandleInSidePanel={handleDockedApprovalInSidePanel} />)}
             {pendingCrossSpaceReads.map((request) => (
               <CrossSpaceReadCard key={request.grantId} request={request} token={token}
-                userId={model.authenticatedUserId ?? ""} />
+                userId={model.authenticatedUserId ?? ""}
+                onHandleInSidePanel={handleDockedApprovalInSidePanel} />
             ))}
           </ChannelApprovalsDock>}
         </>) : null}
@@ -1424,6 +1491,16 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       />
       {/* The composer sits in the reserved bottom gutter; the work dock stays
           anchored to --app-composer-height. */}
+      {/* In the inline popover card, keep the same quiet centered spinner visible until the first
+          screen of messages renders so cold reopen never flashes a blank white surface (Item 4). */}
+      {inlinePopover && selectedChannel && !historyError && (loadingHistory || !historyRenderAuthorized) && timeline.length === 0 && (
+        <div
+          aria-label="Loading conversation"
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-white"
+        >
+          <Loader2 className="size-5 animate-spin text-muted-foreground/60" />
+        </div>
+      )}
       {selectedChannel && (
         <Composer
           channel={selectedChannel}
@@ -1452,6 +1529,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           quote={discussionQuotes.get(selectedChannel.id) ?? null}
           onAttachmentsChange={changeDraftAttachments}
           onSend={sendComposerMessage}
+          onEscape={inlinePopover ? () => {
+            if (draftRef.current.trim().length === 0) announceEmbedMinimize();
+          } : undefined}
           onOpenAppsForSpace={openComposerApps}
           onEditHarnessProfile={openHarnessProfile}
         />
@@ -1760,14 +1840,17 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         >
           <ConnectionStatus />
           {companion && companionBar ? (
-            <CompanionHeader
-              channel={composingConversation ? null : selectedChannel}
-              composing={composingConversation}
-              spaces={spaces}
-              currentSpaceId={currentSpaceId}
-              onSelectSpace={selectSpace}
-              companion={companionBar}
-            />
+            !inlinePopover ? (
+              <CompanionHeader
+                channel={composingConversation ? null : selectedChannel}
+                composing={composingConversation}
+                loadingChannel={Boolean(companionBoundChannelRoute && !selectedChannel)}
+                spaces={spaces}
+                currentSpaceId={currentSpaceId}
+                onSelectSpace={selectSpace}
+                companion={companionBar}
+              />
+            ) : null
           ) : (
             <TopWorkspaceBar
               page={openedPage}
@@ -1805,9 +1888,17 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
 
           {companion ? (
             // The companion is one conversation: the page's, or a new one about the page.
+            // Pre-warmed inline popover frames stay blank until an explicit `open` selects a channel.
             <>
-              {composingConversation || !selectedChannel ? newConversationSurface : channelConversationSurface}
-              <BrowserReadApprovalDialog />
+              {(inlinePopover || companionBoundChannelRoute) && !selectedChannel ? (
+                <div
+                  aria-label="Loading conversation"
+                  className="flex flex-1 items-center justify-center bg-white"
+                >
+                  <Loader2 className="size-5 animate-spin text-muted-foreground/60" />
+                </div>
+              ) : composingConversation || !selectedChannel ? newConversationSurface : channelConversationSurface}
+              {!inlinePopover && <BrowserReadApprovalDialog />}
             </>
           ) : agentConfigDialog ? (
             <AgentConfigPage

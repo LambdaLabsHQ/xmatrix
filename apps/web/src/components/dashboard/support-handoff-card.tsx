@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LifeBuoy, Loader2, Send, X } from "lucide-react";
 import type { ClientDefectAction, SupportHandoffPart } from "@xmatrix/protocol";
 
+import { HandleInSidePanelButton } from "./ask-card";
 import { actionClass } from "@/components/ui/action-tone";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -29,11 +30,12 @@ const STATUS_LABEL = { approved: "Support can read it", revoked: "Withdrawn", ex
  * box that answers the person. The Hub decides who sees what; a card a viewer
  * may not act on shows only its text.
  */
-export function SupportHandoffCard({ card, body, token, userId }: {
+export function SupportHandoffCard({ card, body, token, userId, onHandleInSidePanel }: {
   card: SupportHandoffCardData;
   body: React.ReactNode;
   token: string | null | undefined;
   userId: string;
+  onHandleInSidePanel?: () => void;
 }) {
   const queryClient = useQueryClient();
   // Each access note refreshes this query (useSupportAccessNoteRefresh), so the count follows the note.
@@ -72,46 +74,56 @@ export function SupportHandoffCard({ card, body, token, userId }: {
           {live && <> · until {new Date(handoff.expiresAt).toLocaleDateString()} · {readCountLabel(handoff.readCount)}</>}
         </p>
       )}
-      {canWithdraw && (
-        <button type="button" disabled={busy} className={actionClass({ variant: "secondary", size: "sm" })}
-          onClick={() => void act(async () => {
-            const next = (await revokeSupportHandoff(token!, card.spaceId, card.grantId)).handoff;
-            queryClient.setQueryData(queryKey, { ...handoff, ...next });
-          }, "Couldn't withdraw support access")}>
-          {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
-          Withdraw now
-        </button>
-      )}
-      {support && live && card.parts.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {card.parts.map((part) => (
-            <button key={part} type="button" disabled={busy} className={actionClass({ variant: "secondary", size: "sm" })}
+      {onHandleInSidePanel ? (
+        (canWithdraw || (support && live)) ? (
+          <div className="mt-2">
+            <HandleInSidePanelButton onClick={onHandleInSidePanel} />
+          </div>
+        ) : null
+      ) : (
+        <>
+          {canWithdraw && (
+            <button type="button" disabled={busy} className={actionClass({ variant: "secondary", size: "sm" })}
               onClick={() => void act(async () => {
-                setRead({ part, result: await readSupportHandoffPart(token!, card.spaceId, card.grantId, part) });
-              }, "Couldn't read this support handoff")}>
-              {PART_LABEL[part]}
+                const next = (await revokeSupportHandoff(token!, card.spaceId, card.grantId)).handoff;
+                queryClient.setQueryData(queryKey, { ...handoff, ...next });
+              }, "Couldn't withdraw support access")}>
+              {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+              Withdraw now
             </button>
-          ))}
-        </div>
-      )}
-      {read && <SupportHandoffPartView read={read} />}
-      {support && live && (
-        <form className="space-y-2" onSubmit={(event) => {
-          event.preventDefault();
-          if (!reply.trim()) return;
-          void act(async () => {
-            await replyToSupportHandoff(token!, card.spaceId, card.grantId, reply.trim());
-            setReply("");
-            setReplied(true);
-          }, "Couldn't send the answer to the person");
-        }}>
-          <Textarea value={reply} maxLength={4000} disabled={busy} placeholder="Answer them as xMatrix support"
-            onChange={(event) => { setReply(event.target.value); setReplied(false); }} />
-          <button type="submit" disabled={busy || !reply.trim()} className={actionClass({ variant: "primary", size: "sm" })}>
-            <Send className="size-3.5" />
-            {replied ? "Sent to their conversation" : "Send to their conversation"}
-          </button>
-        </form>
+          )}
+          {support && live && card.parts.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {card.parts.map((part) => (
+                <button key={part} type="button" disabled={busy} className={actionClass({ variant: "secondary", size: "sm" })}
+                  onClick={() => void act(async () => {
+                    setRead({ part, result: await readSupportHandoffPart(token!, card.spaceId, card.grantId, part) });
+                  }, "Couldn't read this support handoff")}>
+                  {PART_LABEL[part]}
+                </button>
+              ))}
+            </div>
+          )}
+          {read && <SupportHandoffPartView read={read} />}
+          {support && live && (
+            <form className="space-y-2" onSubmit={(event) => {
+              event.preventDefault();
+              if (!reply.trim()) return;
+              void act(async () => {
+                await replyToSupportHandoff(token!, card.spaceId, card.grantId, reply.trim());
+                setReply("");
+                setReplied(true);
+              }, "Couldn't send the answer to the person");
+            }}>
+              <Textarea value={reply} maxLength={4000} disabled={busy} placeholder="Answer them as xMatrix support"
+                onChange={(event) => { setReply(event.target.value); setReplied(false); }} />
+              <button type="submit" disabled={busy || !reply.trim()} className={actionClass({ variant: "primary", size: "sm" })}>
+                <Send className="size-3.5" />
+                {replied ? "Sent to their conversation" : "Send to their conversation"}
+              </button>
+            </form>
+          )}
+        </>
       )}
       {error && <p role="alert" className="text-xs font-semibold text-destructive">{error}</p>}
     </div>
@@ -156,7 +168,14 @@ function SupportHandoffPartView({ read }: { read: { part: SupportHandoffPart; re
 }
 
 /** On xMatrix's own failure notices: hand this conversation to support from where it went wrong. */
-export function SupportHandoffOffer({ channelId, channelName }: { channelId: string; channelName?: string }) {
+export function SupportHandoffOffer({ channelId, channelName, onHandleInSidePanel }: {
+  channelId: string;
+  channelName?: string;
+  onHandleInSidePanel?: () => void;
+}) {
+  if (onHandleInSidePanel) {
+    return <HandleInSidePanelButton onClick={onHandleInSidePanel} />;
+  }
   return (
     <button type="button" className={actionClass({ variant: "secondary", size: "sm" })}
       onClick={() => openSupportHandoff({ channelId, ...(channelName ? { channelName } : {}) })}>

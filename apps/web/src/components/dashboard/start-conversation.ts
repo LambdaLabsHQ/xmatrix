@@ -8,14 +8,20 @@ export type ConversationRequest = {
   spaceId: string;
   memberName: string;
   mode: "open" | "closed";
-} & ({ body: string } | { name: string; metadata: Record<string, string | boolean> });
+} & (
+  | { body: string; metadata?: Record<string, string | boolean> }
+  | { name: string; metadata: Record<string, string | boolean> }
+);
 
 function conversationFields(input: ConversationRequest) {
   return {
     spaceId: input.spaceId,
     name: "name" in input ? input.name.slice(0, 80) : automaticConversationName(input.body),
     mode: input.mode,
-    metadata: { createdBy: "web", ...("name" in input ? input.metadata : { autoName: true }) },
+    metadata: {
+      createdBy: "web",
+      ...("name" in input ? input.metadata : { autoName: true, ...input.metadata }),
+    },
   };
 }
 

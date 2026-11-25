@@ -28,6 +28,7 @@ function recentHost(href: string): string {
 export function CompanionHeader({
   channel,
   composing,
+  loadingChannel = false,
   spaces,
   currentSpaceId,
   onSelectSpace,
@@ -35,6 +36,7 @@ export function CompanionHeader({
 }: {
   channel: ChannelSnapshot | null;
   composing: boolean;
+  loadingChannel?: boolean;
   spaces: SerializedSpace[];
   currentSpaceId: string | null;
   onSelectSpace: (spaceId: string) => void;
@@ -71,6 +73,10 @@ export function CompanionHeader({
             title={title}
           >
             {title}
+          </span>
+        ) : loadingChannel ? (
+          <span className="min-w-0 truncate text-[13.5px] font-medium text-muted-foreground">
+            Loading…
           </span>
         ) : (
           <>

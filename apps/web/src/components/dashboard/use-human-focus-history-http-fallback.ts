@@ -6,6 +6,7 @@ import type { ChannelMessage, ChannelSnapshot } from "@xmatrix/protocol";
 import { INITIAL_HISTORY_LIMIT } from "./workspace-shell-constants";
 import { fetchChannelHistory } from "./workspace-admin-views";
 import { useAuth } from "@/lib/auth-context";
+import { XMatrixApiError } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 type Input = {
@@ -16,6 +17,7 @@ type Input = {
   applyHistory(channelId: string, messages: ChannelMessage[], hasOlderMessages: boolean): void;
   recordTailBase(channelId: string): void;
   authorizeOnlineHistory(channelId: string): void;
+  onChannelNotFound?: (channelId: string) => void;
   setHistoryError(error: string | null): void;
   setLoadingHistory(loading: boolean): void;
 };
@@ -78,9 +80,14 @@ export function useHumanFocusHistoryHttpFallback(input: Input): HumanFocusHistor
         next.authorizeOnlineHistory(channelId);
         next.setHistoryError(null);
         next.setLoadingHistory(false);
-      } catch {
+      } catch (err) {
         if (!isFocused(channelId)) return;
         const next = inputRef.current;
+        if (err instanceof XMatrixApiError && err.status === 404) {
+          next.onChannelNotFound?.(channelId);
+          next.setLoadingHistory(false);
+          return;
+        }
         next.setHistoryError(socketFailure);
         next.setLoadingHistory(false);
       }
