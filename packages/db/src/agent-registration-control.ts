@@ -3,7 +3,7 @@ import { agentLaunchAccess, agentPresetById, harnessParameterObservation, machin
 import { ACTIVE_RUN_STATUS_SQL, digestCanonicalCloneCborV1, parseSpaceAgentRegistrationKey, parseSpaceAgentConfiguration,
   registrationLimitsWithin, spaceConfigurationResources,
   parseRegistrationResourceLimits, intersectRegistrationLimits,
-  parseAgentRegistrationEnvironment, routingModelCatalogObservation,
+  parseAgentRegistrationEnvironment, parseStoredAgentRegistrationEnvironment, routingModelCatalogObservation,
   type AgentRegistrationEnvironment, type AgentRegistrationMachinePlatform, type AgentRegistrationRunningInstance, type AgentRegistrationSummary,
   type SpaceAgentRegistrationKey, type SpaceAgentConfiguration , utf8ByteLength,
   parseHarnessProfileCommand, type HarnessProfileCommand, type SpaceHarnessProfile } from "@xmatrix/protocol";
@@ -533,7 +533,7 @@ export class PostgresAgentRegistrationRepository {
         machine: row.key.machineId, harness: row.key.harness })))], maxRows: limit }));
     return { ...page, registrations: page.registrations.map(row => {
       const label = labels.find(label => label.owner === row.key.ownerUserId && label.machine === row.key.machineId && label.harness === row.key.harness);
-      const environment = label?.declaration_json ? parseAgentRegistrationEnvironment(label.declaration_json) : null;
+      const environment = label?.declaration_json ? parseStoredAgentRegistrationEnvironment(label.declaration_json) : null;
       // The physical environment bounds the Space's models exactly as a launch does.
       const declared = row.models.filter(model => environment?.models.includes(model));
       // A machine whose owner declared no models runs the Space's models from

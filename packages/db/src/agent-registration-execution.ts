@@ -1,5 +1,5 @@
 import { digestCanonicalCloneCborV1, parseSpaceAgentRegistrationKey, parseAgentRoutingRequirements,
-  parseAgentRegistrationEnvironment, type SpaceAgentRegistrationKey, type AgentRoutingRequirements, hasControlCharacter,
+  parseStoredAgentRegistrationEnvironment, refusedAgentHarness, type SpaceAgentRegistrationKey, type AgentRoutingRequirements, hasControlCharacter,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -46,7 +46,10 @@ async function physical(tx: DatabaseTransaction, key: SpaceAgentRegistrationKey,
   values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 });
   if (!rows[0]) throw new RegistrationAccessError("registration_environment_missing", 409);
   await requireMachineNotRetired(tx, key);
-  const environment = parseAgentRegistrationEnvironment(rows[0].declaration_json);
+  const environment = parseStoredAgentRegistrationEnvironment(rows[0].declaration_json);
+  if (refusedAgentHarness(key.harness) || refusedAgentHarness(environment.launch?.runtime) || refusedAgentHarness(environment.launch?.backend)) {
+    throw new RegistrationAccessError("registration_harness_refused", 409);
+  }
   const through = requirements.availableThrough ? Date.parse(requirements.availableThrough) : now;
   // No requested model means the runtime default. A requested model must be one
   // the environment declares; an empty declaration allows no model override.

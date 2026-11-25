@@ -141,6 +141,10 @@ export const REFUSED_AGENT_HARNESSES: readonly RefusedAgentHarness[] = [
   },
 ];
 
+export const REFUSED_AGENT_BACKENDS = new Set<string>(
+  REFUSED_AGENT_HARNESSES.flatMap((entry) => entry.backends),
+);
+
 export function refusedAgentHarness(
   runtimeOrType?: string | null,
 ): RefusedAgentHarness | undefined {

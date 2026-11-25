@@ -1,5 +1,5 @@
 import { registrationKeyFromRow } from "./agent-registration-rows.js";
-import { digestCanonicalCloneCborV1, parseAgentEnvironmentCommand, parseAgentRegistrationEnvironment,
+import { digestCanonicalCloneCborV1, parseAgentEnvironmentCommand, parseStoredAgentRegistrationEnvironment,
   parseAgentRegistrationKey, type AgentEnvironmentCommand, type AgentRegistrationKey } from "@xmatrix/protocol";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
@@ -31,7 +31,7 @@ export class PostgresAgentEnvironmentRepository {
         FROM control.agent_registration_environments WHERE owner_user_id=$1 AND machine_id=$2 AND harness=$3`,
       values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 });
       return { key, version: Number(rows[0]?.version ?? 0), environment: rows[0]
-        ? parseAgentRegistrationEnvironment(rows[0].declaration_json) : null };
+        ? parseStoredAgentRegistrationEnvironment(rows[0].declaration_json) : null };
     });
   }
 

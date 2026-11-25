@@ -1,7 +1,7 @@
 import { utf8ByteLength } from "./hex.js";
 import { parseAgentRegistrationKey, type AgentRegistrationKey } from "./agent-registration.js";
 import { parseAgentRoutingDeclaration, type AgentRoutingDeclaration } from "./agent-routing.js";
-import { AGENT_ACCESS_MODES, AGENT_PRESET_BACKENDS, agentAccessGrant, type AgentAccessGrant, type AgentAccessMode,
+import { AGENT_ACCESS_MODES, AGENT_PRESET_BACKENDS, REFUSED_AGENT_BACKENDS, agentAccessGrant, type AgentAccessGrant, type AgentAccessMode,
   type AgentPreset, type AgentPresetBackend } from "./agent-presets.js";
 import { hasControlCharacter } from "./field-validation.js";
 
@@ -47,14 +47,21 @@ function launchArgs(value: unknown, field: string): string[] {
  * declarations may still carry them; they are read as absent and never written. */
 const RETIRED_LAUNCH_FIELDS = ["requestReviewer", "sandboxMode"];
 
-export function parseAgentRegistrationLaunch(value: unknown): AgentRegistrationLaunch {
+export function parseAgentRegistrationLaunch(
+  value: unknown,
+  options?: { allowRetiredBackends?: boolean },
+): AgentRegistrationLaunch {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid registration launch");
   const row = value as Record<string, unknown>;
   if (Object.keys(row).some(field => !["runtime", "runtimeArgs", "backend", "acpArgs", "access", ...RETIRED_LAUNCH_FIELDS].includes(field))) {
     throw new Error("Invalid registration launch fields");
   }
   const backend = row.backend === undefined ? undefined : launchText(row.backend, 40, "backend");
-  if (backend !== undefined && !AGENT_PRESET_BACKENDS.has(backend as AgentPresetBackend)) {
+  const validBackend = backend !== undefined && (
+    AGENT_PRESET_BACKENDS.has(backend as AgentPresetBackend) ||
+    (options?.allowRetiredBackends === true && REFUSED_AGENT_BACKENDS.has(backend))
+  );
+  if (backend !== undefined && !validBackend) {
     throw new Error("Invalid registration launch backend");
   }
   const acpArgs = row.acpArgs === undefined ? undefined : launchArgs(row.acpArgs, "acpArgs");
@@ -103,13 +110,24 @@ export interface AgentEnvironmentCommand {
   environment: AgentRegistrationEnvironment;
 }
 
-export function parseAgentRegistrationEnvironment(value: unknown): AgentRegistrationEnvironment {
+export function parseAgentRegistrationEnvironment(
+  value: unknown,
+  options?: { allowRetiredBackends?: boolean },
+): AgentRegistrationEnvironment {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.hasOwn(value, "defaultWorkspace")) {
     throw new Error("Physical environment cannot contain a Space workspace");
   }
   const { launch, ...declaration } = value as Record<string, unknown>;
   return { ...parseAgentRoutingDeclaration(declaration),
-    ...(launch === undefined ? {} : { launch: parseAgentRegistrationLaunch(launch) }) };
+    ...(launch === undefined ? {} : { launch: parseAgentRegistrationLaunch(launch, options) }) };
+}
+
+/** Stored declarations may still name a harness backend xMatrix later retired
+ * and refused (for example `zcode-app`). Readers keep that value so catalog
+ * listing and teardown stay usable while launch guards still refuse execution;
+ * write parsers never accept it. */
+export function parseStoredAgentRegistrationEnvironment(value: unknown): AgentRegistrationEnvironment {
+  return parseAgentRegistrationEnvironment(value, { allowRetiredBackends: true });
 }
 
 export function parseAgentEnvironmentCommand(value: unknown): AgentEnvironmentCommand {
