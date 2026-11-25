@@ -9,6 +9,8 @@ import {
   answerBrowserRead,
   createConversation,
   listSpaces,
+  readConnectorCredentials,
+  saveConnectorCredentials,
   sendMessage,
   freshAccessToken,
   hubUrl,
@@ -20,10 +22,19 @@ import {
 } from "./hub-client.js";
 import { capturableUrl, discussionTitle, pagePassage } from "./passage.js";
 import { isTrustedWebAppOrigin, pageKey, readTabSnapshot, showWebPage, tabPageThread } from "./page-tab.js";
+import {
+  PLAY_BUCKET_PATTERN,
+  findOpenPlayConsoleBuckets,
+  isPlayConsoleUrl,
+  isPlayDownloadReportsUrl,
+  playDownloadReportsUrl,
+  readPlayBucketsFromTab,
+} from "./play-reports-bucket.js";
 
 const SIGN_IN_ALARM = "sign-in";
 const MENU_ASK = "ask";
 const MENU_PAGE = "ask-page";
+const MENU_PLAY_BUCKET = "sync-play-bucket";
 const SELECTION_SCRIPT = "selection-chip";
 const WEB_ORIGINS = ["https://*/*", "http://*/*"];
 
@@ -404,6 +415,35 @@ async function syncSelectionScript() {
 /** Agents' page-read requests a side panel took on (panelHandlers.claimBrowserRead). */
 const browserReadClaims = new Set();
 
+async function syncPlayBucketForSpace({ bucket, spaceId } = {}) {
+  const clean = typeof bucket === "string" ? bucket.trim() : "";
+  if (!PLAY_BUCKET_PATTERN.test(clean)) {
+    throw new Error("Expected a Play Console Cloud Storage bucket ID (pubsite_prod_rev_…).");
+  }
+  return authed(async (scoped, token) => {
+    let target = null;
+    if (typeof spaceId === "string" && spaceId) {
+      const { lastSpace } = await chrome.storage.local.get("lastSpace");
+      if (lastSpace?.id === spaceId) {
+        target = lastSpace;
+      } else {
+        const spaces = await listSpaces(scoped, token);
+        target = spaces.find((space) => space.id === spaceId) ?? { id: spaceId, name: spaceId };
+      }
+    } else {
+      target = await quickAskSpace(token);
+    }
+    if (!target) throw new Error("You are not in any Space yet.");
+    await saveConnectorCredentials(scoped, token, {
+      spaceId: target.id,
+      providerId: "googleplay",
+      providerName: "Google Play Console",
+      fields: { reportsBucket: clean },
+    });
+    return { bucket: clean, spaceId: target.id, spaceName: target.name };
+  });
+}
+
 const panelHandlers = {
   async state() {
     const session = await store.get();
@@ -496,6 +536,56 @@ const panelHandlers = {
   showPage: ({ href, preferredTabId }) => showWebPage(chrome, href, {
     preferredTabId: Number.isInteger(preferredTabId) ? preferredTabId : null,
   }),
+  /** Detects Play Console Cloud Storage bucket IDs (`pubsite_prod_rev_*`) on this tab; never reads cookies. */
+  async inspectPlayBucket({ tabId }) {
+    if (!Number.isInteger(tabId)) return { isPlayConsole: false };
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const hintKey = `playBucketHint:${tabId}`;
+    const { [hintKey]: rawHint } = await chrome.storage.session.get(hintKey);
+    const hint = rawHint && Date.now() - rawHint.at < 60_000 ? rawHint : null;
+    const playUrl = isPlayConsoleUrl(tab?.url ?? "") ? tab.url : (hint && isPlayConsoleUrl(hint.url) ? hint.url : "");
+    if (!playUrl) return { isPlayConsole: false };
+
+    const liveBuckets = await readPlayBucketsFromTab(chrome, tabId);
+    const buckets = [...new Set([...liveBuckets, ...(Array.isArray(hint?.buckets) ? hint.buckets : [])])]
+      .filter((value) => PLAY_BUCKET_PATTERN.test(value));
+
+    let space = null;
+    let savedBucket = null;
+    let permissionError = null;
+    if (await store.get()) {
+      try {
+        await authed(async (scoped, token) => {
+          space = await quickAskSpace(token);
+          if (!space) return;
+          const view = await readConnectorCredentials(scoped, token, { spaceId: space.id, providerId: "googleplay" });
+          const existing = typeof view?.plain?.reportsBucket === "string" ? view.plain.reportsBucket.trim() : "";
+          savedBucket = PLAY_BUCKET_PATTERN.test(existing) ? existing : null;
+        });
+      } catch (error) {
+        if (error instanceof HubError && error.status === 403) {
+          permissionError = "Only a Space admin can update Google Play Console settings.";
+        }
+      }
+    }
+    return {
+      isPlayConsole: true,
+      url: playUrl,
+      onDownloadReports: isPlayDownloadReportsUrl(playUrl),
+      downloadReportsUrl: playDownloadReportsUrl(playUrl),
+      buckets,
+      space,
+      savedBucket,
+      synced: hint?.synced ?? null,
+      error: hint?.error ?? permissionError,
+    };
+  },
+  /** Writes a validated plain Play Console bucket ID into the Space's `@googleplay` `reportsBucket`. */
+  async syncPlayBucket({ bucket, spaceId, tabId }) {
+    const result = await syncPlayBucketForSpace({ bucket, spaceId });
+    if (Number.isInteger(tabId)) await chrome.storage.session.remove(`playBucketHint:${tabId}`).catch(() => undefined);
+    return result;
+  },
 };
 
 function isExtensionPage(sender) {
@@ -525,7 +615,11 @@ function replyAsync(work, reply, { includeValue = true } = {}) {
 // The answer never reveals whether a tab was already open or newly created.
 chrome.runtime.onMessageExternal.addListener((message, sender, reply) => {
   if (!isTrustedWebAppOrigin(originOfSender(sender), { allowLocalhost: Boolean(manifest.key) })) return false;
-  if (message?.protocol !== "xmatrix-embed/1" || message?.type !== "show-page") return false;
+  if (message?.protocol !== "xmatrix-embed/1") return false;
+  if (message.type === "google-play-bucket") {
+    return replyAsync(() => findOpenPlayConsoleBuckets(chrome), reply);
+  }
+  if (message.type !== "show-page") return false;
   const href = capturableUrl(String(message.href ?? ""));
   if (!href) {
     reply({ ok: false, error: "Invalid web page address." });
@@ -582,11 +676,36 @@ function installMenus() {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({ id: MENU_ASK, title: "Ask about “%s”", contexts: ["selection"] });
     chrome.contextMenus.create({ id: MENU_PAGE, title: "Ask about this page", contexts: ["page"] });
+    chrome.contextMenus.create({
+      id: MENU_PLAY_BUCKET,
+      title: "Sync Google Play reports bucket to xMatrix",
+      contexts: ["page"],
+      documentUrlPatterns: ["https://play.google.com/console/*"],
+    });
   });
 }
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if ((info.menuItemId !== MENU_ASK && info.menuItemId !== MENU_PAGE) || tab?.id === undefined) return;
+  if (tab?.id === undefined) return;
+  if (info.menuItemId === MENU_PLAY_BUCKET) {
+    openPanel(tab);
+    const url = info.pageUrl ?? tab.url ?? "";
+    const buckets = await readPlayBucketsFromTab(chrome, tab.id);
+    let synced = null;
+    let error = null;
+    if (buckets.length === 1 && await store.get()) {
+      try {
+        synced = await syncPlayBucketForSpace({ bucket: buckets[0] });
+      } catch (caught) {
+        error = caught instanceof Error ? caught.message : String(caught);
+      }
+    }
+    await chrome.storage.session.set({
+      [`playBucketHint:${tab.id}`]: { url, buckets, synced, error, at: Date.now() },
+    });
+    return;
+  }
+  if (info.menuItemId !== MENU_ASK && info.menuItemId !== MENU_PAGE) return;
   // The menu's click lets this extension into this one tab (activeTab) to open the box there.
   try {
     await setPendingAsk({ ...tab, url: info.pageUrl ?? tab.url }, info.menuItemId === MENU_ASK ? info.selectionText ?? "" : "");
@@ -609,7 +728,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // A closed tab's passage and conversation go with it.
 chrome.tabs.onRemoved.addListener((tabId) => {
   openPanels.delete(tabId);
-  chrome.storage.session.remove([`ask:${tabId}`, `askThread:${tabId}`, `openPath:${tabId}`]).catch(() => undefined);
+  chrome.storage.session.remove([`ask:${tabId}`, `askThread:${tabId}`, `openPath:${tabId}`, `playBucketHint:${tabId}`]).catch(() => undefined);
 });
 
 chrome.permissions.onAdded.addListener(() => {

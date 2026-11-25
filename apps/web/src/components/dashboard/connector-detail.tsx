@@ -32,6 +32,7 @@ import { GitHubInstallationAccounts } from "./github-installation-accounts";
 import { GmailMailboxes } from "./gmail-mailboxes";
 import { GoogleChatRoomLink, chatLinkGuide } from "./googlechat-room-link";
 import { GoogleDocFileSelection } from "./google-doc-file-selection";
+import { GooglePlayReportsBucket } from "./google-play-reports-bucket";
 import { ToolPaperScroll, ToolStateDot } from "./tool-split";
 import { WeComCompanyConnection } from "./wecom-company-connection";
 import { relativeTime } from "./workspace-shell-presence";
@@ -217,7 +218,7 @@ export function ConnectorDetailPage({
             </ConnectorFold>
           </ConnectorSection>
         ) : null}
-        {kind !== "chat" && kind !== "company" && configured && connectorWritableCredentials(connector).length > 0 ? (
+        {kind !== "chat" && kind !== "company" && configured && connector.id !== "googleplay" && connectorWritableCredentials(connector).length > 0 ? (
           // A sign-in needs none; typed credentials are then the exception, so they wait behind a fold.
           kind === "oauth" && !hasTypedCredentials ? (
             <ConnectorSection title="Credentials" note={`Not needed while the ${connector.name} sign-in works.`}>
@@ -246,6 +247,12 @@ export function ConnectorDetailPage({
           <ConnectorSection title="Documents"
             note="Choose a Doc or Sheet with the Google account connected to this Space; xMatrix may then read it.">
             <GoogleDocFileSelection key={spaceId} spaceId={spaceId} token={token} />
+          </ConnectorSection>
+        ) : null}
+        {connector.id === "googleplay" && configured ? (
+          <ConnectorSection title="Bulk reports (Cloud Storage)" testId="google-play-reports-bucket"
+            note="Optional for @googleplay:store_reports. Sync your Play Console bucket ID in one click from Chrome, or paste from Play Console → Download reports → Copy Cloud Storage URI.">
+            <GooglePlayReportsBucket key={spaceId} credentials={credentials} />
           </ConnectorSection>
         ) : null}
 

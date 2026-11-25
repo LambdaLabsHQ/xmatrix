@@ -396,9 +396,78 @@ type ChromeExternalRuntime = {
   sendMessage: (
     extensionId: string,
     message: Record<string, unknown>,
-    callback: (response?: { ok?: boolean }) => void,
+    callback: (response?: { ok?: boolean; value?: unknown }) => void,
   ) => void;
 };
+
+const PLAY_BUCKET_PATTERN = /^pubsite_prod(?:_rev)?_[0-9]{6,30}$/u;
+
+export type PlayConsoleBucketResult =
+  | { status: "found"; buckets: string[] }
+  | { status: "not-found"; downloadReportsUrl?: string }
+  | { status: "no-tab" }
+  | { status: "no-permission" }
+  | { status: "unavailable" };
+
+function playConsoleAddress(value: unknown): string | undefined {
+  const clean = webAddress(value);
+  if (!clean) return undefined;
+  try {
+    const parsed = new URL(clean);
+    return parsed.protocol === "https:" && parsed.hostname === "play.google.com"
+      && (parsed.pathname === "/console" || parsed.pathname.startsWith("/console/"))
+      ? parsed.toString()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Asks the installed xMatrix Chrome extension to detect plain `pubsite_prod_rev_*`
+ * bucket IDs from an open Google Play Console tab (never cookies or other page data).
+ */
+export function requestPlayConsoleBucket({ timeoutMs = 5_000 }: { timeoutMs?: number } = {}): Promise<PlayConsoleBucketResult> {
+  const runtime = browserExtensionRuntime();
+  if (!runtime) return Promise.resolve({ status: "unavailable" });
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result: PlayConsoleBucketResult) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = window.setTimeout(() => done({ status: "unavailable" }), timeoutMs);
+    try {
+      runtime.sendMessage(EXTENSION_ID, { protocol: PROTOCOL, type: "google-play-bucket" }, (response) => {
+        if (runtime.lastError || !response?.ok || !response.value || typeof response.value !== "object") {
+          done({ status: "unavailable" });
+          return;
+        }
+        const value = response.value as Record<string, unknown>;
+        if (value.status === "found" && Array.isArray(value.buckets)) {
+          const buckets = [...new Set(value.buckets.filter((item): item is string =>
+            typeof item === "string" && PLAY_BUCKET_PATTERN.test(item)))].slice(0, 10);
+          done(buckets.length > 0 ? { status: "found", buckets } : { status: "not-found" });
+          return;
+        }
+        if (value.status === "not-found") {
+          const downloadReportsUrl = playConsoleAddress(value.downloadReportsUrl);
+          done({ status: "not-found", ...(downloadReportsUrl ? { downloadReportsUrl } : {}) });
+          return;
+        }
+        if (value.status === "no-tab" || value.status === "no-permission") {
+          done({ status: value.status });
+          return;
+        }
+        done({ status: "unavailable" });
+      });
+    } catch {
+      done({ status: "unavailable" });
+    }
+  });
+}
 
 function browserExtensionRuntime(): ChromeExternalRuntime | null {
   if (typeof window === "undefined") return null;

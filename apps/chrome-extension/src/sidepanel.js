@@ -10,6 +10,7 @@
 
 import { capturableUrl, pageTitle } from "./passage.js";
 import { pageKey, readTabSnapshot, tabPageThread } from "./page-tab.js";
+import { isPlayConsoleUrl } from "./play-reports-bucket.js";
 
 const PROTOCOL = "xmatrix-embed/1";
 const APP_ORIGIN = window.location.origin;
@@ -117,6 +118,7 @@ window.addEventListener("message", async (event) => {
     if (!session) await render();
   } else if (data.type === "space" && data.space && typeof data.space === "object") {
     await ask("rememberSpace", { space: data.space }).catch(() => undefined);
+    await refreshPlayBucket().catch(() => undefined);
   } else if (data.type === "account") {
     await ask("rememberAccount", { user: data.user }).catch(() => undefined);
   } else if (data.type === "upgrade-required") {
@@ -158,6 +160,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.recentThreads) showRecent().catch(() => undefined);
   // A question asked on the page gave it a conversation: the bar knows it now.
   if (area === "session" && changes[`askThread:${PANEL_TAB}`]) showPage().catch(() => undefined);
+  if (area === "session" && changes[`playBucketHint:${PANEL_TAB}`]?.newValue) {
+    dismissedPlayPage = "";
+    refreshPlayBucket({ force: true }).catch(() => undefined);
+  }
   if ((area === "local" && changes.session) || (area === "session" && changes.signIn)) render().catch(() => undefined);
 });
 
@@ -191,7 +197,147 @@ async function showPage() {
   const key = `${tab.id} ${pageKey(href)}`;
   if (path && key !== shownPage) postToApp({ type: "open", path, ...(thread.snapshot ? { channel: thread.snapshot } : {}) });
   shownPage = key;
+  await refreshPlayBucket().catch(() => undefined);
 }
+
+// ---- Google Play Console bulk reports bucket one-click sync (plain pubsite_prod_rev_* ID only, never cookies).
+
+let playState = null;
+let dismissedPlayPage = "";
+let syncingPlayBucket = false;
+
+function renderPlayBucketBar() {
+  const bar = $("play-bucket-bar");
+  if (!playState?.isPlayConsole || $("view-app").hidden) {
+    bar.hidden = true;
+    return;
+  }
+  const key = pageKey(playState.url || "");
+  if (dismissedPlayPage && dismissedPlayPage === key && !playState.synced) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  const title = $("play-bucket-title");
+  const detail = $("play-bucket-detail");
+  const select = $("play-bucket-select");
+  const action = $("play-bucket-action");
+  const secondary = $("play-bucket-secondary");
+  const error = $("play-bucket-error");
+
+  error.hidden = !playState.error;
+  error.textContent = playState.error ?? "";
+  select.hidden = true;
+  secondary.hidden = true;
+  detail.classList.remove("mono");
+
+  const spaceName = playState.space?.name || "current Space";
+  const buckets = Array.isArray(playState.buckets) ? playState.buckets : [];
+
+  if (playState.synced?.bucket) {
+    title.textContent = "Google Play reports bucket synced";
+    detail.textContent = `${playState.synced.bucket} → ${playState.synced.spaceName || spaceName} (@googleplay)`;
+    detail.classList.add("mono");
+    action.hidden = true;
+    return;
+  }
+
+  action.hidden = false;
+  if (buckets.length > 0) {
+    if (buckets.length > 1) {
+      select.hidden = false;
+      const previous = select.value;
+      select.replaceChildren(...buckets.map((bucket) => {
+        const option = document.createElement("option");
+        option.value = bucket;
+        option.textContent = bucket;
+        return option;
+      }));
+      if (buckets.includes(previous)) select.value = previous;
+    }
+    const chosen = buckets.length > 1 ? select.value : buckets[0];
+    const alreadySaved = playState.savedBucket === chosen;
+    title.textContent = alreadySaved ? "Google Play reports bucket synced" : "Google Play reports bucket found";
+    detail.textContent = alreadySaved ? `${chosen} · saved in ${spaceName}` : chosen;
+    detail.classList.add("mono");
+    action.textContent = syncingPlayBucket ? "Syncing…" : alreadySaved ? "Re-sync" : `Sync to ${spaceName}`;
+    action.disabled = syncingPlayBucket;
+    return;
+  }
+
+  title.textContent = "Google Play bulk reports";
+  detail.textContent = playState.onDownloadReports
+    ? "No pubsite_prod_rev_… URI visible yet. Open a report tab, then check again."
+    : "Open Download reports to detect and sync your pubsite_prod_rev_… bucket.";
+  action.textContent = "Detect bucket";
+  action.disabled = syncingPlayBucket;
+  if (!playState.onDownloadReports && playState.downloadReportsUrl) {
+    secondary.hidden = false;
+    secondary.textContent = "Download reports";
+    secondary.disabled = syncingPlayBucket;
+  }
+}
+
+async function refreshPlayBucket({ force = false } = {}) {
+  if ($("view-app").hidden) {
+    $("play-bucket-bar").hidden = true;
+    return;
+  }
+  const tab = await activeTab();
+  if (!tab?.id || (!force && !isPlayConsoleUrl(tab.url ?? ""))) {
+    playState = null;
+    renderPlayBucketBar();
+    return;
+  }
+  const next = await ask("inspectPlayBucket", { tabId: tab.id }).catch(() => ({ isPlayConsole: false }));
+  if (playState?.synced && next.isPlayConsole && next.savedBucket === playState.synced.bucket && !next.synced) {
+    next.synced = playState.synced;
+  }
+  playState = next;
+  renderPlayBucketBar();
+}
+
+$("play-bucket-select").addEventListener("change", () => renderPlayBucketBar());
+
+$("play-bucket-dismiss").addEventListener("click", () => {
+  dismissedPlayPage = pageKey(playState?.url || "");
+  if (playState) playState = { ...playState, synced: null };
+  renderPlayBucketBar();
+});
+
+$("play-bucket-secondary").addEventListener("click", async () => {
+  const tab = await activeTab();
+  if (tab?.id !== undefined && playState?.downloadReportsUrl) {
+    await chrome.tabs.update(tab.id, { url: playState.downloadReportsUrl }).catch(() => undefined);
+  }
+});
+
+$("play-bucket-action").addEventListener("click", async () => {
+  if (!playState?.isPlayConsole || syncingPlayBucket) return;
+  const buckets = Array.isArray(playState.buckets) ? playState.buckets : [];
+  if (buckets.length === 0) {
+    await refreshPlayBucket({ force: true });
+    return;
+  }
+  const bucket = buckets.length > 1 ? $("play-bucket-select").value : buckets[0];
+  const tab = await activeTab();
+  syncingPlayBucket = true;
+  playState = { ...playState, error: null };
+  renderPlayBucketBar();
+  try {
+    const synced = await ask("syncPlayBucket", {
+      bucket,
+      spaceId: playState.space?.id,
+      tabId: tab?.id,
+    });
+    playState = { ...playState, savedBucket: synced.bucket, synced, error: null };
+  } catch (caught) {
+    playState = { ...playState, error: caught instanceof Error ? caught.message : String(caught) };
+  } finally {
+    syncingPlayBucket = false;
+    renderPlayBucketBar();
+  }
+});
 
 const readTab = (tabId) => readTabSnapshot(chrome, tabId);
 
@@ -300,7 +446,9 @@ $("quick-select-skip").addEventListener("click", async () => {
 
 // The panel follows its own tab to each page it shows; another tab in front changes nothing here.
 chrome.tabs.onUpdated.addListener((id, change, tab) => {
-  if ((PANEL_TAB ? id === PANEL_TAB : tab.active) && (change.title || change.url)) showPage().catch(() => undefined);
+  if ((PANEL_TAB ? id === PANEL_TAB : tab.active) && (change.title || change.url || change.status === "complete")) {
+    showPage().catch(() => undefined);
+  }
 });
 if (!PANEL_TAB) chrome.tabs.onActivated.addListener(() => showPage().catch(() => undefined));
 
@@ -325,6 +473,7 @@ async function render() {
     }
     show("view-app");
     await openApp();
+    await refreshPlayBucket({ force: true }).catch(() => undefined);
     return;
   }
   closeApp();

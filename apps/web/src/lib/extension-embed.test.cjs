@@ -268,3 +268,61 @@ test("the question on its way is a bounded message with its own id and the page 
   assert.deepEqual(embed.parseEmbedPendingMessage({ ...pending, metadata: { browserPage: { href: "javascript:1" }, xmatrixSystemNotice: true } }),
     { clientMessageId: pending.clientMessageId, body: pending.body });
 });
+
+test("requestPlayConsoleBucket validates extension answers and handles missing or closed Play Console tabs", async (t) => {
+  const prevWindow = globalThis.window;
+  t.after(() => {
+    if (prevWindow === undefined) delete globalThis.window;
+    else globalThis.window = prevWindow;
+  });
+
+  // Without Chrome extension runtime, reports unavailable.
+  globalThis.window = frameWindow("https://evil.example");
+  const embed = require("./extension-embed.ts");
+  assert.deepEqual(await embed.requestPlayConsoleBucket({ timeoutMs: 500 }), { status: "unavailable" });
+
+  let replyWith = null;
+  let lastError;
+  const webWin = {
+    parent: null,
+    location: { origin: "https://xmatrix.sh", ancestorOrigins: [] },
+    setTimeout,
+    clearTimeout,
+    chrome: {
+      runtime: {
+        get lastError() { return lastError; },
+        sendMessage(_extensionId, _message, callback) {
+          callback(replyWith);
+        },
+      },
+    },
+  };
+  webWin.parent = webWin;
+  globalThis.window = webWin;
+
+  // Filters out any non-bucket strings from the extension reply.
+  replyWith = { ok: true, value: { status: "found", buckets: ["pubsite_prod_rev_01234567890123456789", "bad", "SID=1"] } };
+  assert.deepEqual(await embed.requestPlayConsoleBucket({ timeoutMs: 500 }), {
+    status: "found",
+    buckets: ["pubsite_prod_rev_01234567890123456789"],
+  });
+
+  // Keeps only Play Console https URLs for downloadReportsUrl.
+  replyWith = { ok: true, value: { status: "not-found", downloadReportsUrl: "https://play.google.com/console/u/0/developers/1/download-reports/statistics" } };
+  assert.deepEqual(await embed.requestPlayConsoleBucket({ timeoutMs: 500 }), {
+    status: "not-found",
+    downloadReportsUrl: "https://play.google.com/console/u/0/developers/1/download-reports/statistics",
+  });
+  replyWith = { ok: true, value: { status: "not-found", downloadReportsUrl: "https://evil.example/console" } };
+  assert.deepEqual(await embed.requestPlayConsoleBucket({ timeoutMs: 500 }), { status: "not-found" });
+
+  replyWith = { ok: true, value: { status: "no-tab" } };
+  assert.deepEqual(await embed.requestPlayConsoleBucket({ timeoutMs: 500 }), { status: "no-tab" });
+
+  replyWith = { ok: true, value: { status: "no-permission" } };
+  assert.deepEqual(await embed.requestPlayConsoleBucket({ timeoutMs: 500 }), { status: "no-permission" });
+
+  lastError = { message: "Extension not installed" };
+  replyWith = undefined;
+  assert.deepEqual(await embed.requestPlayConsoleBucket({ timeoutMs: 500 }), { status: "unavailable" });
+});
