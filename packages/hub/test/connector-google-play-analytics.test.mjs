@@ -127,6 +127,10 @@ test("store_reports decodes Play Console UTF-16LE CSVs, uses OAuth token directl
   assert.equal(parseCsvRows(csv).length, 3);
 
   assert.equal(typeof statement("@googleplay:store_reports:sh.xmatrix.app bucket=arbitrary-bucket"), "string");
+  assert.deepEqual(
+    statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=gs://pubsite_prod_rev_1234567890/stats/installs/"),
+    { packageName: "sh.xmatrix.app", kind: "installs", month: "202611", bucket: "pubsite_prod_rev_1234567890" },
+  );
   await assert.rejects(ACTIONS.store_reports.execute({ credentials }, statement("@googleplay:store_reports:sh.xmatrix.app")),
     error => error.fix?.field === "reportsBucket");
 

@@ -279,3 +279,39 @@ export async function answerBrowserRead(deps, token, requestId, answer) {
   });
   return json.settled === true;
 }
+
+/** Reads the non-secret plain/generated credential view of a connector; null when not yet created. */
+export async function readConnectorCredentials(deps, token, { spaceId, providerId }) {
+  try {
+    const json = await request(deps,
+      `/api/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}/credentials`,
+      { token });
+    return {
+      plain: json.plain && typeof json.plain === "object" ? json.plain : {},
+      credentialFields: Array.isArray(json.credentialFields) ? json.credentialFields : [],
+    };
+  } catch (error) {
+    if (error instanceof HubError && error.status === 404) return null;
+    throw error;
+  }
+}
+
+/**
+ * Writes connector credential fields (such as Google Play's plain `reportsBucket`).
+ * Creates the unconnected connection row only if the Hub answers 404 (row missing),
+ * so an existing connection is never disconnected or modified.
+ */
+export async function saveConnectorCredentials(deps, token, { spaceId, providerId, providerName, fields }) {
+  const path = `/api/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}/credentials`;
+  try {
+    return await request(deps, path, { method: "PUT", token, body: { fields } });
+  } catch (error) {
+    if (!(error instanceof HubError) || error.status !== 404 || !providerName) throw error;
+  }
+  await request(deps, `/api/spaces/${encodeURIComponent(spaceId)}/app-connections/${encodeURIComponent(providerId)}`, {
+    method: "PATCH",
+    token,
+    body: { providerId, providerName, status: "disconnected" },
+  });
+  return request(deps, path, { method: "PUT", token, body: { fields } });
+}

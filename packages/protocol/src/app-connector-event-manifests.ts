@@ -313,9 +313,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       credentials: [
         ...OAUTH_TOKEN_CREDENTIALS,
         { id: "reportsBucket", label: "Reports Cloud Storage bucket (optional)", plain: true,
-          description: "Optional for store_reports: Play Console → Download reports → Copy Cloud Storage URI (pubsite_prod_rev_…). Passing bucket= once also saves it here." },
+          description: "Optional for store_reports: sync in one click from Play Console → Download reports using the xMatrix Chrome extension, or paste from Copy Cloud Storage URI (pubsite_prod_rev_… or gs://pubsite_prod_rev_…). Passing bucket= once also saves it here." },
         { id: "reportsServiceAccount", label: "Reports service account JSON (optional)",
-          description: "Optional for store_reports: a Google Cloud Service Account JSON key granted View app information & download bulk reports / View financial data in Play Console." },
+          description: "Optional fallback for store_reports: a Google Cloud Service Account JSON key granted View app information & download bulk reports / View financial data in Play Console." },
       ],
       actions: [
         readAction("list_apps", "List apps", "The apps of the Play developer accounts the connected Google account can see, with their package names.", "* [pageToken]"),

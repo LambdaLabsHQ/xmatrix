@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import * as protocol from "@xmatrix/protocol";
 import * as connectors from "../src/app-connectors.ts";
 import * as credentials from "../src/connectors/credentials.ts";
+import * as googlePlayAnalytics from "../src/connectors/actions/google-play-analytics.ts";
 import * as shared from "../src/index-shared.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 
@@ -17,6 +18,7 @@ async function credentialRoutes(repository, extra = {}) {
     "@xmatrix/protocol": protocol,
     "./app-connectors": connectors,
     "./connectors/credentials": store,
+    "./connectors/actions/google-play-analytics": googlePlayAnalytics,
     "./connectors/credential-policy": policy((name) => ({ "../app-connectors": connectors, "./credentials": store })[name]),
     "./index-shared": { ...shared, requireAuth: async () => ({ id: "admin", email: "admin@example.test" }) },
     ...extra,
@@ -135,4 +137,28 @@ test("saving an App Store Connect webSession automatically populates vendorNumbe
   assert.equal(puts.length, 1);
   assert.equal(puts[0].fields.webSession, "myacinfo=fresh");
   assert.equal(puts[0].fields.vendorNumber, "94249739");
+});
+
+test("saving Google Play reportsBucket normalizes gs:// URIs, rejects arbitrary buckets, and allows clearing", async () => {
+  const puts = [];
+  const app = await credentialRoutes({
+    readGenerated: async () => ({ reportsBucket: "pubsite_prod_rev_01234567890123456789" }),
+    put: async (input) => { puts.push(input); return { credentialFields: ["oauthToken", "reportsBucket"] }; },
+  });
+  const put = (fields) => app.fetch(new Request("https://hub.example/api/spaces/space-1/app-connections/googleplay/credentials", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ fields }),
+  }), {});
+
+  const ok = await put({ reportsBucket: "gs://pubsite_prod_rev_01234567890123456789/stats/installs/" });
+  assert.equal(ok.status, 200, await ok.clone().text());
+  assert.equal(puts[0].fields.reportsBucket, "pubsite_prod_rev_01234567890123456789");
+
+  const bad = await put({ reportsBucket: "gs://arbitrary-bucket/stats/" });
+  assert.equal(bad.status, 400);
+  assert.match((await bad.json()).error, /pubsite_prod_rev_/u);
+  assert.equal(puts.length, 1);
+
+  const cleared = await put({ reportsBucket: null });
+  assert.equal(cleared.status, 200, await cleared.clone().text());
+  assert.equal(puts[1].fields.reportsBucket, null);
 });

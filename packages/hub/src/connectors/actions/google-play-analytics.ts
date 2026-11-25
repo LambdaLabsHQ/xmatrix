@@ -27,6 +27,18 @@ const PLAY_BUCKET = /^pubsite_prod(?:_rev)?_[0-9]{6,30}$/u;
 const MONTH_YYYYMM = /^20\d{2}(?:0[1-9]|1[0-2])$/u;
 const DAY_MS = 86_400_000;
 
+/** Extracts a canonical Play Console export bucket ID from a bare ID or gs:// / GCS browser URI. */
+export function normalizePlayReportsBucket(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const candidate = trimmed
+    .replace(/^gs:\/\//iu, "")
+    .replace(/^https?:\/\/console\.cloud\.google\.com\/storage\/browser\//iu, "")
+    .replace(/^https?:\/\/storage\.googleapis\.com\//iu, "")
+    .split(/[/?#]/u)[0] ?? "";
+  return PLAY_BUCKET.test(candidate) ? candidate : undefined;
+}
+
 interface VitalSpec {
   readonly resource: string;
   readonly label: string;
@@ -621,17 +633,18 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
       if (kind !== "list" && !Object.hasOwn(REPORT_PREFIXES, kind)) return STORE_REPORTS_USAGE;
       const month = options.get("month") ?? currentMonthYyyymm();
       if (!MONTH_YYYYMM.test(month)) return "month must be YYYYMM (for example 202611)";
-      const bucket = options.get("bucket");
-      if (bucket !== undefined && !PLAY_BUCKET.test(bucket)) return "bucket must be your Play Console Cloud Storage bucket id (pubsite_prod_rev_…)";
+      const rawBucket = options.get("bucket");
+      const bucket = rawBucket === undefined ? undefined : normalizePlayReportsBucket(rawBucket);
+      if (rawBucket !== undefined && !bucket) return "bucket must be your Play Console Cloud Storage bucket id (pubsite_prod_rev_… or gs://pubsite_prod_rev_…)";
       return { packageName: statement.target, kind, month, ...(bucket ? { bucket } : {}) };
     },
     async execute({ credentials, saveCredentials }, input) {
       const packageName = input.packageName!, kind = input.kind!, month = input.month!;
-      const savedBucket = credentials.reportsBucket?.trim() ?? "";
-      const bucket = input.bucket ?? (PLAY_BUCKET.test(savedBucket) ? savedBucket : "");
+      const savedBucket = normalizePlayReportsBucket(credentials.reportsBucket ?? "") ?? "";
+      const bucket = input.bucket ?? savedBucket;
       if (!bucket) {
         throw new ConnectorRemedy(400,
-          "Set reportsBucket (from Play Console → Download reports → Copy Cloud Storage URI, e.g. pubsite_prod_rev_…) or pass bucket=pubsite_prod_rev_… once; the connection keeps it",
+          "Set reportsBucket in Apps → Google Play Console (sync in one click from Play Console → Download reports via the xMatrix Chrome extension, or paste from Copy Cloud Storage URI, e.g. pubsite_prod_rev_…), or pass bucket=pubsite_prod_rev_… once",
           { kind: "credential", field: "reportsBucket" });
       }
       let token: string;
