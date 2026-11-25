@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: connector commands with a `new` target no longer trip the retired-launch notice
+
+`@google:create_doc:new <title>` and `@google:create_sheet:new <title>` ran
+normally but also posted "The :new and :once launch suffixes are retired",
+because the retired-launch check read `google:create_doc` followed by `:new`
+as an Agent address. Mentions naming an app connector are now left to the
+connector path. Protocol only.
+
 ## Unreleased: Google Docs reads go through Google's Docs MCP server
 
 `@google:read_doc` now calls Google's Docs MCP server (`read_doc`), whose answer

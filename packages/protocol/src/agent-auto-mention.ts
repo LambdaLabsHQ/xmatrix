@@ -4,6 +4,7 @@ import { agentPresetForLauncher } from "./agent-presets.js";
 import { createInstanceMentionScanner, isAbsoluteLocalPath, repoSummonReference } from "./agent-mention.js";
 import { filterOperationalMentions } from "./operational-mention-context.js";
 import { hasControlCharacter } from "./field-validation.js";
+import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "./app-connector-manifests.js";
 
 export type AutoLaunchField = "repo" | "pwd" | "machine" | "model" | "effort" | "harness" | "launch" | "parameters";
 export const AUTO_LAUNCH_FIELDS = INTERACTION_LAUNCH_FIELDS as readonly AutoLaunchField[];
@@ -34,9 +35,16 @@ export function machineTagSelects(tag: string, machineId: string, machineName?: 
   return !!name && name !== UNNAMED_MACHINE && tag === name;
 }
 
-/** Detection only: legacy launch text must never become an executable fallback. */
+const CONNECTOR_IDS: ReadonlySet<string> = new Set(APP_CONNECTOR_PROVIDER_MANIFESTS.map(manifest => manifest.id));
+
+/**
+ * Detection only: legacy launch text must never become an executable fallback.
+ * An app connector command whose target is `new` (`@google:create_doc:new <title>`)
+ * is not an Agent launch.
+ */
 export function hasRetiredAgentLaunchMention(body: string): boolean {
-  const mentions = [...body.matchAll(createInstanceMentionScanner())].map(match => {
+  const mentions = [...body.matchAll(createInstanceMentionScanner())]
+    .filter(match => !CONNECTOR_IDS.has(match[1]!.split(":")[0]!.toLowerCase())).map(match => {
     const text = `@${match[1]}`;
     const start = match.index! + match[0].length - text.length;
     return { start, end: start + text.length };
