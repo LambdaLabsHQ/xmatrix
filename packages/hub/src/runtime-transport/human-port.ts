@@ -542,7 +542,10 @@ export function humanChannelDeliveryFrame(
     .filter((id): id is string => typeof id === "string" && id.trim().length > 0);
   if (!message || recipients.length === 0) return undefined;
   if (input.deliveryKind === "update") {
-    if (message.body !== "" || (!message.recalledAt && !message.deletedAt)) return undefined;
+    // A tombstone, or an edit: the message as it now reads, newer than any copy a reader holds.
+    const tombstone = message.body === "" && Boolean(message.recalledAt || message.deletedAt);
+    const edit = Boolean(message.editedAt) && !message.recalledAt && !message.deletedAt;
+    if (!tombstone && !edit) return undefined;
     return { type: "channel_message_updated", channelId: message.channelId, message };
   }
   const clientMessageId = typeof input.clientMessageId === "string"

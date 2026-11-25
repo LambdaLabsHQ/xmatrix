@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { test } from "node:test";
 
-import { startPgHubWorker } from "./agent-launch-postgres.fixture.mjs";
+import { inTestTransaction, startPgHubWorker } from "./agent-launch-postgres.fixture.mjs";
+import { connectUser } from "./agent-mention-spawn.fixture.mjs";
 import { prepareTestAgentRun } from "./e2e-utils.mjs";
 
 /** The id the Hub gives a person's own Space (src/spaces.ts personalSpaceId), known before the worker starts. */
@@ -69,10 +70,56 @@ test("a person hands a conversation to support; support reads only what was tick
     };
     assert.match(await noteOf(), /^xMatrix support read this conversation \(\d{4}-\d\d-\d\d \d\d:\d\d UTC\)\.$/u,
       "the person sees that support read it");
+    // The person's open conversation (the Web) is told of each edit as it commits.
+    const reader = await connectUser(worker, customer.token);
+    const updates = [];
+    reader.ws.addEventListener("message", (event) => {
+      const frame = JSON.parse(String(event.data));
+      if (frame.type === "channel_message_updated" && frame.channelId === channel.id) updates.push(frame.message);
+    });
+    const noteId = (await history(customer, channel.id))
+      .find((message) => (message.body ?? "").startsWith("xMatrix support read this conversation")).messageId;
+    const updateOf = (messageId, label, text = "") => reader.inbox.waitFor((frame) =>
+      frame.type === "channel_message_updated" && frame.message.messageId === messageId &&
+      frame.message.body.includes(text), label).then((frame) => frame.message);
     await ok(await call(staff, `${base}/messages`));
+    const second = await updateOf(noteId, "the note's second-read edit", "2 times");
     await ok(await call(staff, `${base}/messages`));
+    const third = await updateOf(noteId, "the note's third-read edit", "3 times");
     assert.match(await noteOf(), /^xMatrix support read this conversation 3 times \(latest \d\d:\d\d UTC\)\.$/u,
       "later reads in the hour update the same note");
+    assert.equal(third.body, await noteOf(), "the live update reads as history does");
+    assert.deepEqual([second.entityVersion, third.entityVersion], [2, 3], "each edit is a new version of the note");
+    assert.ok(Date.parse(third.editedAt) >= Date.parse(second.editedAt));
+    assert.equal(third.metadata?.supportAccess?.grantId, handoff.id, "the update keeps what the note reports");
+
+    // The person's own edit is delivered, and recorded, exactly as the Hub's edit of its note.
+    const own = (await ok(await call(customer, `/api/channels/${encodeURIComponent(channel.id)}/messages`,
+      { body: "it fails at startup" }))).message;
+    const edited = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages/${
+      encodeURIComponent(own.messageId)}`, { method: "PATCH", headers: as(customer),
+      body: JSON.stringify({ body: "it fails at startup (since Monday)" }) });
+    assert.equal(edited.status, 200, await edited.clone().text());
+    const ownUpdate = await updateOf(own.messageId, "the person's own edit");
+    assert.deepEqual([ownUpdate.body, ownUpdate.entityVersion, typeof ownUpdate.editedAt],
+      ["it fails at startup (since Monday)", 2, "string"]);
+    assert.deepEqual(Object.keys(third).filter((key) => !(key in ownUpdate)), ["metadata"],
+      "both edits arrive in one shape; only the note carries app metadata");
+    const recorded = await inTestTransaction(async (tx) => ({
+      edits: await tx.query({ text: `SELECT message_id,entity_version,mutation_kind FROM data.message_mutations
+        WHERE channel_id=$1 AND message_id = ANY($2) AND mutation_kind<>'create' ORDER BY message_id,entity_version`,
+      values: [channel.id, [noteId, own.messageId]] }),
+      rows: await tx.query({ text: `SELECT message_id,entity_version,edited_at IS NOT NULL AS edited
+        FROM data.messages WHERE channel_id=$1 AND message_id = ANY($2)`, values: [channel.id, [noteId, own.messageId]] }),
+    }));
+    const versions = (messageId) => recorded.edits.filter((row) => row.message_id === messageId)
+      .map((row) => [Number(row.entity_version), row.mutation_kind]);
+    assert.deepEqual(versions(noteId), [[2, "edit"], [3, "edit"]]);
+    assert.deepEqual(versions(own.messageId), [[2, "edit"]]);
+    assert.deepEqual(Object.fromEntries(recorded.rows.map((row) => [row.message_id, [Number(row.entity_version), row.edited]])),
+      { [noteId]: [3, true], [own.messageId]: [2, true] }, "both edits bump the version and edit time");
+    assert.equal(updates.length, 3, "one live update per edit");
+    reader.ws.close();
 
     const unshared = await call(staff, `${base}/diagnostics`);
     assert.equal(unshared.status, 403);

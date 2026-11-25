@@ -1,4 +1,5 @@
-import { parseChannelTombstoneDelivery } from "../src/runtime-transport/channel-tombstone-delivery.ts";
+import { parseChannelUpdateDelivery } from "../src/runtime-transport/channel-update-delivery.ts";
+import { parseHumanChannelLiveDelivery } from "../src/runtime-transport/channel-live-delivery.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -100,13 +101,35 @@ test("a tombstone update contains no notification or fresh-message framing", () 
 
 test("internal tombstone admission rejects work, private payload, and ambiguous state", () => {
   const input = { deliveryKind: "update", body: "", entityVersion: 3, deletedAt: "2026-10-02T00:00:00.000Z" };
-  assert.deepEqual(parseChannelTombstoneDelivery(input), { deliveryKind: "update", entityVersion: 3, deletedAt: input.deletedAt });
+  assert.deepEqual(parseChannelUpdateDelivery(input), { deliveryKind: "update", entityVersion: 3, deletedAt: input.deletedAt });
   for (const extra of [
     { deliveryKind: "new" }, { body: "old private body" }, { entityVersion: 0 },
     { deletedAt: "invalid" }, { deletedAt: undefined }, { recalledAt: input.deletedAt },
     { attachments: [] }, { metadata: {} }, { recipientNotifications: [] }, { clientMessageId: "echo" },
-  ]) assert.equal(parseChannelTombstoneDelivery({ ...input, ...extra }), null, JSON.stringify(extra));
-  assert.deepEqual(parseChannelTombstoneDelivery({ body: "ordinary append" }), {});
+    { editedAt: input.deletedAt },
+  ]) assert.equal(parseChannelUpdateDelivery({ ...input, ...extra }), null, JSON.stringify(extra));
+  assert.deepEqual(parseChannelUpdateDelivery({ body: "ordinary append" }), {});
+});
+
+test("an edit reaches a reader as an update with its new text, metadata and version, never as work", () => {
+  const editedAt = "2026-11-24T10:05:00.000Z";
+  const metadata = { xmatrixSystemNotice: true, supportAccess: { grantId: "grant-1", spaceId: "space-1" } };
+  const delivery = parseHumanChannelLiveDelivery(deliveryInput({
+    deliveryKind: "update", entityVersion: 3, editedAt, metadata,
+    body: "xMatrix support read this conversation 3 times (latest 10:05 UTC).",
+  }));
+  const frame = humanChannelDeliveryFrame(delivery, "user-1");
+  assert.equal(frame.type, "channel_message_updated");
+  assert.equal(frame.message.body, "xMatrix support read this conversation 3 times (latest 10:05 UTC).");
+  assert.equal(frame.message.editedAt, editedAt);
+  assert.equal(frame.message.entityVersion, 3);
+  assert.deepEqual(frame.message.metadata, metadata);
+  assert.equal("notification" in frame, false);
+  const edit = { deliveryKind: "update", body: "new text", entityVersion: 2, editedAt };
+  for (const extra of [
+    { editedAt: undefined }, { editedAt: "invalid" }, { body: undefined }, { entityVersion: undefined },
+    { attachments: [] }, { recipientNotifications: [] }, { clientMessageId: "echo" },
+  ]) assert.equal(parseChannelUpdateDelivery({ ...edit, ...extra }), null, JSON.stringify(extra));
 });
 
 test("presence for unshown conversations leaves as one digest per window, newest per Instance", async () => {

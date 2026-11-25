@@ -1,11 +1,11 @@
 import { plainDeliveryRecord as plainObject } from "./delivery-record";
-import { parseChannelTombstoneDelivery } from "./channel-tombstone-delivery";
+import { parseChannelUpdateDelivery } from "./channel-update-delivery";
 import { messagePublicationEvidence, utf8ByteLength, type ChannelAttentionSummary, type ChannelMessageNotification } from "@xmatrix/protocol";
 import type { AgentChannelLiveDeliveryInput } from "./agent-instance-port";
 import type { HumanChannelLiveDeliveryInput } from "./human-port";
 
 function parseChannelLiveDeliveryCore(input: Record<string, unknown>): AgentChannelLiveDeliveryInput | undefined {
-  const update = parseChannelTombstoneDelivery(input);
+  const update = parseChannelUpdateDelivery(input);
   if (update === null) return undefined;
   const channelId = typeof input.channelId === "string" ? input.channelId.trim() : undefined;
   // Committed message IDs use the authority's 300-byte limit. Generated
