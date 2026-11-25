@@ -164,7 +164,7 @@ export function affectedPartitions(changedFiles) {
     setupPnpmAction ||
     linuxCommonAction ||
     webWorkflow ||
-    touches(files, "apps/web", "packages/db", "packages/protocol", "scripts/next-build-cache.mjs");
+    touches(files, "apps/web", "docs/guide", "packages/db", "packages/protocol", "scripts/next-build-cache.mjs");
   const hub =
     rootShared ||
     setupPnpmAction ||
