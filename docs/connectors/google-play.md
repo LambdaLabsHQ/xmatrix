@@ -130,7 +130,7 @@ The app must already have an uploaded bundle that declares the
 @googleplay:error_issues:sh.xmatrix.app [days=1-30] [limit=1-25] [type=all|crash|anr]
 @googleplay:anomalies:sh.xmatrix.app
 @googleplay:reviews:sh.xmatrix.app [unanswered] [limit=1-50]
-@googleplay:voided_purchases:sh.xmatrix.app [days=1-30] [limit=1-50]
+@googleplay:voided_purchases:sh.xmatrix.app [days=1-29] [limit=1-50]
 @googleplay:store_reports:sh.xmatrix.app [kind=installs|store_performance|ratings|crashes|sales|earnings|subscriptions|list] [month=YYYYMM] [bucket=pubsite_prod_rev_…]
 ```
 
