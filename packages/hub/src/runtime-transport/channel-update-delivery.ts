@@ -3,7 +3,7 @@
  * empty) or its edit (new body and app metadata, `editedAt`). Updates never
  * carry work, notifications, attachments or a sender's client echo id.
  */
-export type ChannelUpdateDelivery = {
+type ChannelUpdateDelivery = {
   deliveryKind?: "update"; recalledAt?: string; deletedAt?: string; editedAt?: string; entityVersion?: number;
 };
 

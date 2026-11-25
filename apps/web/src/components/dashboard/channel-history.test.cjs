@@ -11,6 +11,7 @@ const {
   formatMessageTimestamp,
   mergeChannelHistory,
   commandResultHistoryMessage,
+  editedHistoryMessage,
 } = history.exports;
 
 test.after(history.dispose);
@@ -181,4 +182,26 @@ test("a partial note snapshot cannot erase a switch's answer and a stale note ca
   const staleEvent = commandResultHistoryMessage([merged], { messageId: message.messageId,
     annotationId: waiting.id, payload: { note: waiting } });
   assert.deepEqual(staleEvent.commandResult, held.commandResult, "live and history use the same fact merge");
+});
+
+test("an edited system note replaces the held text live, keeps what accrued, and never goes back", () => {
+  const note = { messageId: "support-access:grant-1:2026-11-24T14:00:00.000Z", channelId: "a", sequence: 3,
+    sentAt: "2026-11-24T14:00:00.000Z", body: "xMatrix support read this conversation (2026-11-24 14:00 UTC).",
+    metadata: { xmatrixProvenance: "system_fact", supportAccess: { grantId: "grant-1", spaceId: "s" } },
+    reactions: [{ emoji: "eyes", count: 1 }] };
+  const window = [{ messageId: "m1", channelId: "a", sequence: 1, sentAt: "2026-11-24T13:59:00.000Z", body: "hi" }, note];
+  const update = (reads, editedAt) => ({ messageId: note.messageId, channelId: "a", sequence: 3, sentAt: note.sentAt,
+    body: `xMatrix support read this conversation ${reads} times (latest 14:0${reads} UTC).`, editedAt,
+    entityVersion: reads, metadata: note.metadata });
+  const third = editedHistoryMessage(window, update(3, "2026-11-24T14:03:00.000Z"));
+  assert.equal(third.body, "xMatrix support read this conversation 3 times (latest 14:03 UTC).");
+  assert.deepEqual(third.reactions, note.reactions, "an update carries no reactions; the held ones stay");
+  const merged = mergeChannelHistory("a", window, [third]);
+  assert.deepEqual(merged.map((message) => message.body), ["hi", third.body]);
+  assert.equal(editedHistoryMessage(merged, update(2, "2026-11-24T14:02:00.000Z")), undefined,
+    "an earlier edit arriving late is not applied");
+  assert.equal(editedHistoryMessage([window[0]], update(3, "2026-11-24T14:03:00.000Z")), undefined,
+    "a note not held is read with its window");
+  assert.equal(editedHistoryMessage([{ ...note, recalledAt: "2026-11-24T14:04:00.000Z" }],
+    update(3, "2026-11-24T14:03:00.000Z")), undefined, "a recalled message stays recalled");
 });

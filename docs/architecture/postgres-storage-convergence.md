@@ -140,6 +140,15 @@ in-flight reads before refreshing; CLI carries the optional `deletedAt` marker
 and prints a deletion receipt. Additive marker support requires coordinated
 Hub/Web/CLI release; older clients receive no old payload in the update.
 
+An edit (a person's, or the Hub's to its own note, such as the hourly support
+access note) publishes the same `channel_message_updated` message to the
+Channel's Human recipients only, carrying the new body, app metadata,
+`editedAt` and `entityVersion`. Web applies it over the copy it holds, keeping
+reactions and thread, and ignores an edit older than the one it holds. An
+incremental history read whose `contentRevision` moved past the one the held
+rows were read at rereads the latest page instead of only rows after the tail,
+so a missed update cannot be stamped into the tail cache as current.
+
 Delete retry preflight can read an already-deleted row only after current
 Channel and author/admin authorization. The mutation still returns its exact
 idempotency receipt before trying a new write; a fresh command cannot mutate a
