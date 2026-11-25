@@ -4,12 +4,13 @@ import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText, requireText } from "./common";
 import { googleHeaders } from "./google-headers";
 import { GOOGLE_SHEETS_ACTIONS } from "./google-sheets";
-import { WorkspaceMcpUnavailable, workspaceMcpActions, workspaceMcpTool } from "./workspace-mcp";
+import { createGoogleFile, workspaceMcpActions, workspaceMcpOrRest } from "./workspace-mcp";
 
 const FILE_ID = /^[A-Za-z0-9_-]{10,200}$/u;
 const TAB_ID = /^[A-Za-z0-9_.-]{1,100}$/u;
 const MAX_EXCERPT = 12_000;
 const MAX_NODES = 10_000;
+const PRODUCT = "Google Docs & Drive";
 
 function unsupportedText(value: string, title = false): boolean {
   return Array.from(value).some(character => {
@@ -114,16 +115,12 @@ export function googleDocumentExcerpt(document: Record<string, unknown>, tabId?:
  * Google refuses the MCP server itself for this project.
  */
 async function readDocument(credentials: Readonly<Record<string, string>>, id: string): Promise<Record<string, unknown>> {
-  try {
-    const answer = await workspaceMcpTool("docs", credentials, "Google Docs & Drive", "read_doc", { documentId: id });
-    const document = record(answer.content);
-    return { ...document, title: typeof document.title === "string" ? document.title : "(untitled document)" };
-  } catch (error) {
-    if (!(error instanceof WorkspaceMcpUnavailable)) throw error;
-    console.warn("Docs MCP unavailable; using REST", { status: error.status });
-    return providerJson(`https://docs.googleapis.com/v1/documents/${id}?includeTabsContent=true`, { headers: googleHeaders(credentials) });
-  }
+  const answer = await workspaceMcpOrRest("docs", credentials, PRODUCT, "read_doc", { documentId: id });
+  if (!answer) return providerJson(`https://docs.googleapis.com/v1/documents/${id}?includeTabsContent=true`, { headers: googleHeaders(credentials) });
+  const document = record(answer.content);
+  return { ...document, title: typeof document.title === "string" ? document.title : "(untitled document)" };
 }
+
 
 export const GOOGLE_ACTIONS: Record<string, ConnectorAction> = {
   ...GOOGLE_SHEETS_ACTIONS,
@@ -151,6 +148,20 @@ export const GOOGLE_ACTIONS: Record<string, ConnectorAction> = {
       return statement.target === "*" && !statement.text.trim() ? {} : "use @google:list_files:*";
     },
     async execute({ credentials }) {
+      // drive.file: Drive's MCP lists only files created by or opened with xMatrix, like REST did.
+      const recent = await workspaceMcpOrRest("drive", credentials, PRODUCT, "list_recent_files", { pageSize: 20, excludeContentSnippets: true });
+      if (recent) {
+        if (recent.files !== undefined && !Array.isArray(recent.files)) throw new ProviderRequestError(502, "Google did not return an authorized file list");
+        const lines = (recent.files as unknown[] | undefined ?? []).slice(0, 20).map(value => {
+          const file = record(value);
+          if (typeof file.id !== "string" || !FILE_ID.test(file.id) || typeof file.title !== "string") {
+            throw new ProviderRequestError(502, "Google returned an invalid file identity");
+          }
+          return `${file.id}\t${file.title.slice(0, 250).replace(/[\r\n\t]/gu, " ")}\t${String(file.mimeType ?? "").slice(0, 120)}`;
+        });
+        return { summary: `App-authorized Drive files (up to 20; ${recent.nextPageToken ? "more available" : "end of list"}):\n` +
+          quoteRetrievedText(lines.join("\n") || "(no files authorized to xMatrix)") };
+      }
       const url = new URL("https://www.googleapis.com/drive/v3/files");
       url.searchParams.set("q", "trashed = false");
       url.searchParams.set("pageSize", "20");
@@ -176,6 +187,8 @@ export const GOOGLE_ACTIONS: Record<string, ConnectorAction> = {
         ? { title } : "use @google:create_doc:new <title on one line, up to 250 characters>";
     },
     async execute({ credentials }, input) {
+      const created = await createGoogleFile(credentials, input.title!, "document");
+      if (created) return { summary: `Created blank Google Doc: ${input.title}`, url: docUrl(created) };
       const document = await providerJson("https://docs.googleapis.com/v1/documents", { method: "POST",
         headers: googleHeaders(credentials), json: { title: input.title } });
       if (typeof document.documentId !== "string" || !FILE_ID.test(document.documentId)) {
@@ -193,6 +206,16 @@ export const GOOGLE_ACTIONS: Record<string, ConnectorAction> = {
         ? { ...target, text } : "name an app-authorized Doc and plain text (up to 4,000 characters)";
     },
     async execute({ credentials }, input) {
+      const requests = [{ insertText: { endOfSegmentLocation: input.tab ? { tabId: input.tab } : {}, text: input.text } }];
+      const edited = await workspaceMcpOrRest("docs", credentials, PRODUCT, "update_doc", { documentId: input.document, requests });
+      if (edited) {
+        const replies = Array.isArray(edited.replies) ? edited.replies.map(record) : [];
+        const applied = replies.flatMap(reply => Array.isArray(reply.api_replies) ? reply.api_replies : []);
+        if (applied.length !== 1 || replies.some(reply => Array.isArray(reply.errors) && reply.errors.length)) {
+          throw new ProviderRequestError(502, "Google did not confirm the append; check the document before retrying");
+        }
+        return { summary: `Appended to Google Doc (${input.tab ? `tab ${input.tab}` : "first tab"})`, url: docUrl(input.document!) };
+      }
       const result = await providerJson(`https://docs.googleapis.com/v1/documents/${input.document}:batchUpdate`, {
         method: "POST", headers: googleHeaders(credentials), json: { requests: [{ insertText: {
           endOfSegmentLocation: input.tab ? { tabId: input.tab } : {}, text: input.text,
