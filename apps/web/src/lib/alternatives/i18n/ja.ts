@@ -843,7 +843,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
       "T3 Code の代替ツールをお探しですか？固有のユーザー ID、共有チャンネル（GitHub Discussions #27974）、生きたプロジェクトページ（#15858）、Space シークレット、プロバイダー間引き継ぎ（#15846）を xMatrix で実現。",
     eyebrow: "T3 Code 代替 · T3 Code vs xMatrix",
     headline: "T3 Code vs xMatrix",
-    lead: "T3 Code は優れた無料の個人向けコーディングワークベンチですが、各環境が 1 アカウントに紐づき、共有の生きたプロジェクトページがなく、プロバイダークォータ切れで「Limited」のまま停止します。xMatrix はチームに共有チャンネル、生きたページ、Space シークレット、そして複数マシン横断の 34 種類のコーディングエージェントを提供します。",
+    lead: "T3 Code は優れた無料の個人向けコーディングワークベンチですが、各環境が 1 アカウントに紐づき、共有の生きたプロジェクトページがなく、クォータが切れるとリセットか手動切り替えまで「Limited」で待ちます。xMatrix はチームに共有チャンネル、生きたページ、Space シークレット、そして複数マシン横断の 34 種類のコーディングエージェントを提供します。",
     productCaption:
       "xMatrix の画面：所有マシン全体で 34 種類のコーディングエージェントが協業し、チーム全員の生きたページを最新化し続ける本物のマルチプレイヤーチャンネル。",
     painPoints: [

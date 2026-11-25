@@ -841,7 +841,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
       "正在找 T3 Code 替代品或类似 T3 Code 的团队平替工具？一次性补齐真实成员身份、共享频道 (#27974)、项目活页面 (#15858)、Space 密钥与跨服务商接力 (#15846)。",
     eyebrow: "T3 Code 替代方案 · T3 Code vs xMatrix",
     headline: "T3 Code vs xMatrix",
-    lead: "T3 Code 是一款出色的免费单人编码工作台，但每个环境只绑定单一账号、缺少共享项目活页面，且模型额度耗尽时会卡死在 Limited。xMatrix 为团队提供共享频道、活页面、Space 密钥，并在你的所有机器上原生运行 34 种编程智能体。",
+    lead: "T3 Code 是一款出色的免费单人编码工作台，但每个环境只绑定单一账号、缺少共享项目活页面，且额度用完后线程停在 Limited，只能等重置或手动换一家。xMatrix 为团队提供共享频道、活页面、Space 密钥，并在你的所有机器上原生运行 34 种编程智能体。",
     productCaption:
       "在 xMatrix 中：真正的多人协作频道，34 种编程智能体跨你所有的机器协同作战，持续为全队维护最新的活页面。",
     painPoints: [

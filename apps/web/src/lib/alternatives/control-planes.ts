@@ -11,7 +11,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       "Looking for T3 Code alternatives? Give your team real user identities, shared Channels, living project Pages, Space secrets and cross-provider handoff.",
     eyebrow: "T3 Code Alternative · T3 Code vs xMatrix",
     headline: "T3 Code vs xMatrix",
-    lead: "T3 Code is an impressive free single-player coding workbench, but it binds each environment to one account, has no shared living project pages, and stalls at 'Limited' when a provider quota runs out. xMatrix gives your team shared Channels, living Pages, Space secrets, and 34 coding harnesses across your machines.",
+    lead: "T3 Code is an impressive free single-player coding workbench, but it binds each environment to one account, has no shared living project pages, and waits at 'Limited' until the quota resets or you switch providers by hand. xMatrix gives your team shared Channels, living Pages, Space secrets, and 34 coding harnesses across your machines.",
     productCaption: "Inside xMatrix: real multiplayer Channels where 34 coding harnesses work across all your machines and keep living Pages current for the whole team.",
     painPoints: [
       {

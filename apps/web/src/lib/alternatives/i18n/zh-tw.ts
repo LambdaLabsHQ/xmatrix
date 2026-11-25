@@ -826,7 +826,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       "正在找 T3 Code 替代方案？為團隊帶來真實成員身分、共享頻道（GitHub Discussion #27974）、動態專案頁面（#15858）、Space 機密與跨供應商交接（#15846）。",
     eyebrow: "T3 Code 替代方案 · T3 Code vs xMatrix",
     headline: "T3 Code vs xMatrix",
-    lead: "T3 Code 是一款出色的免費單人開發工作台，但每個環境都綁死單一帳號、缺少共享動態專案頁面，且供應商配額見底時只會卡在「Limited」。xMatrix 為你的團隊帶來共享頻道、即時頁面、Space 機密，以及跨主機運行的 34 種程式設計代理。",
+    lead: "T3 Code 是一款出色的免費單人開發工作台，但每個環境都綁死單一帳號、缺少共享動態專案頁面，且配額用完後討論串停在「Limited」，只能等重置或手動換一家。xMatrix 為你的團隊帶來共享頻道、即時頁面、Space 機密，以及跨主機運行的 34 種程式設計代理。",
     productCaption:
       "xMatrix 實景：在真正的多人頻道裡讓 34 種程式設計代理跨主機協作，為整個團隊持續保持即時頁面最新。",
     painPoints: [
