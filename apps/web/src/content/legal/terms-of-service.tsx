@@ -199,6 +199,17 @@ export function TermsOfServiceContent() {
           not responsible for that provider&apos;s independent conduct.
         </p>
         <p>
+          <strong className="text-foreground">Connector results.</strong> Where a provider&apos;s terms
+          limit how long data obtained through its API may be stored, MadeByRobot, as the tool, deletes
+          the original results its connector returned (command receipts, inbound events, execution
+          summaries, and private results) at that limit and at once when the connection is
+          disconnected. Conclusions, records, Pages, notes, and files that the Customer or its
+          Authorized Users, including Agents, create from those results are Customer Data under the
+          Customer&apos;s control. The Customer decides what to keep and is responsible for keeping it
+          consistent with that provider&apos;s terms; MadeByRobot does not delete or review those
+          records for that purpose.
+        </p>
+        <p>
           When MadeByRobot selects a provider to perform management extraction or a Service Agent
           feature, the provider acts as our service provider or subprocessor. We are responsible for
           selection, configuration, data minimization, and disclosure and use an enterprise or API

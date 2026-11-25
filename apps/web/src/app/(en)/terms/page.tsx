@@ -14,6 +14,8 @@ export default function TermsOfServicePage() {
     <LegalDocument
       title="Terms of Service"
       description="The rights, responsibilities, and Agent authority that apply when a Customer uses xMatrix."
+      version="2026-11-25"
+      effectiveDate="25 November 2026"
     >
       <TermsOfServiceContent />
     </LegalDocument>
