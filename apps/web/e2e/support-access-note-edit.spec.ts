@@ -28,16 +28,19 @@ test("an edited support access note updates the conversation and its handoff car
     line: "it never starts", parts: ["messages"], status: "approved", readCount, requestedAt: E2E_NOW,
     expiresAt: "2026-07-08T00:00:00.000Z", viewerRole: "owner" } });
   const handoffRoute = `**/api/xmatrix/spaces/${E2E_SPACE.id}/support-handoffs/${GRANT}`;
-  await fixtureJson(page, "support-handoff-1", handoffRoute, handoff(1), { method: "GET" });
-
-  const send = await openWorkingAgentsSpace(page, workingAgentsSpace(1, "support-note"), messages, FIRST_NOTE);
+  const send = await openWorkingAgentsSpace(page, workingAgentsSpace(1, "support-note"), messages, FIRST_NOTE,
+    { fixtures: () => fixtureJson(page, "support-handoff-1", handoffRoute, handoff(1), { method: "GET" }) });
   const timeline = page.locator(".app-message-timeline");
   const card = page.getByTestId("support-handoff-card");
   await expect(card).toContainText("1 read");
 
-  // Two more reads: the Hub counts them and edits the note to say so.
+  // Two more reads: the Hub counts them and edits the note to say so; its
+  // history (the socket's page and the HTTP read alike) reads the edit too.
   await fixtureJson(page, "support-handoff-3", handoffRoute, handoff(3), { method: "GET" });
   const edited = { ...messages[2], body: THIRD_NOTE, editedAt: "2026-07-01T00:09:00.000Z", entityVersion: 3 };
+  messages[2] = edited;
+  await fixtureJson(page, "support-note-history", "**/api/xmatrix/channels/channel-general/history**",
+    { messages, hasMore: false });
   send({ type: "channel_message_updated", channelId: E2E_CHANNEL.id, message: edited });
   await expect(timeline.getByText(THIRD_NOTE)).toBeVisible();
   await expect(timeline.getByText(FIRST_NOTE)).toHaveCount(0);
@@ -49,11 +52,7 @@ test("an edited support access note updates the conversation and its handoff car
   await page.waitForTimeout(500);
   await expect(timeline.getByText(THIRD_NOTE)).toBeVisible();
 
-  // Opened again, the conversation reads the note as history has it now
-  // (the socket's history page and the HTTP read alike).
-  messages[2] = edited;
-  await fixtureJson(page, "support-note-history", "**/api/xmatrix/channels/channel-general/history**",
-    { messages: [messages[0], messages[1], edited], hasMore: false });
+  // Opened again, from its tail cache and history, the note still reads the edit.
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(page.locator(".app-message-timeline").getByText(THIRD_NOTE)).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".app-message-timeline").getByText(FIRST_NOTE)).toHaveCount(0);
