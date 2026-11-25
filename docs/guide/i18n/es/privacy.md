@@ -1,17 +1,35 @@
 ---
 title: "Telemetría, diagnósticos y privacidad local — Documentación de xMatrix"
-description: "Qué se queda en tu equipo, cómo funcionan las consultas opcionales de cuota y los diagnósticos del cliente, y cómo desactivarlos."
+description: "Qué se queda en tu equipo, qué llega al Hub (y por qué no tiene cifrado de extremo a extremo), cómo funcionan las consultas opcionales de cuota y los diagnósticos del cliente, y cómo desactivarlos."
 ---
 
 # Telemetría y privacidad local
 
-xMatrix combina un Hub colaborativo alojado con un daemon local en Rust que corre en tus propias máquinas. Esta página detalla todos los diagnósticos y lecturas locales de los clientes y el daemon, y cómo desactivarlos.
+xMatrix combina un Hub colaborativo alojado con un daemon local en Rust que corre en tus propias máquinas. Esta página detalla nuestros límites de confianza (qué se queda en tu equipo, qué llega al Hub y por qué los canales y Pages no tienen cifrado de extremo a extremo), todos los diagnósticos y lecturas locales de los clientes y el daemon, y cómo desactivarlos.
 
 ## Qué se queda en tu máquina
 
-Tu código fuente, historial de Git, carpetas de trabajo, historial del proveedor y credenciales locales de modelos permanecen en tus propios equipos. xMatrix nunca sube tus claves API ni tokens OAuth locales al Hub, ni lee archivos de otras herramientas para vincular identidades entre máquinas.
+Tu código fuente, historial de Git, carpetas de trabajo, archivos sin confirmar, claves SSH, historial del proveedor y credenciales locales de modelos permanecen en tus propios equipos, salvo que una persona, un Agent, una herramienta o una función los publique o adjunte expresamente. La salida bruta de terminal no se archiva de forma continua en el Hub: los eventos de **Instance Trace** viven solo en la memoria del proceso host (como máximo 500 eventos, 768 KiB o 24 horas) y se transmiten bajo demanda únicamente a usuarios autorizados. xMatrix nunca sube tus claves API ni tokens OAuth locales al Hub, ni lee archivos de otras herramientas para vincular identidades entre máquinas.
 
 Para mantener estable un equipo conectado tras reinstalaciones bajo tu cuenta, el daemon deriva localmente un `machineId` aislado por propietario (`SHA-256` de tu ID de usuario y un identificador del sistema operativo); los identificadores de hardware sin procesar y las huellas sin aislar por cuenta nunca se envían al Hub.
+
+## Qué llega al Hub y por qué no tiene cifrado de extremo a extremo
+
+**Cifrado en tránsito y en reposo, no cifrado de extremo a extremo (E2EE).** El tráfico entre tus clientes, el daemon local y el Hub de xMatrix usa HTTPS/TLS. Los datos almacenados en el Hub—PostgreSQL gestionado en PlanetScale, Cloudflare Durable Objects y almacenamiento privado de objetos R2—están cifrados en reposo, y los Saved Secrets junto con las réplicas locales del daemon reciben cifrado autenticado adicional. **Los canales, Pages y adjuntos no están cifrados de extremo a extremo.**
+
+**Por qué no tiene cifrado de extremo a extremo.** A diferencia de un túnel de terminal remoto para una sola persona, xMatrix es un espacio de trabajo colaborativo para múltiples personas y múltiples Agents. El Hub alojado procesa el contenido colaborativo legible para poder:
+
+- sincronizar canales, hilos y Pages entre miembros y dispositivos;
+- indexar y buscar en canales y Pages;
+- enrutar `@auto` al Agent y repositorio adecuados, vincular conversaciones a Pages y coordinar traspasos entre proveedores;
+- ejecutar automatizaciones de Pages (programas `norn`) y procesar webhooks externos (GitHub, Gmail, Linear, Sentry y otras aplicaciones conectadas).
+
+**Qué se almacena en el Hub:** mensajes de canales, hilos, Pages, adjuntos, metadatos de Space/Agent/máquina, datos normalizados de cuota, resultados de aplicaciones conectadas y Saved Secrets cifrados (cuyos valores nunca se muestran en mensajes ni catálogos de Agents y solo se inyectan en un Run según su política de acceso: `auto` o aprobación `ask` por ejecución).
+
+**Conexión de máquinas y límite de acceso interno:**
+
+- Conectar una máquina requiere la aprobación explícita del propietario con sesión iniciada (no es un túnel abierto por defecto). Puedes desconectar una máquina o detener cualquier Agent en ejecución en cualquier momento, y los conectores externos aplican políticas por aplicación de solo lectura, preguntar antes o lectura y escritura.
+- El contenido almacenado en el Hub solo es accesible para miembros y Agents autorizados según los permisos de tu Space y tus canales. El personal y los Agents de soporte de xMatrix no leen conversaciones de clientes salvo que les pases una conversación expresamente (consulta [Pasar una conversación al soporte de xMatrix](#pasar-una-conversación-al-soporte-de-xmatrix)); el análisis del producto usa únicamente metadatos sin cuerpo de mensajes.
 
 ## Consultas locales de cuota de proveedores
 
@@ -108,7 +126,6 @@ Las filas se aplican en orden: una activación explícita se respeta aunque Do N
 ### Activar o desactivar diagnósticos e informes de errores
 
 - **Web, escritorio, iOS y Android:** abre **Settings → Legal and privacy** y cambia **Send diagnostics and crash reports**. Tu elección se guarda en tu cuenta y todos los clientes la siguen. En escritorio, este interruptor también actualiza el ajuste `telemetry` del daemon local.
-- **CLI y daemon:** desactivados por defecto; actívalos con `xmatrix config telemetry on` o `XMATRIX_TELEMETRY=1`, y desactívalos con `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`.
 - **CLI y daemon:** actívalos con `xmatrix config telemetry on` o `XMATRIX_TELEMETRY=1`, y desactívalos con `xmatrix config telemetry off`, `XMATRIX_TELEMETRY=0` o `DO_NOT_TRACK=1`. `xmatrix config telemetry on|off` también guarda la elección en tu cuenta.
 
 ## Pasar una conversación al soporte de xMatrix

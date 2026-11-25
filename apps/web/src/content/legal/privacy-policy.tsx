@@ -553,16 +553,26 @@ export function PrivacyPolicyContent() {
       <LegalSection id="security" title="13. Security">
         <p>
           We use risk-appropriate administrative, technical, and organizational measures, including
-          authentication, Space/Channel/Run access controls, scoped short-lived Agent credentials,
+          authentication, Space/Channel/Run access controls, explicit owner approval before connecting
+          a machine, scoped short-lived Agent credentials, per-app connector permission policies,
           private object storage, no-store handling for sensitive responses, protected deployment
-          workflows, and incident response. Production service traffic uses HTTPS/TLS. Cloudflare&apos;s
-          Durable Objects, D1, and R2 provide provider-managed encryption at rest. Saved Secrets and
-          daemon local replicas receive additional authenticated encryption with protected key material.
+          workflows, and incident response. Production service traffic uses HTTPS/TLS. Our
+          infrastructure providers—including PlanetScale (managed PostgreSQL) and Cloudflare (Durable
+          Objects, D1, and R2)—provide provider-managed encryption at rest. Saved Secrets and daemon
+          local replicas receive additional authenticated encryption with protected key material.
         </p>
         <p>
           These controls are not end-to-end encryption: MadeByRobot and its service providers process
-          readable content when required to route, synchronize, search, support, secure, or perform an
-          authorized feature. We do not currently promise a fixed data-residency region or represent that
+          readable collaboration content (such as Channel messages, Pages, and attachments) when
+          required to synchronize multi-user workspaces, index and search, route Agents, maintain
+          collaborative Pages, run Page automations and connected-app webhooks, secure the service,
+          or perform another authorized feature. Source code, local files, SSH keys, and local
+          provider credentials remain on your computer as described in Section 4 and our{" "}
+          <Link className="font-medium text-foreground underline underline-offset-4" href="/docs/privacy">
+            Telemetry and Local Privacy guide
+          </Link>
+          ; support access to customer conversations requires an explicit user handoff as described
+          in Section 6. We do not currently promise a fixed data-residency region or represent that
           xMatrix is certified for SOC 2, ISO 27001, HIPAA, or PCI workloads. No system is completely
           secure, and we cannot guarantee that unauthorized access, loss, or misuse will never occur.
         </p>
