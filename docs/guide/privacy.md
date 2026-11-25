@@ -1,6 +1,6 @@
 ---
 title: "Telemetry, diagnostics and local privacy — xMatrix Docs"
-description: "What stays on your machine, what goes to the Hub (and why it is not end-to-end encrypted), how optional local quota probes and client diagnostics work, and how to turn either off."
+description: "What stays on your machine, what goes to the Hub (not end-to-end encrypted), how optional quota probes and diagnostics work, and how to turn them off."
 ---
 
 # Telemetry and local privacy
