@@ -121,3 +121,14 @@ test("receipt previews finish on long whitespace with or without another entry",
   ].join("\n");
   execFileSync(process.execPath, ["--input-type=module", "--eval", script], { timeout: 10_000 });
 });
+
+test("receipts stored with the earlier retention wordings still parse without their notice", () => {
+  for (const notice of [
+    "Under the provider's terms this result is deleted after 29 days, and at once when the connection is disconnected; do not copy it into Pages, memory or other lasting notes.",
+    "Under the provider's terms this result is deleted after 29 days, and at once when the connection is disconnected; Pages, memory and other lasting notes may keep only the business facts the task concluded (an amount, a date, a status) with their source id, never the retrieved text.",
+  ]) {
+    const [entry] = parseConnectorReceipt(connectorReceiptBody([`Gmail read: completed; Result: [hidden — private call].\n${notice}`]));
+    assert.deepEqual(entry, { subject: "Read message", status: "completed", detail: "", private: true });
+  }
+  assert.match(appResultRetentionNotice("gmail"), /^The original result is deleted after 29 days, and at once when the connection is disconnected\. Whether records you keep from it comply with the provider's terms is your responsibility\.$/u);
+});
