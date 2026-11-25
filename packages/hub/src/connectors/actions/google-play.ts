@@ -3,6 +3,7 @@ import { record, text } from "../event-format";
 import { ProviderRequestError } from "../http";
 import type { ConnectorAction, ConnectorActionStatement } from "../provider";
 import { jsonFields } from "./app-store-connect";
+import { GOOGLE_PLAY_ANALYTICS_ACTIONS } from "./google-play-analytics";
 import { GOOGLE_PLAY_OPERATION_ACTIONS, playOutput } from "./google-play-operations";
 
 /*
@@ -102,6 +103,7 @@ async function regionPrices(credentials: Readonly<Record<string, string>>, packa
 
 export const GOOGLE_PLAY_ACTIONS: Record<string, ConnectorAction> = {
   ...GOOGLE_PLAY_OPERATION_ACTIONS,
+  ...GOOGLE_PLAY_ANALYTICS_ACTIONS,
   list_apps: {
     effect: "read", requires: ["oauthToken"],
     parse: statement => statement.target === "*" && /^[A-Za-z0-9_=-]{0,2000}$/u.test(statement.text.trim())

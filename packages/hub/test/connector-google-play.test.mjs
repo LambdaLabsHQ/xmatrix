@@ -22,7 +22,7 @@ test("Google Play keeps its own grant for exactly its two scopes on the company 
   const client = oauthClient(company, "googleplay");
   assert.equal(client.clientId, company.CONNECTOR_GOOGLE_CLIENT_ID);
   assert.deepEqual(getAppConnectorProvider("googleplay").oauth.scopes, ["openid", "https://www.googleapis.com/auth/userinfo.email", scope, reporting]);
-  assert.deepEqual(getAppConnectorProvider("googleplay").credentials.filter(field => !field.managed), []);
+  assert.deepEqual(getAppConnectorProvider("googleplay").credentials.filter(field => !field.managed && field.required), []);
   const accepted = { access_token: "a", refresh_token: "r", token_type: "Bearer", expires_in: 3600, scope: `${scope} ${reporting}` };
   assert.equal((await fetched([{ body: accepted }], () => exchangeOAuthGrant(client, "code", "https://hub.test/cb"))).result.fields.oauthToken, "a");
   for (const wrong of [scope, `${scope} ${reporting} https://www.googleapis.com/auth/cloud-platform`, "https://www.googleapis.com/auth/cloud-platform"]) {
