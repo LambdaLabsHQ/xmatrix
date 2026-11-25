@@ -506,6 +506,7 @@ export type {
 } from "./agent-registration-catalog.js";
 export {
   agentLaunchAccess, parseAgentEnvironmentCommand, parseAgentRegistrationEnvironment, parseAgentRegistrationLaunch,
+  parseStoredAgentRegistrationEnvironment,
 } from "./agent-registration-environment.js";
 export type {
   AgentEnvironmentCommand, AgentRegistrationEnvironment, AgentRegistrationLaunch,

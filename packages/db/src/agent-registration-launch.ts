@@ -33,7 +33,7 @@ import {
   type AgentRoutingRequirements,
   type RegistrationLaunchBinding,
   registrationLaunchBindingForDaemon,
-  parseAgentRegistrationEnvironment,
+  parseStoredAgentRegistrationEnvironment,
   routingModelCatalogObservation, routingModelOptionNamed,
   hostObservedRequirements,
   machineResourceObservation,
@@ -638,7 +638,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       if (!rows[0] || Number(rows[0].version) !== environmentVersion) {
         throw new RegistrationAccessError("registration_environment_changed", 409);
       }
-      const environment = parseAgentRegistrationEnvironment(rows[0].declaration_json);
+      const environment = parseStoredAgentRegistrationEnvironment(rows[0].declaration_json);
       if (input.modelResource && (environment.modelAliases?.[input.modelResource] ?? input.modelResource) !== input.requirements.model) {
         throw new RegistrationAccessError("registration_model_unavailable", 409);
       }
@@ -1400,8 +1400,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           values: [candidate.key.ownerUserId,candidate.key.machineId,candidate.key.harness], maxRows: 1 });
         const fact = facts[0];
         const evaluatedAt = new Date(fact?.evaluated_at ?? Date.now()).toISOString();
-        const environment = fact ? parseAgentRegistrationEnvironment(fact.declaration_json) : undefined;
-        if (!environment?.enabled || environment.availableUntil && Date.parse(environment.availableUntil) <= Date.parse(evaluatedAt)) {
+        const environment = fact ? parseStoredAgentRegistrationEnvironment(fact.declaration_json) : undefined;
+        if (!environment?.enabled || environment.availableUntil && Date.parse(environment.availableUntil) <= Date.parse(evaluatedAt) ||
+            (!refusedAgentHarness(candidate.key.harness) && (refusedAgentHarness(environment.launch?.runtime) || refusedAgentHarness(environment.launch?.backend)))) {
           drop(); continue;
         }
         // A machine whose owner declared no models keeps the runtime's

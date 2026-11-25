@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseAgentEnvironmentCommand } from "../dist/agent-registration-environment.js";
+import { parseAgentEnvironmentCommand, parseAgentRegistrationEnvironment, parseStoredAgentRegistrationEnvironment } from "../dist/agent-registration-environment.js";
 
 const command = { key: { ownerUserId: "owner", machineId: "machine", harness: "claude_code" }, commandId: "update",
   expectedVersion: 0, expectedMachineVersion: 0, machineMaxConcurrent: 2,
@@ -23,4 +23,16 @@ test("Space configuration, credentials and impossible limits cannot enter physic
     { environment: { ...command.environment, defaultWorkspace: "/private-space-path" } }]) {
     assert.throws(() => parseAgentEnvironmentCommand({ ...command, ...patch }));
   }
+});
+
+test("stored declarations tolerate retired refused backends while write parsers reject them", () => {
+  const storedLegacyZcode = { ...command.environment, launch: { runtime: "zcode", runtimeArgs: [], backend: "zcode-app" } };
+  assert.throws(() => parseAgentRegistrationEnvironment(storedLegacyZcode), /Invalid registration launch backend/u);
+  assert.throws(() => parseAgentEnvironmentCommand({ ...command, environment: storedLegacyZcode }), /Invalid registration launch backend/u);
+  const parsed = parseStoredAgentRegistrationEnvironment(storedLegacyZcode);
+  assert.equal(parsed.launch?.backend, "zcode-app");
+  assert.throws(
+    () => parseStoredAgentRegistrationEnvironment({ ...command.environment, launch: { runtime: "custom", runtimeArgs: [], backend: "unknown-backend" } }),
+    /Invalid registration launch backend/u,
+  );
 });

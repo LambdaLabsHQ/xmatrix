@@ -3,7 +3,7 @@ import { assertQuotaRetryAdmission } from "./agent-quota-retry.js";
 import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
-import { canonicalRegistrationHarness, currentRoutingQuotaWindows, machineMentionValue, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseHarnessInventory, parseRegistrationResourceLimits,
+import { canonicalRegistrationHarness, currentRoutingQuotaWindows, machineMentionValue, digestCanonicalCloneCborV1, parseStoredAgentRegistrationEnvironment, parseHarnessInventory, parseRegistrationResourceLimits,
   parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaVerdict, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RoutingModelOption, type RegistrationResourceLimits,
   type SpaceAgentRegistrationKey, type AgentInstanceOfflineReason, hasControlCharacter,
 } from "@xmatrix/protocol";
@@ -276,7 +276,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,
     values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 }));
     if (!fact) return undefined;
-    const environment = parseAgentRegistrationEnvironment(fact.declaration_json);
+    const environment = parseStoredAgentRegistrationEnvironment(fact.declaration_json);
     // The physical environment bounds the Space's models exactly as a launch does.
     const models = allowed.filter(model => environment.models.includes(model));
     if (allowed.length && !models.length) return undefined;
@@ -358,7 +358,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       if (!ownReg?.own_configuration || !ownDeclaration || metadata.useRuntimeDefaultModel === true) return [];
       try {
         const allowed = parseSpaceAgentConfiguration(ownReg.own_configuration).routing?.models ?? [];
-        const envModels = parseAgentRegistrationEnvironment(ownDeclaration).models;
+        const envModels = parseStoredAgentRegistrationEnvironment(ownDeclaration).models;
         return allowed.filter(model => envModels.includes(model));
       } catch { return []; }
     })();
@@ -887,7 +887,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const harnessInventory = parseHarnessInventory(object(facts[0]?.daemon_metadata_json).harnesses);
     return autoHandoffSuccessorOrder(facts.flatMap(row => {
       let environment;
-      try { environment = parseAgentRegistrationEnvironment(row.declaration_json); } catch { return []; }
+      try { environment = parseStoredAgentRegistrationEnvironment(row.declaration_json); } catch { return []; }
       const evaluatedAt = new Date(row.evaluated_at as string).getTime();
       if (!environment.enabled || environment.availableUntil && Date.parse(environment.availableUntil) <= evaluatedAt) return [];
       const harnessStatus = harnessInventory?.items.find(item => item.id === String(row.harness));
@@ -955,7 +955,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
               AND capabilities_json ? 'registration_launch_v3' AND capabilities_json ? 'registration_managed_v1' LIMIT 2`,
             values: [key.ownerUserId, key.machineId], maxRows: 2 });
           if (routes.length !== 1) throw await registrationRouteRefusal(tx, "registration_managed_route_unavailable", key);
-          return { environment: parseAgentRegistrationEnvironment(environments[0].declaration_json), workspace: undefined,
+          return { environment: parseStoredAgentRegistrationEnvironment(environments[0].declaration_json), workspace: undefined,
             managed: { key: managedKey, hostname: typeof routes[0]!.hostname === "string" ? routes[0]!.hostname : undefined } };
         }
         const workspaces = located.remoteRepo ? [] : await tx.query({ name: "registration_continuation_workspace_v3",
@@ -965,7 +965,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
           values: [key.ownerUserId, key.machineId, located.canonicalCwd], maxRows: 2 });
         const workspace = workspaces[0];
         if (!located.remoteRepo && workspaces.length !== 1) throw new RegistrationAccessError("registration_workspace_or_daemon_unavailable", 409);
-        return { environment: parseAgentRegistrationEnvironment(environments[0].declaration_json), workspace, managed: undefined };
+        return { environment: parseStoredAgentRegistrationEnvironment(environments[0].declaration_json), workspace, managed: undefined };
       });
   }
 

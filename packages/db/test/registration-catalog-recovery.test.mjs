@@ -44,3 +44,40 @@ for (const phase of ["page", "labels"]) {
     });
   }
 }
+
+test("registration catalog listing tolerates stored legacy refused backends such as zcode-app", async () => {
+  const zcodeRow = { ...catalogRow, harness: "zcode", display_name: "zcode" };
+  const labelRow = {
+    owner: "owner", machine: "machine", harness: "zcode", name: "Workstation",
+    declaration_json: {
+      schemaVersion: 1, enabled: true, models: [], description: "",
+      availability: "interactive", capabilities: [],
+      launch: { runtime: "zcode", runtimeArgs: [], backend: "zcode-app" },
+    },
+    online: false,
+  };
+  const database = createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix",
+    shardId: placement.shardId,
+    connectivityBreaker: new ConnectivityBreaker("shard-0"),
+    poolFactory: () => ({
+      async connect() {
+        return {
+          async query(input) {
+            const text = typeof input === "string" ? input : input.text;
+            const rows = text.includes("jsonb_to_recordset") ? [labelRow] : [zcodeRow];
+            return { rows, rowCount: rows.length };
+          },
+          release() {},
+        };
+      },
+      async end() {},
+    }),
+  });
+  const session = database.openSession();
+  const page = await new PostgresAgentRegistrationRepository(session, placement).list(listing);
+  await session.close();
+  assert.equal(page.registrations.length, 1);
+  assert.equal(page.registrations[0].key.harness, "zcode");
+  assert.equal(page.registrations[0].machineName, "Workstation");
+});

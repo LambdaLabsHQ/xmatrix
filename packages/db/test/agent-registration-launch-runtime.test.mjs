@@ -9,6 +9,7 @@ test('a harness key is never exec\'d: the preset runtime or the declared launch 
   assert.throws(() => registrationLaunchSpawnFields(undefined, 'no-such-harness'), { code: 'registration_runtime_unknown' });
   assert.throws(() => registrationLaunchSpawnFields(undefined, 'zcode'), { code: 'registration_harness_refused' });
   assert.throws(() => registrationLaunchSpawnFields({ runtime: '/usr/local/bin/zcode', runtimeArgs: [] }, 'custom'), { code: 'registration_harness_refused' });
+  assert.throws(() => registrationLaunchSpawnFields({ runtime: '/usr/local/bin/custom', runtimeArgs: [], backend: 'zcode-app' }, 'custom'), { code: 'registration_harness_refused' });
 });
 
 test('a declared launch naming a harness key execs its preset launcher', async () => {
