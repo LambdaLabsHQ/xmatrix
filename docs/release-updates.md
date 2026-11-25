@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: Calendar lists read through Google's Workspace MCP server
+
+`@googlecalendar:list_calendars` and `list_events` now call Google's Calendar
+MCP server (`list_calendars`, `list_events`) with the connection's own token,
+the first curated actions moved off the REST API for Google's Workspace AI
+Tools Addendum. The receipts carry Google's MCP shape (`calendars[]`,
+`events[]`, `nextPageToken`); REST-only fields such as `accessRole`,
+`primary` and `etag` are absent. While Google refuses the server itself for a
+project (not enrolled, client not marked as an agent, service off), the same
+read is served from REST, so nothing breaks during Google's rollout; a refused
+call (such as an unknown calendar) is reported as it is, never retried.
+`get_event`, the writes and `freebusy` stay on REST for now: the MCP tools
+have no etag precondition or caller-chosen event id, and no busy-interval read.
+Hub only.
+
 ## Unreleased: Vercel uses short-lived installation tokens
 
 Vercel retires long-lived integration tokens (deadline 2027-01-15). The Hub no
