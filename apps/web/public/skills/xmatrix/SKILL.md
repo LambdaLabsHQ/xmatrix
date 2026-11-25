@@ -92,6 +92,11 @@ The retired `:new` and `:once` launch suffixes are rejected. Send the local path
 directly, never an opaque workspace ID; quote absolute paths containing spaces.
 Read the instances reference for isolation, intentional parallelism, and handoff.
 
+From a connector result, keep conclusions (a fact, a date, an amount, with the
+source id) in Pages or notes, not copies of the result; some providers' terms
+bound how long their results may be kept, and records kept from them are the
+Customer's responsibility.
+
 Report the actual outcome and verification, with resource IDs or artifact paths
 when useful. A sent launch request is not proof of an online agent or completed
 work. If blocked, state the failed operation and precise missing prerequisite;

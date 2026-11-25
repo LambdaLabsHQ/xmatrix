@@ -54,9 +54,8 @@ export function appResultRetentionDays(appId: string): number | undefined {
 export function appResultRetentionNotice(appId: string): string | undefined {
   const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((entry) => entry.id === appId);
   if (manifest?.resultRetentionDays === undefined) return undefined;
-  return `Under the provider's terms this result is deleted after ${manifest.resultRetentionDays} days, and at once when the connection is disconnected; ` +
-    (manifest.resultRetentionMayKeep ? `Pages, memory and other lasting notes may keep only ${manifest.resultRetentionMayKeep}.`
-      : "do not copy it into Pages, memory or other lasting notes.");
+  return `The original result is deleted after ${manifest.resultRetentionDays} days, and at once when the connection is disconnected. ` +
+    "Whether records you keep from it comply with the provider's terms is your responsibility.";
 }
 
 export function connectorReceiptBody(lines: readonly string[]): string {

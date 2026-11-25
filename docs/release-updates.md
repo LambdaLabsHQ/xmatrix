@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: one retention notice; records kept from results are the Customer's
+
+Decided by Daniel on 2026-11-25. xMatrix, as the tool, deletes the original
+results of a provider that bounds their storage (`resultRetentionDays`:
+@gcp, @gmail, @google, @googlecalendar) at that age and on disconnect;
+conclusions and records people or Agents write from them belong to the
+Customer, who is responsible for them, and the product does not delete or
+police Pages. Every such receipt and `xmatrix connector list` now carry one
+neutral sentence: "The original result is deleted after 29 days, and at once
+when the connection is disconnected. Whether records you keep from it comply
+with the provider's terms is your responsibility." This replaces the
+"do not copy into Pages or memory" wording and the per-provider
+`resultRetentionMayKeep` added hours earlier. The Agent launch prompt and the
+xMatrix skill ask Agents to keep conclusions with their source id, not copies of
+results. Hub, protocol, CLI prompt and skill.
+
 ## Unreleased: Workspace receipts say what may be kept
 
 The retention notice on Gmail, Google Docs/Drive/Sheets and Calendar receipts
