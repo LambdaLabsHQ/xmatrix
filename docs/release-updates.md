@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: production Web builds use native SWC, one typecheck, and skip the Electron binary
+
+Production Web builds (`server-release.yml`) and Android's bundled Web build
+(`android-deploy.yml`) no longer set `NEXT_TEST_WASM=1`, so production compiles
+with the same native SWC binding that pull request CI and Playwright e2e test
+instead of downloading `@next/swc-wasm-nodejs` on every release.
+`server-release.yml` also drops the redundant `pnpm exec turbo typecheck
+--filter=@xmatrix/web` step that ran without `.next/types` right before
+`build:cloudflare`, keeping `next build`'s authoritative lint and typecheck
+intact. Finally, `setup-pnpm-node` now defaults `electron-binary` to `false`
+(with `ci.yml`'s `desktop` job opting in and `server-release.yml`'s Hub install
+setting `ELECTRON_SKIP_BINARY_DOWNLOAD=1`), so Hub, Web, Android, and receipt
+release jobs no longer download the Electron binary or fail on its GitHub
+release download. CI and release workflows only; no product behavior changes.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the public site says only what xMatrix actually does
 
 A fact audit of the homepage, pricing, comparison pages, public Markdown and

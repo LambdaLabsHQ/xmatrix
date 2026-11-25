@@ -83,8 +83,6 @@ jobs:
         run: node scripts/check-release-version.mjs
 
       - name: Build and deploy Android
-        env:
-          NEXT_TEST_WASM: "1"
         run: node scripts/android-deploy.mjs
 
       - name: Stage Android release assets

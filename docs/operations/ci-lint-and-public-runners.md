@@ -58,8 +58,10 @@ jobs each finish in about two minutes including setup:
   process-tree timing lanes;
 - `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
   build, and the lint and typecheck that build would run (`next typegen`, then
-  `tsc`, beside `next lint`); in the full tier the checked build stays the
-  authoritative Web lint and typecheck;
+  `tsc`, beside `next lint`); in the full tier and in `server-release.yml`, the
+  checked `next build` stays the single authoritative Web lint and typecheck
+  (including generated `.next/types`) on the native SWC binding, without a
+  preceding standalone `tsc --noEmit` or `NEXT_TEST_WASM`;
 - `hub (static)` and `hub (1/8)`…`hub (8/8)`, only when the diff reaches the
   Hub (`packages/hub`, `packages/db`, `packages/protocol`, the Agent prompts
   or a shared root file): the complete Hub suite a Hub train gates on, in
@@ -195,7 +197,10 @@ and the outer retries wait two and four seconds. Authentication, package
 integrity, permissions, disk and other install failures stop immediately.
 PNPM enters the job's PATH only after installation and its version probe succeed.
 This recovery applies only to package-manager bootstrap, never validation or
-deployment failures.
+deployment failures. `setup-pnpm-node` defaults `electron-binary` to `false` so
+non-Desktop CI and production release jobs skip Electron's postinstall binary
+download (avoiding unnecessary transfer and GitHub release 504s); `ci.yml`'s
+`desktop` job opts in with `electron-binary: "true"`.
 
 CodeQL runs from its own workflow (`.github/workflows/codeql.yml`), apart from
 the release train. Each push to `main` scans what every beta ships: Hub, Web
