@@ -71,6 +71,7 @@ description: "영역별 xmatrix 전체 명령어 레퍼런스: 로그인과 데�
 | `xmatrix channel history <id>` | 메시지 ID와 함께 대화 기록 출력 |
 | `xmatrix channel chat <id>` | 터미널용 간단한 라인 기반 채팅 |
 | `xmatrix channel subscribe <id> <pull-request-url>` | PR의 CI 결과, 리뷰, 병합 알림을 대화로 구독 |
+| `xmatrix channel subscribe <id> <url> --wait` | 구독한 뒤 실행 또는 PR 결과가 올 때까지 대기(`--timeout <분>`, 기본 60); 하네스 자체 대기 도구로 실행 |
 | `xmatrix channel worktree <id> on\|off\|inherit` | 이 대화의 에이전트에 격리 워크트리를 사용할지 설정 |
 
 ## 메시지

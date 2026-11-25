@@ -32,6 +32,7 @@ use xmatrix_cli_core::wire_compat;
 use xmatrix_cli_core::{config, http};
 
 mod read_context;
+mod subscription_wait;
 pub use read_context::{
     ChannelReadContext, LaunchContext, load_channel_read_context, load_launch_context,
 };
@@ -1579,9 +1580,23 @@ pub async fn cmd_channel(hub_url: &str, token: &str, command: ChannelCommand) ->
         ChannelCommand::Subscribe {
             channel_id,
             pull_request,
+            wait,
+            timeout,
         } => {
             let channel_id = resolve_channel_reference(hub_url, token, &channel_id).await?;
-            cmd_channel_subscribe(hub_url, token, &channel_id, &pull_request).await
+            if !wait {
+                return cmd_channel_subscribe(hub_url, token, &channel_id, &pull_request)
+                    .await
+                    .map(|_| ());
+            }
+            subscription_wait::cmd_channel_subscribe_wait(
+                hub_url,
+                token,
+                &channel_id,
+                &pull_request,
+                std::time::Duration::from_secs(timeout.max(1) * 60),
+            )
+            .await
         }
         ChannelCommand::DeleteMessage {
             channel_id,
@@ -2025,12 +2040,20 @@ fn is_workflow_run_url(url: &str) -> bool {
     url.trim().starts_with("https://github.com/") && url.contains("/actions/runs/")
 }
 
-async fn cmd_channel_subscribe(
+/// What a subscription left to wait for.
+pub(crate) enum Subscribed {
+    /// Its report is still to come.
+    Pending,
+    /// A workflow run that already completed, with its conclusion.
+    Completed(String),
+}
+
+pub(crate) async fn cmd_channel_subscribe(
     hub_url: &str,
     token: &str,
     channel_id: &str,
     pull_request: &str,
-) -> error::Result<()> {
+) -> error::Result<Subscribed> {
     if is_workflow_run_url(pull_request) {
         return cmd_channel_subscribe_workflow_run(hub_url, token, channel_id, pull_request).await;
     }
@@ -2058,7 +2081,7 @@ async fn cmd_channel_subscribe(
                 "{} Subscribed to {name}: its CI verdict, reviews, comments and merge arrive in this conversation",
                 "✓".green().bold()
             );
-            Ok(())
+            Ok(Subscribed::Pending)
         }
         Some("closed") => Err(CliError::Launch(format!(
             "{name} is closed, so it reports nothing more and is not subscribed."
@@ -2076,7 +2099,7 @@ async fn cmd_channel_subscribe_workflow_run(
     token: &str,
     channel_id: &str,
     run_url: &str,
-) -> error::Result<()> {
+) -> error::Result<Subscribed> {
     let answer: serde_json::Value = http::request_json(
         &with_route(
             hub_url,
@@ -2108,14 +2131,15 @@ async fn cmd_channel_subscribe_workflow_run(
                 "{} Subscribed to {name}: its verdict arrives in this conversation when it completes",
                 "✓".green().bold()
             );
-            Ok(())
+            Ok(Subscribed::Pending)
         }
         Some("completed") => {
-            println!(
-                "{name} already completed: {}. Nothing to wait for.",
-                answer["conclusion"].as_str().unwrap_or("completed")
-            );
-            Ok(())
+            let conclusion = answer["conclusion"]
+                .as_str()
+                .unwrap_or("completed")
+                .to_string();
+            println!("{name} already completed: {conclusion}. Nothing to wait for.");
+            Ok(Subscribed::Completed(conclusion))
         }
         _ => Err(CliError::Launch(format!(
             "This Space's GitHub connection does not reach {name}, so its verdict will not arrive in this conversation."
@@ -2653,7 +2677,7 @@ fn print_channel_chat_messages(
     printed
 }
 
-async fn fetch_channel_chat_history(
+pub(crate) async fn fetch_channel_chat_history(
     hub_url: &str,
     token: &str,
     channel_id: &str,

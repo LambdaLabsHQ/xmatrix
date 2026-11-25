@@ -71,6 +71,7 @@ Donde un comando acepta un id de conversación, también acepta la dirección de
 | `xmatrix channel history <id>` | Imprime el historial de mensajes con sus ids |
 | `xmatrix channel chat <id>` | Un chat sencillo por líneas en la terminal |
 | `xmatrix channel subscribe <id> <pull-request-url>` | Envía a la conversación el resultado de CI, las revisiones y la fusión de un pull request |
+| `xmatrix channel subscribe <id> <url> --wait` | Suscribe y espera hasta que la ejecución o el pull request informe (`--timeout <minutos>`, 60 por defecto); ejecútalo con la espera propia de tu harness |
 | `xmatrix channel worktree <id> on\|off\|inherit` | Si los agentes de esta conversación obtienen worktrees aislados |
 
 ## Mensajes

@@ -71,6 +71,7 @@ description: "依功能分類的完整 xmatrix 指令參考：登入與背景服
 | `xmatrix channel history <id>` | 印出對話歷史訊息與訊息 ID |
 | `xmatrix channel chat <id>` | 在終端機開啟簡易的單行互動聊天 |
 | `xmatrix channel subscribe <id> <pull-request-url>` | 將指定 Pull Request 的 CI 結果、審查意見與合併狀態推播至此對話 |
+| `xmatrix channel subscribe <id> <url> --wait` | 訂閱後一直等到工作流程或 Pull Request 回報結果（`--timeout <分鐘>`，預設 60）；請用 harness 自帶的等待方式執行 |
 | `xmatrix channel worktree <id> on\|off\|inherit` | 設定此對話中的 Agent 是否使用獨立的 git worktree |
 
 ## 訊息
