@@ -48,6 +48,10 @@
   let shown = "";
   let layout = { placement: "below", maxPanelHeight: 320 };
   let lastSize = null;
+  let lastFrameHeight = 0;
+  let askPanelOpen = false;
+  let askCollapsedHeight = 0;
+  let pendingResetDraftAfterDrag = false;
 
   /**
    * The box is made, hidden, as soon as the person starts selecting, so its
@@ -72,10 +76,11 @@
   const GAP = 8;
   const EDGE_MARGIN = 8;
   const DEFAULT_TOP_INSET = 12;
-  const DEFAULT_BOTTOM_INSET = 24;
-  const DEFAULT_SIDE_INSET = 12;
-  // Room below the selection where the composer plus an open completion list fit comfortably without flipping up.
-  const PREFERRED_ROOM = 320;
+  const DEFAULT_BOTTOM_INSET = 36;
+  const DEFAULT_SIDE_INSET = 24;
+  // Unified room threshold for both ask capsule and inline thread card so pressing Enter
+  // never flips placement or jumps over the selected text.
+  const PREFERRED_ROOM = 400;
   // Vertical budget inside the capsule for the input row and chrome before the completion list scrolls.
   const COMPOSER_CHROME_HEIGHT = 84;
   const MIN_PANEL_HEIGHT = 120;
@@ -89,7 +94,7 @@
    * - above (popup upward) when below is tight and above has more room;
    * - pinned near the bottom opening upward if a huge selection leaves neither side with room.
    */
-  function chooseLayout(rect, viewportHeight) {
+  function chooseLayout(rect, viewportHeight, preferredRoom = PREFERRED_ROOM) {
     const spaceBelow = Math.max(0, viewportHeight - EDGE_MARGIN - (rect.bottom + GAP));
     const spaceAbove = Math.max(0, rect.top - GAP - EDGE_MARGIN);
     if (Math.max(spaceBelow, spaceAbove) < MIN_SIDE_ROOM) {
@@ -99,7 +104,7 @@
         maxPanelHeight: Math.max(MIN_PANEL_HEIGHT, Math.floor(available - COMPOSER_CHROME_HEIGHT)),
       };
     }
-    const placement = spaceBelow < PREFERRED_ROOM && spaceAbove > spaceBelow ? "above" : "below";
+    const placement = spaceBelow < preferredRoom && spaceAbove > spaceBelow ? "above" : "below";
     const available = placement === "above" ? spaceAbove : spaceBelow;
     return {
       placement,
@@ -124,17 +129,84 @@
   }
 
   /** Fully hidden, not removed: the next selection opens it again at once. */
-  function hide() {
-    if (frame) frame.style.visibility = "hidden";
+  function hide({ resetDraft = true } = {}) {
+    const wasAsk = mode === "ask";
+    if (frame) {
+      if (resetDraft && (wasAsk || pendingResetDraftAfterDrag) && frameReady) {
+        frame.contentWindow?.postMessage({ xmatrixAsk: "reset-draft" }, ORIGIN);
+      }
+      frame.style.visibility = "hidden";
+      frame.style.clipPath = "none";
+    }
     if (frame && document.activeElement === frame) frame.blur();
     mode = "hidden";
     shown = "";
     lastSize = null;
+    lastFrameHeight = 0;
+    askPanelOpen = false;
+    askCollapsedHeight = 0;
+    pendingResetDraftAfterDrag = !resetDraft && wasAsk;
     pendingMessage = null;
+  }
+
+  /**
+   * Computes a fixed vertical runway for `ask` mode so the iframe's `top` and
+   * `height` never move while typing or opening/closing `@` completion; `clip-path`
+   * reveals only the active capsule/list and keeps the unused runway click-through.
+   */
+  function askFrameBox(rect, viewportHeight, chosenLayout, topInset = DEFAULT_TOP_INSET, bottomInset = DEFAULT_BOTTOM_INSET) {
+    if (chosenLayout.placement === "above") {
+      const visibleBottom = Math.max(EDGE_MARGIN + 64, Math.min(rect.top - GAP, viewportHeight - EDGE_MARGIN));
+      const availableVisible = Math.max(80, visibleBottom - EDGE_MARGIN);
+      const reservedHeight = Math.min(viewportHeight + topInset + bottomInset, Math.ceil(availableVisible + topInset + bottomInset));
+      const fixedTop = visibleBottom + bottomInset - reservedHeight;
+      return { fixedTop, reservedHeight };
+    }
+    const visibleTop = Math.max(EDGE_MARGIN, Math.min(rect.bottom + GAP, viewportHeight - EDGE_MARGIN - 64));
+    // Leave full shadow clearance above the viewport bottom edge so the card's drop shadow is never clipped.
+    const bottomClearance = Math.max(EDGE_MARGIN, bottomInset);
+    const availableVisible = Math.max(80, viewportHeight - bottomClearance - visibleTop);
+    const reservedHeight = Math.min(viewportHeight + topInset, Math.ceil(availableVisible + topInset + bottomInset));
+    const fixedTop = visibleTop - topInset;
+    return { fixedTop, reservedHeight };
+  }
+
+  /** Pre-sizes the hidden iframe to its fixed `ask`/`thread` runway before showing, so 100vh is already settled. */
+  function prepareAskFrameBox() {
+    if (!frame || !anchor || (mode !== "ask" && mode !== "thread")) return;
+    askPanelOpen = false;
+    askCollapsedHeight = 0;
+    const { fixedTop, reservedHeight } = askFrameBox(anchor, innerHeight, layout);
+    lastFrameHeight = reservedHeight;
+    frame.style.right = "auto";
+    frame.style.top = `${fixedTop}px`;
+    frame.style.height = `${reservedHeight}px`;
+    frame.style.clipPath = "none";
+  }
+
+  /**
+   * Two-tier clip-path for `ask` / `thread`:
+   * - Resting (`askPanelOpen === false`): hugs the exact surface height so the webpage below stays interactive.
+   * - Completion open (`mode === "ask" && askPanelOpen`): opens ONCE to `collapsedHeight + maxPanelHeight`
+   *   so filtering/backspacing/growing candidates never moves the clip edge or flickers a frame.
+   */
+  function applySurfaceClipPath(frameHeight, surfaceHeight) {
+    if (!frame) return;
+    const visibleHeight = mode === "ask" && askPanelOpen
+      ? Math.min(frameHeight, Math.max(surfaceHeight, (askCollapsedHeight || surfaceHeight) + layout.maxPanelHeight))
+      : surfaceHeight;
+    const unused = Math.max(0, frameHeight - visibleHeight);
+    frame.style.clipPath = unused > 0
+      ? (layout.placement === "above"
+        ? `inset(${unused}px 0px 0px 0px)`
+        : `inset(0px 0px ${unused}px 0px)`)
+      : "none";
   }
 
   /** Docks a compact tab flush to the right viewport edge when this page already has a thread and the panel is closed. */
   function showDock() {
+    askPanelOpen = false;
+    askCollapsedHeight = 0;
     if (panelOpen || !hasThread) return hide();
     if (frame && document.activeElement === frame) frame.blur();
     mode = "dock";
@@ -154,7 +226,9 @@
   /**
    * Positions the visible surface inside the viewport:
    * - `dock`: flush to the right edge at ~42% viewport height so the user knows the right side panel can be opened.
-   * - `ask` / `quote` / `thread`: anchored beside the selection and clamped cleanly inside viewport bounds.
+   * - `ask`: fixed vertical runway (`top` + `height` constant) with `clip-path` hugging the visible capsule/list
+   *   so opening/closing `@` completion never causes a cross-origin iframe resize or frame jump.
+   * - `quote` / `thread`: anchored beside the selection and clamped cleanly inside viewport bounds.
    */
   function place(width, height, insets) {
     if (!frame || mode === "hidden") return;
@@ -167,6 +241,7 @@
       frame.style.top = `${top}px`;
       frame.style.width = `${frameWidth}px`;
       frame.style.height = `${frameHeight}px`;
+      frame.style.clipPath = "none";
       frame.style.visibility = "visible";
       return;
     }
@@ -176,6 +251,32 @@
     const leftInset = Number.isFinite(insets?.leftInset) ? insets.leftInset : DEFAULT_SIDE_INSET;
     const rightInset = Number.isFinite(insets?.rightInset) ? insets.rightInset : DEFAULT_SIDE_INSET;
     const frameWidth = Math.min(width, innerWidth + leftInset + rightInset);
+    const minLeft = EDGE_MARGIN - leftInset;
+    const maxLeft = innerWidth - EDGE_MARGIN - (frameWidth - rightInset);
+    const left = Math.max(minLeft, Math.min(anchor.left - leftInset, maxLeft));
+
+    if (mode === "ask" || mode === "thread") {
+      const { fixedTop, reservedHeight } = askFrameBox(anchor, innerHeight, layout, topInset, bottomInset);
+      const frameHeight = Math.max(reservedHeight, Math.min(height, innerHeight + topInset + bottomInset));
+      const top = layout.placement === "above"
+        ? fixedTop - (frameHeight - reservedHeight)
+        : fixedTop;
+      const bottomLimit = layout.placement === "below"
+        ? innerHeight - frameHeight
+        : innerHeight - EDGE_MARGIN - (frameHeight - bottomInset);
+      const clampedTop = Math.max(EDGE_MARGIN - topInset, Math.min(top, bottomLimit));
+      lastFrameHeight = frameHeight;
+      if (mode === "ask" && !askPanelOpen) askCollapsedHeight = height;
+      frame.style.right = "auto";
+      frame.style.top = `${clampedTop}px`;
+      frame.style.left = `${left}px`;
+      frame.style.width = `${frameWidth}px`;
+      frame.style.height = `${frameHeight}px`;
+      applySurfaceClipPath(frameHeight, height);
+      frame.style.visibility = "visible";
+      return;
+    }
+
     const frameHeight = Math.min(height, innerHeight + topInset + bottomInset);
     const rawTop = layout.placement === "above"
       ? anchor.top - GAP - frameHeight + bottomInset
@@ -183,14 +284,12 @@
     const minTop = EDGE_MARGIN - topInset;
     const maxTop = innerHeight - EDGE_MARGIN - (frameHeight - bottomInset);
     const top = Math.max(minTop, Math.min(rawTop, maxTop));
-    const minLeft = EDGE_MARGIN - leftInset;
-    const maxLeft = innerWidth - EDGE_MARGIN - (frameWidth - rightInset);
-    const left = Math.max(minLeft, Math.min(anchor.left - leftInset, maxLeft));
     frame.style.right = "auto";
     frame.style.top = `${top}px`;
     frame.style.left = `${left}px`;
     frame.style.width = `${frameWidth}px`;
     frame.style.height = `${frameHeight}px`;
+    frame.style.clipPath = "none";
     frame.style.visibility = "visible";
   }
 
@@ -207,15 +306,31 @@
     return Boolean(active && active !== frame && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/u.test(active.tagName)));
   }
 
-  /** Opens the box (or quote pill if the side panel is open) on `text`, under `rect`. */
+  /**
+   * Opens the surface beside `rect` for selected `text`:
+   * - Side panel already open -> compact `quote` pill;
+   * - This page already has a conversation -> full inline `thread` card (existing chat + quoted composer);
+   * - Brand-new page with no conversation yet -> floating `ask` composer capsule.
+   */
   async function open(text, rect) {
+    pendingResetDraftAfterDrag = false;
     anchor = rect;
     shown = text;
-    mode = panelOpen ? "quote" : "ask";
+    if (mode === "dock" && frame) {
+      frame.style.visibility = "hidden";
+      frame.style.clipPath = "none";
+    }
+    mode = panelOpen ? "quote" : hasThread ? "thread" : "ask";
     ensureFrame();
-    await chrome.runtime.sendMessage({ type: "askPrepare", text, title: document.title, url: location.href });
-    if (shown !== text || (mode !== "ask" && mode !== "quote")) return;
-    layout = chooseLayout(anchor, innerHeight);
+    const prepared = await chrome.runtime.sendMessage({ type: "askPrepare", text, title: document.title, url: location.href });
+    if (shown !== text || (mode !== "ask" && mode !== "quote" && mode !== "thread")) return;
+    if (prepared?.ok && prepared.value) {
+      if (typeof prepared.value.panelOpen === "boolean") panelOpen = prepared.value.panelOpen;
+      if (typeof prepared.value.hasThread === "boolean") hasThread = prepared.value.hasThread;
+      mode = panelOpen ? "quote" : hasThread ? "thread" : "ask";
+    }
+    layout = chooseLayout(anchor, innerHeight, PREFERRED_ROOM);
+    prepareAskFrameBox();
     pendingMessage = {
       xmatrixAsk: "prepared",
       mode,
@@ -227,14 +342,25 @@
 
   function onSelection() {
     if (document.activeElement === frame) return;
-    // Keep an active inline conversation open while the user reads or highlights text on the page.
-    if (mode === "thread") return;
     const text = String(globalThis.getSelection() ?? "").trim();
     const rect = selectionRect();
+    if (mode === "thread") {
+      // D1/D2: keep an open inline conversation card alive on plain clicks/empty selections,
+      // and smoothly follow any new mouse or keyboard (Shift+Arrow) selection without flashing dock.
+      if (text.length >= 2 && rect && !inEditable() && text !== shown) {
+        open(text, rect).catch(() => undefined);
+      }
+      return;
+    }
     if (text.length < 2 || !rect || inEditable()) {
+      if (pendingResetDraftAfterDrag) {
+        pendingResetDraftAfterDrag = false;
+        if (frame && frameReady) frame.contentWindow?.postMessage({ xmatrixAsk: "reset-draft" }, ORIGIN);
+      }
       if (mode === "ask" || mode === "quote") dismiss();
       return;
     }
+    pendingResetDraftAfterDrag = false;
     if (text === shown && (mode === "ask" || mode === "quote")) return;
     open(text, rect).catch(() => dismiss());
   }
@@ -251,12 +377,23 @@
         lastSize = { width, height, topInset, bottomInset, leftInset, rightInset };
         place(width, height, lastSize);
       }
+    } else if (event.data.type === "panel") {
+      if (mode === "ask") {
+        askPanelOpen = Boolean(event.data.open);
+        if (lastFrameHeight > 0 && lastSize) applySurfaceClipPath(lastFrameHeight, lastSize.height);
+      }
     } else if (event.data.type === "mode") {
       if (event.data.mode === "thread") {
+        askPanelOpen = false;
+        askCollapsedHeight = 0;
         mode = "thread";
         hasThread = true;
         if (!anchor) anchor = { top: 64, bottom: 64, left: Math.max(EDGE_MARGIN, innerWidth - 520) };
-        if (lastSize) place(lastSize.width, lastSize.height, lastSize);
+      } else if (event.data.mode === "ask") {
+        askPanelOpen = false;
+        askCollapsedHeight = 0;
+        mode = "ask";
+        hasThread = false;
       } else if (event.data.mode === "dock") {
         hasThread = true;
         showDock();
@@ -292,21 +429,57 @@
     if (lastSize) place(lastSize.width, lastSize.height, lastSize);
   });
 
-  // A click on the page, away from the popup, closes it (or docks it if a thread is active);
-  // never dismiss the quiet right-edge dock tab on page clicks.
+  // D1: A click on the page hides a bare ask capsule or quote pill, while an active inline
+  // conversation card stays open while the user reads/scrolls/copies (closed via ×, Escape, or ◫).
+  // Item 6: On mousedown during `ask`, defer `reset-draft` until mouseup so dragging a new
+  // selection on the webpage preserves whatever the user already typed in the capsule.
   listen(document, "mousedown", (event) => {
-    if ((mode === "ask" || mode === "quote" || mode === "thread") && event.target !== frame) dismiss();
+    if (event.target === frame) return;
+    if (mode === "ask") hide({ resetDraft: false });
+    else if (mode === "quote") dismiss();
   }, true);
-  // The person is selecting text (not just clicking): get the box ready while they drag.
+  listen(window, "blur", () => {
+    if (pendingResetDraftAfterDrag) {
+      pendingResetDraftAfterDrag = false;
+      if (frame && frameReady) frame.contentWindow?.postMessage({ xmatrixAsk: "reset-draft" }, ORIGIN);
+    }
+  });
+  // The person is selecting text (not just clicking): get the box ready while they drag,
+  // and pre-warm the embedded App on drag-start when this tab already has a bound thread (Item 4).
+  let prewarmedDrag = false;
   listen(document, "selectionchange", () => {
+    const collapsed = globalThis.getSelection()?.isCollapsed !== false;
+    if (collapsed || inEditable()) {
+      prewarmedDrag = false;
+      return;
+    }
+    if (hasThread && !panelOpen && mode === "dock" && frame && frameReady && !prewarmedDrag) {
+      prewarmedDrag = true;
+      frame.contentWindow?.postMessage({ xmatrixAsk: "prewarm" }, ORIGIN);
+      return;
+    }
     if (frame && frameReady) return;
-    if (globalThis.getSelection()?.isCollapsed !== false || inEditable()) return;
     ensureFrame();
     warm();
   });
-  listen(document, "mouseup", (event) => {
+  listen(window, "mouseup", (event) => {
     if (event.target === frame) return;
+    prewarmedDrag = false;
     setTimeout(onSelection, 0);
+  });
+  // Keep an open inline thread card synced with client-side history navigation (Item 2).
+  const notifyClientPageChange = () => {
+    if (mode === "thread" && frame && frameReady) {
+      frame.contentWindow?.postMessage({ xmatrixAsk: "page-updated", title: document.title, href: location.href }, ORIGIN);
+    }
+  };
+  listen(window, "popstate", notifyClientPageChange);
+  listen(window, "hashchange", notifyClientPageChange);
+  // B5: Let the frame release any off-screen warm App when this tab moves to the background.
+  listen(document, "visibilitychange", () => {
+    if (frame && frameReady) {
+      frame.contentWindow?.postMessage({ xmatrixAsk: "visibility", hidden: Boolean(document.hidden) }, ORIGIN);
+    }
   });
   listen(document, "keyup", (event) => {
     if (event.key === "Escape") {
@@ -326,9 +499,15 @@
     if (message?.type === "open-ask") {
       anchor = (!message.page && selectionRect()) || { top: 16, bottom: 16, left: innerWidth };
       shown = String(message.text ?? "");
-      mode = panelOpen ? "quote" : "ask";
+      if (typeof message.hasThread === "boolean") hasThread = message.hasThread;
+      if (mode === "dock" && frame) {
+        frame.style.visibility = "hidden";
+        frame.style.clipPath = "none";
+      }
+      mode = panelOpen ? "quote" : hasThread ? "thread" : "ask";
       ensureFrame();
-      layout = chooseLayout(anchor, innerHeight);
+      layout = chooseLayout(anchor, innerHeight, PREFERRED_ROOM);
+      prepareAskFrameBox();
       pendingMessage = {
         xmatrixAsk: "prepared",
         mode,
@@ -336,13 +515,29 @@
         maxPanelHeight: layout.maxPanelHeight,
       };
       deliver();
+    } else if (message?.type === "page-updated") {
+      if (frame && frameReady && typeof message.href === "string" && message.href) {
+        frame.contentWindow?.postMessage({
+          xmatrixAsk: "page-updated",
+          title: typeof message.title === "string" ? message.title : document.title,
+          href: message.href,
+        }, ORIGIN);
+      }
     } else if (message?.type === "panel-state") {
       panelOpen = Boolean(message.open);
       if (typeof message.hasThread === "boolean") hasThread = message.hasThread;
       if (panelOpen) {
+        // Hide visually at once, but keep the inline App alive until `panel-release`
+        // arrives from background.js once the side panel displays the conversation.
         if (mode !== "quote") hide();
       } else if (hasThread && mode === "hidden") {
         showDock();
+      } else if (!hasThread && mode === "dock") {
+        hide();
+      }
+    } else if (message?.type === "panel-release") {
+      if (panelOpen && frame && frameReady) {
+        frame.contentWindow?.postMessage({ xmatrixAsk: "release" }, ORIGIN);
       }
     }
   };

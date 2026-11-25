@@ -1,6 +1,7 @@
-import { digestCanonicalCloneCborV1, isOperationalInvocationSpan, nonOperationalMentionRanges,
-  parseAgentInvocationSelections, type AgentInvocationSelection, type AgentInvocationSelections,
+import { digestCanonicalCloneCborV1, discussionHead, isOperationalInvocationSpan, nonOperationalMentionRanges,
+  parseAgentInvocationSelections, type AgentInvocationSelection, type AgentInvocationSelections, type DiscussionSource,
 } from "@xmatrix/protocol";
+import { UserFacingProblem } from "@/lib/user-facing-error";
 
 export type ComposerAgentBinding = AgentInvocationSelection & { label?: string };
 /** A picked channel or page shown by name in the draft; the message carries `reference` in its place. */
@@ -104,4 +105,58 @@ export async function invocationSelectionsEnvelope(body: string, selections: rea
   const sourceBodyHash = await digestCanonicalCloneCborV1(body);
   return parseAgentInvocationSelections({ schemaVersion: 1, sourceRevision: 1, sourceBodyHash,
     selections: [...selections] }, { spaceId, body, bodyHash: sourceBodyHash, revision: 1 });
+}
+
+/**
+ * Prepends a quoted passage head to `body` while preserving explicit `@`
+ * agent invocation selections. If shifting offsets fails (for example, an
+ * oversized quote exceeding the 64 KiB body limit or unexpected syntax),
+ * retries with a shortened quote and finally falls back to the unquoted body
+ * rather than silently dropping the user's explicit `@` mention target.
+ */
+export async function prependQuotePreservingInvocations(
+  body: string,
+  picked: AgentInvocationSelections | undefined,
+  quote: { text: string; label: string; href: string },
+  spaceId: string | null | undefined,
+): Promise<{ body: string; invocationSelections?: AgentInvocationSelections }> {
+  const source: DiscussionSource = { label: quote.label, href: quote.href };
+  const tryWithQuote = async (text: string) => {
+    const head = discussionHead(text || quote.label, source);
+    const nextBody = `${head}${body}`;
+    if (!picked?.selections.length) return { body: nextBody };
+    if (!spaceId) return null;
+    try {
+      const shifted = await invocationSelectionsEnvelope(
+        nextBody,
+        picked.selections.map((sel) => ({
+          ...sel,
+          start: sel.start + head.length,
+          end: sel.end + head.length,
+        })),
+        spaceId,
+      );
+      if (shifted && shifted.selections.length === picked.selections.length) {
+        return { body: nextBody, invocationSelections: shifted };
+      }
+    } catch {
+      // Retry with a shorter quote or preserve original body + selections below.
+    }
+    return null;
+  };
+
+  const full = await tryWithQuote(quote.text);
+  if (full) return full;
+
+  // Retry once with a bounded quote excerpt in case the full passage pushed body over 64 KiB.
+  if (quote.text.length > 400) {
+    const shortened = await tryWithQuote(`${quote.text.slice(0, 400).trimEnd()}…`);
+    if (shortened) return shortened;
+  }
+
+  // Never silently drop either the quoted passage or the explicit @ mention target.
+  if (picked?.selections.length) {
+    throw new UserFacingProblem("Couldn't attach the selected quote with your @ mention — shorten the selection or clear it before sending.", true);
+  }
+  return { body: `${discussionHead(quote.text || quote.label, source)}${body}` };
 }

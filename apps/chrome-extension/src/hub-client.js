@@ -48,8 +48,8 @@ async function readJson(response) {
   }
 }
 
-async function request(deps, path, { method = "GET", body, token } = {}) {
-  const headers = { ...clientHeaders(deps.version), accept: "application/json" };
+async function request(deps, path, { method = "GET", body, token, headers: extraHeaders } = {}) {
+  const headers = { ...clientHeaders(deps.version), accept: "application/json", ...extraHeaders };
   if (body !== undefined) headers["content-type"] = "application/json";
   if (token) headers.authorization = `Bearer ${token}`;
   const response = await deps.fetch(new URL(path, deps.hubUrl).toString(), {
@@ -237,14 +237,32 @@ export async function listSpaces(deps, token) {
 
 /**
  * Starts a conversation in a Space, as the web app's passage discussion does:
- * named by the passage until its first message names it.
+ * named by the passage until its first message names it. Passing `requestKey`
+ * makes creation idempotent across the inline App and background outbox.
  */
-export async function createConversation(deps, token, { spaceId, name, memberName }) {
-  const json = await request(deps, "/api/channels", {
+export async function createConversation(
+  deps,
+  token,
+  { spaceId, name, memberName, mode = "open", metadata, requestKey },
+  retry = {},
+) {
+  const options = {
     method: "POST",
     token,
-    body: { spaceId, name, mode: "open", metadata: { createdBy: "chrome-extension", autoName: true }, memberName },
-  });
+    ...(requestKey ? { headers: { "x-xmatrix-idempotency-key": requestKey } } : {}),
+    body: {
+      spaceId,
+      name: String(name ?? "").slice(0, 80),
+      mode: mode === "closed" ? "closed" : "open",
+      metadata: metadata && typeof metadata === "object"
+        ? metadata
+        : { createdBy: "chrome-extension", autoName: true },
+      memberName: memberName || "Human",
+    },
+  };
+  const json = requestKey
+    ? await idempotentRequest(deps, "/api/channels", options, retry)
+    : await request(deps, "/api/channels", options);
   if (typeof json.channel?.id !== "string") throw new HubError(502, "xMatrix did not start the conversation.");
   return { id: json.channel.id, spaceId: json.channel.spaceId ?? spaceId, snapshot: json.channel };
 }
@@ -254,14 +272,25 @@ export async function createConversation(deps, token, { spaceId, name, memberNam
  * the same send land once; `launch` starts the Agents it mentions, as the web
  * composer does.
  */
-export async function sendMessage(deps, token, { channelId, body, clientMessageId, invocationSelections, metadata },
-  retry = {}) {
+export async function sendMessage(
+  deps,
+  token,
+  { channelId, body, clientMessageId, invocationSelections, metadata, replyToMessageId, appMentions },
+  retry = {},
+) {
   // The same clientMessageId on every attempt: a retry lands the message once.
   const json = await idempotentRequest(deps, `/api/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     token,
-    body: { body, clientMessageId, launch: true, ...(invocationSelections ? { invocationSelections } : {}),
-      ...(metadata ? { metadata } : {}) },
+    body: {
+      body,
+      clientMessageId,
+      launch: true,
+      ...(replyToMessageId ? { replyToMessageId } : {}),
+      ...(Array.isArray(appMentions) && appMentions.length > 0 ? { appMentions } : {}),
+      ...(invocationSelections ? { invocationSelections } : {}),
+      ...(metadata ? { metadata } : {}),
+    },
   }, retry);
   return { messageId: json.message?.messageId ?? clientMessageId };
 }

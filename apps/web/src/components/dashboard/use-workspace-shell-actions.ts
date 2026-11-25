@@ -4,11 +4,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { appViewSelectionQuery, browserPageMetadata, decodeChannelSnapshot, discussionHead, isAppSelectionView, presenceInstanceId, type SerializedChannel } from "@xmatrix/protocol";
 
 import { pageShellActions } from "./page-shell-actions";
-import { invocationSelectionsEnvelope } from "./composer-invocation-bindings";
+import { invocationSelectionsEnvelope, prependQuotePreservingInvocations } from "./composer-invocation-bindings";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
-import { announceEmbedSpace, embedBrowserPage, subscribeEmbedOpen, type EmbedPendingMessage, subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
+import { announceEmbedClearPageThread, announceEmbedOutboxAck, announceEmbedOutboxRegister, announceEmbedPageThread, announceEmbedSpace, embedBrowserPage, isExtensionCompanion, subscribeEmbedClearPassage, subscribeEmbedOpen, subscribeEmbedPassages, subscribeEmbedStartConversation, type EmbedOutboxChannelCreate, type EmbedPassage, type EmbedPendingMessage, type EmbedStartConversation } from "@/lib/extension-embed";
+import { XMatrixApiError } from "@/lib/query/api-client";
 import { appAddressHref, appAddressOrigin } from "@/lib/app-address";
 import { pageApi } from "@/lib/pages/page-client";
 import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
@@ -1452,29 +1453,53 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     await copyTextToClipboard(absoluteChannelUrl(channel, s.spacesRef.current));
   }, [s.spacesRef]);
 
+  // Tracks in-flight conversation creation keys for extension background outbox registration.
+  const pendingEmbedChannelCreateRef = useRef<Map<string, EmbedOutboxChannelCreate>>(new Map());
+  const isPermanentOutboxRefusal = (err: unknown): boolean => (
+    err instanceof XMatrixApiError
+    && err.status >= 400
+    && err.status < 500
+    && ![401, 408, 429].includes(err.status)
+  );
+
   /**
    * Shows a new conversation at once and creates it meanwhile, as a Google Docs
    * comment appears as it is clicked: its id is the one the Hub will give it.
    * Its history, its focus and the messages sent to it wait for `created`; a
    * create that fails takes it away again.
    */
-  async function beginConversation(request: ConversationRequest):
+  async function beginConversation(
+    request: ConversationRequest,
+    options?: { requestKey?: string },
+  ):
     Promise<{ channel: ChannelSnapshot; created: Promise<ChannelSnapshot> }> {
     const token = s.token;
     const userId = s.user?.id;
     if (!token || !userId) throw new UserFacingProblem("Sign in again to start a conversation");
-    const requestKey = crypto.randomUUID();
+    const requestKey = options?.requestKey || crypto.randomUUID();
     const channel = await plannedConversation({ ...request, userId, requestKey });
     // The store publishes synchronously, and channelsRef follows each publication.
     const show = (next: (current: ChannelSnapshot[]) => ChannelSnapshot[]) => setChannels(next);
     const settled = () => {
       s.channelCreationsRef.current.delete(channel.id);
+      pendingEmbedChannelCreateRef.current.delete(channel.id);
       s.setCreatingChannelIds((current) => {
         const next = new Set(current);
         next.delete(channel.id);
         return next;
       });
     };
+    if (isExtensionCompanion()) {
+      pendingEmbedChannelCreateRef.current.set(channel.id, {
+        requestKey,
+        spaceId: request.spaceId,
+        memberName: request.memberName,
+        mode: request.mode,
+        ...("name" in request
+          ? { name: request.name, metadata: request.metadata }
+          : { body: request.body, ...(request.metadata ? { metadata: request.metadata } : {}) }),
+      });
+    }
     show((current) => replaceChannel(current, channel));
     const created = createConversation({ ...request, token, requestKey }).then((committed) => {
       show((current) => replaceChannel(current, committed));
@@ -1603,11 +1628,19 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
    */
   // Passages that came while the app was still signing in or choosing its Space.
   const pendingWebPassagesRef = useRef<EmbedPassage[]>([]);
+  // 0ms optimistic conversation starts queued if auth/space finishes hydrating a moment later.
+  const pendingEmbedStartRef = useRef<EmbedStartConversation | null>(null);
+  const handledEmbedStartIdsRef = useRef(new Set<string>());
+  // Inline selection quote (#2004: the highlighted text on the page IS the quote, so the composer stays clean
+  // with no quote card and prepends the quote + link to the next message sent in that conversation).
+  const implicitWebQuoteRef = useRef<{ channelId: string; quote: DiscussionQuote } | null>(null);
+  // Raw user-typed text per pending send so 404 recovery restores only what they typed (never double-quoted).
+  const rawComposerBodyByClientIdRef = useRef(new Map<string, string>());
   const webPassageTargetReady = Boolean(s.token && s.user && s.currentSpaceId);
 
   const handleWebPassage = useStableCallback(async (passage: EmbedPassage) => {
-    // The side panel often opens with the passage: it waits for the session and the Space.
-    if (!s.token || !s.user || !s.currentSpaceId) {
+    // The side panel / inline thread often opens with the passage: wait for session, Space, and (for target="current") the open channel.
+    if (!s.token || !s.user || !s.currentSpaceId || (passage.target === "current" && !s.selectedChannelIdRef.current)) {
       pendingWebPassagesRef.current = [...pendingWebPassagesRef.current.slice(-4), passage];
       return;
     }
@@ -1615,10 +1648,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       { label: passage.label || new URL(passage.href).host, href: passage.href }, false);
     const openChannelId = s.selectedChannelIdRef.current;
     if (passage.target === "current" && openChannelId) {
+      if (passage.implicit) {
+        implicitWebQuoteRef.current = { channelId: openChannelId, quote };
+        return;
+      }
+      implicitWebQuoteRef.current = null;
       quoteIntoComposer(quote);
       // In the narrow panel the list may be showing: the quote is seen in its conversation.
       navigateToChannel(openChannelId);
-      setComposerAutoFocusRequest((current) => current + 1);
+      if (passage.focus !== false) setComposerAutoFocusRequest((current) => current + 1);
       return;
     }
     try {
@@ -1635,7 +1673,85 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
   });
 
+  const handleEmbedStartConversation = useStableCallback(async (start: EmbedStartConversation) => {
+    if (handledEmbedStartIdsRef.current.has(start.id)) return;
+    const targetSpaceId = start.spaceId || s.currentSpaceId;
+    if (!s.token || !s.user || !targetSpaceId) {
+      pendingEmbedStartRef.current = start;
+      return;
+    }
+    handledEmbedStartIdsRef.current.add(start.id);
+    pendingEmbedStartRef.current = null;
+    try {
+      const embedRequest: ConversationRequest = start.title
+        ? {
+            spaceId: targetSpaceId,
+            memberName: s.user.name || s.user.email || "Human",
+            name: start.title,
+            mode: "open",
+            metadata: { autoName: true, createdBy: "chrome-extension" },
+          }
+        : {
+            spaceId: targetSpaceId,
+            memberName: s.user.name || s.user.email || "Human",
+            body: start.body,
+            mode: "open",
+            metadata: { createdBy: "chrome-extension" },
+          };
+      const { channel, created } = await beginConversation(
+        embedRequest,
+        start.requestKey ? { requestKey: start.requestKey } : undefined,
+      );
+      announceEmbedPageThread({
+        path: `/app/${channel.spaceId}/channels/${channel.id}`,
+        title: channel.name || start.title || "",
+        href: start.href ?? "",
+        recordRecent: true,
+      });
+      created.then((committed) => {
+        announceEmbedPageThread({
+          path: `/app/${committed.spaceId}/channels/${committed.id}`,
+          title: committed.name || start.title || "",
+          href: start.href ?? "",
+          recordRecent: true,
+        });
+      }).catch((err: unknown) => {
+        if (start.clientMessageId && isPermanentOutboxRefusal(err)) {
+          announceEmbedOutboxAck(start.clientMessageId);
+        }
+        announceEmbedClearPageThread({
+          draft: start.rawQuestion || start.body,
+          error: userErrorMessage(err, "Couldn't start the conversation") ?? undefined,
+        });
+      });
+      await sendNewConversationMessage(channel, {
+        body: start.body,
+        attachments: [],
+        invocationSelections: start.invocationSelections,
+      }, start.clientMessageId ? { clientMessageId: start.clientMessageId } : undefined);
+      setComposerAutoFocusRequest((current) => current + 1);
+    } catch (err) {
+      if (start.clientMessageId && isPermanentOutboxRefusal(err)) {
+        announceEmbedOutboxAck(start.clientMessageId);
+      }
+      announceEmbedClearPageThread({
+        draft: start.rawQuestion || start.body,
+        error: userErrorMessage(err, "Couldn't start the conversation") ?? undefined,
+      });
+    }
+  });
+
   useEffect(() => subscribeEmbedPassages((passage) => void handleWebPassage(passage)), [handleWebPassage]);
+  useEffect(() => subscribeEmbedStartConversation((start) => void handleEmbedStartConversation(start)), [handleEmbedStartConversation]);
+  useEffect(() => subscribeEmbedClearPassage(() => {
+    implicitWebQuoteRef.current = null;
+  }), []);
+  useEffect(() => {
+    const queued = pendingEmbedStartRef.current;
+    if (!queued) return;
+    if (!s.token || !s.user || !(queued.spaceId || s.currentSpaceId)) return;
+    void handleEmbedStartConversation(queued);
+  }, [s.token, s.user, s.currentSpaceId, handleEmbedStartConversation]);
 
   // The side panel asks its on-page questions in the Space shown here.
   const shownSpaceId = s.currentSpace?.id;
@@ -1651,7 +1767,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setChannels((current) => (current.some((item) => item.id === opened.id) ? current : [opened, ...current]));
     }
     const shown = openInternalAppLink(new URL(path, appAddressOrigin()).toString());
-    const channelId = path.split("/channels/")[1];
+    const channelId = path.split("#")[0]?.split("/channels/")[1];
     if (pending && channelId) showExtensionPendingMessage(decodeURIComponent(channelId), pending);
     return shown;
   });
@@ -1687,7 +1803,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void (async () => {
       for (const passage of pending) await handleWebPassage(passage);
     })();
-  }, [webPassageTargetReady, handleWebPassage]);
+  }, [webPassageTargetReady, s.selectedChannelId, handleWebPassage]);
 
   function openInternalAppLink(href: string): boolean {
     const pageLink = internalPageLink(href, appAddressHref());
@@ -1923,8 +2039,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
    */
   async function createNewConversation(body: string, mode: "open" | "closed", failed?: (error: unknown) => void) {
     if (!s.token || !s.user || !s.currentSpaceId) throw new UserFacingProblem("Choose a Space first");
-    const { channel, created } = await beginConversation({ spaceId: s.currentSpaceId,
-      memberName: s.user.name || s.user.email || "Human", body, mode });
+    const { channel, created } = await beginConversation({
+      spaceId: s.currentSpaceId,
+      memberName: s.user.name || s.user.email || "Human",
+      body,
+      mode,
+      ...(isExtensionCompanion() ? { metadata: { createdBy: "chrome-extension" } } : {}),
+    });
     created.catch((error: unknown) => failed?.(error));
     return channel;
   }
@@ -1933,7 +2054,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
      there as pending, as any send does; the shell's own send reads the
      selected conversation from React state, which has not settled in the tick
      after a create, so the message is delivered to the created channel. */
-  async function sendNewConversationMessage(channel: ChannelSnapshot, snapshot: ComposerSendSnapshot) {
+  async function sendNewConversationMessage(
+    channel: ChannelSnapshot,
+    snapshot: ComposerSendSnapshot,
+    options?: { clientMessageId?: string },
+  ) {
     if (!s.token) throw new UserFacingProblem("Sign in again to send");
     setChannels((current) => replaceChannel(current, channel));
     setComposingConversation(false);
@@ -1950,7 +2075,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       uploads: snapshot.uploads,
       invocationSelections: snapshot.invocationSelections,
       appMentions: parseAppMentions(snapshot.body, APP_CONNECTORS),
-    });
+    }, undefined, options);
   }
 
 
@@ -2589,7 +2714,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     // The Composer render that enabled Send owns the authoritative attachment
     // snapshot. In particular, mobile can tap Send immediately after an XHR
     // upload reports Ready, before the shell's ref-backed draft catches up.
-    const body = summon?.body ?? composerSnapshot?.body ?? s.draftRef.current;
+    let body = summon?.body ?? composerSnapshot?.body ?? s.draftRef.current;
     const attachments = fromComposer
       ? (composerSnapshot?.attachments ?? s.draftAttachmentsRef.current)
       : [];
@@ -2604,7 +2729,20 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const channel = s.selectedChannel;
     const channelId = channel.id;
 
-    const invocationSelections = fromComposer ? composerSnapshot?.invocationSelections : undefined;
+    const rawComposerBody = body;
+    let invocationSelections = fromComposer ? composerSnapshot?.invocationSelections : undefined;
+    if (fromComposer && body.trim() && implicitWebQuoteRef.current?.channelId === channelId) {
+      const pendingQuote = implicitWebQuoteRef.current;
+      try {
+        const quoted = await prependQuotePreservingInvocations(body, invocationSelections, pendingQuote.quote, channel.spaceId);
+        implicitWebQuoteRef.current = null;
+        body = quoted.body;
+        invocationSelections = quoted.invocationSelections;
+      } catch (err) {
+        setHistoryError(userErrorMessage(err, MESSAGE_SEND_FAILED_FALLBACK) ?? null);
+        return;
+      }
+    }
     const appMentions = parseAppMentions(body, APP_CONNECTORS);
     const replyToMessageId = replySnapshot?.messageId;
     const replyTo = replySnapshot?.messageId
@@ -2631,7 +2769,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
     await deliverOutgoingMessage(channel, {
       body, invocationSelections, attachments, uploads, replyToMessageId, replyTo, appMentions,
-    });
+    }, fromComposer ? rawComposerBody : undefined);
   }
 
   /** Shows the message as pending in its channel at once, then appends it. */
@@ -2639,13 +2777,19 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     channel: ChannelSnapshot,
     { body, invocationSelections, attachments, uploads, replyToMessageId, replyTo, appMentions }:
       Pick<OutgoingMessage, "body" | "invocationSelections" | "attachments" | "uploads" | "replyToMessageId" | "replyTo" | "appMentions">,
+    rawComposerBody?: string,
+    options?: { clientMessageId?: string },
   ): Promise<string | null> {
     if (!s.token) return null;
     const channelId = channel.id;
-    const clientMessageId =
+    const clientMessageId = options?.clientMessageId || (
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
-        : `out-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        : `out-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+    );
+    if (typeof rawComposerBody === "string" && rawComposerBody) {
+      rawComposerBodyByClientIdRef.current.set(clientMessageId, rawComposerBody);
+    }
     const sentAt = new Date().toISOString();
     const browserPage = embedBrowserPage();
     setHistoryError(null);
@@ -2670,6 +2814,23 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       sentAt,
       attachments,
     });
+    if (isExtensionCompanion() && attachments.length === 0 && !uploads?.length) {
+      const pendingCreate = pendingEmbedChannelCreateRef.current.get(channelId);
+      announceEmbedOutboxRegister({
+        clientMessageId,
+        ...(s.user?.id ? { userId: s.user.id } : {}),
+        channelId,
+        spaceId: channel.spaceId,
+        ...(pendingCreate ? { channelCreate: pendingCreate } : {}),
+        body,
+        ...(invocationSelections ? { invocationSelections } : {}),
+        ...(outgoing.metadata ? { metadata: outgoing.metadata } : {}),
+        ...(replyToMessageId ? { replyToMessageId } : {}),
+        ...(appMentions.length > 0 ? { appMentions } : {}),
+        ...(channel.name ? { title: channel.name } : {}),
+        ...(browserPage?.href ? { href: browserPage.href } : {}),
+      });
+    }
     setOutgoingMessages((current) => [...current, outgoing]);
     return attemptOutgoingSend(s.token, channel, outgoing);
   }
@@ -2708,6 +2869,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         metadata,
       });
       if (isValidChannelMessage(payload.message)) {
+        rawComposerBodyByClientIdRef.current.delete(clientMessageId);
         // Stamp clientMessageId before dropping the pending row so the confirmed
         // timeline item reuses the same React key and does not remount/flicker.
         s.outboundClientIdsByMessageIdRef.current.set(payload.message.messageId, clientMessageId);
@@ -2723,17 +2885,17 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         if (payload.message.sequence) {
           const confirmedSequence = payload.message.sequence;
           setChannels((current) =>
-            current.map((channel) =>
-              channel.id === channelId
+            current.map((item) =>
+              item.id === channelId
                 ? {
-                    ...channel,
-                    messageCount: Math.max(channel.messageCount || 0, confirmedSequence),
+                    ...item,
+                    messageCount: Math.max(item.messageCount || 0, confirmedSequence),
                     historyHeadSequence: Math.max(
-                      channel.historyHeadSequence || 0,
+                      item.historyHeadSequence || 0,
                       confirmedSequence,
                     ),
                   }
-                : channel
+                : item
             )
           );
         }
@@ -2743,6 +2905,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setOutgoingMessages((current) =>
         current.filter((message) => message.clientMessageId !== clientMessageId)
       );
+      announceEmbedOutboxAck(clientMessageId);
       if (payload.channel) {
         setChannels((current) => replaceChannel(current, payload.channel!));
       }
@@ -2776,10 +2939,14 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         : err instanceof SentUploadFailed
           ? userErrorMessage(err.reason, "Couldn't upload the file", `Couldn't upload ${err.fileName}`) ?? "Upload cancelled."
           : userErrorMessage(err, MESSAGE_SEND_FAILED_FALLBACK) ?? undefined;
+      if (isPermanentOutboxRefusal(err)) {
+        announceEmbedOutboxAck(clientMessageId);
+      }
+      const failedStatus = unknownResult ? "unconfirmed" : "failed";
       setOutgoingMessages((current) =>
         current.map((item) =>
           item.clientMessageId === clientMessageId
-            ? { ...item, status: unknownResult ? "unconfirmed" : "failed", error: message }
+            ? { ...item, status: failedStatus, error: message }
             : item
         )
       );
@@ -2788,6 +2955,12 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       } else {
         setHistoryError(message ?? null);
         refreshSpaceAllowanceAfterRefusal(queryClient, s.user?.id, channel.spaceId, err);
+        // Hub returns 404 for both deleted channels and channels the reader no longer belongs to.
+        if (isExtensionCompanion() && err instanceof XMatrixApiError && err.status === 404) {
+          const rawDraft = rawComposerBodyByClientIdRef.current.get(clientMessageId);
+          rawComposerBodyByClientIdRef.current.delete(clientMessageId);
+          announceEmbedClearPageThread({ draft: rawDraft });
+        }
       }
       return null;
     }
@@ -2804,6 +2977,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       }
       s.outboundPreviewByClientIdRef.current.delete(outgoing.clientMessageId);
       setOutgoingMessages((current) => current.filter((item) => item.clientMessageId !== outgoing.clientMessageId));
+      announceEmbedOutboxAck(outgoing.clientMessageId);
       setHistoryError(null);
       return;
     }
@@ -2813,6 +2987,22 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     for (const upload of outgoing.uploads ?? []) if (!upload.replacesId) upload.retry();
     const retried: OutgoingMessage = { ...outgoing, status: "pending", error: undefined };
     setHistoryError(null);
+    if (isExtensionCompanion() && retried.attachments.length === 0 && !retried.uploads?.length) {
+      const pendingCreate = pendingEmbedChannelCreateRef.current.get(channel.id);
+      announceEmbedOutboxRegister({
+        clientMessageId: retried.clientMessageId,
+        ...(s.user?.id ? { userId: s.user.id } : {}),
+        channelId: channel.id,
+        spaceId: channel.spaceId,
+        ...(pendingCreate ? { channelCreate: pendingCreate } : {}),
+        body: retried.body,
+        ...(retried.invocationSelections ? { invocationSelections: retried.invocationSelections } : {}),
+        ...(retried.metadata ? { metadata: retried.metadata } : {}),
+        ...(retried.replyToMessageId ? { replyToMessageId: retried.replyToMessageId } : {}),
+        ...(retried.appMentions.length > 0 ? { appMentions: retried.appMentions } : {}),
+        ...(channel.name ? { title: channel.name } : {}),
+      });
+    }
     setOutgoingMessages((current) =>
       current.map((item) => item.clientMessageId === retried.clientMessageId ? retried : item)
     );

@@ -226,118 +226,18 @@ const PAGE = `<!doctype html>
   <link rel="modulepreload" href="main.js">
   <script src="document.js"></script>
   <style>
-    /* The side panel composer is a borderless, divider-free full-bleed warm paper writing dock
-       flush to the bottom edge (Daniel 2026-11-24: occupies the full bottom area with zero borders
-       or dividing lines — pure warm paper surface contrast against the white timeline above, plus a
-       dedicated two-row writing + toolbar layout so it reads unmistakably as an input area; the
-       on-page selection box keeps its floating glass capsule in ask.html).
-       #xmatrix-side-panel guarantees higher specificity than globals.css's glass-surface recipes. */
+    /* Keep the exact native Channel floating glass-pill composer (Daniel 2026-11-25: no full-bleed
+       dock override — use the same Channel composer in both the side panel and the inline dialog),
+       with compact side-panel inset padding so the pill breathes cleanly at ~380px width. */
     #xmatrix-side-panel .xmatrix-app-shell .app-composer {
-      position: relative !important;
-      inset: auto !important;
-      padding: 0 !important;
-      background: transparent !important;
-      border: 0 !important;
-      pointer-events: auto !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer-shell {
-      padding: 0 !important;
-      gap: 0 !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box:not(.app-agent-work-card) {
-      --app-liquid-rim-layers: 0 0 transparent !important;
-      --app-liquid-edge-meniscus: 0 0 transparent !important;
-      --app-glass-edge: none !important;
-      --app-liquid-backdrop-filter: none !important;
-      --app-liquid-surface-bg: oklch(0.958 0.011 80) !important;
-      border: 0 !important;
-      border-radius: 0 !important;
-      background: oklch(0.958 0.011 80) !important;
-      background-color: oklch(0.958 0.011 80) !important;
-      background-image: none !important;
-      box-shadow: none !important;
-      -webkit-backdrop-filter: none !important;
-      backdrop-filter: none !important;
-      transition: background-color 140ms ease !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box:not(.app-agent-work-card):focus-within {
-      border: 0 !important;
-      background: oklch(0.948 0.013 79) !important;
-      background-color: oklch(0.948 0.013 79) !important;
-      box-shadow: none !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box::before,
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box::after {
-      display: none !important;
-      content: none !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer-box > .px-2.pt-2 {
-      padding: 0.625rem 0.75rem 0 !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-browser-page {
-      background: oklch(1 0 0 / 0.78) !important;
-      border: 0 !important;
-      box-shadow: none !important;
-      border-radius: 8px !important;
+      padding-left: 0.75rem !important;
+      padding-right: 0.75rem !important;
+      padding-bottom: 0.875rem !important;
     }
     #xmatrix-side-panel .xmatrix-app-shell .rich-message :is(pre, code) {
       border: 0 !important;
       box-shadow: none !important;
       background: oklch(0.958 0.006 82) !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-input-row {
-      display: flex !important;
-      flex-wrap: wrap !important;
-      align-items: center !important;
-      justify-content: flex-end !important;
-      gap: 0.25rem 0.375rem !important;
-      padding: 0.5rem 0.75rem 0.625rem !important;
-      min-height: 0 !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-field-host {
-      order: -1 !important;
-      flex: 1 0 100% !important;
-      width: 100% !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-textarea {
-      min-height: 2.75rem !important;
-      padding: 0.25rem 0.125rem 0.5rem !important;
-      font-size: 0.875rem !important;
-      line-height: 1.45 !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-attach {
-      order: 1 !important;
-      margin-right: auto !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer .composer-inline-actions:not(.composer-attach) {
-      order: 2 !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer :is(.app-composer-send, .app-composer-send-ready) {
-      order: 3 !important;
-      width: 2rem !important;
-      height: 2rem !important;
-      border-radius: 999px !important;
-      background: oklch(0.24 0.03 60 / 0.11) !important;
-      box-shadow: none !important;
-      -webkit-backdrop-filter: none !important;
-      backdrop-filter: none !important;
-      color: var(--muted-foreground) !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-composer .app-composer-send-ready {
-      background: var(--foreground) !important;
-      color: #ffffff !important;
-    }
-    /* Because the composer is in flow below the scroller, the timeline needs only quiet breathing room at its end. */
-    #xmatrix-side-panel .xmatrix-app-shell .app-message-timeline {
-      scroll-padding-bottom: 0.75rem !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-message-timeline:not(.app-message-timeline-work-dock-offset) > div,
-    #xmatrix-side-panel .xmatrix-app-shell .app-message-timeline:not(.app-message-timeline-work-dock-offset) .app-message-timeline-scroll-end {
-      padding-bottom: 0.75rem !important;
-    }
-    #xmatrix-side-panel .xmatrix-app-shell .app-agent-work-dock {
-      bottom: calc(var(--app-composer-height, 5.5rem) + 0.375rem) !important;
-      padding: 0.125rem 0.75rem !important;
     }
   </style>
 </head>
@@ -365,6 +265,10 @@ const ASK_PAGE = `<!doctype html>
        carries the paper itself (Daniel 2026-11-23: the box is the input alone). Keep the composer in normal flow
        so the frame measures its height directly without an async ResizeObserver stage loop.
        #xmatrix-ask-box guarantees higher specificity than globals.css's :root:not(.dark) .xmatrix-app .app-composer. */
+    #xmatrix-ask-box,
+    #xmatrix-ask-box body {
+      height: 100%;
+    }
     #xmatrix-ask-box .xmatrix-app { background: transparent !important; }
     #xmatrix-ask-box .xmatrix-app .app-composer {
       position: relative !important;
@@ -377,67 +281,57 @@ const ASK_PAGE = `<!doctype html>
       --app-liquid-surface-bg: var(--background) !important;
       --app-liquid-shared-surface-bg: var(--background) !important;
     }
-    /* Follow-up composer inside the expanded inline thread card: borderless warm paper flush to bottom,
-       matching the redesigned side panel with zero borders or dividing lines. */
-    #xmatrix-ask-box .ask-thread-composer .app-composer-shell {
-      padding: 0 !important;
-      gap: 0 !important;
+    @keyframes ask-card-morph {
+      0% {
+        height: var(--ask-morph-start-h, 3.25rem);
+        border-radius: 26px;
+        background-color: var(--background);
+      }
+      100% {
+        height: var(--ask-morph-end-h, 30.5rem);
+        border-radius: 20px;
+        background-color: #ffffff;
+      }
     }
-    #xmatrix-ask-box .ask-thread-composer .app-composer-box:not(.app-agent-work-card) {
-      --app-liquid-rim-layers: 0 0 transparent !important;
-      --app-liquid-edge-meniscus: 0 0 transparent !important;
-      --app-glass-edge: none !important;
-      --app-liquid-backdrop-filter: none !important;
-      --app-liquid-surface-bg: oklch(0.958 0.011 80) !important;
-      border: 0 !important;
-      border-radius: 0 !important;
-      background: oklch(0.958 0.011 80) !important;
-      background-color: oklch(0.958 0.011 80) !important;
-      background-image: none !important;
-      box-shadow: none !important;
-      -webkit-backdrop-filter: none !important;
-      backdrop-filter: none !important;
+    @keyframes ask-header-unfold {
+      0% {
+        height: 0;
+        opacity: 0;
+      }
+      35% {
+        opacity: 0;
+      }
+      100% {
+        height: 2.5rem;
+        opacity: 1;
+      }
     }
-    #xmatrix-ask-box .ask-thread-composer .app-composer-box:not(.app-agent-work-card):focus-within {
-      background: oklch(0.948 0.013 79) !important;
-      background-color: oklch(0.948 0.013 79) !important;
-      box-shadow: none !important;
+    @keyframes ask-card-open {
+      0% {
+        opacity: 0;
+        transform: translateY(6px) scale(0.985);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
     }
-    #xmatrix-ask-box .ask-thread-composer .app-composer-box::before,
-    #xmatrix-ask-box .ask-thread-composer .app-composer-box::after {
-      display: none !important;
-      content: none !important;
+    #xmatrix-ask-box .ask-thread-card-expanding {
+      animation: ask-card-morph 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
     }
-    #xmatrix-ask-box .ask-thread-composer .composer-input-row {
-      padding: 0.45rem 0.75rem 0.55rem !important;
-      min-height: 0 !important;
+    #xmatrix-ask-box .ask-thread-card-open {
+      animation: ask-card-open 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
     }
-    #xmatrix-ask-box .ask-thread-composer .composer-attach {
-      display: none !important;
+    #xmatrix-ask-box .ask-thread-header-enter {
+      overflow: hidden;
+      animation: ask-header-unfold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
     }
-    #xmatrix-ask-box .ask-thread-composer .composer-textarea {
-      min-height: 1.75rem !important;
-      font-size: 0.84375rem !important;
-      line-height: 1.45 !important;
-    }
-    #xmatrix-ask-box .ask-thread-composer :is(.app-composer-send, .app-composer-send-ready) {
-      width: 1.875rem !important;
-      height: 1.875rem !important;
-      border-radius: 999px !important;
-      background: oklch(0.24 0.03 60 / 0.11) !important;
-      box-shadow: none !important;
-      -webkit-backdrop-filter: none !important;
-      backdrop-filter: none !important;
-      color: var(--muted-foreground) !important;
-    }
-    #xmatrix-ask-box .ask-thread-composer .app-composer-send-ready {
-      background: var(--foreground) !important;
-      color: #ffffff !important;
-    }
-    #xmatrix-ask-box .ask-thread-card .rich-message :is(pre, code) {
-      border: 0 !important;
-      box-shadow: none !important;
-      background: oklch(0.958 0.006 82) !important;
+    @media (prefers-reduced-motion: reduce) {
+      #xmatrix-ask-box .ask-thread-card-expanding,
+      #xmatrix-ask-box .ask-thread-card-open,
+      #xmatrix-ask-box .ask-thread-header-enter {
+        animation: none !important;
+      }
     }
   </style>
 </head>

@@ -118,7 +118,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { leaveOutEmbedBrowserPage, openWebPageLink } from "@/lib/extension-embed";
+import { isExtensionInlinePopover, leaveOutEmbedBrowserPage, openWebPageLink } from "@/lib/extension-embed";
 import { useEmbedBrowserPage } from "./use-extension-companion";
 
 import { Face } from "@/components/dashboard/face";
@@ -262,6 +262,7 @@ export const Composer = memo(function Composer({
   compact = false,
   channel: catalogChannel,
   attachmentsEnabled = true,
+  showSelectedAgentsStrip = true,
   panelPlacement = "above",
   draftIdentity,
   startsConversation = false,
@@ -300,6 +301,8 @@ export const Composer = memo(function Composer({
   compact?: boolean;
   channel: ChannelSnapshot | null;
   attachmentsEnabled?: boolean;
+  /** Whether to show the external "Selected Agents" strip above the pill (off in floating ask box). */
+  showSelectedAgentsStrip?: boolean;
   /** Where completion and auxiliary panels expand relative to the input row. */
   panelPlacement?: "above" | "below";
   /** Identifies the draft when `channel` is not its own, e.g. a conversation that does not exist yet. */
@@ -1594,7 +1597,7 @@ export const Composer = memo(function Composer({
     >
       {error && <p className="mb-2 text-sm font-medium text-destructive">{error}</p>}
       {attachmentError && <p className="mb-2 text-sm font-medium text-destructive">{attachmentError}</p>}
-      {Boolean(invocationDraftRef.current?.bindings.some(isAgentBinding)) && <div aria-label="Selected Agents" className="mb-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+      {showSelectedAgentsStrip && Boolean(invocationDraftRef.current?.bindings.some(isAgentBinding)) && <div aria-label="Selected Agents" className="mb-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
         {invocationDraftRef.current?.bindings.filter(isAgentBinding).map(binding => <span key={`${binding.start}:${binding.end}`}>
           {binding.label ?? binding.text}
         </span>)}
@@ -1786,7 +1789,7 @@ export const Composer = memo(function Composer({
                   </div>
                 </div>
               )}
-              {browserPage && (
+              {browserPage && !isExtensionInlinePopover() && (
                 /* The page this message goes with: not a file, a page the Agent reads (`xmatrix browse`). It is
                    drawn as the conversation's page bookmarks are (conversation-page-cards.tsx). */
                 <div className="px-2 pt-2">

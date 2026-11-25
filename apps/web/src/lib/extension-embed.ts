@@ -17,7 +17,7 @@
  * reading (a passage, or the page itself), to quote in the open conversation
  * or to start a new one with.
  */
-import { browserPageMetadata, browserPageOf, CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AuthUser, type SerializedChannel } from "@xmatrix/protocol";
+import { browserPageMetadata, browserPageOf, CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AgentInvocationSelections, type AuthUser, type SerializedChannel } from "@xmatrix/protocol";
 import canonicalVersion from "../../../../version.json" with { type: "json" };
 import { EXTENSION_EMBED_ORIGINS, EXTENSION_ID } from "./extension-embed-origins";
 
@@ -143,11 +143,15 @@ export type EmbedPassage = {
   href: string;
   /** Quote it in the open conversation, or start a new conversation with it. */
   target: "current" | "new";
+  /** Whether to move keyboard focus into the composer (false when auto-popped on page text selection). */
+  focus?: boolean;
+  /** Selection on the page IS the quote (#2004): keep the composer clean and prepend the quote on send. */
+  implicit?: boolean;
 };
 
 /** Validates a passage message: bounded strings, a web address, a known target. */
 export function parseEmbedPassage(data: Record<string, unknown>): EmbedPassage | null {
-  const { text, label, href, target } = data;
+  const { text, label, href, target, focus, implicit } = data;
   if (typeof text !== "string" || typeof label !== "string" || typeof href !== "string") return null;
   if (target !== "current" && target !== "new") return null;
   if (text.length > MAX_PASSAGE_CHARS || label.length > MAX_LABEL_CHARS || href.length > MAX_HREF_CHARS) return null;
@@ -159,7 +163,14 @@ export function parseEmbedPassage(data: Record<string, unknown>): EmbedPassage |
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
   if (!text.trim() && !label.trim()) return null;
-  return { text, label, href: url.toString(), target };
+  return {
+    text,
+    label,
+    href: url.toString(),
+    target,
+    ...(focus === false ? { focus: false } : {}),
+    ...(implicit === true ? { implicit: true } : {}),
+  };
 }
 
 /** The framing extension's messages of one type, while the app is open in its side panel. */
@@ -186,8 +197,164 @@ export function subscribeEmbedPassages(onPassage: (passage: EmbedPassage) => voi
   return stop;
 }
 
+/** Clears a pending implicit page-selection quote when the inline card minimizes or selection clears. */
+export function subscribeEmbedClearPassage(onClear: () => void): () => void {
+  return subscribeParent("clear-passage", () => onClear());
+}
+
+/** A first message handed straight from the floating ask capsule to the embedded App for 0ms optimistic creation. */
+export type EmbedStartConversation = {
+  id: string;
+  body: string;
+  requestKey?: string;
+  clientMessageId?: string;
+  rawQuestion?: string;
+  title?: string;
+  spaceId?: string;
+  href?: string;
+  label?: string;
+  invocationSelections?: AgentInvocationSelections;
+};
+
+export function parseEmbedStartConversation(data: Record<string, unknown>): EmbedStartConversation | null {
+  const { id, body, requestKey, clientMessageId, rawQuestion, title, spaceId, href, label, invocationSelections } = data;
+  if (typeof id !== "string" || !id || id.length > 128) return null;
+  if (typeof body !== "string" || !body.trim() || body.length > 64 * 1024) return null;
+  const cleanHref = href === undefined ? undefined : webAddress(href) ?? undefined;
+  return {
+    id,
+    body,
+    ...(typeof requestKey === "string" && requestKey.length >= 8 && requestKey.length <= 128 ? { requestKey } : {}),
+    ...(typeof clientMessageId === "string" && clientMessageId.length >= 8 && clientMessageId.length <= 128 ? { clientMessageId } : {}),
+    ...(typeof rawQuestion === "string" && rawQuestion.length <= MAX_PASSAGE_CHARS ? { rawQuestion } : {}),
+    ...(typeof title === "string" && title.length <= MAX_LABEL_CHARS ? { title } : {}),
+    ...(typeof spaceId === "string" && spaceId.length <= 128 ? { spaceId } : {}),
+    ...(cleanHref ? { href: cleanHref } : {}),
+    ...(typeof label === "string" && label.length <= MAX_LABEL_CHARS ? { label } : {}),
+    ...(invocationSelections && typeof invocationSelections === "object"
+      ? { invocationSelections: invocationSelections as AgentInvocationSelections }
+      : {}),
+  };
+}
+
+/** Idempotent conversation creation spec registered with the extension's background outbox. */
+export type EmbedOutboxChannelCreate = {
+  requestKey: string;
+  spaceId?: string;
+  name?: string;
+  body?: string;
+  mode: "open" | "closed";
+  memberName: string;
+  metadata?: Record<string, string | boolean>;
+};
+
+/** Durable background outbox entry registered while an extension surface sends a message. */
+export type EmbedOutboxEntry = {
+  clientMessageId: string;
+  userId?: string;
+  channelId?: string;
+  spaceId?: string;
+  channelCreate?: EmbedOutboxChannelCreate;
+  body: string;
+  invocationSelections?: AgentInvocationSelections;
+  metadata?: Record<string, unknown>;
+  replyToMessageId?: string;
+  appMentions?: unknown[];
+  title?: string;
+  href?: string;
+};
+
+/** Registers an in-flight send with the extension service worker so page close/navigation cannot drop it. */
+export function announceEmbedOutboxRegister(entry: EmbedOutboxEntry) {
+  const parent = extensionEmbedParent();
+  if (parent) postToParent(parent, { type: "outbox-register", entry });
+}
+
+/** Confirms (or discards) an in-flight send with the extension service worker so it won't retry. */
+export function announceEmbedOutboxAck(clientMessageId: string) {
+  const parent = extensionEmbedParent();
+  if (parent && clientMessageId) postToParent(parent, { type: "outbox-ack", clientMessageId });
+}
+
+/** Subscribes to 0ms optimistic conversation starts sent from the floating ask capsule to the embedded App. */
+export function subscribeEmbedStartConversation(onStart: (start: EmbedStartConversation) => void): () => void {
+  return subscribeParent("start-conversation", (data) => {
+    const parsed = parseEmbedStartConversation(data);
+    if (parsed) onStart(parsed);
+  });
+}
+
+/** Tells the inline popover host to minimize the open conversation card to the right-edge dock tab. */
+export function announceEmbedMinimize() {
+  const parent = extensionEmbedParent();
+  if (parent) postToParent(parent, { type: "minimize" });
+}
+
+/** Reports the count of in-flight conversation creates or sends so the host never unmounts mid-send. */
+export function announceEmbedPendingSends(count: number) {
+  const parent = extensionEmbedParent();
+  if (parent) postToParent(parent, { type: "pending-sends", count: Math.max(0, Math.floor(count)) });
+}
+
+/** Tells the side panel host that a conversation is now displayed, so any hidden inline App can release. */
+export function announceEmbedChannelDisplayed(path: string) {
+  const parent = extensionEmbedParent();
+  if (parent && APP_CONVERSATION_PATH.test(path)) postToParent(parent, { type: "channel-displayed", path });
+}
+
+/** Whether this packaged app frame is rendered inside the extension's on-page inline popover card. */
+export function isExtensionInlinePopover(): boolean {
+  return typeof document !== "undefined" && document.documentElement.dataset.inlinePopover === "true";
+}
+
 /** A conversation of this app, as `/app/<space>/channels/<conversation>`; nothing else. */
 const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-9_-]{1,128}$/u;
+/** A conversation open address, optionally targeting a specific card/message (`#message:<id>`). */
+const APP_CONVERSATION_OPEN_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-9_-]{1,128}(?:#message:[A-Za-z0-9_.:-]{1,128})?$/u;
+
+let inlineHostTabId: number | null = (() => {
+  if (typeof window === "undefined") return null;
+  const raw = Number(new URLSearchParams(window.location.search).get("tab"));
+  return Number.isInteger(raw) && raw > 0 ? raw : null;
+})();
+
+if (typeof window !== "undefined") {
+  const parent = extensionEmbedParent();
+  if (parent) {
+    window.addEventListener("message", (event: MessageEvent) => {
+      const data = fromParent(event, parent);
+      if (data?.type === "host-tab" && typeof data.tabId === "number" && Number.isInteger(data.tabId) && data.tabId > 0) {
+        inlineHostTabId = data.tabId;
+      }
+    });
+  }
+}
+
+/**
+ * Opens this tab's Chrome side panel directly from an inline-card click gesture
+ * (optionally jumping straight to `messageId`) so approval/decision cards are
+ * never acted on inside an untrusted web-page overlay.
+ */
+export function openEmbedSidePanel(options?: { spaceId?: string; channelId?: string; messageId?: string }) {
+  const cleanMessageId = typeof options?.messageId === "string" && /^[A-Za-z0-9_.:-]{1,128}$/u.test(options.messageId)
+    ? options.messageId
+    : undefined;
+  const parent = extensionEmbedParent();
+  if (parent) {
+    postToParent(parent, {
+      type: "dock-to-panel",
+      ...(options?.spaceId ? { spaceId: options.spaceId } : {}),
+      ...(options?.channelId ? { channelId: options.channelId } : {}),
+      ...(cleanMessageId ? { messageId: cleanMessageId } : {}),
+    });
+  }
+  if (inlineHostTabId !== null) {
+    const sidePanel = (globalThis as unknown as {
+      chrome?: { sidePanel?: { open?: (opts: { tabId: number }) => Promise<void> } };
+    }).chrome?.sidePanel;
+    void sidePanel?.open?.({ tabId: inlineHostTabId })?.catch?.(() => undefined);
+  }
+}
 
 /**
  * What shows an address of this app in the open app; false when it shows
@@ -217,7 +384,8 @@ export function parseEmbedPendingMessage(value: unknown): EmbedPendingMessage | 
 function parseOpenedChannel(value: unknown, path: string): SerializedChannel | undefined {
   if (!value || typeof value !== "object") return undefined;
   const { id, spaceId } = value as { id?: unknown; spaceId?: unknown };
-  if (typeof id !== "string" || typeof spaceId !== "string" || !path.endsWith(`/channels/${id}`)) return undefined;
+  const basePath = path.split("#")[0] ?? path;
+  if (typeof id !== "string" || typeof spaceId !== "string" || !basePath.endsWith(`/channels/${id}`)) return undefined;
   return JSON.stringify(value).length <= 256_000 ? value as SerializedChannel : undefined;
 }
 const addressOpeners = new Set<AddressOpener>();
@@ -231,7 +399,7 @@ const addressOpeners = new Set<AddressOpener>();
 export function subscribeEmbedOpen(onOpen: AddressOpener): () => void {
   addressOpeners.add(onOpen);
   const stop = subscribeParent("open", (data) => {
-    if (typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path)) {
+    if (typeof data.path === "string" && APP_CONVERSATION_OPEN_PATH.test(data.path)) {
       onOpen(data.path, parseOpenedChannel(data.channel, data.path), parseEmbedPendingMessage(data.pending));
     }
   });
@@ -354,10 +522,22 @@ export function subscribeEmbedRecent(onRecent: (recent: EmbedRecent[]) => void):
   return subscribeParent("recent", (data) => onRecent(parseEmbedRecent(data.recent)));
 }
 
-/** Tells the extension a conversation was started here about the page beside the panel. */
-export function announceEmbedPageThread(thread: { path: string; title: string; href: string }) {
+/** Tells the extension a conversation was started or opened for this tab. */
+export function announceEmbedPageThread(thread: { path: string; title: string; href: string; recordRecent?: boolean }) {
   const parent = extensionEmbedParent();
   if (parent && APP_CONVERSATION_PATH.test(thread.path)) postToParent(parent, { type: "page-thread", ...thread });
+}
+
+/** Tells the extension this tab's bound conversation is gone or reset; optional `draft`/`error` restores unsent text. */
+export function announceEmbedClearPageThread(options?: { draft?: string; error?: string }) {
+  const parent = extensionEmbedParent();
+  if (parent) {
+    postToParent(parent, {
+      type: "clear-page-thread",
+      ...(typeof options?.draft === "string" && options.draft ? { draft: options.draft.slice(0, MAX_PASSAGE_CHARS) } : {}),
+      ...(typeof options?.error === "string" && options.error ? { error: options.error.slice(0, 500) } : {}),
+    });
+  }
 }
 
 /**

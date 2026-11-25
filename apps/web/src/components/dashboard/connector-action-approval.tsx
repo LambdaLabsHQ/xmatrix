@@ -8,7 +8,7 @@ import { APP_CONNECTOR_PROVIDER_MANIFESTS, WEB_PROXY_ROUTES } from "@xmatrix/pro
 import { actionClass } from "@/components/ui/action-tone";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { userErrorMessage } from "@/lib/user-facing-error";
-import { AskCard } from "./ask-card";
+import { AskCard, HandleInSidePanelButton } from "./ask-card";
 import { CalendarEventPreview, calendarApprovalQuestion, calendarEventDraft, type CalendarEventDraft } from "./calendar-event-preview";
 import { refetchUnlessHumanPush } from "./workspace-resource-push";
 
@@ -43,8 +43,11 @@ export function useConnectorActionApprovals(userId: string, channelId: string | 
 }
 
 /** Preview is fetched as a current admin, never taken from a message's caller-controlled metadata. */
-export function ConnectorActionApproval({ request, token, userId }: {
-  request: ActionApproval; token: string | null | undefined; userId: string;
+export function ConnectorActionApproval({ request, token, userId, onHandleInSidePanel }: {
+  request: ActionApproval;
+  token: string | null | undefined;
+  userId: string;
+  onHandleInSidePanel?: () => void;
 }) {
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -86,14 +89,18 @@ export function ConnectorActionApproval({ request, token, userId }: {
       </>}
       {previewError && <p role="alert" className="mt-2 text-xs text-destructive">{previewError}. Disallow it and ask the Agent again.</p>}
       {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
-      {!settled && <div className="mt-3 flex gap-2">
+      {!settled && (onHandleInSidePanel ? (
+        <div className="mt-3">
+          <HandleInSidePanelButton onClick={onHandleInSidePanel} />
+        </div>
+      ) : <div className="mt-3 flex gap-2">
         <button type="button" disabled={busy || Boolean(previewError)} onClick={() => void decide("allow")} className={actionClass({ variant: "primary", size: "sm" })}>
           {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Allow once
         </button>
         <button type="button" disabled={busy} onClick={() => void decide("disallow")} className={actionClass({ variant: "secondary", size: "sm" })}>
           <X className="size-3.5" /> Disallow
         </button>
-      </div>}
+      </div>)}
     </AskCard>
   );
 }

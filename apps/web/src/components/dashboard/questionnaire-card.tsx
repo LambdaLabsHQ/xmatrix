@@ -9,7 +9,7 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 import { ArrowUp, Check, Circle, CircleDot, CircleHelp, Pencil, Square, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { actionClass } from "@/components/ui/action-tone";
-import { AskCard } from "./ask-card";
+import { AskCard, HandleInSidePanelButton } from "./ask-card";
 import type { QuestionnaireState } from "@xmatrix/protocol";
 import type { TimelineItem } from "./workspace-shell-message-model";
 
@@ -148,10 +148,12 @@ export function QuestionnaireMessage({
   questionnaire,
   message,
   onAnswer,
+  onHandleInSidePanel,
 }: {
   questionnaire: QuestionnaireMetadata;
   message: TimelineItem;
   onAnswer: (message: TimelineItem, answer: QuestionnaireAnswer) => Promise<boolean>;
+  onHandleInSidePanel?: () => void;
 }) {
   const seen = useContext(SettledQuestionnaires).get(message.messageId ?? "");
   const [selected, setSelected] = useState<Record<string, string[]>>({});
@@ -228,25 +230,28 @@ export function QuestionnaireMessage({
               picked={selected[question.id] ?? []}
               typed={other[question.id] ?? ""}
               answer={answers ? (answers[question.id] ?? []) : withdrawn ? [] : undefined}
+              readOnly={Boolean(onHandleInSidePanel)}
               onToggle={(option) => toggle(question, option)}
               onType={(value) => typeOther(question, value)}
             />
           ))}
         </div>
-        {!answers && !withdrawn && (
+        {!answers && !withdrawn && (onHandleInSidePanel ? (
+          <HandleInSidePanelButton onClick={onHandleInSidePanel} className="mt-2" />
+        ) : (
           <button type="button" disabled={!canSubmit} onClick={submit}
             className={actionClass({ variant: "primary", size: "sm" }, "mt-2")}>
             <ArrowUp className="size-3.5" strokeWidth={2.5} />
             Send answer
           </button>
-        )}
+        ))}
       </AskCard>
     </div>
   );
 }
 
 /** One question: its prompt, then its options as paper lines. */
-function QuestionLines({ question, header, lone, group, picked, typed, answer, onToggle, onType }: {
+function QuestionLines({ question, header, lone, group, picked, typed, answer, readOnly = false, onToggle, onType }: {
   question: QuestionnaireQuestion;
   header?: string;
   /** The card's own question line already shows this prompt. */
@@ -256,6 +261,8 @@ function QuestionLines({ question, header, lone, group, picked, typed, answer, o
   typed: string;
   /** What the card was answered with; the lines no longer take input. */
   answer?: string[];
+  /** When true (inline web-page popover), options are shown read-only with no interactive inputs. */
+  readOnly?: boolean;
   onToggle: (option: QuestionnaireOption) => void;
   onType: (value: string) => void;
 }) {
@@ -264,8 +271,9 @@ function QuestionLines({ question, header, lone, group, picked, typed, answer, o
   const On = multiple ? SquareCheck : CircleDot;
   const known = new Set(question.options.map((option) => option.label));
   const typedAnswer = answer?.filter((value) => !known.has(value)).join(", ");
+  const locked = Boolean(answer) || readOnly;
   return (
-    <fieldset className="min-w-0" disabled={Boolean(answer)}>
+    <fieldset className="min-w-0" disabled={locked}>
       <legend className={lone ? "sr-only" : "text-[15px] font-bold leading-snug"}>
         {header ? <span className="mr-1.5 text-xs font-black uppercase tracking-wide text-muted-foreground">{header}</span> : null}
         {question.label}
@@ -279,17 +287,19 @@ function QuestionLines({ question, header, lone, group, picked, typed, answer, o
               <label
                 className={cn(
                   "flex w-full min-w-0 items-center gap-3 py-2.5 text-left",
-                  answer ? "cursor-default" : "cursor-pointer",
+                  locked ? "cursor-default" : "cursor-pointer",
                   answer && !chosen && "opacity-45"
                 )}
               >
-                <input
-                  type={multiple ? "checkbox" : "radio"}
-                  name={group}
-                  checked={chosen}
-                  onChange={() => onToggle(option)}
-                  className="sr-only"
-                />
+                {!readOnly && (
+                  <input
+                    type={multiple ? "checkbox" : "radio"}
+                    name={group}
+                    checked={chosen}
+                    onChange={() => onToggle(option)}
+                    className="sr-only"
+                  />
+                )}
                 <span className="app-tool-state-icon" data-state={chosen ? "running" : "offline"} aria-hidden="true">
                   <Mark className="size-4" />
                 </span>
@@ -314,7 +324,7 @@ function QuestionLines({ question, header, lone, group, picked, typed, answer, o
               </span>
             </li>
           ) : null
-        ) : question.allowOther ? (
+        ) : !readOnly && question.allowOther ? (
           <li>
             <label className="flex w-full min-w-0 items-center gap-3 py-2.5">
               <span className="app-tool-state-icon" data-state={typed.trim() ? "running" : "offline"} aria-hidden="true">

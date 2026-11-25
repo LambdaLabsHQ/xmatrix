@@ -326,3 +326,34 @@ test("requestPlayConsoleBucket validates extension answers and handles missing o
   replyWith = undefined;
   assert.deepEqual(await embed.requestPlayConsoleBucket({ timeoutMs: 500 }), { status: "unavailable" });
 });
+
+test("start-conversation and minimize validate extension embed messages", (t) => {
+  const { win, embed } = load(t, EXTENSION);
+  const started = [];
+  const stop = embed.subscribeEmbedStartConversation((start) => started.push(start));
+  const payload = {
+    protocol: "xmatrix-embed/1",
+    type: "start-conversation",
+    id: "start-1",
+    body: "> quote\n\nis this right?",
+    rawQuestion: "is this right?",
+    title: "Pool notes",
+    spaceId: "space-1",
+    href: "https://a.example/pool",
+    label: "Pool notes",
+  };
+  win.dispatch({ source: win.parent, origin: "https://evil.example", data: payload });
+  win.dispatch({ source: win.parent, origin: EXTENSION, data: { ...payload, body: "   " } });
+  win.dispatch({ source: win.parent, origin: EXTENSION, data: payload });
+  stop();
+  assert.equal(started.length, 1);
+  assert.equal(started[0].id, "start-1");
+  assert.equal(started[0].rawQuestion, "is this right?");
+  assert.equal(started[0].href, "https://a.example/pool");
+
+  embed.announceEmbedMinimize();
+  assert.deepEqual(win.parent.posted.at(-1), {
+    origin: EXTENSION,
+    message: { protocol: "xmatrix-embed/1", type: "minimize" },
+  });
+});

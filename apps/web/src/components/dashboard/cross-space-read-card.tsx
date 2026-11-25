@@ -10,7 +10,7 @@ import { actionClass } from "@/components/ui/action-tone";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { userErrorMessage } from "@/lib/user-facing-error";
-import { AskCard, AskError } from "./ask-card";
+import { AskCard, AskError, HandleInSidePanelButton } from "./ask-card";
 import { refetchUnlessHumanPush } from "./workspace-resource-push";
 
 /**
@@ -104,10 +104,11 @@ export function useChannelPendingCrossSpaceReads(userId: string, channelId: stri
   return query.data ?? [];
 }
 
-export function CrossSpaceReadCard({ request, token, userId }: {
+export function CrossSpaceReadCard({ request, token, userId, onHandleInSidePanel }: {
   request: CrossSpaceReadMetadata;
   token?: string | null;
   userId: string;
+  onHandleInSidePanel?: () => void;
 }) {
   const fetch = useXMatrixQueryFetch(userId);
   const readGrant = useGrantFetch(userId, token);
@@ -171,46 +172,56 @@ export function CrossSpaceReadCard({ request, token, userId }: {
       {isOwner && grantQuery.isLoading && <AnimatedIcon icon={Loader2} className="mt-2 flex size-3.5 animate-spin text-muted-foreground" />}
       <AskError error={error} loadError={grantQuery.error} action="Couldn't load this access request"
         onRetry={() => void grantQuery.refetch()} />
-      {isOwner && grant?.status === "pending" && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void decide("approve")}
-            className={actionClass({ variant: "primary", size: "sm" })}
-          >
-            {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-            Approve
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void decide("deny")}
-            className={actionClass({ variant: "secondary", size: "sm" })}
-          >
-            <X className="size-3.5" />
-            Deny
-          </button>
-          {grant.scope === "space" && (
-            <label className="ml-1 inline-flex items-center gap-1.5 text-xs text-foreground">
-              <input type="checkbox" checked={narrow} disabled={busy} onChange={(event) => setNarrow(event.target.checked)} />
-              Only this Channel
-            </label>
+      {onHandleInSidePanel ? (
+        isOwner && (grant?.status === "pending" || grant?.status === "approved") ? (
+          <div className="mt-3">
+            <HandleInSidePanelButton onClick={onHandleInSidePanel} />
+          </div>
+        ) : null
+      ) : (
+        <>
+          {isOwner && grant?.status === "pending" && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void decide("approve")}
+                className={actionClass({ variant: "primary", size: "sm" })}
+              >
+                {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+                Approve
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void decide("deny")}
+                className={actionClass({ variant: "secondary", size: "sm" })}
+              >
+                <X className="size-3.5" />
+                Deny
+              </button>
+              {grant.scope === "space" && (
+                <label className="ml-1 inline-flex items-center gap-1.5 text-xs text-foreground">
+                  <input type="checkbox" checked={narrow} disabled={busy} onChange={(event) => setNarrow(event.target.checked)} />
+                  Only this Channel
+                </label>
+              )}
+            </div>
           )}
-        </div>
-      )}
-      {isOwner && grant?.status === "approved" && (
-        <div className="mt-3">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void decide("revoke")}
-            className={actionClass({ variant: "secondary", size: "sm" })}
-          >
-            {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
-            Revoke now
-          </button>
-        </div>
+          {isOwner && grant?.status === "approved" && (
+            <div className="mt-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void decide("revoke")}
+                className={actionClass({ variant: "secondary", size: "sm" })}
+              >
+                {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+                Revoke now
+              </button>
+            </div>
+          )}
+        </>
       )}
     </AskCard>
   );

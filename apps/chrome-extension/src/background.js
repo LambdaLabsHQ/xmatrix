@@ -20,8 +20,9 @@ import {
   tokenExpiresAt,
   withSession,
 } from "./hub-client.js";
-import { capturableUrl, discussionTitle, pagePassage } from "./passage.js";
-import { isTrustedWebAppOrigin, pageKey, readTabSnapshot, showWebPage, tabPageThread } from "./page-tab.js";
+import { capturableUrl, discussionTitle, pagePassage, pageTitle } from "./passage.js";
+import { OUTBOX_ALARM_NAME, createOutbox } from "./outbox.js";
+import { clearAllTabThreads, clearTabThread, isTrustedWebAppOrigin, migrateTabThread, pageKey, readTabSnapshot, selectBrowserReadTab, setTabThread, showWebPage, tabPageThread } from "./page-tab.js";
 import {
   PLAY_BUCKET_PATTERN,
   findOpenPlayConsoleBuckets,
@@ -128,6 +129,7 @@ async function beginSignIn() {
 
 async function endSession() {
   const session = await store.get();
+  await outbox.clearAll().catch(() => undefined);
   await store.set(null);
   if (session) await signOut(deps, session).catch(() => undefined);
 }
@@ -156,13 +158,43 @@ function enablePanel(tabId) {
   return chrome.sidePanel.setOptions({ tabId, path: `src/sidepanel.html?tab=${tabId}`, enabled: true });
 }
 
-/** Tabs whose side panel page currently holds an open port to this service worker. */
-const openPanels = new Set();
+/** Tabs whose side panel page currently holds an open port to this service worker (`tabId -> Port`). */
+const openPanels = new Map();
+/** Safety fallback timers to release hidden inline Apps if a panel opens without displaying a channel. */
+const panelReleaseTimers = new Map();
+/** In-memory index of tabs known to have a bound thread so `tabs.onUpdated` avoids storage reads for unbound tabs. */
+let boundThreadTabs = null;
+
+function clearPanelReleaseTimer(tabId) {
+  const timer = panelReleaseTimers.get(tabId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    panelReleaseTimers.delete(tabId);
+  }
+}
+
+function releaseTabInlineApp(tabId) {
+  clearPanelReleaseTimer(tabId);
+  if (!Number.isInteger(tabId)) return;
+  void chrome.tabs.sendMessage(tabId, { type: "panel-release" }).catch(() => undefined);
+}
+
+async function ensureBoundThreadTabs() {
+  if (boundThreadTabs) return boundThreadTabs;
+  const stored = await chrome.storage.local.get(null).catch(() => ({}));
+  const ids = new Set();
+  for (const [key, thread] of Object.entries(stored ?? {})) {
+    if (!key.startsWith("askThread:") || !thread?.channelId || !thread?.spaceId) continue;
+    const id = Number(key.slice("askThread:".length));
+    if (Number.isInteger(id)) ids.add(id);
+  }
+  boundThreadTabs = ids;
+  return ids;
+}
 
 async function notifyTabPanelState(tabId, open) {
   if (!Number.isInteger(tabId)) return;
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  const thread = tab ? await tabPageThread(chrome, tabId, tab.url) : null;
+  const thread = await tabPageThread(chrome, tabId);
   if (!open && thread) await enablePanel(tabId).catch(() => undefined);
   await chrome.tabs.sendMessage(tabId, {
     type: "panel-state",
@@ -176,11 +208,19 @@ chrome.runtime.onConnect.addListener((port) => {
   const match = /^sidepanel:(\d+)$/u.exec(port.name);
   if (!match) return;
   const tabId = Number(match[1]);
-  openPanels.add(tabId);
+  openPanels.set(tabId, port);
   notifyTabPanelState(tabId, true).catch(() => undefined);
+  clearPanelReleaseTimer(tabId);
+  panelReleaseTimers.set(tabId, setTimeout(() => {
+    panelReleaseTimers.delete(tabId);
+    if (openPanels.has(tabId)) releaseTabInlineApp(tabId);
+  }, 10_000));
   port.onDisconnect.addListener(() => {
-    openPanels.delete(tabId);
-    notifyTabPanelState(tabId, false).catch(() => undefined);
+    if (openPanels.get(tabId) === port) {
+      openPanels.delete(tabId);
+      clearPanelReleaseTimer(tabId);
+      notifyTabPanelState(tabId, false).catch(() => undefined);
+    }
   });
 });
 
@@ -241,34 +281,81 @@ async function askContext(tab, { optionalPassage = false } = {}) {
   const session = stored ? { token: stored.token, user: stored.user ?? null } : null;
   if (!session?.user) throw Object.assign(new Error("Sign in to xMatrix in the side panel first."), { code: "signed_out" });
   const { lastSpace } = await chrome.storage.local.get("lastSpace");
-  const thread = passage ? await tabPageThread(chrome, tab.id, passage.href) : null;
+  const [thread, outboxFailures] = await Promise.all([
+    tabPageThread(chrome, tab.id),
+    outbox.listFailures().catch(() => []),
+  ]);
   if (thread) await enablePanel(tab.id).catch(() => undefined);
   return {
     token: session.token,
     user: session.user,
     spaceId: thread?.spaceId ?? lastSpace?.id ?? null,
     passage: passage ? { text: passage.text, label: passage.label, href: passage.href } : null,
-    thread: thread ? { spaceId: thread.spaceId, channelId: thread.channelId, title: thread.title ?? passage?.label ?? "" } : null,
+    thread: thread ? {
+      spaceId: thread.spaceId,
+      channelId: thread.channelId,
+      title: thread.title ?? passage?.label ?? "",
+      snapshot: thread.snapshot ?? null,
+    } : null,
+    outboxFailures,
     panelOpen: openPanels.has(tab.id),
     tabId: tab.id,
   };
 }
 
-async function askBrowserRead(tab, { requestId, target }) {
+async function readSnapshotAnswer(targetTab) {
+  const href = capturableUrl(targetTab?.url ?? "");
+  if (!targetTab?.id || !href) return { refusal: "no-page" };
+  const text = await readTabSnapshot(chrome, targetTab.id);
+  return text ? { title: targetTab.title || "", href, text } : { refusal: "unreadable" };
+}
+
+/** Picks an open side panel port to show a cross-tab `--tab <url>` approval dialog. */
+async function pickApprovalPanelPort(preferredTabId = null) {
+  if (openPanels.size === 0) return null;
+  const [front] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+  if (front?.id !== undefined && openPanels.has(front.id)) return openPanels.get(front.id);
+  if (Number.isInteger(preferredTabId) && openPanels.has(preferredTabId)) return openPanels.get(preferredTabId);
+  return openPanels.values().next().value ?? null;
+}
+
+/**
+ * Single Service Worker arbiter for `xmatrix browse` across BOTH side panels and inline cards:
+ * claims each `requestId` at most once and ALWAYS answers immediately (never silent, never 250ms race).
+ * - `current` / `conversation`: reads only via `selectBrowserReadTab` (bound tab or foreground tab with open panel).
+ * - `--tab <url>`: forwards directly to an open side panel port for approval, or refuses `panel-closed`.
+ */
+async function resolveBrowserRead({ requestId, target, channelId, agentName, panelTabId } = {}) {
   if (typeof requestId !== "string" || !requestId || !panelHandlers.claimBrowserRead({ requestId })) return;
+  if (target !== "current" && target !== "conversation") {
+    const port = await pickApprovalPanelPort(panelTabId);
+    if (port) {
+      try {
+        port.postMessage({
+          type: "approve-browser-read",
+          requestId,
+          target: String(target ?? ""),
+          channelId: typeof channelId === "string" ? channelId : "",
+          agentName: typeof agentName === "string" ? agentName : "",
+        });
+        return;
+      } catch {
+        // Port disconnected right before post; fall through to refuse immediately.
+      }
+    }
+    await panelHandlers.browserReadAnswer({ requestId, answer: { refusal: "panel-closed" } });
+    return;
+  }
   let answer;
   try {
-    if (target === "current" || target === "conversation") {
-      const freshTab = await chrome.tabs.get(tab.id).catch(() => tab);
-      const href = capturableUrl(freshTab?.url ?? "");
-      if (!freshTab?.id || !href) {
-        answer = { refusal: "no-page" };
-      } else {
-        const text = await readTabSnapshot(chrome, freshTab.id);
-        answer = text ? { title: freshTab.title || "", href, text } : { refusal: "unreadable" };
-      }
+    const selected = await selectBrowserReadTab(chrome, {
+      channelId: typeof channelId === "string" ? channelId : "",
+      openPanelTabIds: openPanels,
+    });
+    if (selected.refusal || !selected.tab) {
+      answer = { refusal: selected.refusal ?? "no-page" };
     } else {
-      answer = { refusal: "panel-closed" };
+      answer = await readSnapshotAnswer(selected.tab);
     }
   } catch {
     answer = { refusal: "unreadable" };
@@ -276,17 +363,25 @@ async function askBrowserRead(tab, { requestId, target }) {
   await panelHandlers.browserReadAnswer({ requestId, answer });
 }
 
-/** Prepares this tab's side panel to open straight onto the inline conversation (called on ◫ or edge dock click). */
-async function askDock(tab, { spaceId, channelId } = {}) {
-  const existing = await tabPageThread(chrome, tab.id, tab.url);
+async function askBrowserRead(_tab, args) {
+  return resolveBrowserRead(args);
+}
+
+/** Prepares this tab's side panel to open straight onto the inline conversation (called on ◫, edge dock, or approval handoff click). */
+async function askDock(tab, { spaceId, channelId, messageId } = {}) {
+  const existing = await tabPageThread(chrome, tab.id);
   const resolvedSpaceId = typeof spaceId === "string" && spaceId ? spaceId : existing?.spaceId;
   const resolvedChannelId = typeof channelId === "string" && channelId ? channelId : existing?.channelId;
+  const cleanMessageId = typeof messageId === "string" && /^[A-Za-z0-9_.:-]{1,128}$/u.test(messageId)
+    ? messageId
+    : "";
   await enablePanel(tab.id).catch(() => undefined);
   if (resolvedSpaceId && resolvedChannelId) {
+    const hash = cleanMessageId ? `#message:${encodeURIComponent(cleanMessageId)}` : "";
     await chrome.storage.session.set({
       [`openPath:${tab.id}`]: {
         channel: existing?.snapshot ?? null,
-        path: `/app/${encodeURIComponent(resolvedSpaceId)}/channels/${encodeURIComponent(resolvedChannelId)}`,
+        path: `/app/${encodeURIComponent(resolvedSpaceId)}/channels/${encodeURIComponent(resolvedChannelId)}${hash}`,
         at: Date.now(),
       },
     });
@@ -309,15 +404,13 @@ async function rememberRecent({ spaceId, channelId, title, href }) {
 }
 
 /**
- * The conversation a tab's questions go to while it stays on one page: the
- * first question there starts it, and the next ones follow up in it (Daniel
- * 2026-11-23: asking again on the same page continues the conversation). A
- * question on another page, or in another Space, starts a new one.
+ * The conversation a tab's questions go to (one tab = one conversation thread):
+ * switching pages inside the same tab continues the tab's thread while updating
+ * each message's browserPage metadata; switching Space or clicking "+" starts fresh.
  */
-async function askThread(tab, href, spaceId) {
-  const key = `askThread:${tab.id}`;
-  const { [key]: thread } = await chrome.storage.session.get(key);
-  return thread && thread.page === pageKey(href) && thread.spaceId === spaceId ? thread : null;
+async function askThread(tab, spaceId) {
+  const thread = await tabPageThread(chrome, tab.id);
+  return thread && thread.spaceId === spaceId ? thread : null;
 }
 
 async function askSend(tab, { body, invocationSelections, channelId: explicitChannelId, spaceId: explicitSpaceId, page: explicitPage }) {
@@ -334,8 +427,9 @@ async function askSend(tab, { body, invocationSelections, channelId: explicitCha
   const metadata = { browserPage: { title: passage.label, href: passage.href } };
   const threadTitle = discussionTitle(passage.text || passage.label);
   const show = async (space, channel) => {
-    await chrome.storage.session.set({ [`askThread:${tab.id}`]: { page: pageKey(passage.href), spaceId: space.id,
-      channelId: channel.id, title: channel.snapshot?.name || threadTitle, snapshot: channel.snapshot ?? null } });
+    await setTabThread(chrome, tab.id, { page: pageKey(passage.href), spaceId: space.id,
+      channelId: channel.id, title: channel.snapshot?.name || threadTitle, snapshot: channel.snapshot ?? null });
+    boundThreadTabs?.add(tab.id);
     await chrome.storage.local.set({ lastSpace: { id: space.id, name: space.name } });
     await chrome.storage.session.set({ [`openPath:${tab.id}`]: { channel: channel.snapshot ?? null,
       path: `/app/${encodeURIComponent(space.id)}/channels/${encodeURIComponent(channel.id)}`, at: Date.now(),
@@ -359,7 +453,7 @@ async function askSend(tab, { body, invocationSelections, channelId: explicitCha
       await message(explicitChannelId, targetSpace.id);
       return { space: targetSpace, channel };
     }
-    const thread = await askThread(tab, passage.href, space.id);
+    const thread = await askThread(tab, space.id);
     if (thread) {
       const channel = { id: thread.channelId, snapshot: thread.snapshot ?? null };
       await show(space, channel);
@@ -392,9 +486,87 @@ async function askSend(tab, { body, invocationSelections, channelId: explicitCha
     spaceId: result.space.id,
     channelId: result.channel.id,
     title: result.channel.snapshot?.name || threadTitle,
+    snapshot: result.channel.snapshot ?? null,
     clientMessageId,
   };
 }
+
+// ---- Durable outbox: ensures inline-card and side-panel sends reach the Hub even if the page closes or navigates.
+
+async function deliverOutboxEntry(entry, { onChannelCreated }) {
+  const session = await store.get();
+  if (!session) throw Object.assign(new Error("Sign in to xMatrix first."), { code: "signed_out" });
+  if (entry.userId && session.user?.id && entry.userId !== session.user.id) {
+    throw new HubError(403, "Outbox entry belongs to another account.", "account_mismatch");
+  }
+  let resolvedChannelId = entry.channelId ?? null;
+  let resolvedSpaceId = entry.spaceId ?? entry.channelCreate?.spaceId ?? null;
+  let createdSnapshot = null;
+  await authed(async (scoped, token) => {
+    if (entry.channelCreate && !entry.channelCreated) {
+      if (!resolvedSpaceId) {
+        const space = await quickAskSpace(token);
+        if (!space) throw new HubError(404, "You are not in any Space yet.");
+        resolvedSpaceId = space.id;
+      }
+      const createName = entry.channelCreate.name
+        || discussionTitle(entry.channelCreate.body || entry.body);
+      const created = await createConversation(scoped, token, {
+        spaceId: resolvedSpaceId,
+        name: createName,
+        mode: entry.channelCreate.mode,
+        memberName: entry.channelCreate.memberName || session.user?.name || "Human",
+        metadata: entry.channelCreate.metadata,
+        requestKey: entry.channelCreate.requestKey,
+      });
+      resolvedChannelId = created.id;
+      resolvedSpaceId = created.spaceId || resolvedSpaceId;
+      createdSnapshot = created.snapshot ?? null;
+      await onChannelCreated({ channelId: resolvedChannelId, spaceId: resolvedSpaceId });
+    }
+    if (!resolvedChannelId) throw new HubError(400, "Missing conversation ID for outbox send.");
+    await sendMessage(scoped, token, {
+      channelId: resolvedChannelId,
+      body: entry.body,
+      clientMessageId: entry.clientMessageId,
+      invocationSelections: entry.invocationSelections,
+      metadata: entry.metadata,
+      replyToMessageId: entry.replyToMessageId,
+      appMentions: entry.appMentions,
+    });
+  });
+  if (resolvedSpaceId && resolvedChannelId) {
+    const page = entry.metadata?.browserPage;
+    const href = capturableUrl(String(entry.href || page?.href || ""));
+    const title = String(createdSnapshot?.name || entry.title || page?.title || "").slice(0, 300);
+    if (href) {
+      void rememberRecent({ spaceId: resolvedSpaceId, channelId: resolvedChannelId, title: title || href, href })
+        .catch(() => undefined);
+    }
+    if (Number.isInteger(entry.tabId)) {
+      const tab = await chrome.tabs.get(entry.tabId).catch(() => null);
+      if (tab) {
+        const existing = await tabPageThread(chrome, entry.tabId).catch(() => null);
+        if (!existing) {
+          await setTabThread(chrome, entry.tabId, {
+            page: href ? pageKey(href) : "",
+            spaceId: resolvedSpaceId,
+            channelId: resolvedChannelId,
+            title,
+            snapshot: createdSnapshot,
+          }).catch(() => undefined);
+          boundThreadTabs?.add(entry.tabId);
+        }
+      }
+    }
+  }
+}
+
+const outbox = createOutbox({
+  storage: chrome.storage.local,
+  alarms: chrome.alarms,
+  deliver: deliverOutboxEntry,
+});
 
 // ---- Quick select: a small button beside selected text, on pages the person allowed.
 
@@ -480,13 +652,28 @@ const panelHandlers = {
     });
   },
   takePassages,
-  /** The panel's app started a conversation about the page in this tab ("Ask about this page"): its questions go there now. */
-  async rememberPageThread({ tabId, path, title, href }) {
+  /** The panel's app started or switched to a conversation for this tab: all surfaces in this tab follow it. */
+  async rememberPageThread({ tabId, path, title, href, recordRecent = true }) {
     const match = typeof path === "string" && path.match(/^\/app\/([A-Za-z0-9_-]{1,128})\/channels\/([A-Za-z0-9_-]{1,128})$/u);
+    if (!match || !Number.isInteger(tabId)) return;
     const page = capturableUrl(String(href ?? ""));
-    if (!match || !page || !Number.isInteger(tabId)) return;
-    await chrome.storage.session.set({ [`askThread:${tabId}`]: { page: pageKey(page), spaceId: match[1], channelId: match[2], snapshot: null } });
-    await rememberRecent({ spaceId: match[1], channelId: match[2], title, href: page });
+    await setTabThread(chrome, tabId, {
+      page: page ? pageKey(page) : "",
+      spaceId: match[1],
+      channelId: match[2],
+      title: String(title ?? "").slice(0, 300),
+      snapshot: null,
+    });
+    boundThreadTabs?.add(tabId);
+    if (page && recordRecent !== false) await rememberRecent({ spaceId: match[1], channelId: match[2], title, href: page });
+    await notifyTabPanelState(tabId, openPanels.has(tabId)).catch(() => undefined);
+  },
+  /** The person clicked "+" New conversation in this tab's side panel: unbind the previous thread. */
+  async clearPageThread({ tabId }) {
+    if (!Number.isInteger(tabId)) return;
+    await clearTabThread(chrome, tabId);
+    boundThreadTabs?.delete(tabId);
+    await notifyTabPanelState(tabId, openPanels.has(tabId)).catch(() => undefined);
   },
   /**
    * An Agent's request to read a page reaches every open side panel: the first to claim it answers, so the person
@@ -498,6 +685,7 @@ const panelHandlers = {
     setTimeout(() => browserReadClaims.delete(requestId), 120_000);
     return true;
   },
+  resolveBrowserRead,
   /** The page's text, or why it was not read, back to the Agent waiting for it (packages/hub browser-read.ts). */
   browserReadAnswer({ requestId, answer }) {
     if (typeof requestId !== "string" || !answer || typeof answer !== "object") throw new Error("Invalid answer");
@@ -520,6 +708,26 @@ const panelHandlers = {
   },
   async quickSelectAsked() {
     await chrome.storage.local.set({ quickSelectAsked: true });
+  },
+  /** The side panel has painted its conversation: safe to release any hidden inline App in this tab. */
+  panelReady({ tabId }) {
+    if (Number.isInteger(tabId) && openPanels.has(tabId)) releaseTabInlineApp(tabId);
+    return { ok: true };
+  },
+  outboxRegister(args) {
+    return outbox.register(args);
+  },
+  outboxAck({ clientMessageId } = {}) {
+    return outbox.ack(clientMessageId);
+  },
+  outboxFlushTab({ tabId, source } = {}) {
+    return outbox.flushForTab(tabId, { source: source ?? null });
+  },
+  outboxFailures() {
+    return outbox.listFailures();
+  },
+  dismissOutboxFailures() {
+    return outbox.clearFailures();
   },
   /** The conversation the extension just started for this tab's panel, once. */
   async takeOpenPath({ tabId }) {
@@ -639,23 +847,54 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     return false;
   }
   if (message?.type === "askPrepare" && sender.tab && !isExtensionPage(sender)) {
-    return answer(setPendingAsk(sender.tab, String(message.text ?? ""),
-      { title: typeof message.title === "string" ? message.title : undefined,
-        url: typeof message.url === "string" ? message.url : undefined }));
+    return answer((async () => {
+      const url = typeof message.url === "string" ? message.url : sender.tab.url;
+      await setPendingAsk(sender.tab, String(message.text ?? ""), {
+        title: typeof message.title === "string" ? message.title : undefined,
+        url,
+      });
+      const thread = await tabPageThread(chrome, sender.tab.id);
+      if (thread && !openPanels.has(sender.tab.id)) await enablePanel(sender.tab.id).catch(() => undefined);
+      return { panelOpen: openPanels.has(sender.tab.id), hasThread: Boolean(thread) };
+    })());
   }
   if (message?.type === "askPageState" && sender.tab && !isExtensionPage(sender)) {
     return answer((async () => {
-      const thread = await tabPageThread(chrome, sender.tab.id, typeof message.url === "string" ? message.url : sender.tab.url);
+      const thread = await tabPageThread(chrome, sender.tab.id);
       if (thread && !openPanels.has(sender.tab.id)) await enablePanel(sender.tab.id).catch(() => undefined);
       return { panelOpen: openPanels.has(sender.tab.id), hasThread: Boolean(thread) };
     })());
   }
   // The question box is this extension's page, framed in that tab: it reads and sends that tab's ask only.
   if (isExtensionPage(sender) && sender.tab?.id !== undefined) {
+    if (message?.type === "askTabId") return answer({ tabId: sender.tab.id });
     if (message?.type === "askContext") return answer(askContext(sender.tab, message.args ?? {}));
     if (message?.type === "askSend") return answer(askSend(sender.tab, message.args ?? {}));
     if (message?.type === "askDock") return answer(askDock(sender.tab, message.args ?? {}));
+    if (message?.type === "askRememberThread") {
+      return answer((async () => {
+        await panelHandlers.rememberPageThread({ tabId: sender.tab.id, ...message.args });
+        await chrome.storage.session.remove(`ask:${sender.tab.id}`).catch(() => undefined);
+      })());
+    }
+    if (message?.type === "askClearThread") return answer(panelHandlers.clearPageThread({ tabId: sender.tab.id }));
     if (message?.type === "askBrowserRead") return answer(askBrowserRead(sender.tab, message.args ?? {}));
+    if (message?.type === "outboxRegister") {
+      const args = message.args ?? {};
+      return answer(outbox.register({
+        ...args,
+        tabId: Number.isInteger(args.tabId) ? args.tabId : sender.tab.id,
+        source: args.source === "sidepanel" ? "sidepanel" : "inline",
+      }));
+    }
+    if (message?.type === "outboxAck") {
+      return answer(outbox.ack(message.args?.clientMessageId));
+    }
+    if (message?.type === "outboxFlushTab") {
+      return answer(outbox.flushForTab(sender.tab.id, { source: message.args?.source ?? "inline" }));
+    }
+    if (message?.type === "outboxFailures") return answer(outbox.listFailures());
+    if (message?.type === "dismissOutboxFailures") return answer(outbox.clearFailures());
     if (message?.type === "askQuoteToPanel") {
       return answer(queuePassage(pagePassage({
         text: String(message.args?.text ?? ""),
@@ -708,9 +947,16 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== MENU_ASK && info.menuItemId !== MENU_PAGE) return;
   // The menu's click lets this extension into this one tab (activeTab) to open the box there.
   try {
-    await setPendingAsk({ ...tab, url: info.pageUrl ?? tab.url }, info.menuItemId === MENU_ASK ? info.selectionText ?? "" : "");
+    const targetUrl = info.pageUrl ?? tab.url;
+    await setPendingAsk({ ...tab, url: targetUrl }, info.menuItemId === MENU_ASK ? info.selectionText ?? "" : "");
+    const existingThread = await tabPageThread(chrome, tab.id);
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["src/selection.js"] });
-    await chrome.tabs.sendMessage(tab.id, { type: "open-ask", page: info.menuItemId === MENU_PAGE, text: info.selectionText ?? "" });
+    await chrome.tabs.sendMessage(tab.id, {
+      type: "open-ask",
+      page: info.menuItemId === MENU_PAGE,
+      text: info.selectionText ?? "",
+      hasThread: Boolean(existingThread),
+    });
   } catch {
     // A page no extension may enter (the Web Store, a PDF): the panel starts the conversation instead.
     openPanel(tab);
@@ -723,12 +969,48 @@ chrome.action.onClicked.addListener((tab) => openPanel(tab));
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SIGN_IN_ALARM) pollSignIn();
+  if (alarm.name === OUTBOX_ALARM_NAME) outbox.flushDue().catch(() => undefined);
 });
 
-// A closed tab's passage and conversation go with it.
+// A closed tab's passage and conversation go with it; any in-flight sends flush immediately from the outbox.
 chrome.tabs.onRemoved.addListener((tabId) => {
   openPanels.delete(tabId);
-  chrome.storage.session.remove([`ask:${tabId}`, `askThread:${tabId}`, `openPath:${tabId}`, `playBucketHint:${tabId}`]).catch(() => undefined);
+  clearPanelReleaseTimer(tabId);
+  boundThreadTabs?.delete(tabId);
+  outbox.flushForTab(tabId, { tabRemoved: true }).catch(() => undefined);
+  clearTabThread(chrome, tabId).catch(() => undefined);
+  chrome.storage.session.remove([`ask:${tabId}`, `openPath:${tabId}`, `playBucketHint:${tabId}`]).catch(() => undefined);
+});
+
+// Keep tab thread bindings intact if Chrome replaces a tab's ID (prerender or Memory Saver discard/restore).
+chrome.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+  const existingPort = openPanels.get(removedTabId);
+  if (existingPort) {
+    openPanels.delete(removedTabId);
+    openPanels.set(addedTabId, existingPort);
+  }
+  if (boundThreadTabs?.delete(removedTabId)) boundThreadTabs.add(addedTabId);
+  migrateTabThread(chrome, removedTabId, addedTabId).catch(() => undefined);
+});
+
+// Keep an open inline conversation card synced with SPA/URL/title navigation in the same tab (Item 2),
+// and flush any in-flight inline sends immediately when a tab starts a cross-document navigation.
+chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (change.status === "loading") {
+    outbox.flushForTab(tabId, { source: "inline" }).catch(() => undefined);
+  }
+  if (!change.url && !change.title && change.status !== "complete") return;
+  const href = capturableUrl(tab?.url ?? "");
+  if (!href) return;
+  if (boundThreadTabs && !boundThreadTabs.has(tabId)) return;
+  void ensureBoundThreadTabs().then((bound) => {
+    if (!bound.has(tabId)) return;
+    return chrome.tabs.sendMessage(tabId, {
+      type: "page-updated",
+      title: pageTitle(tab.title) || new URL(href).host,
+      href,
+    });
+  }).catch(() => undefined);
 });
 
 chrome.permissions.onAdded.addListener(() => {
@@ -743,6 +1025,7 @@ function start() {
   chrome.alarms.clear("needs-you").catch(() => undefined);
   chrome.action.setBadgeText({ text: "" }).catch(() => undefined);
   syncSelectionScript().catch(() => undefined);
+  outbox.recover().catch(() => undefined);
 }
 
 /**
@@ -762,4 +1045,11 @@ chrome.runtime.onInstalled.addListener(() => {
   start();
   reachOpenPages().catch(() => undefined);
 });
-chrome.runtime.onStartup.addListener(start);
+chrome.runtime.onStartup.addListener(() => {
+  start();
+  boundThreadTabs = new Set();
+  clearAllTabThreads(chrome).catch(() => undefined);
+});
+
+// Resume any persisted outbox sends immediately whenever the service worker wakes up.
+outbox.recover().catch(() => undefined);
