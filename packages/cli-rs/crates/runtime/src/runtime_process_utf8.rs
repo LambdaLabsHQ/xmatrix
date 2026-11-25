@@ -1000,6 +1000,30 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
             xmatrix_cli_channel::cmd_send_args(&hub_url, &token, args).await
         }
+        // A wait outlasts an Agent Run's short-lived token, so it asks for a
+        // fresh one whenever the Hub refuses the one in hand.
+        Some(Commands::Channel {
+            command:
+                xmatrix_cli_args::ChannelCommand::Subscribe {
+                    channel_id,
+                    pull_request,
+                    wait: true,
+                    timeout,
+                },
+        }) => {
+            let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
+            let channel_id =
+                xmatrix_cli_channel::resolve_channel_reference(&hub_url, &token, &channel_id)
+                    .await?;
+            xmatrix_cli_channel::cmd_channel_subscribe_wait(
+                &hub_url,
+                || resolve_auth_token(cli.token.as_deref(), &hub_url),
+                &channel_id,
+                &pull_request,
+                std::time::Duration::from_secs(timeout.max(1) * 60),
+            )
+            .await
+        }
         Some(Commands::Channel { command }) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
             cmd_channel(&hub_url, &token, command).await
