@@ -12,7 +12,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       "Comparing Linear Agents alternatives? Skip expiring sandbox credits, cloud-only ticket runs and Enterprise-gated audit logs with local Channels and Pages.",
     eyebrow: "Linear Agents Alternative · Linear vs xMatrix",
     headline: "Linear Agents Alternative: Run Agents on Your Own Machines & Subscriptions — Works Alongside Linear",
-    lead: "Linear is an extraordinary issue tracker, and Linear Agents turns well-scoped issues into cloud sandbox PRs—at $0.25 per 20 minutes plus token spend from a separate prepaid wallet that expires in 12 months. Keep Linear for issue tracking and connect it to xMatrix to run 35 coding harnesses on your own machines in live Channels and living Pages.",
+    lead: "Linear is an extraordinary issue tracker, and Linear Agents turns well-scoped issues into cloud sandbox PRs—at $0.25 per 20 minutes plus token spend from a separate prepaid wallet that expires in 12 months. Keep Linear for issue tracking and connect it to xMatrix to run 34 coding harnesses on your own machines in live Channels and living Pages.",
     productCaption: "Inside xMatrix: keep Linear connected while running local Claude Code and Codex harnesses in live Channels with zero sandbox meters or expiring prepaid balances.",
     painPoints: [
       {
@@ -45,7 +45,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Agent billing model",
-        xmatrix: "BYO model subscriptions across 35 harnesses; Pro $10/human seat/mo ($8 annual)",
+        xmatrix: "BYO model subscriptions across 34 harnesses; Pro $10/human seat/mo ($8 annual)",
         competitor: "Seat plan ($10–$16/mo) + separate prepaid credits (12-mo expiry, non-refundable)",
       },
       {
@@ -116,7 +116,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       "Looking for Notion Custom Agents alternatives? Skip the $20–$24 Business gate, three credit wallets and creator-drained pauses with xMatrix living Pages.",
     eyebrow: "Notion Custom Agents Alternative · Notion vs xMatrix",
     headline: "Notion Custom Agents Alternative: Living Pages Updated as Agents Ship Code — Without Three Credit Wallets",
-    lead: "Notion Custom Agents sit behind a $20–$24/seat Business paywall and a convoluted three-wallet credit system where shared agents drain their creator's personal Select credits and pause mid-run. xMatrix updates living Pages automatically as 35 coding harnesses ship in your real repos—no credit wallets required.",
+    lead: "Notion Custom Agents sit behind a $20–$24/seat Business paywall and a convoluted three-wallet credit system where shared agents drain their creator's personal Select credits and pause mid-run. xMatrix updates living Pages automatically as 34 coding harnesses ship in your real repos—no credit wallets required.",
     productCaption: "Inside xMatrix: agents run in your real repos, talk with your team in Channels, and maintain living Pages—with one pooled Space allowance and full mobile access.",
     painPoints: [
       {
@@ -149,7 +149,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Where agents execute",
-        xmatrix: "Directly on your own macOS, Windows, and Linux machines across 35 harnesses",
+        xmatrix: "Directly on your own macOS, Windows, and Linux machines across 34 harnesses",
         competitor: "Notion cloud browser/VM; coding delegated to external vendor clouds",
       },
       {
@@ -219,7 +219,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       "Looking for Slack Code alternatives? Escape 1 req/min limits, 15-message history on custom apps and 90-day Free caps, with real agent runtimes in xMatrix.",
     eyebrow: "Slack Code Alternative · Slack Code vs xMatrix",
     headline: "Slack Code Alternative: Agents on Your Machines, Decisions on Living Pages — Works Alongside Slack",
-    lead: "Slack Code API adds task channels and diff previews inside Slack, but Slack is still just a chat shell with no agent runtime, no living documentation, and severe API throttling (1 req/min, 15 messages max on history endpoints for non-Marketplace apps). Keep Slack connected via xMatrix's Slack connector while running 35 coding harnesses on your own machines and keeping decisions in living Pages.",
+    lead: "Slack Code API adds task channels and diff previews inside Slack, but Slack is still just a chat shell with no agent runtime, no living documentation, and severe API throttling (1 req/min, 15 messages max on history endpoints for non-Marketplace apps). Keep Slack connected via xMatrix's Slack connector while running 34 coding harnesses on your own machines and keeping decisions in living Pages.",
     productCaption: "Inside xMatrix: native multi-human and multi-agent Channels backed by your own machines and living Pages—with full context access and zero 15-message API walls.",
     painPoints: [
       {
@@ -252,7 +252,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Execution runtime",
-        xmatrix: "Built-in cross-machine daemon for 35 coding harnesses (+ --runtime)",
+        xmatrix: "Built-in cross-machine daemon for 34 coding harnesses (+ --runtime)",
         competitor: "Chat UI only; requires separate partner agent subscriptions or custom hosting",
       },
       {
@@ -336,7 +336,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "Nowledge Mem doesn't launch coding agents, doesn't coordinate multiple teammates in shared channels, and doesn't route work across machines—you still have to stitch together separate runners, tunnels, and MCP configs.",
         xmatrixAnswer:
-          "xMatrix is the full coordination layer: shared Channels, multi-machine routing across 35 coding harnesses, progressive outline/section Page reading, and living Pages in one product.",
+          "xMatrix is the full coordination layer: shared Channels, multi-machine routing across 34 coding harnesses, progressive outline/section Page reading, and living Pages in one product.",
       },
       {
         title: "Private-beta team sync and zero operational governance",
@@ -364,7 +364,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Agent execution",
-        xmatrix: "Launches and routes 35 coding harnesses (+ --runtime) across your machines",
+        xmatrix: "Launches and routes 34 coding harnesses (+ --runtime) across your machines",
         competitor: "Does not execute or route coding agents",
       },
       {
@@ -424,7 +424,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       "Looking for EverOS or EverMemOS alternatives? Leave single-machine SQLite locks, hidden extraction LLM bills and no team sync for xMatrix Channels and Pages.",
     eyebrow: "EverOS (EverMemOS) Alternative · EverOS vs xMatrix",
     headline: "EverOS Alternative: Multi-Machine Project Memory Written by the Agents Doing the Work",
-    lead: "EverOS (EverMemOS) pairs Markdown files with local SQLite and LanceDB indexes, but its open-source v1 explicitly refuses a second service on the same directory, excludes multi-tenancy and sync, and burns continuous background LLM tokens on extraction. xMatrix gives teams real-time multi-machine execution across 35 harnesses and authoritative living Pages.",
+    lead: "EverOS (EverMemOS) pairs Markdown files with local SQLite and LanceDB indexes, but its open-source v1 explicitly refuses a second service on the same directory, excludes multi-tenancy and sync, and burns continuous background LLM tokens on extraction. xMatrix gives teams real-time multi-machine execution across 34 harnesses and authoritative living Pages.",
     productCaption: "Inside xMatrix: real-time multi-machine Markdown Pages updated by your working coding agents—with zero single-directory locks or background extraction token drain.",
     painPoints: [
       {
@@ -446,7 +446,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
         problem:
           "EverOS is a memory backend (and dropped Foresight predictions in v1.7.1); it cannot summon coding harnesses across machines or require human approval before touching Vercel, Cloudflare, Gmail, or Stripe.",
         xmatrixAnswer:
-          "xMatrix combines multi-agent execution across 35 harnesses, Space secrets, per-app approvals across 35 connectors, and living Pages into one cohesive workspace.",
+          "xMatrix combines multi-agent execution across 34 harnesses, Space secrets, per-app approvals across 35 connectors, and living Pages into one cohesive workspace.",
       },
     ],
     comparisonRows: [
@@ -462,7 +462,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Agent execution & routing",
-        xmatrix: "Launches and routes 35 coding harnesses (+ --runtime) across your machines",
+        xmatrix: "Launches and routes 34 coding harnesses (+ --runtime) across your machines",
         competitor: "Memory layer only; does not execute or coordinate agent fleets",
       },
       {
@@ -482,7 +482,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
     switchWhen: [
       "You work across multiple machines or with teammates and cannot live inside a single-directory v1 lock boundary.",
       "You want authoritative Markdown Pages maintained by working Runs rather than paying continuous background LLM extraction costs.",
-      "You need real agent execution across 35 harnesses and 35 governed connectors in addition to persistent project knowledge.",
+      "You need real agent execution across 34 harnesses and 35 governed connectors in addition to persistent project knowledge.",
     ],
     migrationSteps: [
       {
@@ -559,7 +559,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Local code execution",
-        xmatrix: "Runs 35 coding harnesses (+ --runtime) directly in your local repositories",
+        xmatrix: "Runs 34 coding harnesses (+ --runtime) directly in your local repositories",
         competitor: "Bridges GitHub/Linear context; desktop agent gated to $100–$200 Max tier",
       },
       {
@@ -613,7 +613,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
       {
         question: "Can external agents use xMatrix too?",
         answer:
-          "Yes. xMatrix works with 35 built-in coding harnesses (plus any custom CLI via --runtime) and exposes an MCP server for external tools.",
+          "Yes. xMatrix works with 34 built-in coding harnesses (plus any custom CLI via --runtime) and exposes an MCP server for external tools.",
       },
     ],
     relatedSlugs: ["notion", "lobehub", "nowledge-mem", "claude-code"],

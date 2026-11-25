@@ -9,7 +9,6 @@ import agentPresets from "./agent-presets.json" with { type: "json" };
 export type AgentPresetId =
   | "codex"
   | "claude"
-  | "zcode"
   | "grok"
   | "kimi"
   | "cursor"
@@ -46,20 +45,19 @@ export type AgentPresetId =
 export type AgentPresetBackend =
   | "codex-app"
   | "claude-print"
-  | "zcode-app"
   | "grok-acp"
   | "acp"
   | "pty";
 
 export const AGENT_PRESET_BACKENDS = new Set<AgentPresetBackend>([
-  "codex-app", "claude-print", "zcode-app", "grok-acp", "acp", "pty",
+  "codex-app", "claude-print", "grok-acp", "acp", "pty",
 ]);
 
 /**
  * What xMatrix adds to a harness launch in one access mode. `args` join the
  * launcher's argv (the ACP argv for the generic ACP backend), `env` is set on
  * the harness process, and `session` values are sent when its native session
- * starts (Codex `thread/start`, ZCode `session/create`).
+ * starts (Codex `thread/start`).
  */
 export interface AgentPresetAccess {
   args?: string[];
@@ -120,6 +118,50 @@ export interface AgentPreset {
 }
 
 export const AGENT_PRESETS = agentPresets as AgentPreset[];
+
+/** A harness xMatrix explicitly refuses to register, manage, or run. */
+export interface RefusedAgentHarness {
+  readonly id: string;
+  readonly displayName: string;
+  readonly launcherStems: readonly string[];
+  readonly backends: readonly string[];
+  readonly reason: string;
+  readonly docsUrl: string;
+}
+
+export const REFUSED_AGENT_HARNESSES: readonly RefusedAgentHarness[] = [
+  {
+    id: "zcode",
+    displayName: "ZCode",
+    launcherStems: ["zcode", "zcode.cjs", "zcode-acp", "acp-extension-zcode"],
+    backends: ["zcode-app"],
+    reason:
+      "xMatrix explicitly refuses ZCode: its app-server requires host-side provider credentials and its history of unannounced workspace uploads crosses xMatrix's privacy boundary. Use another supported harness instead.",
+    docsUrl: "https://xmatrix.page/docs/agents#unsupported-harnesses",
+  },
+];
+
+export function refusedAgentHarness(
+  runtimeOrType?: string | null,
+): RefusedAgentHarness | undefined {
+  const raw = runtimeOrType?.trim();
+  if (!raw) return undefined;
+  const lower = raw.toLowerCase();
+  const stem = agentLauncherStem(raw);
+  return REFUSED_AGENT_HARNESSES.find(
+    (entry) =>
+      entry.id === stem ||
+      entry.launcherStems.includes(stem) ||
+      entry.backends.includes(lower),
+  );
+}
+
+export function refusedAgentHarnessMessage(
+  runtimeOrType?: string | null,
+): string | undefined {
+  const entry = refusedAgentHarness(runtimeOrType);
+  return entry ? `${entry.reason} (${entry.docsUrl})` : undefined;
+}
 
 export function agentPresetById(id: string | undefined | null): AgentPreset | undefined {
   return AGENT_PRESETS.find((preset) => preset.id === id);

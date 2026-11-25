@@ -1991,10 +1991,19 @@ fn apply_authoritative_agent_execution_env(
     acp_args: &[String],
 ) -> error::Result<BTreeMap<String, String>> {
     let backend = backend.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(reason) = backend
+        .and_then(xmatrix_cli_agent::refused_agent_harness_reason)
+        .or_else(|| preset_id.and_then(xmatrix_cli_agent::refused_agent_harness_reason))
+    {
+        return Err(CliError::Launch(format!(
+            "{}: {reason}",
+            xmatrix_cli_agent::HARNESS_REFUSED
+        )));
+    }
     if let Some(backend) = backend {
         if !matches!(
             backend,
-            "codex-app" | "claude-print" | "zcode-app" | "grok-acp" | "acp" | "pty"
+            "codex-app" | "claude-print" | "grok-acp" | "acp" | "pty"
         ) {
             return Err(CliError::Launch(
                 "spawn request contains an invalid Agent backend".into(),
@@ -2136,6 +2145,14 @@ fn harness_launcher_preflight(
     runtime: &str,
     profile_path: Option<&str>,
 ) -> error::Result<()> {
+    for candidate in agent_preset_id.into_iter().chain(std::iter::once(runtime)) {
+        if let Some(reason) = xmatrix_cli_agent::refused_agent_harness_reason(candidate) {
+            return Err(CliError::Launch(format!(
+                "{}: {reason}",
+                xmatrix_cli_agent::HARNESS_REFUSED
+            )));
+        }
+    }
     let Some(preset) = agent_preset_id.and_then(xmatrix_cli_agent::agent_preset_by_id) else {
         return Ok(());
     };
@@ -2357,7 +2374,6 @@ async fn spawn_headless_agent(
         "XMATRIX_CLAUDE_PRINT",
         "XMATRIX_CODEX_APP",
         "XMATRIX_GROK_APP",
-        "XMATRIX_ZCODE_APP",
         DAEMON_AUTH_CAPABILITY_ENV,
         DAEMON_AUTH_URL_ENV,
         DAEMON_REQUEST_CAPABILITY_ENV,
@@ -2561,9 +2577,6 @@ async fn spawn_headless_agent(
         Some("claude-print") => {
             command.env("XMATRIX_CLAUDE_PRINT", "1");
         }
-        Some("zcode-app") => {
-            command.env("XMATRIX_ZCODE_APP", "1");
-        }
         Some("grok-acp") => {
             command.env("XMATRIX_GROK_APP", "1");
         }
@@ -2575,9 +2588,6 @@ async fn spawn_headless_agent(
         _ => {
             if is_codex_tool(runtime) {
                 command.env("XMATRIX_CODEX_APP", "1");
-            }
-            if is_zcode_tool(runtime) {
-                command.env("XMATRIX_ZCODE_APP", "1");
             }
             if is_grok_tool(runtime) {
                 command.env("XMATRIX_GROK_APP", "1");
@@ -2895,6 +2905,24 @@ mod harness_launcher_preflight_tests {
         harness_launcher_preflight(Some(&preset.id), "my-wrapper-xyz", Some(&profile)).unwrap();
         harness_launcher_preflight(None, &preset.runtime, Some("")).unwrap();
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn refused_harnesses_are_rejected_before_the_wrapper_starts() {
+        for (preset, runtime) in [
+            (Some("zcode"), "zcode"),
+            (Some("custom"), "/usr/local/bin/zcode"),
+            (None, "ZCODE.EXE"),
+        ] {
+            let refusal = harness_launcher_preflight(preset, runtime, Some(""))
+                .expect_err("zcode must be refused")
+                .to_string();
+            assert!(
+                refusal.starts_with(xmatrix_cli_agent::HARNESS_REFUSED),
+                "{refusal}"
+            );
+            assert!(refusal.contains("ZCode"), "{refusal}");
+        }
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { AGENT_PRESETS } from "@xmatrix/protocol";
 import { FleetStage } from "@/components/landing/fleet-stage";
 import { StageCaption } from "@/components/landing/section-intro";
@@ -36,6 +37,12 @@ export function Agents({ locale = "en" }: { locale?: Locale }) {
             </li>
           ))}
         </ul>
+        <p className="mt-8 text-center text-sm text-[var(--site-ink-muted)]">
+          {copy.refusedNote}{" "}
+          <Link href={copy.refusedLink.href} className="underline underline-offset-4 hover:text-[var(--site-ink)]">
+            {copy.refusedLink.label}
+          </Link>
+        </p>
       </div>
     </section>
   );

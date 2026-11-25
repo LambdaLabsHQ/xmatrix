@@ -11,8 +11,8 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       "Looking for T3 Code alternatives? Give your team real user identities, shared Channels, living project Pages, Space secrets and cross-provider handoff.",
     eyebrow: "T3 Code Alternative · T3 Code vs xMatrix",
     headline: "T3 Code for Teams: Real Identities, One Channel, and One Living Page",
-    lead: "T3 Code is an impressive free single-player coding workbench, but it binds each environment to one account, has no shared living project pages, and stalls at 'Limited' when a provider quota runs out. xMatrix gives your team shared Channels, living Pages, Space secrets, and 35 coding harnesses across your machines.",
-    productCaption: "Inside xMatrix: real multiplayer Channels where 35 coding harnesses work across all your machines and keep living Pages current for the whole team.",
+    lead: "T3 Code is an impressive free single-player coding workbench, but it binds each environment to one account, has no shared living project pages, and stalls at 'Limited' when a provider quota runs out. xMatrix gives your team shared Channels, living Pages, Space secrets, and 34 coding harnesses across your machines.",
+    productCaption: "Inside xMatrix: real multiplayer Channels where 34 coding harnesses work across all your machines and keep living Pages current for the whole team.",
     painPoints: [
       {
         title: "No real multiplayer identity or shared team channels",
@@ -33,7 +33,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
         problem:
           "T3 Code excels at local diffs and emulators, but has no shared project memory or living documentation (GitHub Discussion #15858), defaults new threads to Full access, caps free T3 Connect tunnels at 3 machines, and focuses strictly on code rather than governed ops apps.",
         xmatrixAnswer:
-          "xMatrix turns completed conversations into living Pages, connects unlimited machines across 35 harnesses, stores Space-level secrets safely, and governs 35 connected apps like Vercel, Cloudflare, Sentry, Gmail, and Stripe.",
+          "xMatrix turns completed conversations into living Pages, connects unlimited machines across 34 harnesses, stores Space-level secrets safely, and governs 35 connected apps like Vercel, Cloudflare, Sentry, Gmail, and Stripe.",
       },
     ],
     comparisonRows: [
@@ -59,7 +59,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Harnesses & remote machines",
-        xmatrix: "35 coding harnesses (+ --runtime) across all your macOS, Windows, and Linux machines",
+        xmatrix: "34 coding harnesses (+ --runtime) across all your macOS, Windows, and Linux machines",
         competitor: "10 harnesses + ACP; T3 Connect free tier caps at 3 machines",
       },
     ],
@@ -280,7 +280,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     migrationSteps: [
       {
         title: "Keep your existing CLI tools and subscriptions",
-        detail: "Install xMatrix on your Mac and Linux hosts and add any of 35 harnesses (Claude Code, Codex, Grok, OpenCode, Kimi, etc.) with xmatrix agent add.",
+        detail: "Install xMatrix on your Mac and Linux hosts and add any of 34 harnesses (Claude Code, Codex, Grok, OpenCode, Kimi, etc.) with xmatrix agent add.",
       },
       {
         title: "Use Web, Desktop, or Mobile without self-hosting a relay",
@@ -342,7 +342,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
         problem:
           "Claude Code Desktop ties local execution to Anthropic's ecosystem, lacks Space-wide secret injection across heterogeneous harnesses, and Anthropic's regional restrictions block unsupported territories outright.",
         xmatrixAnswer:
-          "xMatrix coordinates 35 coding harnesses (plus any custom CLI via --runtime) across all your macOS, Windows, and Linux machines under one set of Space secrets and per-app approvals across 35 connected apps.",
+          "xMatrix coordinates 34 coding harnesses (plus any custom CLI via --runtime) across all your macOS, Windows, and Linux machines under one set of Space secrets and per-app approvals across 35 connected apps.",
       },
     ],
     comparisonRows: [
@@ -353,7 +353,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Supported coding harnesses",
-        xmatrix: "35 built-in harnesses (Claude Code, Codex, Cursor, Gemini, Antigravity, etc.) + --runtime",
+        xmatrix: "34 built-in harnesses (Claude Code, Codex, Cursor, Gemini, Antigravity, etc.) + --runtime",
         competitor: "Claude only",
       },
       {

@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
 import {
   HUB_ROUTES, agentPresetById, agentPresetForLauncher, harnessSignInRequestNotice, parseHarnessInventory,
-  type SerializedMachineDaemon,
+  refusedAgentHarnessMessage, type SerializedMachineDaemon,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { requireAuth } from "./index-shared";
@@ -49,6 +49,8 @@ export function registerHarnessSignInRequestRoutes(app: Hono<{ Bindings: Env }>,
     const requestId = body.requestId === undefined ? undefined
       : typeof body.requestId === "string" && REQUEST_ID.test(body.requestId) ? body.requestId : null;
     if (!named || !machineId || reason === null || requestId === null) return refuse("Invalid sign-in request", 400);
+    const refusedHarness = refusedAgentHarnessMessage(named);
+    if (refusedHarness) return refuse(refusedHarness, 400);
     if (!preset || preset.id === "custom") return refuse(`${named} is not a harness xMatrix knows`, 400);
     const daemon = (await port.daemons(c.env, run.ownerUserId)).find((item) => item.machineId === machineId);
     if (!daemon) return refuse("That Machine is not one of this Agent's owner's Machines", 404);

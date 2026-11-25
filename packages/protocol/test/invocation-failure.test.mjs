@@ -62,7 +62,7 @@ test("an offline refusal names its machines and how to bring one back", () => {
   assert.deepEqual(parseOfflineMachines([{ machineId: "a" }]), [{ machineId: "a" }]);
   // The notice carries the machines and the summon to send again.
   assert.deepEqual(machineOfflineNoticeOf({ kind: MACHINE_OFFLINE_NOTICE_KIND, offline: [{ machineId: "a" }],
-    sourceMention: "@zcode", sourceMessageId: "m1" }), { offline: [{ machineId: "a" }], summon: { sourceMention: "@zcode", sourceMessageId: "m1" } });
+    sourceMention: "@codex", sourceMessageId: "m1" }), { offline: [{ machineId: "a" }], summon: { sourceMention: "@codex", sourceMessageId: "m1" } });
   assert.equal(machineOfflineNoticeOf({ kind: MACHINE_OFFLINE_NOTICE_KIND, offline: [] }), null);
   assert.equal(machineOfflineNoticeOf({ kind: HARNESS_SIGNED_OUT_NOTICE_KIND, offline: [{ machineId: "a" }] }), null);
 });

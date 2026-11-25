@@ -30,9 +30,6 @@ fn matrix_adapter(
         "claude-print" => {
             Some(super::agent_presentation::agent_presentation_adapter_for_runtime("claude"))
         }
-        "zcode-app" => {
-            Some(super::agent_presentation::agent_presentation_adapter_for_runtime("zcode"))
-        }
         "grok-acp" => Some(super::AcpVendorConfig::grok().presentation_adapter),
         "acp" => Some(super::AcpVendorConfig::generic(&preset.runtime).presentation_adapter),
         // A custom PTY harness types into a terminal; it offers no commands.
@@ -60,7 +57,7 @@ fn matrix_route(
     // Generic ACP peers get `/goal` as prompt text; only these intercept it.
     let intercepts_goal = matches!(
         backend,
-        "codex-app" | "claude-print" | "zcode-app" | "grok-acp"
+        "codex-app" | "claude-print" | "grok-acp"
     );
     if intercepts_goal && super::parse_goal_command(&token).is_some()
         || crate::harness_parameters::command(&token).is_some()
@@ -128,15 +125,9 @@ fn every_registered_harness_routes_every_offered_command() {
             .to_vec(),
             _ => Vec::new(),
         };
-        // ZCode's app-server reports no model catalog.
-        let has_catalog = backend != "zcode-app";
         let facts = super::agent_presentation::AgentPresentationFacts {
-            models: if has_catalog {
-                vec![matrix_model()]
-            } else {
-                Vec::new()
-            },
-            models_reported: has_catalog,
+            models: vec![matrix_model()],
+            models_reported: true,
             model: Some("model-a".into()),
             commands: match backend {
                 "acp" | "grok-acp" => reported
@@ -164,14 +155,12 @@ fn every_registered_harness_routes_every_offered_command() {
             .present(&facts, &overlay)
             .commands
             .unwrap_or_default();
-        if has_catalog {
-            for control in ["/model", "/effort"] {
-                assert!(
-                    commands.iter().any(|command| command.token == control),
-                    "{} must offer {control} once its catalog is live",
-                    preset.id
-                );
-            }
+        for control in ["/model", "/effort"] {
+            assert!(
+                commands.iter().any(|command| command.token == control),
+                "{} must offer {control} once its catalog is live",
+                preset.id
+            );
         }
         for command in &commands {
             match matrix_route(backend, command, &live) {

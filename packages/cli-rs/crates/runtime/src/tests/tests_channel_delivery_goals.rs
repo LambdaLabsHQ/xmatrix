@@ -1442,54 +1442,6 @@ fn codex_goal_dynamic_set_validates_native_patch_fields() {
 }
 
 #[test]
-fn zcode_goal_snapshot_maps_metrics_verification_and_clear() {
-    let snapshot = serde_json::json!({
-        "snapshot": {
-            "session": {
-                "target": {
-                    "objective": "finish the release",
-                    "status": "blocked",
-                    "activeInputId": "input-7"
-                }
-            },
-            "goalStats": {
-                "iterationCount": 4,
-                "tokensUsed": 4321,
-                "contextUsed": 876,
-                "toolCallCount": 9,
-                "timeUsedSeconds": 67
-            },
-            "runtime": {
-                "goalVerifications": [{
-                    "passed": false,
-                    "reason": "tests still failing",
-                    "nextAction": "fix the remaining test"
-                }]
-            }
-        }
-    });
-    let goal = zcode_goal_state_from_value(&snapshot)
-        .expect("goal state was present")
-        .expect("goal was not cleared");
-    assert_eq!(goal.status.as_deref(), Some("blocked"));
-    assert_eq!(goal.active, Some(false));
-    assert_eq!(goal.tokens_used, Some(4321));
-    assert_eq!(goal.iteration_count, Some(4));
-    assert_eq!(goal.context_used, Some(876));
-    assert_eq!(goal.tool_call_count, Some(9));
-    assert_eq!(goal.time_used_seconds, Some(67));
-    assert_eq!(goal.reason.as_deref(), Some("tests still failing"));
-    assert_eq!(goal.next_action.as_deref(), Some("fix the remaining test"));
-    assert_eq!(
-        zcode_goal_active_input_id(&snapshot).as_deref(),
-        Some("input-7")
-    );
-
-    let cleared = serde_json::json!({"snapshot": {"session": {"target": null}}});
-    assert!(matches!(zcode_goal_state_from_value(&cleared), Some(None)));
-}
-
-#[test]
 fn codex_goal_resume_sets_active_status_without_replacing_objective() {
     let paused = serde_json::json!({
         "goal": {

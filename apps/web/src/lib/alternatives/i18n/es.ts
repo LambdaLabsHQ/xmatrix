@@ -7,10 +7,10 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     verifiedDate: "22 de noviembre de 2026",
     metaTitle: "Alternativas a Raft (2026): Raft vs xMatrix",
     metaDescription:
-      "¿Buscas alternativas a Raft (Slock)? xMatrix guarda las decisiones en Páginas vivas, no en un chat enterrado, con 35 agentes de código y 35 apps gobernadas.",
+      "¿Buscas alternativas a Raft (Slock)? xMatrix guarda las decisiones en Páginas vivas, no en un chat enterrado, con 34 agentes de código y 35 apps gobernadas.",
     eyebrow: "Alternativa a Raft · Raft vs xMatrix",
     headline: "La alternativa a Raft donde las decisiones viven en Páginas vivas, no en chat enterrado",
-    lead: "Raft trata a los agentes de programación como compañeros de chat y retiró su Wiki Agent en septiembre de 2026. xMatrix mantiene canales compartidos para personas y 35 agentes de código, y convierte el trabajo terminado en Páginas vivas que se mantienen al día en cada máquina y en 35 aplicaciones conectadas.",
+    lead: "Raft trata a los agentes de programación como compañeros de chat y retiró su Wiki Agent en septiembre de 2026. xMatrix mantiene canales compartidos para personas y 34 agentes de código, y convierte el trabajo terminado en Páginas vivas que se mantienen al día en cada máquina y en 35 aplicaciones conectadas.",
     productCaption:
       "Dentro de xMatrix: personas y agentes de programación colaboran en Canales mientras actualizan una única Página viva de proyecto, en lugar de dispersar el contexto entre el historial del chat y archivos MEMORY.md locales.",
     painPoints: [
@@ -33,7 +33,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "En Raft Pro ($10/asiento humano/mes, o $8.80 en plan anual), cada agente cuenta como 0.1 asiento y queda fijado a una única máquina: cuando ese portátil se desconecta, el agente se detiene.",
         xmatrixAnswer:
-          "xMatrix admite 35 agentes de código (más cualquier CLI personalizada con --runtime) en todas las máquinas macOS, Windows y Linux que registres a $0 por asiento de agente, enrutando las tareas según idoneidad y margen disponible.",
+          "xMatrix admite 34 agentes de código (más cualquier CLI personalizada con --runtime) en todas las máquinas macOS, Windows y Linux que registres a $0 por asiento de agente, enrutando las tareas según idoneidad y margen disponible.",
       },
     ],
     comparisonRows: [
@@ -49,7 +49,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Agentes y precios",
-        xmatrix: "35 agentes de código (+ --runtime); Free (500 escrituras totales) / Pro $10/persona/mes ($8 anual)",
+        xmatrix: "34 agentes de código (+ --runtime); Free (500 escrituras totales) / Pro $10/persona/mes ($8 anual)",
         competitor: "Menos runtimes; Free (historial de 30 días); Pro $10/asiento/mes ($8.80 anual) + 0.1 asiento/agente",
       },
       {
@@ -114,9 +114,9 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Comparas alternativas a Lody? Pasa de worktrees por sesión y cortes del daemon a Canales compartidos, Páginas vivas, secretos del Space y rutinas webhook.",
     eyebrow: "Alternativa a Lody · Lody vs xMatrix",
     headline: "Alternativa a Lody: un Canal, una Página viva compartidos por todo tu equipo y cada agente",
-    lead: "Lody organiza el trabajo en hilos aislados de una sesión por worktree sincronizados mediante un relay en la nube de código cerrado. xMatrix reúne a tus compañeros y a 35 agentes de código en un Canal compartido, mantiene las Páginas vivas al día a medida que aterriza el trabajo y añade secretos del Space junto con programas Norn dirigidos por eventos.",
+    lead: "Lody organiza el trabajo en hilos aislados de una sesión por worktree sincronizados mediante un relay en la nube de código cerrado. xMatrix reúne a tus compañeros y a 34 agentes de código en un Canal compartido, mantiene las Páginas vivas al día a medida que aterriza el trabajo y añade secretos del Space junto con programas Norn dirigidos por eventos.",
     productCaption:
-      "Dentro de xMatrix: en lugar de pasarse sesiones de programación aisladas una a una, compañeros y 35 agentes de código trabajan en un Canal compartido y consolidan los resultados en Páginas vivas.",
+      "Dentro de xMatrix: en lugar de pasarse sesiones de programación aisladas una a una, compañeros y 34 agentes de código trabajan en un Canal compartido y consolidan los resultados en Páginas vivas.",
     painPoints: [
       {
         title: "Una experiencia centrada en sesiones deja fuera los canales de equipo y la documentación viva",
@@ -158,7 +158,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Amplitud de agentes y enrutamiento",
-        xmatrix: "35 agentes de código (+ --runtime) enrutados por idoneidad, margen y traspaso de cuota",
+        xmatrix: "34 agentes de código (+ --runtime) enrutados por idoneidad, margen y traspaso de cuota",
         competitor: "Espera y reanuda cuando se restablece la cuota del mismo proveedor",
       },
       {
@@ -218,7 +218,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Evalúas alternativas a Multica? Cambia tickets headless, bypassPermissions silencioso y variables en texto plano por Canales en vivo y secretos del Space.",
     eyebrow: "Alternativa a Multica · Multica vs xMatrix",
     headline: "Alternativa a Multica: no conviertas cada petición en un ticket — dilo una vez y las Páginas se mantienen al día",
-    lead: "Multica obliga a convertir cada tarea de agente en una incidencia Kanban headless con bypassPermissions por defecto y sin capa de documentación viva. xMatrix permite que personas y 35 agentes de código colaboren en vivo en Canales (o acoplen una sesión interactiva con xmatrix claude), mantiene las Páginas vivas al día y gobierna 35 aplicaciones conectadas con secretos del Space.",
+    lead: "Multica obliga a convertir cada tarea de agente en una incidencia Kanban headless con bypassPermissions por defecto y sin capa de documentación viva. xMatrix permite que personas y 34 agentes de código colaboren en vivo en Canales (o acoplen una sesión interactiva con xmatrix claude), mantiene las Páginas vivas al día y gobierna 35 aplicaciones conectadas con secretos del Space.",
     productCaption:
       "Dentro de xMatrix: dirige a Claude Code, Codex y otros 33 agentes de código en vivo junto a tu equipo en Canales compartidos, con aprobaciones explícitas por app y Páginas vivas en lugar de ejecuciones ciegas en un tablero.",
     painPoints: [
@@ -234,7 +234,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "El chat integrado de Multica es estrictamente privado 1:1, y su flujo exige convertir el trabajo en tarjetas headless. No admite redirigir a un agente a mitad de tarea ni incorporar una sesión activa de terminal local a una conversación de equipo.",
         xmatrixAnswer:
-          "xMatrix permite que compañeros y 35 agentes de código trabajen en vivo en Canales compartidos, y xmatrix claude acopla una sesión existente de terminal local directamente al Canal mientras los resultados se consolidan en la Página viva.",
+          "xMatrix permite que compañeros y 34 agentes de código trabajen en vivo en Canales compartidos, y xmatrix claude acopla una sesión existente de terminal local directamente al Canal mientras los resultados se consolidan en la Página viva.",
       },
       {
         title: "Sin páginas vivas ni memoria de proyecto integrada",
@@ -262,7 +262,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Agentes de código compatibles",
-        xmatrix: "35 agentes de código integrados (+ cualquier CLI personalizada con --runtime)",
+        xmatrix: "34 agentes de código integrados (+ cualquier CLI personalizada con --runtime)",
         competitor: "28 runtimes de CLI",
       },
       {
@@ -428,7 +428,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "Meta adquirió Conductor y cerró Conductor Cloud el 20 nov 2026. Ejecuta equipos de Claude Code y Codex en macOS, Windows y Linux con xMatrix a $10/asiento.",
     eyebrow: "Alternativa a Conductor · Migración tras Meta",
     headline: "Dónde migrar tras el cierre de Conductor por Meta: Mac, Windows y Linux con Páginas vivas",
-    lead: "Meta adquirió Conductor en noviembre de 2026, cerró nuevos registros y apagó Conductor Cloud el 20 de noviembre de 2026, dejando la app local solo para macOS en mantenimiento hasta inicios de 2027. xMatrix es un hogar activo e independiente para tus 35 agentes de código en macOS, Windows y Linux, con el contexto del equipo siempre al día en Páginas vivas.",
+    lead: "Meta adquirió Conductor en noviembre de 2026, cerró nuevos registros y apagó Conductor Cloud el 20 de noviembre de 2026, dejando la app local solo para macOS en mantenimiento hasta inicios de 2027. xMatrix es un hogar activo e independiente para tus 34 agentes de código en macOS, Windows y Linux, con el contexto del equipo siempre al día en Páginas vivas.",
     productCaption:
       "Dentro de xMatrix: trae tus repositorios exportados de Conductor y tus cuentas de Claude Code o Codex a un espacio multiplataforma en macOS, Windows, Linux, Android y Web.",
     painPoints: [
@@ -451,7 +451,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Conductor cobraba $50/mes en Pro y $60/usuario/mes en Teams, sufría lentitud en la interfaz con registros largos de conversación y dejaba el conocimiento atrapado en workspaces aislados en lugar de un documento vivo compartido.",
         xmatrixAnswer:
-          "xMatrix Pro cuesta $10/asiento humano/mes ($8/mes anual) sin límite de instancias entre 35 agentes de código, convierte el trabajo terminado en Páginas vivas y suma 35 conectores gobernados además de Secretos del Space.",
+          "xMatrix Pro cuesta $10/asiento humano/mes ($8/mes anual) sin límite de instancias entre 34 agentes de código, convierte el trabajo terminado en Páginas vivas y suma 35 conectores gobernados además de Secretos del Space.",
       },
     ],
     comparisonRows: [
@@ -472,7 +472,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Resultado multi-agente",
-        xmatrix: "Páginas vivas + Canales compartidos multi-humano con 35 agentes de código",
+        xmatrix: "Páginas vivas + Canales compartidos multi-humano con 34 agentes de código",
         competitor: "Sesiones paralelas en worktrees y vistas de diffs",
       },
       {
@@ -531,7 +531,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Comparas alternativas a Orca? Cambia picos de RAM monousuario, +8,900 issues abiertos y emparejamiento LAN frágil por Canales y Páginas vivas de xMatrix.",
     eyebrow: "Alternativa a Orca · Orca vs xMatrix",
     headline: "Alternativa a Orca cuando ya no trabajas solo: un Canal, una Página viva y enrutamiento a medida",
-    lead: "Orca es un popular ADE open-source monousuario para lanzar prompts en abanico sobre worktrees locales paralelos, pero sigue sin interfaz multijugador, replicar un prompt en N agentes multiplica el consumo de tokens y las flotas pesadas disparan la RAM local. xMatrix enruta cada tarea al agente más adecuado entre 35 agentes de código y mantiene las Páginas vivas al día para todo tu equipo.",
+    lead: "Orca es un popular ADE open-source monousuario para lanzar prompts en abanico sobre worktrees locales paralelos, pero sigue sin interfaz multijugador, replicar un prompt en N agentes multiplica el consumo de tokens y las flotas pesadas disparan la RAM local. xMatrix enruta cada tarea al agente más adecuado entre 34 agentes de código y mantiene las Páginas vivas al día para todo tu equipo.",
     productCaption:
       "Dentro de xMatrix: distribuye el trabajo de código paralelo entre todas tus máquinas sin picos de RAM por navegadores integrados y supervisa los resultados con claridad desde escritorio o móvil.",
     painPoints: [
@@ -636,7 +636,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Buscas alternativas a LobeHub o LobeChat? Evita la reventa de créditos y la migración 2.0 a PostgreSQL/S3 con agentes locales y Páginas vivas de xMatrix.",
     eyebrow: "Alternativa a LobeHub (LobeChat) · LobeHub vs xMatrix",
     headline: "Alternativa a LobeHub: para equipos que ya pagan Claude Code o Codex — deja de comprar créditos dos veces",
-    lead: "LobeHub (renombrado desde LobeChat) es un espacio de IA multipropósito monetizado mediante la reventa de créditos de modelos, con una pila autoalojada 2.0 pesada y sin canales compartidos multi-humano y multi-agente. xMatrix ejecuta 35 agentes de código directamente en tus repositorios reales con tus suscripciones actuales, con Goals para verificar entregas y 35 conectores gobernados.",
+    lead: "LobeHub (renombrado desde LobeChat) es un espacio de IA multipropósito monetizado mediante la reventa de créditos de modelos, con una pila autoalojada 2.0 pesada y sin canales compartidos multi-humano y multi-agente. xMatrix ejecuta 34 agentes de código directamente en tus repositorios reales con tus suscripciones actuales, con Goals para verificar entregas y 35 conectores gobernados.",
     productCaption:
       "Dentro de xMatrix: coordina tus propias suscripciones de Claude Code, Codex y Cursor en Canales de equipo en tiempo real con Páginas vivas, sin reventa de tokens ni mantenimiento de pilas Docker.",
     painPoints: [
@@ -695,14 +695,14 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     ],
     switchWhen: [
       "Ya pagas por Claude Code, Codex o Cursor y no quieres pagar sobrecostos en créditos por contextos largos de programación.",
-      "Quieres ingenieros y 35 agentes de código colaborando en vivo en Canales compartidos y manteniendo Páginas vivas autoritativas en lugar de depurar recuperación RAG.",
+      "Quieres ingenieros y 34 agentes de código colaborando en vivo en Canales compartidos y manteniendo Páginas vivas autoritativas en lugar de depurar recuperación RAG.",
       "No quieres mantener una pila autoalojada de PostgreSQL + S3 solo para coordinar agentes de código locales.",
     ],
     migrationSteps: [
       {
         title: "Conserva tus CLIs nativas y tus suscripciones",
         detail:
-          "Registra cualquiera de los 35 agentes de código (Claude Code, Codex, Gemini, Cursor, etc.) directamente en xMatrix para dejar de pagar dos veces por bolsas de créditos alojados.",
+          "Registra cualquiera de los 34 agentes de código (Claude Code, Codex, Gemini, Cursor, etc.) directamente en xMatrix para dejar de pagar dos veces por bolsas de créditos alojados.",
       },
       {
         title: "Transforma bases de conocimiento estáticas en Páginas vivas y Goals",
@@ -740,7 +740,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Comparas alternativas a Cumora? Ejecuta agentes en tus repositorios locales reales, sin sandboxes sin red (#350), errores de bwrap ni listas de espera.",
     eyebrow: "Alternativa a Cumora · Cumora vs xMatrix",
     headline: "Alternativa a Cumora: agentes trabajando en tus repos reales y entregando vía conectores gobernados",
-    lead: "Cumora introduce agentes con personalidad en el chat de equipo, pero encierra las ejecuciones locales BYOA dentro de sandboxes sin conexión separados de tus sesiones reales, sufre fallos de Bubblewrap y descarga de CDN (#350), y sigue en vista previa solo con invitación. xMatrix ejecuta 35 agentes de código directamente en tus repositorios y entrega mediante 35 conectores gobernados y Páginas vivas.",
+    lead: "Cumora introduce agentes con personalidad en el chat de equipo, pero encierra las ejecuciones locales BYOA dentro de sandboxes sin conexión separados de tus sesiones reales, sufre fallos de Bubblewrap y descarga de CDN (#350), y sigue en vista previa solo con invitación. xMatrix ejecuta 34 agentes de código directamente en tus repositorios y entrega mediante 35 conectores gobernados y Páginas vivas.",
     productCaption:
       "Dentro de xMatrix: sin lista de espera por invitación ni muro de sandbox sin conexión; tus harnesses locales de Claude Code y Codex colaboran con tu equipo directamente en tus repositorios.",
     painPoints: [
@@ -769,7 +769,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     comparisonRows: [
       {
         dimension: "Dónde trabajan los agentes locales",
-        xmatrix: "Directamente en tus repositorios locales registrados y toolchains con 35 agentes de código",
+        xmatrix: "Directamente en tus repositorios locales registrados y toolchains con 34 agentes de código",
         competitor: "Dentro del sandbox offline de Cumora (bloquea peticiones salientes, #350)",
       },
       {
@@ -844,9 +844,9 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Buscas alternativas a T3 Code? Da a tu equipo identidades reales, Canales compartidos, Páginas vivas, secretos del Space y traspaso entre proveedores.",
     eyebrow: "Alternativa a T3 Code · T3 Code vs xMatrix",
     headline: "T3 Code para equipos: identidades reales, un Canal y una Página viva",
-    lead: "T3 Code es un excelente entorno gratuito de programación monousuario, pero vincula cada entorno a una sola cuenta, no tiene páginas vivas compartidas de proyecto y se detiene en «Limited» cuando se agota la cuota de un proveedor. xMatrix ofrece a tu equipo Canales compartidos, Páginas vivas, secretos del Space y 35 agentes de código en todas tus máquinas.",
+    lead: "T3 Code es un excelente entorno gratuito de programación monousuario, pero vincula cada entorno a una sola cuenta, no tiene páginas vivas compartidas de proyecto y se detiene en «Limited» cuando se agota la cuota de un proveedor. xMatrix ofrece a tu equipo Canales compartidos, Páginas vivas, secretos del Space y 34 agentes de código en todas tus máquinas.",
     productCaption:
-      "Dentro de xMatrix: Canales multijugador reales donde 35 agentes de código trabajan en todas tus máquinas y mantienen las Páginas vivas al día para todo el equipo.",
+      "Dentro de xMatrix: Canales multijugador reales donde 34 agentes de código trabajan en todas tus máquinas y mantienen las Páginas vivas al día para todo el equipo.",
     painPoints: [
       {
         title: "Sin identidad multijugador real ni canales compartidos de equipo",
@@ -867,7 +867,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "T3 Code brilla en diffs locales y emuladores, pero carece de memoria compartida o documentación viva (GitHub Discussion #15858), abre hilos nuevos con acceso total por defecto, limita los túneles gratuitos de T3 Connect a 3 máquinas y se centra solo en código en vez de apps operativas gobernadas.",
         xmatrixAnswer:
-          "xMatrix convierte las conversaciones terminadas en Páginas vivas, conecta máquinas ilimitadas con 35 agentes de código, guarda secretos a nivel de Space de forma segura y gobierna 35 aplicaciones conectadas como Vercel, Cloudflare, Sentry, Gmail y Stripe.",
+          "xMatrix convierte las conversaciones terminadas en Páginas vivas, conecta máquinas ilimitadas con 34 agentes de código, guarda secretos a nivel de Space de forma segura y gobierna 35 aplicaciones conectadas como Vercel, Cloudflare, Sentry, Gmail y Stripe.",
       },
     ],
     comparisonRows: [
@@ -893,7 +893,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Agentes y máquinas remotas",
-        xmatrix: "35 agentes de código (+ --runtime) en todas tus máquinas macOS, Windows y Linux",
+        xmatrix: "34 agentes de código (+ --runtime) en todas tus máquinas macOS, Windows y Linux",
         competitor: "10 harnesses + ACP; el plan gratuito de T3 Connect limita a 3 máquinas",
       },
     ],
@@ -1117,7 +1117,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         title: "Conserva tus herramientas de CLI y suscripciones actuales",
         detail:
-          "Instala xMatrix en tus hosts Mac y Linux y añade cualquiera de los 35 agentes de código (Claude Code, Codex, Grok, OpenCode, Kimi, etc.) con xmatrix agent add.",
+          "Instala xMatrix en tus hosts Mac y Linux y añade cualquiera de los 34 agentes de código (Claude Code, Codex, Grok, OpenCode, Kimi, etc.) con xmatrix agent add.",
       },
       {
         title: "Usa Web, escritorio o móvil sin autoalojar un relay",
@@ -1179,7 +1179,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Claude Code Desktop ata la ejecución local al ecosistema de Anthropic, carece de inyección de secretos del Space entre harnesses heterogéneos y las restricciones regionales de Anthropic bloquean directamente territorios sin soporte.",
         xmatrixAnswer:
-          "xMatrix coordina 35 agentes de código (más cualquier CLI personalizada con --runtime) en todas tus máquinas macOS, Windows y Linux bajo un solo conjunto de Secretos del Space y aprobaciones por app en 35 aplicaciones conectadas.",
+          "xMatrix coordina 34 agentes de código (más cualquier CLI personalizada con --runtime) en todas tus máquinas macOS, Windows y Linux bajo un solo conjunto de Secretos del Space y aprobaciones por app en 35 aplicaciones conectadas.",
       },
     ],
     comparisonRows: [
@@ -1190,7 +1190,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Agentes de código compatibles",
-        xmatrix: "35 agentes de código integrados (Claude Code, Codex, Cursor, Gemini, Antigravity, etc.) + --runtime",
+        xmatrix: "34 agentes de código integrados (Claude Code, Codex, Cursor, Gemini, Antigravity, etc.) + --runtime",
         competitor: "Solo Claude",
       },
       {
@@ -1260,7 +1260,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Comparas alternativas a Linear Agents? Evita créditos que caducan, sandboxes solo en la nube y auditoría solo en Enterprise con Canales y Páginas vivas.",
     eyebrow: "Alternativa a Linear Agents · Linear vs xMatrix",
     headline: "Alternativa a Linear Agents: ejecuta agentes en tus propias máquinas sin créditos que caducan, junto a Linear",
-    lead: "Linear es un gestor de incidencias extraordinario, y Linear Agents convierte tickets bien acotados en PRs desde sandboxes en la nube por $0.25 cada 20 minutos más consumo de tokens desde un saldo prepagado aparte que caduca a los 12 meses. Conserva Linear para tus incidencias y conéctalo a xMatrix para ejecutar 35 agentes de código en tus propias máquinas dentro de Canales en vivo y Páginas vivas.",
+    lead: "Linear es un gestor de incidencias extraordinario, y Linear Agents convierte tickets bien acotados en PRs desde sandboxes en la nube por $0.25 cada 20 minutos más consumo de tokens desde un saldo prepagado aparte que caduca a los 12 meses. Conserva Linear para tus incidencias y conéctalo a xMatrix para ejecutar 34 agentes de código en tus propias máquinas dentro de Canales en vivo y Páginas vivas.",
     productCaption:
       "Dentro de xMatrix: mantén Linear conectado mientras ejecutas tus harnesses locales de Claude Code y Codex en Canales en vivo sin medidores de sandbox ni saldos prepagados que vencen.",
     painPoints: [
@@ -1294,7 +1294,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Modelo de cobro por agentes",
-        xmatrix: "Trae tus propias suscripciones en 35 agentes de código; Pro $10/asiento humano/mes ($8 anual)",
+        xmatrix: "Trae tus propias suscripciones en 34 agentes de código; Pro $10/asiento humano/mes ($8 anual)",
         competitor: "Plan por asiento ($10–$16/mes) + créditos prepagados aparte (caducan en 12 meses, sin reembolso)",
       },
       {
@@ -1365,7 +1365,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Buscas alternativas a Notion Custom Agents? Evita la barrera Business de $20–$24, tres billeteras de créditos y pausas por saldo con Páginas vivas de xMatrix.",
     eyebrow: "Alternativa a Notion Custom Agents · Notion vs xMatrix",
     headline: "Alternativa a Notion Custom Agents: Páginas vivas que se actualizan al entregar código, sin tres billeteras de créditos",
-    lead: "Notion Custom Agents queda detrás de un muro Business de $20–$24/asiento y un enredado sistema de tres billeteras de créditos donde los agentes compartidos consumen los créditos personales Select de su creador y se pausan a mitad de ejecución. xMatrix actualiza las Páginas vivas automáticamente mientras 35 agentes de código entregan en tus repositorios reales, sin billeteras de créditos.",
+    lead: "Notion Custom Agents queda detrás de un muro Business de $20–$24/asiento y un enredado sistema de tres billeteras de créditos donde los agentes compartidos consumen los créditos personales Select de su creador y se pausan a mitad de ejecución. xMatrix actualiza las Páginas vivas automáticamente mientras 34 agentes de código entregan en tus repositorios reales, sin billeteras de créditos.",
     productCaption:
       "Dentro de xMatrix: los agentes trabajan en tus repositorios reales, conversan con tu equipo en Canales y mantienen Páginas vivas, con una única bolsa compartida del Space y acceso móvil completo.",
     painPoints: [
@@ -1399,7 +1399,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Dónde ejecutan los agentes",
-        xmatrix: "Directamente en tus propias máquinas macOS, Windows y Linux con 35 agentes de código",
+        xmatrix: "Directamente en tus propias máquinas macOS, Windows y Linux con 34 agentes de código",
         competitor: "Navegador/VM en la nube de Notion; la programación se delega a nubes externas",
       },
       {
@@ -1469,7 +1469,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Buscas alternativas a Slack Code? Sal del límite de 1 req/min, 15 mensajes de historial en apps propias y 90 días en Free, con agentes reales en xMatrix.",
     eyebrow: "Alternativa a Slack Code · Slack Code vs xMatrix",
     headline: "Alternativa a Slack Code: agentes en tus máquinas, decisiones en Páginas vivas, junto a Slack",
-    lead: "Slack Code API añade canales de tareas y vistas previas de diffs dentro de Slack, pero Slack sigue siendo solo una interfaz de chat sin runtime de agentes, sin documentación viva y con un recorte severo en la API (1 petición/min y máximo 15 mensajes en endpoints de historial para apps fuera del Marketplace). Mantén Slack conectado mediante el conector de Slack de xMatrix mientras ejecutas 35 agentes de código en tus propias máquinas y conservas las decisiones en Páginas vivas.",
+    lead: "Slack Code API añade canales de tareas y vistas previas de diffs dentro de Slack, pero Slack sigue siendo solo una interfaz de chat sin runtime de agentes, sin documentación viva y con un recorte severo en la API (1 petición/min y máximo 15 mensajes en endpoints de historial para apps fuera del Marketplace). Mantén Slack conectado mediante el conector de Slack de xMatrix mientras ejecutas 34 agentes de código en tus propias máquinas y conservas las decisiones en Páginas vivas.",
     productCaption:
       "Dentro de xMatrix: Canales nativos multi-humano y multi-agente respaldados por tus propias máquinas y Páginas vivas, con acceso completo al contexto y cero muros de 15 mensajes.",
     painPoints: [
@@ -1503,7 +1503,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Runtime de ejecución",
-        xmatrix: "Daemon multimáquina integrado para 35 agentes de código (+ --runtime)",
+        xmatrix: "Daemon multimáquina integrado para 34 agentes de código (+ --runtime)",
         competitor: "Solo interfaz de chat; exige suscripciones aparte de agentes asociados o hosting propio",
       },
       {
@@ -1588,7 +1588,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "Nowledge Mem no lanza agentes de código, no coordina a varios compañeros en canales compartidos ni enruta el trabajo entre máquinas: sigues teniendo que unir runners, túneles y configuraciones MCP por separado.",
         xmatrixAnswer:
-          "xMatrix es la capa completa de coordinación: Canales compartidos, enrutamiento entre máquinas con 35 agentes de código, lectura progresiva de esquema y secciones de Páginas y Páginas vivas en un solo producto.",
+          "xMatrix es la capa completa de coordinación: Canales compartidos, enrutamiento entre máquinas con 34 agentes de código, lectura progresiva de esquema y secciones de Páginas y Páginas vivas en un solo producto.",
       },
       {
         title: "Sincronización de equipos en beta privada y cero gobernanza operativa",
@@ -1616,7 +1616,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Ejecución de agentes",
-        xmatrix: "Lanza y enruta 35 agentes de código (+ --runtime) entre tus máquinas",
+        xmatrix: "Lanza y enruta 34 agentes de código (+ --runtime) entre tus máquinas",
         competitor: "No ejecuta ni enruta agentes de programación",
       },
       {
@@ -1676,7 +1676,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       "¿Buscas alternativas a EverOS o EverMemOS? Deja los bloqueos SQLite de una máquina, gastos ocultos de LLM y la falta de sincronización por Canales y Páginas.",
     eyebrow: "Alternativa a EverOS (EverMemOS) · EverOS vs xMatrix",
     headline: "Alternativa a EverOS: memoria de proyecto multimáquina escrita por los agentes que hacen el trabajo",
-    lead: "EverOS (EverMemOS) combina archivos Markdown con índices locales en SQLite y LanceDB, pero su v1 open-source rechaza explícitamente un segundo servicio sobre el mismo directorio, deja fuera multitenencia y sincronización, y quema tokens LLM de forma continua en extracción en segundo plano. xMatrix brinda a los equipos ejecución multimáquina en tiempo real con 35 agentes de código y Páginas vivas autoritativas.",
+    lead: "EverOS (EverMemOS) combina archivos Markdown con índices locales en SQLite y LanceDB, pero su v1 open-source rechaza explícitamente un segundo servicio sobre el mismo directorio, deja fuera multitenencia y sincronización, y quema tokens LLM de forma continua en extracción en segundo plano. xMatrix brinda a los equipos ejecución multimáquina en tiempo real con 34 agentes de código y Páginas vivas autoritativas.",
     productCaption:
       "Dentro de xMatrix: Páginas Markdown sincronizadas en tiempo real entre máquinas y actualizadas por tus agentes activos, sin bloqueos de directorio único ni drenaje de tokens por extracción.",
     painPoints: [
@@ -1699,7 +1699,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
         problem:
           "EverOS es un backend de memoria (y eliminó las predicciones Foresight en v1.7.1); no puede invocar agentes de código en varias máquinas ni exigir aprobación humana antes de tocar Vercel, Cloudflare, Gmail o Stripe.",
         xmatrixAnswer:
-          "xMatrix integra ejecución multi-agente con 35 agentes de código, Secretos del Space, aprobaciones por app en 35 conectores y Páginas vivas en un único espacio cohesionado.",
+          "xMatrix integra ejecución multi-agente con 34 agentes de código, Secretos del Space, aprobaciones por app en 35 conectores y Páginas vivas en un único espacio cohesionado.",
       },
     ],
     comparisonRows: [
@@ -1715,7 +1715,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Ejecución y enrutamiento de agentes",
-        xmatrix: "Lanza y enruta 35 agentes de código (+ --runtime) entre tus máquinas",
+        xmatrix: "Lanza y enruta 34 agentes de código (+ --runtime) entre tus máquinas",
         competitor: "Solo capa de memoria; no ejecuta ni coordina flotas de agentes",
       },
       {
@@ -1735,7 +1735,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     switchWhen: [
       "Trabajas en varias máquinas o con compañeros y no puedes vivir dentro del límite de bloqueo de un solo directorio de la v1.",
       "Quieres Páginas Markdown autoritativas mantenidas por las propias ejecuciones en lugar de pagar costes continuos de extracción LLM en segundo plano.",
-      "Necesitas ejecución real con 35 agentes de código y 35 conectores gobernados además de conocimiento persistente del proyecto.",
+      "Necesitas ejecución real con 34 agentes de código y 35 conectores gobernados además de conocimiento persistente del proyecto.",
     ],
     migrationSteps: [
       {
@@ -1813,7 +1813,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       },
       {
         dimension: "Ejecución local de código",
-        xmatrix: "Ejecuta 35 agentes de código (+ --runtime) directamente en tus repositorios locales",
+        xmatrix: "Ejecuta 34 agentes de código (+ --runtime) directamente en tus repositorios locales",
         competitor: "Enlaza contexto de GitHub/Linear; el agente de escritorio queda restringido al plan Max de $100–$200",
       },
       {
@@ -1870,7 +1870,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
       {
         question: "¿Pueden agentes externos usar xMatrix también?",
         answer:
-          "Sí. xMatrix funciona con 35 agentes de código integrados (más cualquier CLI personalizada con --runtime) y expone un servidor MCP para herramientas externas.",
+          "Sí. xMatrix funciona con 34 agentes de código integrados (más cualquier CLI personalizada con --runtime) y expone un servidor MCP para herramientas externas.",
       },
     ],
   },

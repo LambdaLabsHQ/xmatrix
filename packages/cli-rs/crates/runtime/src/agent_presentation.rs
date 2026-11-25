@@ -129,7 +129,6 @@ pub(crate) enum BuiltinAgentPresentationAdapter {
     Claude,
     Grok,
     Kimi,
-    Zcode,
     GenericAcp { runtime: String, source: String },
     Legacy { runtime: String, source: String },
 }
@@ -141,7 +140,6 @@ impl AgentPresentationAdapter for BuiltinAgentPresentationAdapter {
             Self::Claude => "claude",
             Self::Grok => "grok",
             Self::Kimi => "kimi",
-            Self::Zcode => "zcode",
             Self::GenericAcp { runtime, .. } | Self::Legacy { runtime, .. } => runtime,
         }
     }
@@ -152,7 +150,6 @@ impl AgentPresentationAdapter for BuiltinAgentPresentationAdapter {
             Self::Claude => "claude_stream",
             Self::Grok => "grok_acp",
             Self::Kimi => "kimi_acp",
-            Self::Zcode => "zcode_app",
             Self::GenericAcp { source, .. } | Self::Legacy { source, .. } => source,
         }
     }
@@ -163,7 +160,6 @@ impl AgentPresentationAdapter for BuiltinAgentPresentationAdapter {
             Self::Claude => Some(AGENT_COMMAND_CATALOG_CLAUDE),
             Self::Grok => Some(AGENT_COMMAND_CATALOG_GROK),
             Self::Kimi => Some(AGENT_COMMAND_CATALOG_KIMI),
-            Self::Zcode => Some(AGENT_COMMAND_CATALOG_ZCODE),
             Self::GenericAcp { .. } | Self::Legacy { .. } => None,
         }
     }
@@ -195,9 +191,6 @@ pub(crate) fn agent_presentation_adapter_for_runtime(
     }
     if key.contains("kimi") {
         return BuiltinAgentPresentationAdapter::Kimi;
-    }
-    if key.contains("zcode") || key.contains("glm") {
-        return BuiltinAgentPresentationAdapter::Zcode;
     }
     let runtime = if key.is_empty() {
         "unknown".to_string()
@@ -240,8 +233,6 @@ const AGENT_COMMAND_CATALOG_GROK: &str =
     include_str!("../../../../protocol/src/agent-command-catalogs/grok.json");
 const AGENT_COMMAND_CATALOG_KIMI: &str =
     include_str!("../../../../protocol/src/agent-command-catalogs/kimi.json");
-const AGENT_COMMAND_CATALOG_ZCODE: &str =
-    include_str!("../../../../protocol/src/agent-command-catalogs/zcode.json");
 
 pub(crate) fn agent_command_catalog_json_for_runtime(runtime: &str) -> Option<&'static str> {
     agent_presentation_adapter_for_runtime(runtime).command_catalog_json()

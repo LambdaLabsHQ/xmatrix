@@ -12,7 +12,6 @@ with what the person picked, so the harness continues the turn it is in.
 | Claude Code | `control_request` `can_use_tool` for `AskUserQuestion` | `--permission-prompt-tool stdio` (headless Claude withholds the tool without it) | `allow` with `updatedInput.answers` keyed by question text |
 | Codex | server request `item/tool/requestUserInput` | `-c features.default_mode_request_user_input=true` (otherwise Plan mode only) | `{ answers: { <questionId>: { answers: [...] } } }` |
 | ACP agents (Grok, Kimi, Cursor, Gemini, …) | server request `elicitation/create`, form mode | `clientCapabilities.elicitation.form` in `initialize` | `{ action: "accept", content }` typed by the requested schema |
-| ZCode | none yet | — | — |
 
 With `--dangerously-skip-permissions` Claude sends `can_use_tool` only for
 tools that need a person; every other tool is allowed with its input

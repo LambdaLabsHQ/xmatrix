@@ -29,14 +29,6 @@ fn runtime_uses(matches: fn(&str) -> bool, tool: &str, cmd: &str, cmd_args: &[St
     matches(tool) || matches(cmd) || cmd_args.iter().any(|arg| matches(arg))
 }
 
-fn is_zcode_launcher_token(value: &str) -> bool {
-    is_zcode_tool(value) || launcher_stem_matches(value, &["zai", "glm", "z-ai", "bigmodel"])
-}
-
-fn uses_zcode_runtime(tool: &str, cmd: &str, cmd_args: &[String]) -> bool {
-    runtime_uses(is_zcode_launcher_token, tool, cmd, cmd_args)
-}
-
 fn is_grok_launcher_token(value: &str) -> bool {
     is_grok_tool(value) || launcher_stem_matches(value, &["grok-build"])
 }
@@ -178,10 +170,6 @@ fn is_codex_tool(tool: &str) -> bool {
     launcher_stem_matches(tool, &["codex"])
 }
 
-fn is_zcode_tool(tool: &str) -> bool {
-    launcher_stem_matches(tool, &["zcode", "zcode.cjs"])
-}
-
 fn is_grok_tool(tool: &str) -> bool {
     launcher_stem_matches(tool, &["grok"])
 }
@@ -250,16 +238,6 @@ fn use_codex_app_backend(tool: &str) -> bool {
     }
 }
 
-fn use_zcode_app_backend(tool: &str) -> bool {
-    if std::env::var("XMATRIX_AGENT_BACKEND")
-        .ok()
-        .is_some_and(|backend| backend == "zcode-app")
-    {
-        return true;
-    }
-    is_zcode_tool(tool) && env_flag("XMATRIX_ZCODE_APP")
-}
-
 fn use_grok_app_backend(tool: &str) -> bool {
     if std::env::var("XMATRIX_AGENT_BACKEND")
         .ok()
@@ -285,7 +263,7 @@ fn use_grok_app_backend(tool: &str) -> bool {
 /// backend other than the dedicated `grok-acp` adapter.
 ///
 /// Backend resolution priority across the runtime: dedicated app-server / ACP
-/// backends (codex-app, zcode-app, grok-acp, acp) > claude-print > headless
+/// backends (codex-app, grok-acp, acp) > claude-print > headless
 /// PTY > interactive PTY (last-resort fallback).
 fn use_acp_backend() -> bool {
     if env_flag("XMATRIX_ACP") {

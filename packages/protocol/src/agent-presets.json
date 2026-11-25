@@ -167,48 +167,6 @@
     }
   },
   {
-    "id": "zcode",
-    "displayName": "ZCode",
-    "description": "ZCode CLI through the ZCode Protocol app-server backend.",
-    "runtime": "zcode",
-    "avatarUrl": "/agent-vendors/zcode.svg",
-    "defaultArgs": [],
-    "access": { "full": { "session": { "mode": "yolo" } } },
-    "backend": "zcode-app",
-    "launcherNames": ["zcode", "zcode.exe", "zcode.cmd", "zcode.bat"],
-    "classicConfigDirs": ["~/.zcode"],
-    "management": {
-      "version": null,
-      "install": {
-        "unix": null,
-        "windows": null
-      },
-      "update": {
-        "unix": null,
-        "windows": null
-      },
-      "uninstall": {
-        "unix": null,
-        "windows": null
-      },
-      "login": {
-        "flow": "device_code",
-        "start": {
-          "command": "zcode",
-          "args": ["login", "zai", "--no-browser"]
-        },
-        "urlRegex": "Open this URL to sign in:\\s*(https://\\S+)"
-      },
-      "autoUpdate": {
-        "behavior": "unsupported",
-        "controls": []
-      },
-      "sources": ["https://docs.z.ai/devpack/tool/zcode"],
-      "checkedAt": "2026-09-30",
-      "notes": "No verified public CLI installer or updater; keep the existing runtime integration and report launcher presence without executing a guessed version command."
-    }
-  },
-  {
     "id": "grok",
     "displayName": "Grok Build",
     "description": "Grok Build CLI through its ACP stdio backend (non-PTY).",

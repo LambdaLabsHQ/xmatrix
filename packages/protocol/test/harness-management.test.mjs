@@ -118,8 +118,7 @@ test("an action is available only where an official recipe or control exists", (
   assert.equal(harnessActionAvailable(preset("goose"), "auto_update_on"), true);
   // The daily release watcher uses the official update recipe without a registry.
   assert.equal(harnessActionAvailable(preset("goose"), "release"), true);
-  assert.equal(harnessActionAvailable(preset("zcode"), "update"), false);
-  assert.equal(harnessActionAvailable(preset("zcode"), "release"), false);
+  assert.equal(AGENT_PRESETS.find((entry) => entry.id === "zcode"), undefined);
   assert.equal(harnessActionAvailable(preset("codex"), "uninstall"), true);
   // No verified uninstaller upstream: the action is never offered.
   assert.equal(harnessActionAvailable(preset("grok"), "uninstall"), false);
@@ -166,7 +165,7 @@ test("a remote sign-in carries a pasted code only on login_finish and answers wi
 test("sign-in is offered exactly for presets with an official headless sign-in", () => {
   const signIn = AGENT_PRESETS.filter(preset => harnessActionAvailable(preset.management, "login_start")).map(preset => preset.id);
   assert.deepEqual(signIn.sort(), ["antigravity", "claude", "cline", "codex", "copilot", "cursor", "devin", "grok", "hermes",
-    "jcode", "kilo", "kimi", "kiro", "omp", "opencode", "qoder", "zcode"]);
+    "jcode", "kilo", "kimi", "kiro", "omp", "opencode", "qoder"]);
   for (const preset of AGENT_PRESETS) {
     const login = preset.management.login;
     if (!login) continue;

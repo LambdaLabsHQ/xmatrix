@@ -1438,14 +1438,13 @@ function agentSupportsGoalCommand(
 ): boolean {
   if (instance?.capabilities?.includes("goal")) return true;
   // Compatibility fallback for runtimes that predate capability advertising.
-  // Current Codex, Claude Code, Grok Build, and ZCode instances report `goal`
+  // Current Codex, Claude Code, and Grok Build instances report `goal`
   // plus their exact `goal.*` operation set.
   const type = agent.type?.toLowerCase() || "";
   return (
     type.includes("codex") ||
     type.includes("claude") ||
-    type.includes("grok") ||
-    type.includes("zcode")
+    type.includes("grok")
   );
 }
 

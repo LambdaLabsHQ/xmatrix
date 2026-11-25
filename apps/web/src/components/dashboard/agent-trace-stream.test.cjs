@@ -1236,7 +1236,7 @@ test("Cursor ACP deltas retain nanosecond order across history and live merges",
 // receipt order, while this test catches presentation reordering of that order.
 test("all trace adapters preserve host receive order across pages, turns and tool updates", () => {
   const { mergeAgentTraceReplicas } = require("./agent-trace-replica.ts");
-  for (const source of ["codex_app_server", "zcode_app_server", "claude_code", "cursor_acp"]) {
+  for (const source of ["codex_app_server", "claude_code", "cursor_acp"]) {
     const streamId = "11111111-1111-4111-8111-111111111111";
     const ordered = (sequence, phase, payload) => {
       const event = llmTrace(`event:${10 - sequence}`, `2026-10-13T08:00:${String(20 - sequence).padStart(2, "0")}Z`, phase, payload, source);

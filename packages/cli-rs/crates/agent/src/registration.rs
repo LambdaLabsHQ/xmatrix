@@ -90,6 +90,9 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
             };
             let preset = concrete_preset(&harness)?;
             let runtime = runtime.unwrap_or_else(|| preset.runtime.clone());
+            if let Some(reason) = crate::refused_agent_harness_reason(&runtime) {
+                return Err(CliError::Launch(reason.into()));
+            }
             if !runtime_available_for_preset(&runtime, preset) {
                 eprintln!(
                     "{} {runtime} is not installed on this machine yet{}",
@@ -644,6 +647,9 @@ fn model_command(key: &Value, current: &Value, model: Option<&str>) -> error::Re
 }
 
 fn concrete_preset(harness: &str) -> error::Result<&'static AgentPreset> {
+    if let Some(reason) = crate::refused_agent_harness_reason(harness) {
+        return Err(CliError::Launch(reason.into()));
+    }
     agent_preset_by_id(harness)
         .filter(|preset| preset.id != "custom")
         .ok_or_else(|| {

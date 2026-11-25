@@ -66,6 +66,9 @@ test("people, unknown harnesses, other owners' Machines and missing installs are
     assert.equal((await agent.post(body)).status, 400, JSON.stringify(body));
   }
   assert.equal((await agent.post({ harness: "custom" })).status, 400);
+  const zcodeSignIn = await agent.post({ harness: "zcode" });
+  assert.equal(zcodeSignIn.status, 400);
+  assert.match((await zcodeSignIn.json()).error, /explicitly refuses ZCode/u);
   assert.equal((await agent.post({ harness: "no-such-harness" })).status, 400);
   assert.equal((await agent.post({ harness: "codex", machineId: "machine:elsewhere" })).status, 404);
   const missing = route({ id: "agent-run:run", email: "owner@example.test", agentRun: run },

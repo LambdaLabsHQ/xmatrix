@@ -212,6 +212,7 @@ fn runtime_accepts_channel_delivery(bound_channel_id: Option<&str>, channel_id: 
 /// `context` and dispatches the switch on its own `agent_*_switch_requested`
 /// frame. The cancelled turn hands control back to the run loop, which applies
 /// the switch and resumes the cancelled work on the new selection.
+#[cfg(test)]
 fn event_requests_active_turn_interrupt(
     event: &agent_instance_connection::AgentInstanceConnectionEvent,
     bound_channel_id: Option<&str>,
@@ -496,17 +497,6 @@ fn goal_runtime_capabilities(tool: &str, cmd: &str, cmd_args: &[String]) -> Vec<
             "status",
             "token-budget",
             "metrics",
-        ]
-    } else if use_zcode_app_backend(tool) {
-        &[
-            "set",
-            "replace",
-            "get",
-            "clear",
-            "pause",
-            "resume",
-            "metrics",
-            "verification",
         ]
     } else if use_grok_app_backend(tool) {
         &["set", "get", "clear", "pause", "resume"]
