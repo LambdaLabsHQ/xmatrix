@@ -273,7 +273,7 @@ export function channelMessage(
     channelId,
     sequence,
     ...messagePublicationEvidence(input),
-    ...((recalledAt || deletedAt) && Number.isSafeInteger(input.entityVersion) && Number(input.entityVersion) > 0
+    ...((recalledAt || deletedAt || editedAt) && Number.isSafeInteger(input.entityVersion) && Number(input.entityVersion) > 0
       ? { entityVersion: Number(input.entityVersion) } : {}),
     from: input.from as ChannelMessage["from"],
     body,

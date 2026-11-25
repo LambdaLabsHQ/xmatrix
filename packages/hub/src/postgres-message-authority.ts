@@ -929,11 +929,22 @@ export async function postgresMessageMutation(
       senderSnapshot: bundle.senderSnapshot,
       ...(residual === undefined ? {} : { residual }),
     });
-    return messages.updatePrepared({
-      ...base,
-      editedAt,
-      prepared: postgresPreparedMessage(prepared),
-    });
+    const stored = postgresPreparedMessage(prepared);
+    const result = await messages.updatePrepared({ ...base, editedAt, prepared: stored });
+    if (family !== "edit-message") return result;
+    // The edited message as every reader of the Channel now sees it, for the
+    // live update the commit path delivers (channel-messages.ts).
+    return {
+      ...result,
+      editedMessage: {
+        ...postgresProductMessage({
+          ...candidate, payloadBundleBase64: stored.payloadBundleBase64, bodyHash: stored.bodyHash,
+          senderSnapshotDigest: stored.senderSnapshotDigest, recordDigest: stored.recordDigest,
+          editedAt: result.editedAt,
+        }),
+        entityVersion: result.entityVersion,
+      },
+    };
   }
   if (family === "message-reaction") {
     if (actor.kind === "user" && input.actorUserId !== undefined && input.actorUserId !== actor.id) {

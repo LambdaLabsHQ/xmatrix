@@ -94,7 +94,9 @@ export async function openWorkingAgentsSpace(
   space: ReturnType<typeof workingAgentsSpace>,
   messages: unknown[],
   lastRowText: string,
-  options: { routeSocket?: typeof routeHumanSocket; initialAgentList?: typeof space.agents } = {},
+  options: { routeSocket?: typeof routeHumanSocket; initialAgentList?: typeof space.agents;
+    /** The spec's own answers, registered after the shared stubs so they win. */
+    fixtures?: () => Promise<void> } = {},
 ): Promise<((frame: unknown) => void) & { connections(): number }> {
   let send: ((frame: unknown) => void) | null = null;
   let connections = 0;
@@ -116,6 +118,7 @@ export async function openWorkingAgentsSpace(
     }
   });
   await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: space.channels });
+  await options.fixtures?.();
   await fixtureJson(page, "working-agents-invocations", "**/api/xmatrix/channels/*/agent-launches/query", {
     launches: [], rejections: [], continuations: [], executions: [], stops: [], nextCursor: null,
   });

@@ -139,6 +139,22 @@ export function commandResultHistoryMessage<
   return { ...held, commandResult: mergeCommandResult(held.commandResult, annotationId, metadata?.payload) };
 }
 
+/**
+ * The held message with an edit the Hub delivered live applied: its new text,
+ * edit time and app metadata over the copy the reader holds, which keeps what
+ * accrued after commit (reactions, thread, attachments). Undefined when the
+ * message is not held, is recalled, or the held copy is a later edit already.
+ */
+export function editedHistoryMessage<T extends ChannelHistoryLike & { editedAt?: string; recalledAt?: string }>(
+  messages: readonly T[],
+  edit: T,
+): T | undefined {
+  const held = messages.find((message) => message.messageId === edit.messageId);
+  if (!held || held.recalledAt || !edit.editedAt) return undefined;
+  if (held.editedAt && Date.parse(held.editedAt) > Date.parse(edit.editedAt)) return undefined;
+  return { ...held, ...edit };
+}
+
 export function mergeChannelHistory<T extends ChannelHistoryLike>(
   channelId: string,
   current: T[],
