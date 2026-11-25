@@ -2411,6 +2411,7 @@ async fn acp_turn_joins_a_mid_turn_prompt_instead_of_ending() {
             .await
             .expect("initialize ACP steer fixture");
         let interrupter = session.interrupter().expect("ACP interrupter");
+        assert!(interrupter.can_steer(), "Antigravity advertises mid-turn steering");
         let agent = test_serialized_agent("antigravity-fixture");
         let steer = async {
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -2453,6 +2454,7 @@ async fn acp_steer_declines_for_agents_that_do_not_join_prompts() {
             .await
             .expect("initialize generic ACP fixture");
         let interrupter = session.interrupter().expect("ACP interrupter");
+        assert!(!interrupter.can_steer(), "generic ACP agents without steering report can_steer=false");
         assert!(!interrupter.steer_active_turn("hello").await.expect("decline"));
         session.shutdown().await;
     })
