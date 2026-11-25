@@ -81,34 +81,64 @@ export async function recordMessageExecutions(tx: DatabaseTransaction, context: 
     const bindingDigest = await hash([context.runId, context.instanceId, context.instanceId,
       report.executionId, report.sourceCount, report.sources, report.startedAtMillis]);
     const reportDigest = await hash(report);
-    const prior = (await tx.query<QueryResultRow>({ name: "runtime_message_execution_prior_v1", text: `SELECT
-      binding_digest,report_digest,revision,state FROM data.agent_message_executions
-      WHERE run_id=$1 AND execution_id=$2 LIMIT 1`, values: [context.runId, report.executionId], maxRows: 1 }))[0];
+    const priorRows = await tx.query<QueryResultRow>({ name: "runtime_message_execution_prior_v2", text: `SELECT
+      binding_id,instance_id,binding_digest,report_digest,revision,state,
+      source_message_id,source_entity_version,source_body_hash,source_sequence,source_count,started_at_millis
+      FROM data.agent_message_executions
+      WHERE run_id=$1 AND execution_id=$2`, values: [context.runId, report.executionId], maxRows: 100 });
+    const prior = priorRows[0];
     // Invalid/conflicting observation data cannot prevent the owning Run from
-    // terminalizing. It also cannot replace an earlier execution's identity.
-    if (prior && (prior.binding_digest !== bindingDigest || Number(prior.revision) > report.revision ||
-        Number(prior.revision) === report.revision && prior.report_digest !== reportDigest ||
-        TERMINAL.has(String(prior.state)) && Number(prior.revision) !== report.revision)) continue;
-    if (prior && Number(prior.revision) === report.revision && TERMINAL.has(String(prior.state))) continue;
+    // terminalizing. It also cannot replace an earlier execution's identity or
+    // drop/mutate sources that were already bound; while non-terminal, mid-turn
+    // steering may monotonically append new sources to the running execution.
+    if (prior) {
+      const priorRevision = Number(prior.revision);
+      const priorSourceCount = Number(prior.source_count);
+      const incomingByMessage = new Map(report.sources.map(source => [source.messageId, source]));
+      const preservesPriorSources = priorRows.every(row => {
+        const match = incomingByMessage.get(String(row.source_message_id));
+        return match !== undefined
+          && match.entityVersion === Number(row.source_entity_version)
+          && match.bodyHash === String(row.source_body_hash)
+          && match.sequence === Number(row.source_sequence);
+      });
+      const sameSourceSet = report.sources.length === priorRows.length && report.sourceCount === priorSourceCount;
+      if (String(prior.instance_id) !== context.instanceId
+          || Number(prior.started_at_millis) !== report.startedAtMillis
+          || priorRevision > report.revision
+          || priorSourceCount > report.sourceCount
+          || !preservesPriorSources
+          || (sameSourceSet && prior.binding_digest !== bindingDigest)
+          || (priorRevision === report.revision && prior.report_digest !== reportDigest)
+          || (TERMINAL.has(String(prior.state)) && priorRevision !== report.revision)) continue;
+      if (priorRevision === report.revision && TERMINAL.has(String(prior.state))) continue;
+    }
     if (!prior && TERMINAL.has(report.state) && report.updatedAtMillis < Date.parse(context.at) - RETENTION_MS) continue;
-    const entries = await Promise.all(report.sources.map(async source => ({
-      id: await hash([context.runId, report.executionId, source.messageId]),
-      message_id: source.messageId, entity_version: source.entityVersion, body_hash: source.bodyHash,
-      sequence: source.sequence,
-    })));
-    await tx.query({ name: "runtime_message_execution_upsert_v2", text: `WITH incoming AS (
+    const priorIds = new Set(priorRows.map(row => String(row.binding_id)));
+    const entries = await Promise.all(report.sources.map(async source => {
+      const id = await hash([context.runId, report.executionId, source.messageId]);
+      return {
+        id,
+        message_id: source.messageId, entity_version: source.entityVersion, body_hash: source.bodyHash,
+        sequence: source.sequence, is_new: !priorIds.has(id),
+      };
+    }));
+    await tx.query({ name: "runtime_message_execution_upsert_v3", text: `WITH incoming AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb) AS entry(id text,message_id text,
-          entity_version bigint,body_hash text,sequence bigint)
+          entity_version bigint,body_hash text,sequence bigint,is_new boolean)
       ), eligible AS (
-        SELECT incoming.* FROM incoming JOIN data.messages message
+        SELECT incoming.id,incoming.message_id,incoming.entity_version,incoming.body_hash,incoming.sequence
+          FROM incoming JOIN data.messages message
           ON message.space_id=$2 AND message.channel_id=$3 AND message.message_id=incoming.message_id
           AND incoming.entity_version BETWEEN COALESCE(message.invocation_input_version,message.entity_version) AND message.entity_version
           AND message.body_hash=incoming.body_hash
           AND message.timeline_sequence=incoming.sequence AND message.deleted_at IS NULL AND message.recalled_at IS NULL
-          AND $20::boolean
+          AND incoming.is_new
         UNION
-        SELECT incoming.* FROM incoming JOIN data.agent_message_executions prior ON prior.binding_id=incoming.id
-          AND prior.run_id=$4 AND prior.instance_id=$5 AND prior.binding_digest=$9
+        SELECT incoming.id,incoming.message_id,incoming.entity_version,incoming.body_hash,incoming.sequence
+          FROM incoming JOIN data.agent_message_executions prior ON prior.binding_id=incoming.id
+          AND prior.run_id=$4 AND prior.instance_id=$5 AND prior.execution_id=$8
+          AND prior.started_at_millis=$15
       ) INSERT INTO data.agent_message_executions
         (binding_id,space_id,channel_id,run_id,instance_id,agent_name,channel_instance_id,
          execution_id,binding_digest,report_digest,revision,source_message_id,source_entity_version,
@@ -116,19 +146,24 @@ export async function recordMessageExecutions(tx: DatabaseTransaction, context: 
          updated_at_millis,finished_at_millis,created_at,observed_at,expires_at)
       SELECT id,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,message_id,entity_version,body_hash,sequence,
         $12,$13,$14,$15,$16,$17,$18,$18,$19 FROM eligible
-      ON CONFLICT (binding_id) DO UPDATE SET revision=EXCLUDED.revision,report_digest=EXCLUDED.report_digest,
+      ON CONFLICT (binding_id) DO UPDATE SET binding_digest=EXCLUDED.binding_digest,
+        source_count=EXCLUDED.source_count,revision=EXCLUDED.revision,report_digest=EXCLUDED.report_digest,
         state=EXCLUDED.state,input_disposition=EXCLUDED.input_disposition,
         updated_at_millis=EXCLUDED.updated_at_millis,finished_at_millis=EXCLUDED.finished_at_millis,
         observed_at=GREATEST(agent_message_executions.observed_at,EXCLUDED.observed_at),
         expires_at=GREATEST(agent_message_executions.expires_at,EXCLUDED.expires_at)
-      WHERE agent_message_executions.binding_digest=EXCLUDED.binding_digest
+      WHERE agent_message_executions.run_id=EXCLUDED.run_id
+        AND agent_message_executions.instance_id=EXCLUDED.instance_id
+        AND agent_message_executions.execution_id=EXCLUDED.execution_id
+        AND agent_message_executions.started_at_millis=EXCLUDED.started_at_millis
+        AND agent_message_executions.source_count<=EXCLUDED.source_count
         AND agent_message_executions.revision<=EXCLUDED.revision
         AND agent_message_executions.state IN ('accepted','running')`,
       values: [JSON.stringify(entries), context.spaceId, context.channelId, context.runId, context.instanceId,
         context.agentName?.slice(0, 160) ?? null, context.channelInstanceId ?? null,
         report.executionId, bindingDigest, reportDigest, report.revision, report.sourceCount,
         report.state, report.inputDisposition ?? null, report.startedAtMillis, report.updatedAtMillis,
-        report.finishedAtMillis ?? null, context.at, new Date(Date.parse(context.at) + RETENTION_MS).toISOString(), !prior], maxRows: 0 });
+        report.finishedAtMillis ?? null, context.at, new Date(Date.parse(context.at) + RETENTION_MS).toISOString()], maxRows: 0 });
   }
 }
 

@@ -2215,11 +2215,11 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                 None => initial_prompt,
             };
         let payload = prompt_with_optional_bootstrap(&mut bootstrap, &initial_prompt);
-        let initial_content_blocks = prompt_content_blocks(
+        let initial_content_blocks = acp_prompt_content_blocks(
             &payload,
             initial_message_attachments.as_deref(),
             Some(initial_message_attachment_files.image_paths()),
-            ImageBlockShape::Acp,
+            run.config.inline_prompt_images,
         )?;
         write_current_run_status("turn_running", false, None);
         let turn = submit_acp_turn_interruptible(
@@ -2236,6 +2236,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
             auto_join_channel_id.as_deref(),
             &runtime_state,
             run.latest_usage.clone(),
+            &mut materialized_inbound_images,
         )
         .await;
         let cancelled = run.settle_turn(
@@ -2285,11 +2286,11 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                                 .await;
                                 let message_text =
                                     message.prompt_text(&agent, Some(&inbound_images));
-                                let message_blocks = prompt_content_blocks(
+                                let message_blocks = acp_prompt_content_blocks(
                                     &message_text,
                                     message.attachments.as_deref(),
                                     Some(inbound_images.image_paths()),
-                                    ImageBlockShape::Acp,
+                                    run.config.inline_prompt_images,
                                 )?;
                                 blocks.extend(message_blocks);
                                 prompt_parts.push(message_text);
@@ -2363,6 +2364,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                     Some(&primary_channel_id),
                     &runtime_state,
                     run.latest_usage.clone(),
+                    &mut materialized_inbound_images,
                 )
                 .await;
                 let cancelled = run
@@ -2394,6 +2396,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                     Some(&channel_id),
                     &runtime_state,
                     run.latest_usage.clone(),
+                    &mut materialized_inbound_images,
                 )
                 .await;
                 let cancelled = run
@@ -3186,6 +3189,23 @@ fn acp_text_block(text: &str) -> Value {
     serde_json::json!({ "type": "text", "text": text })
 }
 
+/// Build ACP `session/prompt` content blocks. Vendors with `inline_prompt_images`
+/// receive base64 image blocks; Antigravity reads materialized local attachment
+/// files on demand via `read_file`, keeping long sessions free of eager media
+/// payloads and avoiding double ingestion.
+pub(crate) fn acp_prompt_content_blocks(
+    text: &str,
+    attachments: Option<&[protocol::ChannelAttachment]>,
+    local_image_paths: Option<&[PathBuf]>,
+    inline_prompt_images: bool,
+) -> error::Result<Vec<Value>> {
+    if inline_prompt_images {
+        prompt_content_blocks(text, attachments, local_image_paths, ImageBlockShape::Acp)
+    } else {
+        Ok(vec![acp_text_block(text)])
+    }
+}
+
 fn prompt_with_optional_bootstrap(bootstrap: &mut Option<String>, text: &str) -> String {
     match bootstrap.take() {
         Some(bootstrap) => format!("{bootstrap}\n\n{text}"),
@@ -3208,8 +3228,10 @@ async fn submit_acp_turn_interruptible(
     trace_channel_id: Option<&str>,
     runtime_state: &AgentRuntimeStateTracker,
     latest_usage: Option<protocol::LlmUsage>,
+    materialized_inbound_images: &mut Vec<LocalImageFiles>,
 ) -> error::Result<CodexTurnResult> {
     let display_name = app.config.display_name.clone();
+    let inline_prompt_images = app.config.inline_prompt_images;
     let interrupter = app.interrupter()?;
     let turn = app.submit_turn(
         text,
@@ -3240,22 +3262,54 @@ async fn submit_acp_turn_interruptible(
         }
         // A message that would cut the turn short joins it instead when the
         // agent takes prompts mid-turn, as Claude's turns do.
-        if let Some(message) = crate::active_turn_steer_message(
-            event,
-            trace_channel_id,
-            agent,
-            interrupt_history_replay,
-        ) {
+        if interrupter.can_steer()
+            && let Some(message) = crate::active_turn_steer_message(
+                event,
+                trace_channel_id,
+                agent,
+                interrupt_history_replay,
+            )
+        {
             interrupter.cancel_questions().await;
             let instruction = crate::inbound_execution_sources(std::slice::from_ref(&message))
                 .into_iter()
                 .next()
                 .and_then(|source| runtime_state.join_message_turn_source(source));
+            let inbound_images = if message
+                .attachments
+                .as_deref()
+                .is_some_and(|items| !items.is_empty())
+                && let Some(relay) = relay
+            {
+                Some(
+                    materialize_inbound_image_files(message.attachments.as_deref(), relay).await,
+                )
+            } else {
+                None
+            };
             let input = crate::steered_turn_input(
-                &message.prompt_text(agent, None),
+                &message.prompt_text(agent, inbound_images.as_ref()),
                 instruction.as_deref(),
             );
-            match interrupter.steer_active_turn(&input).await {
+            let steer_blocks = match acp_prompt_content_blocks(
+                &input,
+                message.attachments.as_deref(),
+                inbound_images.as_ref().map(LocalImageFiles::image_paths),
+                inline_prompt_images,
+            ) {
+                Ok(blocks) => blocks,
+                Err(err) => {
+                    eprintln!(
+                        "{} {display_name} ACP steer content block build failed: {err}; falling back to text-only steer",
+                        "⚠".yellow().bold()
+                    );
+                    vec![acp_text_block(&input)]
+                }
+            };
+            if let Some(files) = inbound_images.filter(|files| !files.paths().is_empty()) {
+                materialized_inbound_images.push(files);
+            }
+            match interrupter.steer_active_turn_blocks(steer_blocks).await {
                 Ok(true) => {
                     if let Some(relay) = relay {
                         crate::ack_inbound_channel_messages(relay, std::slice::from_ref(&message));
@@ -3443,9 +3497,22 @@ impl AcpInterrupter {
         write_acp_message(&self.write, &acp_cancel_notification(&self.session_id)).await
     }
 
+    pub(crate) fn can_steer(&self) -> bool {
+        self.steered_prompts.is_some()
+    }
+
     /// Join `text` to the running turn as another `session/prompt`. False when
     /// this agent does not join mid-turn prompts; the caller then interrupts.
+    #[cfg(test)]
     pub(crate) async fn steer_active_turn(&self, text: &str) -> error::Result<bool> {
+        self.steer_active_turn_blocks(vec![acp_text_block(text)]).await
+    }
+
+    /// Join structured ACP `session/prompt` content blocks to the running turn.
+    pub(crate) async fn steer_active_turn_blocks(
+        &self,
+        content_blocks: Vec<Value>,
+    ) -> error::Result<bool> {
         let Some(steered) = &self.steered_prompts else {
             return Ok(false);
         };
@@ -3457,7 +3524,7 @@ impl AcpInterrupter {
             "method": "session/prompt",
             "params": {
                 "sessionId": self.session_id,
-                "prompt": [acp_text_block(text)],
+                "prompt": content_blocks,
             },
         });
         if let Err(err) = write_acp_message(&self.write, &request).await {
@@ -3565,6 +3632,11 @@ struct AcpVendorConfig {
     /// `end_turn` and the work carries on under the newer one. Without it a
     /// channel message that arrives mid-turn cancels the turn instead.
     steers_mid_turn: bool,
+    /// Whether inbound image attachments are base64-inlined into ACP
+    /// `session/prompt` blocks. Antigravity reads materialized local files on
+    /// demand via `read_file`, so skipping eager inlining avoids media bloat
+    /// across long resumed sessions and duplicate image ingestion.
+    pub(crate) inline_prompt_images: bool,
 }
 
 impl AcpVendorConfig {
@@ -3600,6 +3672,7 @@ impl AcpVendorConfig {
             preset_acp_args: None,
             supports_background_tasks: false,
             steers_mid_turn: false,
+            inline_prompt_images: true,
         }
     }
 
@@ -3649,6 +3722,7 @@ impl AcpVendorConfig {
             preset_acp_args: preset.and_then(|preset| preset.acp_args.clone()),
             supports_background_tasks: stem == "antigravity",
             steers_mid_turn: stem == "antigravity",
+            inline_prompt_images: stem != "antigravity",
         }
     }
 

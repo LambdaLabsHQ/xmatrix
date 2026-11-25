@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: Antigravity first-step acknowledgment, on-demand ACP images, and steered execution tracking
+
+- **Immediate first-step and mid-turn Channel feedback + shorter turn tail**: tightened `channel-contract.md`, `steered_turn_input`, and Antigravity's native `_meta.antigravity.systemPrompt.append` note so Agents send a one-sentence acknowledgment in their very first step on multi-step work or mid-turn instructions and end immediately after `xmatrix send --final-for` instead of writing a duplicate local closing summary.
+- **On-demand image reading for Antigravity ACP and preserved steered attachments**: Antigravity ACP now delivers materialized local attachment paths in prompt text (`inline_prompt_images: false`) instead of eagerly base64-inlining every screenshot into `session/prompt`, avoiding long-session media bloat and double ingestion; both ACP and Claude mid-turn steering now materialize and forward inbound attachments instead of dropping them, and non-steering ACP vendors no longer mutate execution sources before declining a steer.
+- **Steered execution completion in PostgreSQL**: `recordMessageExecutions` now allows append-only source additions on non-terminal executions while preserving source immutability and terminal fencing, fixing steered turns that previously stayed stuck in `accepted` and dropped steered source rows.
+
+Hub (`@xmatrix/db`, bootstrap prompts) and CLI / daemon; no schema migration. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: App Store Connect and Google Play Console operational analytics actions
 
 Agents and operators can now query App Store and Google Play operational metrics directly from Channels without leaving xMatrix or adding new Google OAuth consent scopes:

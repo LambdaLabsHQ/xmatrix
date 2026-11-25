@@ -400,11 +400,58 @@ fn grok_trusted_rules_use_native_session_metadata_not_user_input() {
     assert!(!rules.contains("ordinary"));
     assert!(!rules.contains("ignore rules"));
     assert!(antigravity_rules.contains("Antigravity note:"));
+    assert!(antigravity_rules.contains("very first step"));
     assert!(antigravity_rules.contains("xmatrix channel edit-message channel-1"));
+    assert!(antigravity_rules.contains("--final-for"));
     assert!(
         !shared_contract.contains("Antigravity note:"),
         "Antigravity batching note must not enter the shared Channel contract"
     );
+    assert!(
+        shared_contract.contains("in your first step"),
+        "shared Channel contract should instruct immediate first-step acknowledgment"
+    );
+    assert!(
+        shared_contract.contains("duplicate summary"),
+        "shared Channel contract should discourage redundant post-send summaries"
+    );
+    assert!(
+        !AcpVendorConfig::generic("antigravity").inline_prompt_images,
+        "Antigravity reads materialized local images on demand instead of inlining base64 into session/prompt"
+    );
+    assert!(
+        AcpVendorConfig::generic("kimi").inline_prompt_images,
+        "other ACP vendors continue to receive inline ACP image blocks"
+    );
+    let sample_attachment = protocol::ChannelAttachment {
+        id: "att-1".into(),
+        kind: "image".into(),
+        name: "screen.png".into(),
+        mime_type: "image/png".into(),
+        size: 8,
+        data_url: "data:image/png;base64,iVBORw0KGgo=".into(),
+        url: None,
+        channel_id: None,
+        message_id: None,
+    };
+    let on_demand = crate::acp_prompt_content_blocks(
+        "check screenshot",
+        Some(std::slice::from_ref(&sample_attachment)),
+        None,
+        false,
+    )
+    .expect("on-demand ACP blocks");
+    assert_eq!(on_demand.len(), 1);
+    assert_eq!(on_demand[0]["type"], "text");
+    let inlined = crate::acp_prompt_content_blocks(
+        "check screenshot",
+        Some(std::slice::from_ref(&sample_attachment)),
+        None,
+        true,
+    )
+    .expect("inlined ACP blocks");
+    assert_eq!(inlined.len(), 2);
+    assert_eq!(inlined[1]["type"], "image");
     let params = acp_session_new_params("/workspace", Some(&rules), Some(AcpTrustedRules::MetaRules));
     assert_eq!(params["cwd"], "/workspace");
     assert_eq!(params["mcpServers"], serde_json::json!([]));
