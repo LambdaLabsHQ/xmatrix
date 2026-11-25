@@ -49,7 +49,7 @@ description: "xmatrix コマンドを分野別に網羅。ログインとデー�
 | `xmatrix agent model <harness> [<model>\|--clear] --space <id>` | 未指定起動時のデフォルトモデルを表示・設定（`--clear` でハーネス既定へ戻す）。エージェントも所有者のエージェント分を設定可能。詳しくは[エージェントのデフォルトモデルを設定する](agents.md#set-an-agents-model) |
 | `xmatrix agent disable\|enable <harness> --space <id>` | エージェントを無効化または有効化 |
 | `xmatrix agent remove <harness> --space <id>` | Space からエージェントを削除 |
-| `xmatrix list` | 現在オンラインのエージェントを表示 |
+| `xmatrix list` | 稼働中のエージェントインスタンスを表示 |
 | `xmatrix harness list` | マシン上のハーネスと状態を表示 |
 | `xmatrix harness install\|update\|uninstall <name>` | 公式手順でハーネスをインストール・更新・削除 |
 | `xmatrix harness auto-update <name> on\|off` | ハーネスの自動更新を切り替え |
@@ -72,12 +72,11 @@ description: "xmatrix コマンドを分野別に網羅。ログインとデー�
 | `xmatrix channel chat <id>` | ターミナル上のシンプルな行ベースチャット |
 | `xmatrix channel subscribe <id> <pull-request-url>` | プルリクエストの CI 結果・レビュー・マージ通知を会話へ配信 |
 | `xmatrix channel subscribe <id> <url> --wait` | 購読してから、実行またはプルリクエストの結果が届くまで待機（`--timeout <分>`、既定 60）。ハーネス自身の待機ツールで実行 |
-| `xmatrix channel worktree <id> on\|off\|inherit` | この会話のエージェントに独立した worktree を割り当てるか設定 |
 
 ## メッセージ
 
 ```sh
-xmatrix send <conversation> "@codex repo:acme/web review the migration diff"
+xmatrix send <conversation> --launch "@codex repo:acme/web review the migration diff"
 xmatrix send <conversation> --stdin < update.md
 xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Here is the report."
 ```
@@ -88,9 +87,10 @@ xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Her
 | `--file <path>` | UTF-8 ファイルから本文を読み込む。 |
 | `--attachment <path>` | 本文と一緒にファイルを添付する。複数回指定可能。 |
 | `--reply-to <message-id>` | 特定のメッセージに返信する |
+| `--launch` | メッセージで呼び出したエージェント（`@codex`、`@auto`）を起動する。付けないとメンションされるだけです。`@codex:1` などのインスタンス宛てには不要です。 |
 | `--wait` | メンションした人やエージェントの返答待ちであることを示す。返答があるまで相手の「Needs you」リストに残ります。 |
 
-CLI から送ったメッセージも、アプリで入力した場合と同じ[構文](syntax.md)で解釈されます。
+CLI から送ったメッセージも、アプリで入力した場合と同じ[構文](syntax.md)で解釈されます。ただし、エージェントの呼び出しは `--launch` を付けたときだけ起動します。
 
 | コマンド | 動作 |
 | --- | --- |

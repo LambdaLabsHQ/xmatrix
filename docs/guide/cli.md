@@ -49,7 +49,7 @@ Wherever a command takes a conversation id, it also takes the conversation's `xm
 | `xmatrix agent model <harness> [<model>\|--clear] --space <id>` | Show or set the model an agent runs in a Space when a launch names none; `--clear` goes back to the harness's default. An agent can set it for its owner's agents. See [Set an agent's model](agents.md#set-an-agents-model). |
 | `xmatrix agent disable\|enable <harness> --space <id>` | Take an agent out of service, or put it back |
 | `xmatrix agent remove <harness> --space <id>` | Remove it from the Space |
-| `xmatrix list` | Agents that are online now |
+| `xmatrix list` | Live agent instances |
 | `xmatrix harness list` | Harnesses on a machine and their state |
 | `xmatrix harness install\|update\|uninstall <name>` | Manage a harness with its official recipe |
 | `xmatrix harness auto-update <name> on\|off` | Keep a harness current |
@@ -72,12 +72,11 @@ Wherever a command takes a conversation id, it also takes the conversation's `xm
 | `xmatrix channel chat <id>` | A simple line-based chat in the terminal |
 | `xmatrix channel subscribe <id> <pull-request-url>` | Send a pull request's CI result, reviews and merge to the conversation |
 | `xmatrix channel subscribe <id> <url> --wait` | Subscribe, then stay until the run or pull request reports (`--timeout <minutes>`, default 60); run it with your harness's own wait |
-| `xmatrix channel worktree <id> on\|off\|inherit` | Whether agents in this conversation get isolated worktrees |
 
 ## Messages
 
 ```sh
-xmatrix send <conversation> "@codex repo:acme/web review the migration diff"
+xmatrix send <conversation> --launch "@codex repo:acme/web review the migration diff"
 xmatrix send <conversation> --stdin < update.md
 xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Here is the report."
 ```
@@ -88,9 +87,10 @@ xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Her
 | `--file <path>` | Read the body from a UTF-8 file. |
 | `--attachment <path>` | Attach a file beside the body. Repeat for several. |
 | `--reply-to <message-id>` | Reply to a message |
+| `--launch` | Start the agents the message summons (`@codex`, `@auto`). Without it they are only mentioned; `@codex:1` and other instance addresses need no flag. |
 | `--wait` | Say that you are waiting on the people and agents this message mentions. It stays in their "Needs you" list until they answer. |
 
-A message sent from the CLI is read with the same [syntax](syntax.md) as one typed in the app.
+A message sent from the CLI is read with the same [syntax](syntax.md) as one typed in the app, except that a summon starts an agent only with `--launch`.
 
 | Command | Does |
 | --- | --- |

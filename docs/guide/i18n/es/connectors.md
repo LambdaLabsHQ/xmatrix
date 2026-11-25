@@ -1,6 +1,6 @@
 ---
 title: "GitHub, Sentry, Linear y Slack para agentes de IA · xMatrix"
-description: "Trae eventos de GitHub, Sentry, Linear, Slack y 30 apps más a tus conversaciones, y permite que personas y agentes actúen sobre ellas con comandos de una línea."
+description: "Trae eventos de GitHub, Sentry, Linear, Slack y más de 30 apps a tus conversaciones, y permite que personas y agentes actúen sobre ellas con comandos de una línea."
 ---
 
 # Apps conectadas
@@ -91,7 +91,7 @@ Las acciones de cada app figuran en su panel dentro de **Apps** y en el composit
 | Google Cloud | `gcp` | Incidente de monitorización disparado, resuelto | Proyectos, Cloud Run, logs, métricas, costes, APIs |
 | CircleCI | `circleci` | Fallido, exitoso | |
 | Buildkite | `buildkite` | Fallido, aprobado | |
-| Stripe | `stripe` | Pagos fallidos, disputas y cambios de suscripción. Conecta con Stripe o recibe cada evento de un objeto desde un webhook que crees | |
+| Stripe | `stripe` | Pagos fallidos, disputas y cambios de suscripción. Conecta con Stripe o recibe cada evento de un objeto desde un webhook que crees | `accounts`, `list_events`, `get_event`, `list_payment_intents`, `get_payment_intent`, `list_invoices`, `get_invoice`, `list_subscriptions`, `get_subscription`, `list_disputes`, `get_dispute` (solo lectura) |
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, sitemaps, propiedades, verificación |
 | Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event` (las escrituras piden aprobación por defecto; [guía](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-calendar.md)) |
@@ -103,7 +103,7 @@ Las acciones de cada app figuran en su panel dentro de **Apps** y en el composit
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
 | Bing Webmaster Tools | `bingwebmaster` | | `list_sites`, `traffic`, `queries`, `pages`, `crawl_stats`, `submit_urls`, `submit_sitemap`, `indexnow` |
 | Yandex Webmaster | `yandexwebmaster` | | `list_hosts`, `summary`, `queries`, `recrawl` |
-| Gmail | `gmail` | | `search`, `read`; `send`, `reply` (piden la aprobación de un administrador del Space cada vez por defecto). Varios buzones, cada uno usado solo por el miembro o Agente al que pertenece |
+| Gmail | `gmail` | | `search`, `read`, `drafts`; `send`, `send_draft`, `reply` (piden la aprobación de un administrador del Space cada vez por defecto). Varios buzones, cada uno usado solo por el miembro o Agente al que pertenece |
 | X | `x` | | `accounts`, `read_post`, `timeline`, `media_status`; `post`, `upload_video`, `publish_video`, `quote` (piden aprobación por defecto). Selección explícita de cuenta; citar publicaciones requiere acceso a X Enterprise API |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Mensajes, reacciones | `post` |
@@ -132,7 +132,7 @@ Algunos ejemplos:
 
 ## Créditos de X
 
-En Pro, las acciones de pago de X consumen del saldo de créditos del Space, ya sea que las ejecute un Agente o que una persona las ejecute o apruebe.
+Las acciones de pago de X requieren un Space Pro y consumen del saldo de créditos del Space, ya sea que las ejecute un Agente o que una persona las ejecute o apruebe.
 
 | Acción | Créditos |
 | --- | --- |

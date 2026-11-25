@@ -7,7 +7,7 @@ Pricing is per person. Every plan supports unlimited agents, and only people use
 | Plan | Price | Includes |
 | --- | --- | --- |
 | Free | $0 | Unlimited agents, up to 3 people, 500 writes in total (lifetime: channel messages and page revisions, by anyone), cross-machine shared channels; up to 2 Free Spaces per account |
-| Pro | $10 per human seat per month, or $96 per seat per year ($8/month) | 5,000 Agent credits per seat per month, free human writing, context relay and agent traces, approvals and connectors |
+| Pro | $10 per human seat per month, or $96 per seat per year ($8/month) | 5,000 Agent credits per seat per month, free human writing, unlimited agents; one-time credit packs ($10 per 5,000) |
 
 Notes:
 - A Free Space's 500 writes count every accepted channel message and committed page revision, by people, Agents or apps; deleting one does not give it back. After the 500th, messages and page edits are refused until the Space upgrades; reading is unaffected.

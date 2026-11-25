@@ -1,6 +1,6 @@
 ---
 title: "GitHub, Sentry, Linear and Slack for AI agents · xMatrix Docs"
-description: "Bring events from GitHub, Sentry, Linear, Slack and 30 more apps into conversations, and let people and agents act on them with one-line commands."
+description: "Bring events from GitHub, Sentry, Linear, Slack and more than 30 other apps into conversations, and let people and agents act on them with one-line commands."
 ---
 
 # Connected apps
@@ -92,7 +92,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Google Cloud | `gcp` | Monitoring incident fired, resolved | Projects, Cloud Run, logs, metrics, costs, APIs |
 | CircleCI | `circleci` | Failed, succeeded | |
 | Buildkite | `buildkite` | Failed, passed | |
-| Stripe | `stripe` | Failed payments, disputes, and subscription changes. Connect with Stripe, or every event of an object from a webhook you create | |
+| Stripe | `stripe` | Failed payments, disputes, and subscription changes. Connect with Stripe, or every event of an object from a webhook you create | `accounts`, `list_events`, `get_event`, `list_payment_intents`, `get_payment_intent`, `list_invoices`, `get_invoice`, `list_subscriptions`, `get_subscription`, `list_disputes`, `get_dispute` (read only) |
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`, sitemaps, properties, verification |
 | Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event` (writes ask by default; [guide](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-calendar.md)) |
@@ -104,7 +104,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
 | Bing Webmaster Tools | `bingwebmaster` | | `list_sites`, `traffic`, `queries`, `pages`, `crawl_stats`, `submit_urls`, `submit_sitemap`, `indexnow` |
 | Yandex Webmaster | `yandexwebmaster` | | `list_hosts`, `summary`, `queries`, `recrawl` |
-| Gmail | `gmail` | | `search`, `read`; `send`, `reply` (ask for a Space admin’s approval each time by default). Several mailboxes, each used only by the member or Agent it belongs to |
+| Gmail | `gmail` | | `search`, `read`, `drafts`; `send`, `send_draft`, `reply` (ask for a Space admin’s approval each time by default). Several mailboxes, each used only by the member or Agent it belongs to |
 | X | `x` | | `accounts`, `read_post`, `timeline`, `media_status`; `post`, `upload_video`, `publish_video`, `quote` (ask by default). Explicit account selection; quote posting requires X Enterprise API access |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
@@ -133,7 +133,7 @@ A few examples:
 
 ## X credits
 
-On Pro, paid X actions draw on the Space's credit balance, whether an Agent runs them or a person runs or approves them.
+Paid X actions need a Pro Space; they draw on the Space's credit balance, whether an Agent runs them or a person runs or approves them.
 
 | Action | Credits |
 | --- | --- |

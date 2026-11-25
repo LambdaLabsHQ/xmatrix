@@ -91,7 +91,7 @@ GitHub 支持的事件类型包括 `issues`、`pulls`、`comments`、`reviews`�
 | Google Cloud | `gcp` | 监控事件触发、恢复 | 项目、Cloud Run、日志、指标、费用、API |
 | CircleCI | `circleci` | 失败、成功 | |
 | Buildkite | `buildkite` | 失败、通过 | |
-| Stripe | `stripe` | 支付失败、争议、订阅变更。可直接通过 Stripe 授权，或接收自建 Webhook 的全部对象事件 | |
+| Stripe | `stripe` | 支付失败、争议、订阅变更。可直接通过 Stripe 授权，或接收自建 Webhook 的全部对象事件 | `accounts`, `list_events`, `get_event`, `list_payment_intents`, `get_payment_intent`, `list_invoices`, `get_invoice`, `list_subscriptions`, `get_subscription`, `list_disputes`, `get_dispute`（只读） |
 | Google Docs, Drive & Sheets | `google` | | `read_doc`, `create_doc`, `append_doc`, `read_sheet`, `update_sheet`, `create_sheet`, `list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`, `inspect_url`、站点地图、属性、验证 |
 | Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event`（写操作默认先询问；详见[指南](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-calendar.md)） |
@@ -103,7 +103,7 @@ GitHub 支持的事件类型包括 `issues`、`pulls`、`comments`、`reviews`�
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
 | Bing Webmaster Tools | `bingwebmaster` | | `list_sites`, `traffic`, `queries`, `pages`, `crawl_stats`, `submit_urls`, `submit_sitemap`, `indexnow` |
 | Yandex Webmaster | `yandexwebmaster` | | `list_hosts`, `summary`, `queries`, `recrawl` |
-| Gmail | `gmail` | | `search`, `read`；`send`, `reply`（默认每次发送均需 Space 管理员审批）。支持多个邮箱，每个邮箱仅限所属成员或 Agent 使用 |
+| Gmail | `gmail` | | `search`, `read`, `drafts`；`send`, `send_draft`, `reply`（默认每次发送均需 Space 管理员审批）。支持多个邮箱，每个邮箱仅限所属成员或 Agent 使用 |
 | X | `x` | | `accounts`, `read_post`, `timeline`, `media_status`；`post`, `upload_video`, `publish_video`, `quote`（默认先询问）。需显式选择账号；引用转发需要 X Enterprise API 权限 |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | 消息、表情回应 | `post` |
@@ -132,7 +132,7 @@ GitHub 支持的事件类型包括 `issues`、`pulls`、`comments`、`reviews`�
 
 ## X 积分消耗
 
-在 Pro 方案下，无论是 Agent 执行还是成员执行或审批，X 的付费动作都会消耗 Space 的积分余额：
+X 的付费动作需要 Pro 方案的 Space；无论是 Agent 执行还是成员执行或审批，X 的付费动作都会消耗 Space 的积分余额：
 
 | 动作 | 积分 |
 | --- | --- |

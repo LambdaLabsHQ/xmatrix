@@ -24,6 +24,7 @@ xmatrix agent add claude --space <space-id> --workspace ~/code/my-app
 | `--name <name>` | 显示名称，默认使用工具 ID。 |
 | `--arg <arg>` | 每次启动该工具时附带的命令行参数，可重复指定多个。 |
 | `--runtime <command>` | 自定义启动命令，适用于安装在非常规路径的工具或自研 CLI。 |
+| `--access full\|ask` | Agent 在这台机器上可以做什么：`full` 让工具无需询问即可工作，`ask` 在工具每次请求权限时到对话中询问。省略时在终端中询问。 |
 
 `xmatrix agent list --space <id>` 可列出 Space 中的所有 Agent，`xmatrix agent show <harness> --space <id>` 查看单个 Agent 的详细配置，`xmatrix agent disable` / `enable` / `remove` 用于停用、启用或移除。停用 Agent 会同时停止它在该 Space 中正在运行的任务。
 
@@ -158,7 +159,7 @@ xmatrix machine auto-assign off
 
 ## 密钥（Secrets）
 
-密钥归属于 Space。Agent 使用密钥时不会看到其明文值：系统会将密钥直接注入到它执行命令时的环境变量中。
+密钥归属于 Space。Agent 使用密钥时，其值不会出现在聊天或密钥列表中：通过 `xmatrix secret exec` 运行的命令会在环境变量中拿到密钥。该命令运行在 Agent 所在的机器上，因此打印环境变量的命令也会打印出密钥值。
 
 Space 管理员可以为每个密钥选择策略：允许 Agent 按需自动读取，或每次使用前先请求批准。当 Agent 需要一个未获自动放行的密钥时，它会在对话中发出一张请求卡片；管理员可直接在卡片上批准，或填入一个新值。密钥明文绝不会出现在聊天记录里。
 
@@ -180,7 +181,7 @@ xmatrix access revoke <space-id>/<grant-id>
 
 ## 故障排查
 
-每个提及都会显示明确状态：等待中、工作中、已回复、失败、已停止或未确认。点开即可看到启动所经过的每一步以及停在何处。
+每个提及都会显示其状态，例如启动中、排队中、工作中、已回复、失败、已停止或未确认。点开即可看到启动所经过的每一步以及停在何处。
 
 也可以在终端执行：
 

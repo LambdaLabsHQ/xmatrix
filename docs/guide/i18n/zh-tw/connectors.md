@@ -91,7 +91,7 @@ GitHub 支援的類型包括 `issues`、`pulls`、`comments`、`reviews`、`comm
 | Google Cloud | `gcp` | Monitoring 事件觸發、恢復正常 | 專案、Cloud Run、日誌、指標、費用、API |
 | CircleCI | `circleci` | 失敗、成功 | |
 | Buildkite | `buildkite` | 失敗、通過 | |
-| Stripe | `stripe` | 付款失敗、爭議款項與訂閱異動。可透過 Connect with Stripe 連線，或自建 Webhook 接收物件所有事件 | |
+| Stripe | `stripe` | 付款失敗、爭議款項與訂閱異動。可透過 Connect with Stripe 連線，或自建 Webhook 接收物件所有事件 | `accounts`, `list_events`, `get_event`, `list_payment_intents`, `get_payment_intent`, `list_invoices`, `get_invoice`, `list_subscriptions`, `get_subscription`, `list_disputes`, `get_dispute`（唯讀） |
 | Google Docs, Drive & Sheets | `google` | | `read_doc`、`create_doc`、`append_doc`、`read_sheet`、`update_sheet`、`create_sheet`、`list_files` |
 | Google Search Console | `googlesearchconsole` | | `query`、`inspect_url`、sitemaps、資源屬性、驗證 |
 | Google Calendar | `googlecalendar` | | `list_calendars`、`list_events`、`get_event`、`freebusy`、`create_event`、`update_event`、`delete_event`（寫入操作預設先詢問；詳見[指南](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-calendar.md)） |
@@ -103,7 +103,7 @@ GitHub 支援的類型包括 `issues`、`pulls`、`comments`、`reviews`、`comm
 | PageSpeed Insights | `pagespeed` | | `audit`、`field` |
 | Bing Webmaster Tools | `bingwebmaster` | | `list_sites`、`traffic`、`queries`、`pages`、`crawl_stats`、`submit_urls`、`submit_sitemap`、`indexnow` |
 | Yandex Webmaster | `yandexwebmaster` | | `list_hosts`、`summary`、`queries`、`recrawl` |
-| Gmail | `gmail` | | `search`、`read`；`send`、`reply`（預設每次都需 Space 管理員核准）。支援多個信箱，每個信箱僅供其所屬成員或 Agent 使用 |
+| Gmail | `gmail` | | `search`、`read`、`drafts`；`send`、`send_draft`、`reply`（預設每次都需 Space 管理員核准）。支援多個信箱，每個信箱僅供其所屬成員或 Agent 使用 |
 | X | `x` | | `accounts`、`read_post`、`timeline`、`media_status`；`post`、`upload_video`、`publish_video`、`quote`（預設先詢問）。需明確指定帳號；引用貼文需 X Enterprise API 權限 |
 | Notion | `notion` | | `read_page`、`append`、`create_page` |
 | Slack | `slack` | 訊息、表情反應 | `post` |
@@ -132,7 +132,7 @@ GitHub 支援的類型包括 `issues`、`pulls`、`comments`、`reviews`、`comm
 
 ## X 點數計費
 
-在 Pro 方案中，付費的 X 操作會扣除 Space 的點數餘額，不論是由 Agent 執行，還是由團隊成員執行或核准皆同。
+付費的 X 操作需要 Pro 方案的 Space，並會扣除 Space 的點數餘額，不論是由 Agent 執行，還是由團隊成員執行或核准皆同。
 
 | 操作 | 點數 |
 | --- | --- |

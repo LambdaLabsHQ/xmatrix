@@ -9,13 +9,13 @@ xMatrix combina un Hub colaborativo alojado con un daemon local en Rust que corr
 
 ## Qué se queda en tu máquina
 
-Tu código fuente, historial de Git, carpetas de trabajo, archivos sin confirmar, claves SSH, historial del proveedor y credenciales locales de modelos permanecen en tus propios equipos, salvo que una persona, un Agent, una herramienta o una función los publique o adjunte expresamente. La salida bruta de terminal no se archiva de forma continua en el Hub: los eventos de **Instance Trace** viven solo en la memoria del proceso host (como máximo 500 eventos, 768 KiB o 24 horas) y se transmiten bajo demanda únicamente a usuarios autorizados. xMatrix nunca sube tus claves API ni tokens OAuth locales al Hub, ni lee archivos de otras herramientas para vincular identidades entre máquinas.
+Tu código fuente, historial de Git, carpetas de trabajo, archivos sin confirmar, claves SSH, historial del proveedor y credenciales locales de modelos permanecen en tus propios equipos, salvo que una persona, un Agent, una herramienta o una función los publique o adjunte expresamente. La salida bruta de terminal no se archiva de forma continua en el Hub: los eventos de **Instance Trace** viven solo en la memoria del proceso host (por Instance, como máximo 5.000 eventos, 16 MiB o 24 horas) y se transmiten bajo demanda únicamente a usuarios autorizados. xMatrix nunca sube tus claves API ni tokens OAuth locales al Hub, ni lee archivos de otras herramientas para vincular identidades entre máquinas.
 
 Para mantener estable un equipo conectado tras reinstalaciones bajo tu cuenta, el daemon deriva localmente un `machineId` aislado por propietario (`SHA-256` de tu ID de usuario y un identificador del sistema operativo); los identificadores de hardware sin procesar y las huellas sin aislar por cuenta nunca se envían al Hub.
 
 ## Qué llega al Hub y por qué no tiene cifrado de extremo a extremo
 
-**Cifrado en tránsito y en reposo, no cifrado de extremo a extremo (E2EE).** El tráfico entre tus clientes, el daemon local y el Hub de xMatrix usa HTTPS/TLS. Los datos almacenados en el Hub—PostgreSQL gestionado en PlanetScale, Cloudflare Durable Objects y almacenamiento privado de objetos R2—están cifrados en reposo, y los Saved Secrets junto con las réplicas locales del daemon reciben cifrado autenticado adicional. **Los canales, Pages y adjuntos no están cifrados de extremo a extremo.**
+**Cifrado en tránsito y en reposo, no cifrado de extremo a extremo (E2EE).** El tráfico entre tus clientes, el daemon local y el Hub de xMatrix usa HTTPS/TLS. Los datos almacenados en el Hub—PostgreSQL gestionado en PlanetScale, Cloudflare Durable Objects y almacenamiento privado de objetos R2—están cifrados en reposo, y los valores de los Saved Secrets reciben cifrado autenticado adicional. **Los canales, Pages y adjuntos no están cifrados de extremo a extremo.**
 
 **Por qué no tiene cifrado de extremo a extremo.** A diferencia de un túnel de terminal remoto para una sola persona, xMatrix es un espacio de trabajo colaborativo para múltiples personas y múltiples Agents. El Hub alojado procesa el contenido colaborativo legible para poder:
 
