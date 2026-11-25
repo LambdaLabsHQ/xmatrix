@@ -3,8 +3,7 @@ import type {
   SharedHumanWorkerCommand,
   SharedHumanWorkerEvent,
 } from "./human-shared-socket-worker";
-import type { ParsedSocketFrame } from "./reconnecting-socket";
-import type { HumanSocketTransport } from "./worker-socket-transport";
+import { BaseHumanSocketTransport, type HumanSocketTransport } from "./worker-socket-transport";
 
 export interface SharedHumanWorkerPortLike {
   postMessage(command: SharedHumanWorkerCommand): void;
@@ -74,15 +73,10 @@ export function createSharedWorkerSocketOpener(options: {
   };
 }
 
-class SharedWorkerSocketTransport implements HumanSocketTransport {
-  readyState = 0;
-  private readonly events = new EventTarget();
-  private readonly listeners = new Set<(frames: readonly ParsedSocketFrame[]) => void>();
+class SharedWorkerSocketTransport extends BaseHumanSocketTransport {
   private port: SharedHumanWorkerPortLike | undefined;
   private fallback: HumanSocketTransport | undefined;
   private fallbackUnsubscribePackets: (() => void) | undefined;
-  private startTimer: ReturnType<typeof setTimeout> | undefined;
-  private startupTimer: ReturnType<typeof setTimeout> | undefined;
   private pageHideListener: (() => void) | undefined;
   private workerReady = false;
 
@@ -97,38 +91,20 @@ class SharedWorkerSocketTransport implements HumanSocketTransport {
     startupTimeoutMs?: number;
     onUnavailable: () => void;
   }) {
-    // Match native WebSocket: callers can attach listeners before any event.
-    this.startTimer = setTimeout(() => {
-      this.startTimer = undefined;
-      this.start();
-    }, 0);
-  }
-
-  addEventListener<K extends keyof WebSocketEventMap>(
-    type: K,
-    listener: (event: WebSocketEventMap[K]) => void,
-    options?: boolean | AddEventListenerOptions,
-  ): void {
-    this.events.addEventListener(type, listener as EventListener, options);
-  }
-
-  subscribePackets(listener: (frames: readonly ParsedSocketFrame[]) => void): () => void {
-    this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
+    super();
   }
 
   send(data: Parameters<WebSocket["send"]>[0]): void {
-    if (this.readyState === 0) throw new DOMException("Socket is still connecting", "InvalidStateError");
-    if (this.readyState !== 1) return;
-    if (typeof data !== "string") throw new TypeError("The Human socket sends text frames only");
-    if (this.fallback) this.fallback.send(data);
-    else this.post({ type: "send", data });
+    const text = this.assertTextSend(data);
+    if (text === null) return;
+    if (this.fallback) this.fallback.send(text);
+    else this.post({ type: "send", data: text });
   }
 
   close(code?: number, reason?: string): void {
     if (this.readyState >= 2) return;
     this.readyState = 2;
-    this.clearTimers();
+    this.clearStartup();
     if (this.fallback) {
       this.fallback.close(code, reason);
       return;
@@ -143,7 +119,7 @@ class SharedWorkerSocketTransport implements HumanSocketTransport {
   dispose(code = 1000): void {
     if (this.readyState === 3) return;
     this.readyState = 3;
-    this.clearTimers();
+    this.clearStartup();
     this.detachPageHide();
     const fallback = this.fallback;
     this.fallback = undefined;
@@ -164,7 +140,7 @@ class SharedWorkerSocketTransport implements HumanSocketTransport {
     this.listeners.clear();
   }
 
-  private start(): void {
+  protected start(): void {
     if (this.readyState !== 0) return;
     try {
       const worker = this.options.createSharedWorker();
@@ -196,11 +172,13 @@ class SharedWorkerSocketTransport implements HumanSocketTransport {
       }
       port.addEventListener("message", ({ data }) => {
         if (this.port !== port || this.readyState === 3) return;
-        switch (data.type) {
-          case "port-ping":
-            this.post({ type: "port-pong" });
-            return;
-          case "ready":
+        if (data.type === "port-ping") {
+          this.post({ type: "port-pong" });
+          return;
+        }
+        this.dispatchWorkerEvent(
+          data,
+          () => {
             if (this.workerReady || this.readyState !== 0) return;
             this.clearStartupTimer();
             this.workerReady = true;
@@ -211,23 +189,9 @@ class SharedWorkerSocketTransport implements HumanSocketTransport {
               focusKey: this.options.focusKey,
               clientRole: this.options.clientRole,
             });
-            return;
-          case "open":
-            this.opened();
-            return;
-          case "error":
-            this.events.dispatchEvent(new Event("error"));
-            return;
-          case "packet":
-            if (this.readyState === 1) this.deliver(data.frames);
-            return;
-          case "close":
-            this.closed(data.code, data.reason, data.wasClean);
-            return;
-          case "failed":
-            this.sharedFailed();
-            return;
-        }
+          },
+          () => this.sharedFailed(),
+        );
       });
       this.startupTimer = setTimeout(failed, this.options.startupTimeoutMs ?? 3_000);
     } catch {
@@ -238,7 +202,7 @@ class SharedWorkerSocketTransport implements HumanSocketTransport {
   private sharedFailed(): void {
     if (this.readyState === 3) return;
     this.options.onUnavailable();
-    this.clearTimers();
+    this.clearStartup();
     this.detachPageHide();
     this.releasePort();
     if (!this.workerReady && this.readyState === 0) {
@@ -270,27 +234,16 @@ class SharedWorkerSocketTransport implements HumanSocketTransport {
     }
   }
 
-  private opened(): void {
-    if (this.readyState !== 0) return;
-    this.readyState = 1;
-    this.events.dispatchEvent(new Event("open"));
-  }
-
-  private closed(code: number, reason: string, wasClean: boolean): void {
+  protected closed(code: number, reason: string, wasClean: boolean): void {
     if (this.readyState === 3) return;
     this.readyState = 3;
-    this.clearTimers();
+    this.clearStartup();
     this.detachPageHide();
     this.releasePort();
     this.fallback = undefined;
     this.fallbackUnsubscribePackets?.();
     this.fallbackUnsubscribePackets = undefined;
-    this.events.dispatchEvent(new CloseEvent("close", { code, reason, wasClean }));
-    this.listeners.clear();
-  }
-
-  private deliver(frames: readonly ParsedSocketFrame[]): void {
-    for (const listener of this.listeners) listener(frames);
+    this.finishClosed(code, reason, wasClean);
   }
 
   private post(command: SharedHumanWorkerCommand): void {
@@ -317,17 +270,6 @@ class SharedWorkerSocketTransport implements HumanSocketTransport {
     if (typeof window === "undefined" || !this.pageHideListener) return;
     window.removeEventListener("pagehide", this.pageHideListener);
     this.pageHideListener = undefined;
-  }
-
-  private clearStartupTimer(): void {
-    if (this.startupTimer !== undefined) clearTimeout(this.startupTimer);
-    this.startupTimer = undefined;
-  }
-
-  private clearTimers(): void {
-    if (this.startTimer !== undefined) clearTimeout(this.startTimer);
-    this.startTimer = undefined;
-    this.clearStartupTimer();
   }
 
   private releasePort(): void {

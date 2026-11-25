@@ -1,5 +1,5 @@
 import { HUMAN_HEARTBEAT_PING } from "@xmatrix/protocol";
-import { createHumanFramePackets } from "./human-frame-packets";
+import { createHumanFramePackets, type HumanWorkerEvent } from "./human-frame-packets";
 import type { ParsedSocketFrame, SocketTransport } from "./reconnecting-socket";
 
 export type SharedClientRole = "panel" | "inline" | "app";
@@ -12,14 +12,7 @@ export type SharedHumanWorkerCommand =
   | { type: "clear-user"; userId: string }
   | { type: "port-pong" };
 
-export type SharedHumanWorkerEvent =
-  | { type: "ready" }
-  | { type: "open" }
-  | { type: "error" }
-  | { type: "packet"; frames: ParsedSocketFrame[] }
-  | { type: "close"; code: number; reason: string; wasClean: boolean }
-  | { type: "failed" }
-  | { type: "port-ping" };
+export type SharedHumanWorkerEvent = HumanWorkerEvent | { type: "port-ping" };
 
 export interface SharedWorkerPortLike {
   postMessage(message: SharedHumanWorkerEvent): void;
@@ -103,10 +96,9 @@ function normalizeFocusKey(focusKey: string | null | undefined): string {
 
 function parseJsonObject(data: string): Record<string, unknown> | null {
   try {
-    const value = JSON.parse(data) as unknown;
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : null;
+    const parsed: unknown = JSON.parse(data);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -222,6 +214,32 @@ export function installHumanSharedSocketWorker(
     }
   }
 
+  function deliverJsonWithRequestId(
+    client: ClientSession,
+    value: Record<string, unknown>,
+    clientReqId: string | undefined,
+  ): void {
+    deliverPacket(client, [{
+      kind: "json",
+      value: clientReqId !== undefined ? { ...value, requestId: clientReqId } : { ...value },
+    }]);
+  }
+
+  function closeAffectedClients(
+    affected: readonly ClientSession[],
+    code: number,
+    reason: string,
+    wasClean: boolean,
+  ): void {
+    for (const client of affected) {
+      client.entry = null;
+      if (client.closed) continue;
+      client.closed = true;
+      clientsById.delete(client.id);
+      safePost(client.port, { type: "close", code, reason, wasClean });
+    }
+  }
+
   function pickBrowserReadClient(entry: PoolEntry): ClientSession | null {
     // Prefer a side panel port for this account on this entry, then any client
     // on this entry, then any side panel port for this account across the pool.
@@ -329,10 +347,7 @@ export function installHumanSharedSocketWorker(
           entry.authState = "authenticated";
           for (const [client, clientReqId] of entry.awaitingAuth) {
             client.hasReceivedHandshake = true;
-            deliverPacket(client, [{
-              kind: "json",
-              value: { ...value, ...(clientReqId !== undefined ? { requestId: clientReqId } : {}) },
-            }]);
+            deliverJsonWithRequestId(client, value, clientReqId);
             flushPendingBeforeAuth(client);
           }
           for (const silentClient of Array.from(entry.silentAuthWaiters)) {
@@ -344,10 +359,7 @@ export function installHumanSharedSocketWorker(
         if (type === "agent_list") {
           entry.cachedAgentList = value;
           for (const [client, clientReqId] of entry.awaitingAuth) {
-            deliverPacket(client, [{
-              kind: "json",
-              value: { ...value, ...(clientReqId !== undefined ? { requestId: clientReqId } : {}) },
-            }]);
+            deliverJsonWithRequestId(client, value, clientReqId);
           }
           entry.awaitingAuth.clear();
           continue;
@@ -360,10 +372,7 @@ export function installHumanSharedSocketWorker(
           entry.authState = "none";
           entry.authRequestId = null;
           for (const [client, clientReqId] of awaiting) {
-            deliverPacket(client, [{
-              kind: "json",
-              value: { ...value, ...(clientReqId !== undefined ? { requestId: clientReqId } : {}) },
-            }]);
+            deliverJsonWithRequestId(client, value, clientReqId);
           }
           for (const client of silent) {
             deliverPacket(client, [{ kind: "json", value }]);
@@ -379,10 +388,7 @@ export function installHumanSharedSocketWorker(
         const waiters = Array.from(entry.pingWaiters.entries());
         entry.pingWaiters.clear();
         for (const [client, clientReqId] of waiters) {
-          deliverPacket(client, [{
-            kind: "json",
-            value: { ...value, ...(clientReqId !== undefined ? { requestId: clientReqId } : {}) },
-          }]);
+          deliverJsonWithRequestId(client, value, clientReqId);
         }
         continue;
       }
@@ -493,19 +499,7 @@ export function installHumanSharedSocketWorker(
       const affected = Array.from(entry.clients);
       entry.clients.clear();
       destroyPoolEntry(entry);
-      for (const client of affected) {
-        client.entry = null;
-        if (!client.closed) {
-          client.closed = true;
-          clientsById.delete(client.id);
-          safePost(client.port, {
-            type: "close",
-            code: event.code,
-            reason: event.reason,
-            wasClean: event.wasClean,
-          });
-        }
-      }
+      closeAffectedClients(affected, event.code, event.reason, event.wasClean);
     });
 
     socket.addEventListener("error", () => {
@@ -593,14 +587,7 @@ export function installHumanSharedSocketWorker(
       const affected = Array.from(entry.clients);
       entry.clients.clear();
       destroyPoolEntry(entry, 1000, "sign-out");
-      for (const client of affected) {
-        client.entry = null;
-        if (!client.closed) {
-          client.closed = true;
-          clientsById.delete(client.id);
-          safePost(client.port, { type: "close", code: 1000, reason: "sign-out", wasClean: true });
-        }
-      }
+      closeAffectedClients(affected, 1000, "sign-out", true);
     }
   }
 
