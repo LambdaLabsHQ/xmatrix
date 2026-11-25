@@ -71,8 +71,8 @@ test("every competitor alternative page works across all 6 site locales and reso
 
   assert.deepEqual(
     footerAlternativePages.map((p) => p.slug),
-    ["raft", "lody", "multica", "paradev", "conductor", "lobehub", "orca", "t3-code", "cumora"],
-    "footer lists only direct competitors, not harnesses xMatrix runs, shut-down products or adjacent tools",
+    ["raft", "lody", "multica", "paradev", "conductor", "lobehub", "notion", "orca", "t3-code", "cumora"],
+    "footer lists only direct competitors, not harnesses xMatrix runs or shut-down products",
   );
   assert.equal(findAlternativePageByRouteSlug("claude-code-alternatives", "en"), undefined, "Claude Code is a harness, not a competitor");
   assert.equal(findAlternativeRedirect("claude-code-alternatives"), "/docs/agents");
