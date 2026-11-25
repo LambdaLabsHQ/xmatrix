@@ -56,8 +56,8 @@ test("Calendar validates addresses, explicit offsets, bounded intervals, event f
 });
 
 test("Calendar reads use fixed Google origin, explicit cursors, expanded recurring instances and bounded untrusted output", async () => {
-  const listed = await fetched([{ body: { kind: "calendar#events", items: [event], nextPageToken: "next" } }], () => actions.list_events.execute(context, valid("list_events", { ...interval, q: "planning", pageToken: "previous" }, "owner@example.com")));
-  const url = new URL(listed.calls[0].url);
+  const listed = await fetched([{ body: { jsonrpc: "2.0", id: 1, result: { isError: true, content: [{ type: "text", text: "Access to this tool requires that your Google Cloud project (1) is enrolled in the Google Workspace Developer Preview Program." }] } } }, { body: { kind: "calendar#events", items: [event], nextPageToken: "next" } }], () => actions.list_events.execute(context, valid("list_events", { ...interval, q: "planning", pageToken: "previous" }, "owner@example.com")));
+  const url = new URL(listed.calls[1].url);
   assert.equal(url.origin, "https://www.googleapis.com"); assert.match(url.pathname, /owner%40example.com\/events$/u);
   assert.equal(url.searchParams.get("timeMin"), interval.timeMin); assert.equal(url.searchParams.get("pageToken"), "previous");
   assert.equal(url.searchParams.get("singleEvents"), "true"); assert.equal(url.searchParams.get("maxResults"), "50");
@@ -67,8 +67,8 @@ test("Calendar reads use fixed Google origin, explicit cursors, expanded recurri
   await fetched([{ body: { ...event, id: "other" } }], () => assert.rejects(actions.get_event.execute(context, valid("get_event", event.id)), /malformed/u));
   await fetched([{ body: { kind: "calendar#calendarList" } }], () => verifyGoogleCalendar(credentials));
   await fetched([{ body: {} }], () => assert.rejects(verifyGoogleCalendar(credentials), /malformed/u));
-  const calendars = await fetched([{ body: { kind: "calendar#calendarList", items: [calendar] } }], () => actions.list_calendars.execute(context, valid("list_calendars", { pageToken: "next" }, "*")));
-  assert.equal(new URL(calendars.calls[0].url).searchParams.get("pageToken"), "next");
+  const calendars = await fetched([{ status: 403, body: { error: { message: "Forbidden" } } }, { body: { kind: "calendar#calendarList", items: [calendar] } }], () => actions.list_calendars.execute(context, valid("list_calendars", { pageToken: "next" }, "*")));
+  assert.equal(new URL(calendars.calls[1].url).searchParams.get("pageToken"), "next");
 });
 
 test("busy reads are read effects and unavailable calendars fail instead of claiming free", async () => {
@@ -108,4 +108,22 @@ test("approved writes target the frozen calendar, preserve ETags and notificatio
       assert.equal(calls.length, 0);
     });
   }
+});
+
+test("calendar and event lists come from Google's Calendar MCP server, with REST only while it refuses this project", async () => {
+  const mcpEvents = { events: [{ id: event.id, summary: "Planning", updated: "2026-10-30T17:57:35Z" }], nextPageToken: "n2" };
+  const listed = await fetched([{ body: { jsonrpc: "2.0", id: 1, result: { structuredContent: mcpEvents } } }],
+    () => actions.list_events.execute(context, valid("list_events", { ...interval, q: "planning", maxResults: 10, pageToken: "previous" }, "owner@example.com")));
+  assert.equal(listed.calls.length, 1);
+  assert.equal(listed.calls[0].url, "https://calendarmcp.googleapis.com/mcp/v1");
+  assert.deepEqual(listed.calls[0].body.params, { name: "list_events", arguments: { calendarId: "owner@example.com",
+    startTime: interval.timeMin, endTime: interval.timeMax, pageSize: 10, orderBy: "startTime", fullText: "planning", pageToken: "previous" } });
+  assert.match(listed.result.summary, /"nextPageToken": "n2"/u);
+  const calendars = await fetched([{ body: { jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify({ calendars: [{ id: "primary@example.com" }] }) }] } } }],
+    () => actions.list_calendars.execute(context, valid("list_calendars", {}, "*")));
+  assert.deepEqual(calendars.calls[0].body.params, { name: "list_calendars", arguments: { pageSize: 100 } });
+  assert.match(calendars.result.summary, /primary@example.com/u);
+  // A refused call (not the server) is the answer, never a silent REST retry.
+  await fetched([{ body: { jsonrpc: "2.0", id: 1, result: { isError: true, content: [{ type: "text", text: "Calendar not found" }] } } }],
+    () => assert.rejects(actions.list_events.execute(context, valid("list_events", interval, "owner@example.com")), /list_events failed: Calendar not found/u));
 });
