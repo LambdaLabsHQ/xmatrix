@@ -1,7 +1,7 @@
-const assert = require("node:assert/strict");
-const test = require("node:test");
-const fs = require("node:fs");
+const { existsSync, readFileSync } = require("node:fs");
 const path = require("node:path");
+const test = require("node:test");
+const assert = require("node:assert/strict");
 const ts = require("typescript");
 const React = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
@@ -15,14 +15,14 @@ function createLoader(overrides = {}) {
       ? path.join(WEB_SRC, id.slice(2))
       : path.resolve(baseDir, id);
     for (const candidate of [`${base}.ts`, `${base}.tsx`, path.join(base, "index.ts"), path.join(base, "index.tsx")]) {
-      if (fs.existsSync(candidate)) return candidate;
+      if (existsSync(candidate)) return candidate;
     }
     return null;
   }
   function load(file) {
     const abs = path.resolve(__dirname, file);
     if (modules.has(abs)) return modules.get(abs);
-    const compiled = ts.transpileModule(fs.readFileSync(abs, "utf8"), {
+    const compiled = ts.transpileModule(readFileSync(abs, "utf8"), {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
         target: ts.ScriptTarget.ES2022,
@@ -320,6 +320,6 @@ test("SettingsCard and HarnessSignedOutNotice delegate controls to side panel in
 });
 
 test("workspace-shell-view never mounts BrowserReadApprovalDialog inside the inline web-page popover", () => {
-  const source = fs.readFileSync(path.join(__dirname, "workspace-shell-view.tsx"), "utf8");
+  const source = readFileSync(path.join(__dirname, "workspace-shell-view.tsx"), "utf8");
   assert.match(source, /\{!inlinePopover && <BrowserReadApprovalDialog \/>\}/u);
 });

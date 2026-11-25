@@ -117,28 +117,24 @@ function mountSelectionScript({ width = 1280, height = 800, initialPageState = n
     });
   };
 
+  const selectWith = async (text, rect, trigger) => {
+    selection = { text, rect, isCollapsed: false };
+    dispatch(documentListeners, "selectionchange", {});
+    trigger();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+
   return {
-    async select(text, rect) {
-      selection = { text, rect, isCollapsed: false };
-      dispatch(documentListeners, "selectionchange", {});
-      dispatch(windowListeners, "mouseup", { target: {} });
-      await Promise.resolve();
-      await Promise.resolve();
+    select(text, rect) {
+      return selectWith(text, rect, () => dispatch(windowListeners, "mouseup", { target: {} }));
     },
-    async dragSelect(text, rect) {
+    dragSelect(text, rect) {
       dispatch(documentListeners, "mousedown", { target: {} });
-      selection = { text, rect, isCollapsed: false };
-      dispatch(documentListeners, "selectionchange", {});
-      dispatch(windowListeners, "mouseup", { target: {} });
-      await Promise.resolve();
-      await Promise.resolve();
+      return selectWith(text, rect, () => dispatch(windowListeners, "mouseup", { target: {} }));
     },
-    async keyboardSelect(text, rect) {
-      selection = { text, rect, isCollapsed: false };
-      dispatch(documentListeners, "selectionchange", {});
-      dispatch(documentListeners, "keyup", { key: "ArrowRight", shiftKey: true });
-      await Promise.resolve();
-      await Promise.resolve();
+    keyboardSelect(text, rect) {
+      return selectWith(text, rect, () => dispatch(documentListeners, "keyup", { key: "ArrowRight", shiftKey: true }));
     },
     pressEscape() {
       dispatch(documentListeners, "keyup", { key: "Escape", shiftKey: false });
@@ -393,7 +389,7 @@ test("selecting text on a page that already has a conversation opens the full in
   assert.equal(preparedAsk.mode, "ask");
 });
 
-test("mouse drag or Shift+Arrow keyboard selection updates an open inline thread without flashing dock", async () => {
+async function mountThreadedSelection({ ready = true } = {}) {
   const harness = mountSelectionScript({
     width: 1280,
     height: 800,
@@ -402,7 +398,12 @@ test("mouse drag or Shift+Arrow keyboard selection updates an open inline thread
   });
   await Promise.resolve();
   await Promise.resolve();
-  harness.ready();
+  if (ready) harness.ready();
+  return harness;
+}
+
+test("mouse drag or Shift+Arrow keyboard selection updates an open inline thread without flashing dock", async () => {
+  const harness = await mountThreadedSelection();
 
   await harness.select("first highlighted sentence", { top: 180, bottom: 204, left: 160, width: 200, height: 24 });
   harness.reportSize({ width: 528, height: 488, topInset: 12, bottomInset: 36, leftInset: 24, rightInset: 24 });
@@ -429,15 +430,7 @@ test("mouse drag or Shift+Arrow keyboard selection updates an open inline thread
 });
 
 test("drag-start prewarms a docked thread and SPA page-updated forwards new URL/title to the open card", async () => {
-  const harness = mountSelectionScript({
-    width: 1280,
-    height: 800,
-    initialPageState: { panelOpen: false, hasThread: true },
-    prepareState: { panelOpen: false, hasThread: true },
-  });
-  await Promise.resolve();
-  await Promise.resolve();
-  harness.ready();
+  const harness = await mountThreadedSelection();
   assert.equal(harness.lastPosted().xmatrixAsk, "dock");
 
   // Starting a selection drag while docked prewarms the real App before mouseup (Item 4).
@@ -478,12 +471,7 @@ test("re-selecting text while ask capsule is open preserves draft, while clickin
 });
 
 test("panel-state hides inline card visually without premature release, and panel-release unmounts it", async () => {
-  const harness = mountSelectionScript({
-    width: 1280,
-    height: 800,
-    initialPageState: { panelOpen: false, hasThread: true },
-    prepareState: { panelOpen: false, hasThread: true },
-  });
+  const harness = await mountThreadedSelection({ ready: false });
   await harness.select("open card", { top: 160, bottom: 184, left: 120, width: 140, height: 24 });
   harness.ready();
 
