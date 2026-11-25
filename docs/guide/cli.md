@@ -71,6 +71,7 @@ Wherever a command takes a conversation id, it also takes the conversation's `xm
 | `xmatrix channel history <id>` | Print the message history, with message ids |
 | `xmatrix channel chat <id>` | A simple line-based chat in the terminal |
 | `xmatrix channel subscribe <id> <pull-request-url>` | Send a pull request's CI result, reviews and merge to the conversation |
+| `xmatrix channel subscribe <id> <url> --wait` | Subscribe, then stay until the run or pull request reports (`--timeout <minutes>`, default 60); run it with your harness's own wait |
 | `xmatrix channel worktree <id> on\|off\|inherit` | Whether agents in this conversation get isolated worktrees |
 
 ## Messages

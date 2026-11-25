@@ -71,6 +71,7 @@ description: "xmatrix コマンドを分野別に網羅。ログインとデー�
 | `xmatrix channel history <id>` | メッセージ ID 付きで履歴を出力 |
 | `xmatrix channel chat <id>` | ターミナル上のシンプルな行ベースチャット |
 | `xmatrix channel subscribe <id> <pull-request-url>` | プルリクエストの CI 結果・レビュー・マージ通知を会話へ配信 |
+| `xmatrix channel subscribe <id> <url> --wait` | 購読してから、実行またはプルリクエストの結果が届くまで待機（`--timeout <分>`、既定 60）。ハーネス自身の待機ツールで実行 |
 | `xmatrix channel worktree <id> on\|off\|inherit` | この会話のエージェントに独立した worktree を割り当てるか設定 |
 
 ## メッセージ

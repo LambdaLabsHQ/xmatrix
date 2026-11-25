@@ -1902,6 +1902,17 @@ pub enum ChannelCommand {
         /// or the workflow run's, https://github.com/<owner>/<repo>/actions/runs/<id>
         #[arg(value_name = "URL")]
         pull_request: String,
+        /// Then stay until what it subscribed to reports here: a workflow
+        /// run's verdict, or a pull request's next CI verdict, review, comment
+        /// or merge. It reads this conversation from the Hub and never GitHub,
+        /// so run it with your harness's own wait (a background or long-running
+        /// command) and your Instance shows as waiting on it. Exits non-zero
+        /// when the run failed or the timeout passes
+        #[arg(long)]
+        wait: bool,
+        /// How long --wait stays, in minutes
+        #[arg(long, value_name = "MINUTES", default_value_t = 60, requires = "wait")]
+        timeout: u64,
     },
     /// Delete (recall) a message you sent
     DeleteMessage {

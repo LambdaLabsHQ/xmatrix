@@ -62,6 +62,15 @@ arrive there as messages. A pull request an Agent Run opens with `gh pr create`
 is usually subscribed already; the command answers whether it is, so an Agent
 runs it before it stops watching a pull request. Repeating it is harmless.
 
+To wait for the result instead of ending the turn, add `--wait`
+(`--timeout <minutes>`, default 60). It subscribes, then stays until the
+workflow run's verdict, or the pull request's next CI verdict, review, comment
+or merge, arrives in the conversation, reading only the conversation on the
+Hub, never GitHub. Run it with the harness's own wait (a background or
+long-running command): the harness reports that open command, so the Instance
+shows as waiting on it. It exits non-zero when the run failed, CI failed or the
+timeout passed; the subscription stays either way.
+
 ## Cross-Space transfers
 
 `xmatrix channel move <channel-id> --space <target-space-id>` creates a proposal;
