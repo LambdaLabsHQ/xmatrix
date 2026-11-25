@@ -50,22 +50,16 @@ export function appResultRetentionDays(appId: string): number | undefined {
   return APP_CONNECTOR_PROVIDER_MANIFESTS.find((manifest) => manifest.id === appId)?.resultRetentionDays;
 }
 
-const RETENTION_NOTICE_PREFIX = "Under the provider's terms this result is deleted after ";
-const RETENTION_NOTICE_MID = " days, and at once when the connection is disconnected; ";
-const RETENTION_NOTICE_NO_COPY = "do not copy it into Pages, memory or other lasting notes.";
-const RETENTION_NOTICE_MAY_KEEP_PREFIX = "Pages, memory and other lasting notes may keep only ";
+const retentionNotice = (days: number | string) => `The original result is deleted after ${days} days, ` +
+  "and at once when the connection is disconnected. Whether records you keep from it comply with the provider's terms is your responsibility.";
+const RETENTION_NOTICE = /^The original result is deleted after [1-9]\d* days, and at once when the connection is disconnected\. Whether records you keep from it comply with the provider's terms is your responsibility\.$/u;
+// Wordings receipts carried before 2026-11-25; stored ones stay readable until they expire.
+const LEGACY_RETENTION_NOTICE = /^Under the provider's terms this result is deleted after [1-9]\d* days, and at once when the connection is disconnected; (?:do not copy it into Pages, memory or other lasting notes\.|Pages, memory and other lasting notes may keep only .+\.)$/u;
 
-/** What an Agent is told about such a provider's results, so it does not keep copies longer. */
+/** What an Agent is told about such a provider's results: when they are deleted, and that records kept from them are the Customer's. */
 export function appResultRetentionNotice(appId: string): string | undefined {
-  const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((entry) => entry.id === appId);
-  if (manifest?.resultRetentionDays === undefined) return undefined;
-<<<<<<< HEAD
-  return `The original result is deleted after ${manifest.resultRetentionDays} days, and at once when the connection is disconnected. ` +
-    "Whether records you keep from it comply with the provider's terms is your responsibility.";
-=======
-  return `${RETENTION_NOTICE_PREFIX}${manifest.resultRetentionDays}${RETENTION_NOTICE_MID}` +
-    (manifest.resultRetentionMayKeep ? `${RETENTION_NOTICE_MAY_KEEP_PREFIX}${manifest.resultRetentionMayKeep}.`
-      : RETENTION_NOTICE_NO_COPY);
+  const days = appResultRetentionDays(appId);
+  return days === undefined ? undefined : retentionNotice(days);
 }
 
 /** Strips one trailing `appResultRetentionNotice` line that `publishCommandStatus` appended for Agents. */
@@ -73,15 +67,7 @@ function stripTrailingRetentionNotice(line: string): string {
   const split = line.lastIndexOf("\n");
   if (split < 0) return line;
   const tail = line.slice(split + 1);
-  if (!tail.startsWith(RETENTION_NOTICE_PREFIX)) return line;
-  const mid = tail.indexOf(RETENTION_NOTICE_MID, RETENTION_NOTICE_PREFIX.length);
-  if (mid < 0 || !/^[1-9]\d*$/u.test(tail.slice(RETENTION_NOTICE_PREFIX.length, mid))) return line;
-  const guidance = tail.slice(mid + RETENTION_NOTICE_MID.length);
-  const knownGuidance = guidance === RETENTION_NOTICE_NO_COPY
-    || (guidance.startsWith(RETENTION_NOTICE_MAY_KEEP_PREFIX) && guidance.endsWith(".")
-      && guidance.length > RETENTION_NOTICE_MAY_KEEP_PREFIX.length + 1);
-  return knownGuidance ? line.slice(0, split) : line;
->>>>>>> origin/main
+  return RETENTION_NOTICE.test(tail) || LEGACY_RETENTION_NOTICE.test(tail) ? line.slice(0, split) : line;
 }
 
 export function connectorReceiptBody(lines: readonly string[]): string {
