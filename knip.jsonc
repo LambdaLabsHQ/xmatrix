@@ -6,7 +6,7 @@
   ],
   "ignoreBinaries": ["open", "SELECT", "wrangler"],
   "ignoreDependencies": ["wrangler"],
-  "ignoreUnresolved": ["cloudflare:workers"],
+  "ignoreUnresolved": ["cloudflare:workers", "cloudflare:sockets"],
   "ignoreExportsUsedInFile": true,
   // `@testonly` marks an export that exists for its tests; `@dormant`, staged
   // code no production path constructs yet. `check:reachability` also runs knip
@@ -83,6 +83,7 @@
         // that read, and the shell glob used to be their only entry.
         "test/*.test.mjs",
       ],
+      "ignoreDependencies": ["cloudflare"],
       "includeEntryExports": true,
     },
     "packages/protocol": {
