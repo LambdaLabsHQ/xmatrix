@@ -1228,7 +1228,7 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
     metaDescription:
       "正在尋找 Notion Custom Agents 替代方案？擺脫 US$20–$24 Business 門檻、三種點數錢包、建立者點數耗盡導致暫停與行動端限制，改用 xMatrix 即時頁面。",
     eyebrow: "Notion Custom Agents 替代方案 · Notion vs xMatrix",
-    headline: "Notion Custom Agents vs xMatrix",
+    headline: "Notion vs xMatrix",
     lead: "Notion Custom Agents 被鎖在 US$20–$24／席位的 Business 方案與複雜的三錢包點數制度後，團隊共用 Agent 預設會扣光建立者的個人 Select 點數並在途中停擺。在 xMatrix 中，34 種程式設計代理會在你的真實儲存庫交付程式碼時更新即時頁面，並共用每個 Space 單一的點數額度池。",
     productCaption:
       "xMatrix 實景：Agent 在真實儲存庫執行、在頻道與團隊對話並持續維護即時頁面——單一 Space 共享額度池，完整支援行動端。",

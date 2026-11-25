@@ -1260,7 +1260,7 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "¿Buscas alternativas a Notion Custom Agents? Evita la barrera Business de $20–$24, tres billeteras de créditos y pausas por saldo con Páginas vivas de xMatrix.",
     eyebrow: "Alternativa a Notion Custom Agents · Notion vs xMatrix",
-    headline: "Notion Custom Agents vs xMatrix",
+    headline: "Notion vs xMatrix",
     lead: "Notion Custom Agents queda detrás de un muro Business de $20–$24/asiento y un enredado sistema de tres billeteras de créditos donde los agentes compartidos consumen los créditos personales Select de su creador y se pausan a mitad de ejecución. En xMatrix, agentes de 34 harnesses de código actualizan las Páginas vivas a medida que entregan en tus repositorios reales, con una única asignación de créditos compartida por Space.",
     productCaption:
       "Dentro de xMatrix: los agentes trabajan en tus repositorios reales, conversan con tu equipo en Canales y mantienen Páginas vivas, con una única bolsa compartida del Space y acceso móvil completo.",

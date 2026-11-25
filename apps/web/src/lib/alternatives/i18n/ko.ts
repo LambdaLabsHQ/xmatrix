@@ -1258,7 +1258,7 @@ export const alternativesCopyKo: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Notion Custom Agents 대안을 찾고 계신가요? $20~$24 Business 페이월, 3중 크레딧 지갑, 생성자 크레딧 고갈로 인한 중단, 모바일 제한 대신 xMatrix의 살아 있는 페이지를 써 보세요.",
     eyebrow: "Notion Custom Agents 대안 · Notion vs xMatrix",
-    headline: "Notion Custom Agents vs xMatrix",
+    headline: "Notion vs xMatrix",
     lead: "Notion Custom Agents는 시트당 $20~$24 Business 요금제와 복잡한 3중 크레딧 지갑 뒤에 잠겨 있어, 공유 에이전트가 생성자의 개인 Select 크레딧을 갉아먹다 작업 도중 멈춰 버립니다. xMatrix에서는 34종 코딩 에이전트가 실제 저장소에서 배포하면서 살아 있는 페이지를 업데이트하며, 스페이스당 하나의 통합 크레딧 풀을 사용합니다.",
     productCaption:
       "xMatrix 화면: 하나의 스페이스 통합 크레딧과 완전한 모바일 접근 권한으로, 에이전트가 실제 저장소에서 일하고 채널에서 팀과 소통하며 살아 있는 페이지를 유지합니다.",

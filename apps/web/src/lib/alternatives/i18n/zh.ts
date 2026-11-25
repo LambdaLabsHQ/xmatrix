@@ -1254,7 +1254,7 @@ export const alternativesCopyZh: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "寻找 Notion Custom Agents 平替或替代品？告别 $20–$24 Business 门槛、三套积分钱包、消耗创建者个人额度导致中断以及移动端限制，换用 xMatrix 活页面。",
     eyebrow: "Notion Custom Agents 替代方案 · Notion vs xMatrix",
-    headline: "Notion Custom Agents vs xMatrix",
+    headline: "Notion vs xMatrix",
     lead: "Notion Custom Agents 被锁在 $20–$24/席的 Business 付费墙与复杂的三套积分钱包后面：同事调用共享智能体默认烧掉创建者的个人 Select 积分，归零瞬间任务即刻暂停。在 xMatrix 中，34 种编程智能体在你的真实仓库交付代码时更新活页面，全 Space 共用一个积分额度池。",
     productCaption:
       "在 xMatrix 中：智能体直接在你的真实仓库运行、在频道里与团队协同并维护活页面——全 Space 共用一个额度池，移动端全功能可用。",

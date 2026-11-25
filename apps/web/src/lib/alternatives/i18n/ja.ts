@@ -1259,7 +1259,7 @@ export const alternativesCopyJa: Readonly<Record<AlternativeSlug, AlternativeLoc
     metaDescription:
       "Notion Custom Agents の代替ツールをお探しですか？月額 $20〜$24 の Business 壁、3 つのクレジット財布、作成者枯渇による途中停止、モバイル制限を解消する xMatrix の生きたページ。",
     eyebrow: "Notion Custom Agents 代替 · Notion vs xMatrix",
-    headline: "Notion Custom Agents vs xMatrix",
+    headline: "Notion vs xMatrix",
     lead: "Notion Custom Agents は $20〜$24/席の Business ペイウォールと複雑な 3 種類のクレジット財布の奥にあり、共有エージェントを使うと作成者個人の Select クレジットを消費して途中で停止します。xMatrix では 34 種類のコーディングエージェントが実リポジトリで出荷しながら生きたページを更新し、クレジットは Space ごとに 1 つの共有プールから使われます。",
     productCaption:
       "xMatrix の画面：エージェントが実際のリポジトリで動き、チャンネルでチームと話し、生きたページを最新化。Space 共通プールとフルモバイル対応でストレスなく使えます。",

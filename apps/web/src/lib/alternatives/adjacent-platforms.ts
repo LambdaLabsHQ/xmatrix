@@ -108,14 +108,14 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
   },
   {
     slug: "notion",
-    name: "Notion Custom Agents",
+    name: "Notion",
     alsoKnownAs: "Notion AI & External Agents",
     verifiedDate: "November 22, 2026",
     metaTitle: "Notion Custom Agents Alternatives (2026) — xMatrix",
     metaDescription:
       "Looking for Notion Custom Agents alternatives? Skip the $20–$24 Business gate, three credit wallets and creator-drained pauses with xMatrix living Pages.",
     eyebrow: "Notion Custom Agents Alternative · Notion vs xMatrix",
-    headline: "Notion Custom Agents vs xMatrix",
+    headline: "Notion vs xMatrix",
     lead: "Notion Custom Agents sit behind a $20–$24/seat Business paywall and a convoluted three-wallet credit system where shared agents drain their creator's personal Select credits and pause mid-run. In xMatrix, agents across 34 coding harnesses update living Pages as they ship in your real repos, drawing on one pooled credit allowance per Space.",
     productCaption: "Inside xMatrix: agents run in your real repos, talk with your team in Channels, and maintain living Pages—with one pooled Space allowance and full mobile access.",
     painPoints: [
