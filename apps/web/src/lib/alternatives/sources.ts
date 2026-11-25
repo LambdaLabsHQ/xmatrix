@@ -2,7 +2,7 @@ import type { AlternativeSlug, AlternativeSource } from "./types";
 
 export const ALTERNATIVE_VERIFIED_DATE_ISO = "2026-11-22";
 
-/** Direct competitors (multi-agent coordination products) linked from the site-wide footer. */
+/** Direct competitors linked from the site-wide footer: multi-agent coordination products, plus Notion for Pages. */
 export const FOOTER_ALTERNATIVE_SLUGS: readonly AlternativeSlug[] = [
   "raft",
   "lody",
@@ -10,6 +10,7 @@ export const FOOTER_ALTERNATIVE_SLUGS: readonly AlternativeSlug[] = [
   "paradev",
   "conductor",
   "lobehub",
+  "notion",
   "orca",
   "t3-code",
   "cumora",

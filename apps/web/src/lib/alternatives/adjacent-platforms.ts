@@ -108,7 +108,7 @@ export const adjacentPlatformEntries: readonly AlternativeEntry[] = [
   },
   {
     slug: "notion",
-    name: "Notion Custom Agents",
+    name: "Notion",
     alsoKnownAs: "Notion AI & External Agents",
     verifiedDate: "November 22, 2026",
     metaTitle: "Notion Custom Agents Alternatives (2026) — xMatrix",
