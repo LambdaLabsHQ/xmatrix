@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: the site footer lists our real competitors; Claude Code has no competitor page
+
+The footer's comparison row listed Claude Code (a harness xMatrix runs),
+Google Jules (shutting down), Linear and Notion (adjacent tools) next to real
+competitors, each as "<Name> Alternatives" under a bare "Compare". It now reads
+"Compare xMatrix with" (localized in all 6 languages) followed by plain names of
+the direct competitors: Raft, Lody, Multica, Paradev, Conductor, LobeHub, Orca,
+T3 Code and Cumora. `/claude-code-alternatives` is gone in all 6 locales and
+redirects (308) to the agents guide `/docs/agents`, which covers using Claude
+Code with xMatrix; pages that linked to it link to another competitor. 18
+competitor pages remain, all within 2 links of the footer. Web only. Recovery
+is a CI-validated beta reverting this change.
+
 ## Unreleased: Switch account works again after a connection's Check named its account
 
 Since #2007 a passed Check records the account a connection reached as

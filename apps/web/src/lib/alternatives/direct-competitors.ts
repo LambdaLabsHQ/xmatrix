@@ -724,7 +724,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
           "Yes. Every connected app supports Read-only, Ask first, and Read & write permissions, and Space-level secrets are injected at command runtime without revealing values to the agent.",
       },
     ],
-    relatedSlugs: ["raft", "multica", "nowledge-mem", "paradev"],
+    relatedSlugs: ["raft", "multica", "nowledge-mem", "youmind"],
   },
   {
     slug: "cumora",

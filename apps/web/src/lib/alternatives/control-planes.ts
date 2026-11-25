@@ -103,7 +103,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
           "Yes. xMatrix exposes an MCP server for reading and updating Pages and sending Channel messages, and runs against the same local repositories without locking them.",
       },
     ],
-    relatedSlugs: ["orca", "herdr", "claude-code", "lody"],
+    relatedSlugs: ["orca", "herdr", "multica", "lody"],
   },
   {
     slug: "herdr",
@@ -308,109 +308,6 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
           "xMatrix is source-available under FSL-1.1-ALv2 on GitHub (LambdaLabsHQ/xmatrix), whereas Seedmux is closed-source.",
       },
     ],
-    relatedSlugs: ["herdr", "t3-code", "orca", "claude-code"],
-  },
-  {
-    slug: "claude-code",
-    name: "Claude Code",
-    alsoKnownAs: "Claude Code Desktop, Cowork & Dispatch",
-    verifiedDate: "November 22, 2026",
-    metaTitle: "Claude Code Alternatives (2026): Add Teams & Pages",
-    metaDescription:
-      "Keep Claude Code and add multiplayer Channels, living Pages and 34 more coding agents in xMatrix, with automatic handoff when 5-hour quota caps hit.",
-    eyebrow: "Claude Code Alternative · Claude Code vs xMatrix",
-    headline: "Claude Code Alternative? Keep Claude Code — Wrap It With Teammates, 34 Other Agents, and Living Pages",
-    lead: "Claude Code Desktop and Cowork are great for solo pairing with one Claude session, but they leave teammates outside the room, keep context trapped in solo sessions, and stop cold when November 2026's tighter 5-hour or weekly caps hit. xMatrix wraps Claude Code with shared Channels, living Pages, 34 other harnesses, and Space secrets.",
-    productCaption: "Inside xMatrix: keep running your local Claude Code CLI while teammates and 34 other coding harnesses collaborate in the same Channel and maintain living Pages.",
-    painPoints: [
-      {
-        title: "Built for solo pairing, not multiplayer teams or shared living docs",
-        problem:
-          "Claude Code Desktop is designed for one person watching one agent step by step; Projects memory belongs to a single user, Claude Tag is restricted to Slack Team/Enterprise, and there is no shared living Page maintained collaboratively across humans and multiple harnesses.",
-        xmatrixAnswer:
-          "xMatrix sits one layer up: teammates and dozens of parallel agents collaborate in shared Channels, while every finished run updates the shared living Page so you supervise outcomes and decisions rather than every line of terminal output.",
-      },
-      {
-        title: "Shared 5-hour and weekly quota walls stop work dead",
-        problem:
-          "Because Claude Code, Claude Desktop, and Cowork all draw from the same plan allowance—and background subagents plus /code-review accelerate token burn (many r/claude users report 3x burn in November 2026)—Pro and lower tiers hit limits mid-day with no way to roll work over to another provider.",
-        xmatrixAnswer:
-          "xMatrix doesn't replace Claude Code—it elevates it. When Claude Code hits its 5-hour or weekly cap, xMatrix can hand the checkout (uncommitted changes included) and Page context to Codex, Gemini, Cursor, or another registered harness so work keeps moving.",
-      },
-      {
-        title: "No Space-level secrets or cross-harness governance across your machines",
-        problem:
-          "Claude Code Desktop ties local execution to Anthropic's ecosystem, lacks Space-wide secret injection across heterogeneous harnesses, and Anthropic's regional restrictions block unsupported territories outright.",
-        xmatrixAnswer:
-          "xMatrix coordinates 34 coding harnesses (plus any custom CLI via --runtime) across all your macOS, Windows, and Linux machines under one set of Space secrets and per-app approvals across 35 connected apps.",
-      },
-    ],
-    comparisonRows: [
-      {
-        dimension: "Collaboration & shared memory",
-        xmatrix: "Multiplayer public/private Channels + living Pages co-edited by humans and agents",
-        competitor: "Single-user sessions and personal Projects; Claude Tag limited to Slack paid plans",
-      },
-      {
-        dimension: "Supported coding harnesses",
-        xmatrix: "34 built-in harnesses (Claude Code, Codex, Cursor, Gemini, Antigravity, etc.) + --runtime",
-        competitor: "Claude only",
-      },
-      {
-        dimension: "When Claude hits its usage limit",
-        xmatrix: "Hands off checkout & Page context to another available harness automatically",
-        competitor: "Work pauses until the 5-hour/weekly reset or requires switching to paid API keys",
-      },
-      {
-        dimension: "Supervision model",
-        xmatrix: "Manage dozens of parallel runs by reading Pages, PR checks, and approval cards",
-        competitor: "Pair closely with one session's diff viewer, terminal, and action prompts",
-      },
-      {
-        dimension: "Ops connectors & secrets",
-        xmatrix: "Space-level secrets + 35 apps with per-app policies",
-        competitor: "Per-session MCP tools; Duet cloud VM still in US-only research waitlist",
-      },
-    ],
-    stayWhen: [
-      "You only use Claude, work completely solo, and want tight inline diff pairing and built-in cloud VMs bundled inside your Anthropic subscription.",
-    ],
-    switchWhen: [
-      "You are tired of losing half a workday whenever Claude's 5-hour or weekly cap triggers and want Codex or Gemini to pick up seamlessly.",
-      "You want teammates and multiple harnesses sharing the same Channels, living Pages, and Space secrets.",
-      "You supervise many parallel workstreams and want to read project Pages and exception cards instead of babysitting every terminal.",
-    ],
-    migrationSteps: [
-      {
-        title: "Keep your existing Claude Code CLI—don't uninstall it",
-        detail: "xMatrix drives your official local Claude Code CLI directly using your existing login; nothing is lost.",
-      },
-      {
-        title: "Add a second harness for automatic quota continuity",
-        detail: "Register Codex, Gemini, Cursor, or OpenCode alongside Claude Code via xmatrix agent add so @auto routes around quota caps automatically.",
-      },
-      {
-        title: "Move recurring context from local CLAUDE.md files into living Pages",
-        detail: "Keep project status, decisions, and open tasks in Pages that every harness and teammate shares.",
-      },
-    ],
-    faqs: [
-      {
-        question: "Do I have to give up Claude Code to use xMatrix?",
-        answer:
-          "Not at all. Claude Code is a first-class harness in xMatrix—you keep using Claude Code on your own machines while gaining multiplayer Channels, living Pages, and automatic failover to Codex or Gemini when Claude limits hit.",
-      },
-      {
-        question: "Can teammates share my personal Claude subscription in xMatrix?",
-        answer:
-          "No—xMatrix respects vendor terms of service and does not market subscription pooling. Each machine and user brings their own authorized harness subscriptions or API keys.",
-      },
-      {
-        question: "Does xMatrix include cloud VMs like Claude Cowork?",
-        answer:
-          "Not today. xMatrix connects your own laptops, desktops, and self-managed servers across macOS, Windows, and Linux.",
-      },
-    ],
-    relatedSlugs: ["t3-code", "jules", "orca", "paradev"],
+    relatedSlugs: ["herdr", "t3-code", "orca", "lody"],
   },
 ];

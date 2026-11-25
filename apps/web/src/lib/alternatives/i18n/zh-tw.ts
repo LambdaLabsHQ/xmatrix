@@ -1,6 +1,6 @@
 import type { AlternativeLocaleCopy, AlternativeSlug } from "../types";
 
-/** Traditional Chinese (zh-TW) copy for all 19 competitor alternative pages. */
+/** Traditional Chinese (zh-TW) copy for all competitor alternative pages. */
 export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeLocaleCopy>> = {
   raft: {
     alsoKnownAs: "原名 Slock",
@@ -1116,106 +1116,6 @@ export const alternativesCopyZhTw: Readonly<Record<AlternativeSlug, AlternativeL
       {
         question: "xMatrix 是開源還是閉源？",
         answer: "xMatrix 採 FSL-1.1-ALv2 授權在 GitHub（LambdaLabsHQ/xmatrix）公開原始碼，而 Seedmux 為閉源軟體。",
-      },
-    ],
-  },
-  "claude-code": {
-    alsoKnownAs: "Claude Code Desktop、Cowork 與 Dispatch",
-    verifiedDate: "2026 年 11 月 22 日",
-    metaTitle: "Claude Code 替代方案 (2026)：升級團隊協作與即時頁面",
-    metaDescription:
-      "想為 Claude Code 加上多人頻道、即時頁面與其他 34 種程式設計代理？在 xMatrix 中保留 Claude Code，並在觸及 5 小時上限時支援自動配額交接。",
-    eyebrow: "Claude Code 替代方案 · Claude Code vs xMatrix",
-    headline: "Claude Code 替代？保留 Claude Code，為它加上隊友、34 種程式設計代理與即時頁面",
-    lead: "Claude Code Desktop 與 Cowork 非常適合單人與一個 Claude 工作階段結對開發，但會把隊友擋在門外、讓脈絡困在個人對話裡，且在 2026 年 11 月更緊縮的 5 小時或每週配額觸頂時直接停擺。xMatrix 在 Claude Code 之外包上一層共享頻道、即時頁面、其餘 34 種程式設計代理與 Space 機密。",
-    productCaption:
-      "xMatrix 實景：繼續執行你本機的 Claude Code CLI，讓隊友與其他 34 種程式設計代理在同一頻道協作並持續維護即時頁面。",
-    painPoints: [
-      {
-        title: "為單人結對設計，缺乏多人團隊與共享動態文件",
-        problem:
-          "Claude Code Desktop 預設由一個人一步步盯著一個 Agent 工作；Projects 記憶僅限個人使用，Claude Tag 受限於 Slack Team／Enterprise 方案，且缺乏人與多款工具共同維護的共享即時頁面。",
-        xmatrixAnswer:
-          "xMatrix 站在更高一層協作：隊友與數十個並行 Agent 在共享頻道中合作，每次完成任務就更新共享即時頁面，讓你專注審查成果與決策，而非緊盯每一行終端機輸出。",
-      },
-      {
-        title: "共用的 5 小時與每週配額牆，直接讓工作停擺",
-        problem:
-          "由於 Claude Code、Claude Desktop 與 Cowork 共用同一份方案額度，加上背景子 Agent 與 /code-review 加速 Token 消耗（2026 年 11 月許多 r/claude 使用者回報消耗達以往 3 倍），Pro 與入門方案常在半天內就觸頂，且完全無法轉交給其他供應商接續。",
-        xmatrixAnswer:
-          "xMatrix 不是要取代 Claude Code，而是讓它如虎添翼。一旦 Claude Code 觸及 5 小時或每週上限，xMatrix 能連同工作目錄（包含未提交變更）與頁面脈絡交接給 Codex、Gemini、Cursor 或其他已註冊的代理，讓工作繼續推進。",
-      },
-      {
-        title: "缺乏跨主機的 Space 層級機密與多工具統一治理",
-        problem:
-          "Claude Code Desktop 將本機執行綁定在 Anthropic 生態系中，缺少跨異質工具的 Space 機密注入機制，且 Anthropic 的地區限制更會直接封鎖未支援區域。",
-        xmatrixAnswer:
-          "xMatrix 在一套 Space 機密與 35 個整合工具的個別應用核准機制下，跨所有 macOS、Windows 與 Linux 主機統一協調 34 種程式設計代理（並可透過 --runtime 接入任何自訂 CLI）。",
-      },
-    ],
-    comparisonRows: [
-      {
-        dimension: "協作與共享記憶",
-        xmatrix: "多人公開／私人頻道 + 人與 Agent 共編的即時頁面",
-        competitor: "單人工作階段與個人 Projects；Claude Tag 僅限 Slack 付費方案",
-      },
-      {
-        dimension: "支援的程式設計代理",
-        xmatrix: "內建 34 種程式設計代理（Claude Code、Codex、Cursor、Gemini、Antigravity 等）+ --runtime",
-        competitor: "僅限 Claude",
-      },
-      {
-        dimension: "當 Claude 觸及用量上限時",
-        xmatrix: "自動連同工作目錄變更與頁面脈絡交接給其他可用代理",
-        competitor: "工作暫停直到 5 小時／每週重置，或得改付按量 API 費用",
-      },
-      {
-        dimension: "監控管理方式",
-        xmatrix: "透過即時頁面、PR 檢查與核准卡片統籌數十個並行執行",
-        competitor: "近距離盯著單一工作階段的 diff 檢視器、終端機與操作確認",
-      },
-      {
-        dimension: "維運連接器與機密",
-        xmatrix: "Space 層級機密 + 35 個具個別應用權限原則的整合工具",
-        competitor: "單一工作階段 MCP 工具；Duet 雲端 VM 仍處於僅限美國的研究候補名單",
-      },
-    ],
-    stayWhen: [
-      "你只用 Claude、完全獨自開發，且偏好在 Anthropic 訂閱內享有緊密的行內 diff 結對體驗與內建雲端 VM。",
-    ],
-    switchWhen: [
-      "你受夠了每次 Claude 5 小時或每週配額觸頂就浪費半天工時，希望由 Codex 或 Gemini 無縫接棒。",
-      "你需要隊友與多款執行工具共享相同的頻道、即時頁面與 Space 機密。",
-      "你同時管理多條並行開發線，希望靠專案頁面與例外卡片掌握全局，而不是當每個終端機的保母。",
-    ],
-    migrationSteps: [
-      {
-        title: "保留既有的 Claude Code CLI——完全不用移除",
-        detail: "xMatrix 直接沿用你本機的官方 Claude Code CLI 與現有登入，原有習慣零流失。",
-      },
-      {
-        title: "新增第二款執行工具，開啟自動配額續航",
-        detail: "透過 xmatrix agent add 在 Claude Code 旁註冊 Codex、Gemini、Cursor 或 OpenCode，讓 @auto 自動繞開配額上限。",
-      },
-      {
-        title: "將反覆維護的脈絡從本機 CLAUDE.md 移到即時頁面",
-        detail: "把專案狀態、決策與待辦事項集中維護在頁面中，讓每款工具與每位隊友同步共享。",
-      },
-    ],
-    faqs: [
-      {
-        question: "使用 xMatrix 就必須放棄 Claude Code 嗎？",
-        answer:
-          "完全不用。Claude Code 是 xMatrix 的一等公民執行工具——你依然在自己的主機上執行 Claude Code，同時獲得多人頻道、即時頁面，以及在 Claude 觸頂時自動交接給 Codex 或 Gemini 的能力。",
-      },
-      {
-        question: "隊友可以在 xMatrix 中共用我的個人 Claude 訂閱嗎？",
-        answer:
-          "不行——xMatrix 尊重各供應商的服務條款，絕不主打訂閱共享池。每台主機與每位成員都使用自己經授權的工具訂閱或 API 金鑰。",
-      },
-      {
-        question: "xMatrix 是否像 Claude Cowork 一樣內建託管雲端 VM？",
-        answer: "目前不提供。xMatrix 連接的是你自有掌控的筆電、桌機與自管伺服器，橫跨 macOS、Windows 與 Linux。",
       },
     ],
   },
