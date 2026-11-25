@@ -938,7 +938,18 @@ token and verified team; legacy manual tokens and signed webhook deliveries
 remain supported. Unsigned Marketplace-initiated callbacks are rejected until
 an authenticated Space-selection flow exists. Personal installations also retain
 the provider-confirmed user id, checked against the current configuration.
+API calls use short-lived installation tokens only: the code exchange's own token
+is never used or kept. The Hub asks `POST /v2/oauth/access_token` with
+`grant_type=client_credentials`, the installation id and HTTP Basic client
+credentials, checks the response names the same installation and team, and saves
+the token with its `expires_in` expiry. Vercel issues no refresh token, so the
+installation id is the durable grant: before each action a token with five
+minutes or less left (or a saved long-lived one, which has no expiry) is renewed
+and saved; a webhook's permission check renews in memory only, so the delivery's
+credential version stays bound. `invalid_grant` asks the admin to reconnect;
+`unauthorized_client` and `invalid_client` name the company integration setting.
 Protocol references:
+[short-lived access tokens](https://vercel.com/docs/integrations/create-integration/short-lived-access-tokens),
 [Vercel's API integration guide](https://vercel.com/docs/integrations/create-integration/vercel-api-integrations),
 [external installation flow](https://vercel.com/docs/integrations/create-integration/submit-integration),
 and [configuration API](https://vercel.com/docs/rest-api/integrations/retrieve-an-integration-configuration).

@@ -9,6 +9,7 @@ const event = (extra = {}) => ({ id: 'evt_1', type: 'deployment.ready', payload:
   team: { id: 'team_A' }, user: { id: 'ownerA' }, project: { id: 'prj_A' },
   deployment: { id: 'dpl_A', name: 'test-app', url: 'test-app.vercel.app' }, ...extra,
 } });
+const fresh = () => String(Date.now() + 3_600_000);
 const connection = (space = 'a', id = 'icfg_A') => ({ connectionId: `${space}:vercel`, spaceId: space,
   installationId: id, credentialVersion: 3 });
 function fixture(connections = [connection()]) {
@@ -24,7 +25,7 @@ function fixture(connections = [connection()]) {
     credentials: () => ({ async resolve(input) { resolved.push(input); const c = connections.find(c => c.spaceId === input.spaceId);
       return c && { connectionId: c.connectionId, status: 'configured', version: c.credentialVersion,
         values: { oauthToken: `fixture-${c.installationId}`, oauthAppClientId: 'oac_app',
-          oauthConfigurationId: c.installationId, oauthTeamId: 'team_A' } }; } }),
+          oauthConfigurationId: c.installationId, oauthTeamId: 'team_A', oauthExpiresAt: fresh() } }; } }),
     async append(_env, _channel, input) { appends.push(input); return Response.json({}); },
     async events(_env, input) { automations.push(input); },
   };
@@ -76,7 +77,7 @@ test('current project permissions isolate two installations in the same team and
 test('a changed credential snapshot cannot authorize a stale event or Automation', async () => {
   const f = fixture();
   f.dependencies.credentials = () => ({ async resolve() { return { connectionId: 'a:vercel', status: 'configured', version: 4,
-    values: { oauthToken: 't', oauthConfigurationId: 'icfg_A', oauthAppClientId: 'oac_app', oauthTeamId: 'team_A' } }; } });
+    values: { oauthToken: 't', oauthConfigurationId: 'icfg_A', oauthAppClientId: 'oac_app', oauthTeamId: 'team_A', oauthExpiresAt: fresh() } }; } });
   await provider(() => { throw new Error('stale credentials must not reach Vercel'); }, async calls => {
     assert.equal((await send(event(), f)).status, 200);
     assert.equal(calls.length + f.appends.length + f.automations.length, 0);
@@ -125,7 +126,7 @@ test('provider outages and failed append require retry; they are not successful 
 test('personal account events use the authenticated user scope and never a stale manual team', async () => {
   const f = fixture();
   f.dependencies.credentials = () => ({ async resolve() { return { connectionId: 'a:vercel', status: 'configured', version: 3,
-    values: { oauthToken: 't', oauthConfigurationId: 'icfg_A', oauthAppClientId: 'oac_app', oauthUserId: 'ownerA', teamId: 'team_other' } }; } });
+    values: { oauthToken: 't', oauthConfigurationId: 'icfg_A', oauthAppClientId: 'oac_app', oauthUserId: 'ownerA', teamId: 'team_other', oauthExpiresAt: fresh() } }; } });
   await provider(() => Response.json(configuration('icfg_A', { teamId: null, userId: 'ownerA', projectSelection: 'all' })), async calls => {
     assert.equal((await send(event({ team: null }), f)).status, 200);
     assert.equal(f.queries[0].eventScopeId, 'user_ownerA');
@@ -152,7 +153,7 @@ test('signed removal and transfer retire only the installation and previous scop
 test('OAuth creates configuration/account bindings from verified provider evidence for team and personal grants', async () => {
   for (const team of ['team_A', null]) {
     await provider(url => Response.json(url.endsWith('/v2/oauth/access_token')
-      ? { access_token: 't', installation_id: 'icfg_A', team_id: team, user_id: 'ownerA' }
+      ? { access_token: 't', installation_id: 'icfg_A', team_id: team, user_id: 'ownerA', expires_in: 3600 }
       : configuration('icfg_A', { teamId: team, userId: 'ownerA' })), async () => {
       const grant = await exchangeOAuthGrant(oauthClient(env, 'vercel'), 'code', 'https://hub.test/callback');
       assert.deepEqual(grant.installation, { appClientId: 'oac_app', installationId: 'icfg_A',
@@ -160,4 +161,30 @@ test('OAuth creates configuration/account bindings from verified provider eviden
       assert.equal(grant.fields.oauthUserId, team ? null : 'ownerA');
     });
   }
+});
+
+test('a due or long-lived token is replaced by a client_credentials token for the permission check, unsaved', async () => {
+  for (const stored of [{}, { oauthExpiresAt: String(Date.now() + 60_000) }]) {
+    const f = fixture();
+    f.dependencies.credentials = () => ({ async resolve() { return { connectionId: 'a:vercel', status: 'configured', version: 3,
+      values: { oauthToken: 'long-lived', oauthConfigurationId: 'icfg_A', oauthAppClientId: 'oac_app', oauthTeamId: 'team_A', ...stored } }; } });
+    const bodies = [];
+    await provider((url, init) => {
+      if (url.endsWith('/v2/oauth/access_token')) { bodies.push(Object.fromEntries(init.body));
+        return Response.json({ access_token: 'short-lived', token_type: 'Bearer', expires_in: 3600, installation_id: 'icfg_A', team_id: 'team_A' }); }
+      return Response.json(configuration());
+    }, async calls => {
+      assert.deepEqual(await (await send(event(), f)).json(), { ok: true, events: 1, delivered: 1 });
+      assert.deepEqual(bodies, [{ grant_type: 'client_credentials', installation_id: 'icfg_A' }]);
+      assert.equal(calls[0].token, `Basic ${btoa('oac_app:fixture-integration-secret')}`);
+      assert.equal(calls[1].token, 'Bearer short-lived');
+    });
+  }
+  const removed = fixture();
+  removed.dependencies.credentials = () => ({ async resolve() { return { connectionId: 'a:vercel', status: 'configured', version: 3,
+    values: { oauthToken: 'long-lived', oauthConfigurationId: 'icfg_A', oauthAppClientId: 'oac_app', oauthTeamId: 'team_A' } }; } });
+  await provider(() => Response.json({ error: 'invalid_grant' }, { status: 400 }), async calls => {
+    assert.deepEqual(await (await send(event(), removed)).json(), { ok: true, events: 1, delivered: 0 });
+    assert.equal(calls.length, 1);
+  });
 });

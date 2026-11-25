@@ -6,7 +6,8 @@ import { connectorAppRepository, connectorCredentialRepository } from "./credent
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { connectorEventArrived } from "../outside-events";
 import { deliverEvent, readSignedProviderDelivery, type ConnectorIngressDependencies } from "./event-ingress";
-import { vercelEventScopeId, vercelProjectAuthorized } from "./vercel-api";
+import { ProviderRequestError } from "./http";
+import { vercelEventScopeId, vercelInstallationToken, vercelProjectAuthorized } from "./vercel-api";
 
 const DEPENDENCIES: ConnectorIngressDependencies = { apps: connectorAppRepository,
   credentials: connectorCredentialRepository, append: dispatchProductMessageAppend,
@@ -63,7 +64,17 @@ export async function handleVercelAppDelivery(input: { env: Env; request: Reques
           resolved.version !== connection.credentialVersion || !resolved.values.oauthToken ||
           resolved.values.oauthAppClientId !== client.clientId || resolved.values.oauthConfigurationId !== connection.installationId ||
           vercelEventScopeId(resolved.values.oauthTeamId || null, resolved.values.oauthUserId) !== scope) return 0;
-      if (!await vercelProjectAuthorized(resolved.values, project)) return 0;
+      // A due token is renewed for this check only: saving it would move the credential
+      // version this delivery is bound to. Actions save their own renewals.
+      let values = resolved.values;
+      try {
+        const renewed = await vercelInstallationToken(client, values);
+        if (renewed) values = { ...values, ...renewed };
+      } catch (failure) {
+        if (failure instanceof ProviderRequestError && failure.status === 401) return 0; // installation gone
+        throw failure;
+      }
+      if (!await vercelProjectAuthorized(values, project)) return 0;
       const binding = { providerId: "vercel", appClientId: client.clientId, installationId: connection.installationId,
         credentialVersion: connection.credentialVersion };
       let count = 0;

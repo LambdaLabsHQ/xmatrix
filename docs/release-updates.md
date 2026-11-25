@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Vercel uses short-lived installation tokens
+
+Vercel retires long-lived integration tokens (deadline 2027-01-15). The Hub no
+longer uses or keeps the token from the Vercel authorization code: it asks Vercel
+for a one-hour installation token with `client_credentials`, saves it with its
+expiry, and asks again before an action when five minutes or less remain.
+Existing Vercel connections switch on their next Check, redeploy or deployment
+event; nobody reconnects. A removed installation asks the admin to reconnect.
+Hub only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a first message's launch line shows it is working, and xMatrix's summon no longer quotes it
 
 After sending a new conversation's first message, authors read the plain line under it as the system doing nothing. The line now arrives with the message and leads with a ring around the mark of whoever acts next: xMatrix's mark in a turning ring while it chooses, the picked Agent's mark in a ring that drains with the author's three seconds, and a turning ring again while it starts. While xMatrix or the Agent is at work a light sweeps across the words. "Change" and "Don't start" follow a divider in a quieter ink, and on a phone the line no longer wraps "Don't start" onto a second row. Reduced motion stops every animation.
