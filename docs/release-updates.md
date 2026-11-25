@@ -1,6 +1,8 @@
 # Release Updates
 
-## Unreleased: xMatrix's summon under a first message no longer quotes it
+## Unreleased: a first message's launch line shows it is working, and xMatrix's summon no longer quotes it
+
+After sending a new conversation's first message, authors read the plain line under it as the system doing nothing. The line now arrives with the message and leads with a ring around the mark of whoever acts next: xMatrix's mark in a turning ring while it chooses, the picked Agent's mark in a ring that drains with the author's three seconds, and a turning ring again while it starts. While xMatrix or the Agent is at work a light sweeps across the words. "Change" and "Don't start" follow a divider in a quieter ink, and on a phone the line no longer wraps "Don't start" onto a second row. Reduced motion stops every animation.
 
 When xMatrix started an Agent for a new conversation's first message, its `@<harness>` reply quoted that message in a large block right under it, so the author saw their own words twice before anything happened. The web now shows that summon alone: xMatrix, then the Agent's launch status. Web only; the Hub still records the reply. Recovery is a CI-validated beta reverting this change.
 
