@@ -909,10 +909,12 @@ export class PostgresAppRepository {
           throw new AppControlError("invalid_app_request", 400, "Unsupported connector capability");
         }
         const channelIds: string[] = [];
-        const metadata = appendMetadataLists(body.metadata === undefined
-          ? (current?.metadata_json as Record<string, unknown> | undefined) ?? {}
-          : object(body.metadata, "metadata"), body.metadataAppend);
-        if (Object.keys(metadata).some((key) => !input.provider.metadataFields.includes(key))) {
+        // `connectedAccount` is the Check's own record of the account reached: a save keeps it, never sets it.
+        const stored = (current?.metadata_json as Record<string, unknown> | undefined) ?? {};
+        const { connectedAccount: _sent, ...sent } = body.metadata === undefined ? stored : object(body.metadata, "metadata");
+        const metadata = appendMetadataLists({ ...sent,
+          ...(typeof stored.connectedAccount === "string" ? { connectedAccount: stored.connectedAccount } : {}) }, body.metadataAppend);
+        if (Object.keys(metadata).some((key) => key !== "connectedAccount" && !input.provider.metadataFields.includes(key))) {
           throw new AppControlError("invalid_app_request", 400,
             "Connector metadata contains an unsupported field");
         }

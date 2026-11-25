@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Switch account works again after a connection's Check named its account
+
+Since #2007 a passed Check records the account a connection reached as
+`connectedAccount` in the connection's metadata. Switch account (any OAuth
+connector) first saves the connection, and that save rejected
+`connectedAccount` as an unsupported metadata field, so the callback ended in
+`oauth=failed` ("Connector metadata contains an unsupported field"). A save
+now keeps the Check's `connectedAccount` and ignores one a client sends; only
+the Check writes it. Database repository (Hub) only.
+
 ## Unreleased: connector commands with a `new` target no longer trip the retired-launch notice
 
 `@google:create_doc:new <title>` and `@google:create_sheet:new <title>` ran
