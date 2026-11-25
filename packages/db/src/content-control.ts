@@ -1110,12 +1110,14 @@ export class PostgresContentRepository {
               AND status IN ('completed','failed','blocked') AND (result_summary IS NOT NULL OR reason IS NOT NULL)
             LIMIT $5 FOR UPDATE SKIP LOCKED) RETURNING execution_id`,
         values: [spaceId, appId, cutoff, now, limit], maxRows: limit });
-      const rows = await tx.query<QueryResultRow>({ name: "content_app_results_ref_lock_v1",
+      // Private originals are owned by the receipt (`…:<app>`) or the inbound event (`app:<app>:…`).
+      const rows = await tx.query<QueryResultRow>({ name: "content_app_results_ref_lock_v2",
         text: `SELECT r.ref_id,r.root_set_id,r.child_object_id,o.storage_key,o.checksum,o.byte_length
           FROM data.content_refs r JOIN data.content_objects o
             ON o.space_id=r.space_id AND o.object_id=r.child_object_id
           WHERE r.space_id=$1 AND r.generation=0 AND r.owner_kind='connector_result'
-            AND right(r.owner_id, length($2)+1)=':'||$2 AND r.created_at <= $3::timestamptz
+            AND (right(r.owner_id, length($2)+1)=':'||$2 OR left(r.owner_id, length($2)+5)='app:'||$2||':')
+            AND r.created_at <= $3::timestamptz
           ORDER BY r.created_at,r.ref_id LIMIT $4 FOR UPDATE OF r,o SKIP LOCKED`,
         values: [spaceId, appId, cutoff, limit], maxRows: limit });
       for (const row of rows) {
@@ -1155,7 +1157,7 @@ export class PostgresContentRepository {
     return this.spaces.transaction(requestId, "content.app-results.next", spaceId, async tx => {
       const now = new Date().toISOString();
       const cutoff = await appResultCutoff(tx, spaceId, appId, retentionDays, now);
-      const rows = await tx.query<QueryResultRow>({ name: "content_app_results_next_v1",
+      const rows = await tx.query<QueryResultRow>({ name: "content_app_results_next_v2",
         text: `SELECT MIN(created_at) AS oldest FROM (
           SELECT MIN(created_at) AS created_at FROM data.messages
             WHERE space_id=$1 AND author_kind='app' AND author_id=$2 AND deleted_at IS NULL
@@ -1164,7 +1166,7 @@ export class PostgresContentRepository {
               AND (result_summary IS NOT NULL OR reason IS NOT NULL)
           UNION ALL SELECT MIN(created_at) FROM data.content_refs
             WHERE space_id=$1 AND generation=0 AND owner_kind='connector_result'
-              AND right(owner_id, length($2)+1)=':'||$2
+              AND (right(owner_id, length($2)+1)=':'||$2 OR left(owner_id, length($2)+5)='app:'||$2||':')
         ) oldest`, values: [spaceId, appId], maxRows: 1 });
       if (!rows[0]?.oldest) return null;
       const oldest = new Date(rows[0].oldest as string | Date).getTime();
