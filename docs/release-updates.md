@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: Google Docs/Drive/Sheets and Calendar reach Google's Workspace MCP servers
+
+From 2027-02-01 Google's Workspace AI Tools Addendum has AI agents reach
+Workspace data through Google's official Workspace MCP servers; agents still
+calling the REST APIs are held to Standard quotas. `@google` and
+`@googlecalendar` gain three actions over those servers with the connection's
+own OAuth token: `mcp_tools:<server>` lists the live tools with their input
+schemas and Google's read-only marking, `mcp_read:<server>/<tool> {json}` calls
+a tool Google marks read-only, and `mcp_write:<server>/<tool> {json}` calls any
+other under the app's write permission (so `ask` approves each one). Servers:
+`docs`, `drive`, `sheets`, `slides` for `@google` and `calendar` for
+`@googlecalendar`. Google answers only once the company connector client is
+marked "AI-powered agent" and the MCP services are enabled on its project;
+until then these actions report Google's refusal and the existing REST
+actions keep working unchanged. Hub only.
+
 ## Unreleased: Gmail, Google Docs/Drive/Sheets and Calendar results expire at 29 days
 
 Google's Workspace AI Tools Addendum (from 2027-02-01) lets data an AI tool
