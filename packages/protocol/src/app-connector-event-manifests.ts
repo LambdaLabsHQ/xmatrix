@@ -80,9 +80,6 @@ const SLUG = "^[a-z0-9][a-z0-9_.-]{0,99}$";
 
 /* The values one-click OAuth keeps for a provider whose token expires. */
 /* Google sign-ins also name the account they reached (its address), shown on the connection's page. */
-/** Workspace user data (not Google Technical Information) may become the user's own record of a task's outcome. */
-const WORKSPACE_MAY_KEEP = "the business facts the task concluded (an amount, a date, a status) with their source id, never the retrieved text";
-
 export const GOOGLE_IDENTITY_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"] as const;
 
 const OAUTH_TOKEN_CREDENTIALS: Credential[] = [
@@ -143,7 +140,6 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     // Google Workspace AI Tools Addendum (from 2027-02-01): user data only for
     // active user-authorized tasks and never kept after disconnecting.
     resultRetentionDays: 29,
-    resultRetentionMayKeep: WORKSPACE_MAY_KEEP,
   },
   {
     ...actionConnector({
@@ -246,7 +242,6 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     // Google Workspace AI Tools Addendum (from 2027-02-01): user data only for
     // active user-authorized tasks and never kept after disconnecting.
     resultRetentionDays: 29,
-    resultRetentionMayKeep: WORKSPACE_MAY_KEEP,
   },
   {
     ...actionConnector({
@@ -394,7 +389,6 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     // Google Workspace AI Tools Addendum (from 2027-02-01): user data only for
     // active user-authorized tasks and never kept after disconnecting.
     resultRetentionDays: 29,
-    resultRetentionMayKeep: WORKSPACE_MAY_KEEP,
     events: {
       ingress: false,
       source: { label: "Mailbox", description: "One of your mailboxes with notifications on in Apps → Gmail. Only its owner and their Agents subscribe it.",
