@@ -119,3 +119,20 @@ test("a credential filled from a saved secret is read by the Hub as the admin an
   }
   assert.equal(reads.length, 1, "a refused request reads no secret");
 });
+
+test("saving an App Store Connect webSession automatically populates vendorNumber when missing", async () => {
+  const puts = [];
+  const app = await credentialRoutes({
+    readGenerated: async () => ({}),
+    put: async (input) => { puts.push(input); return { credentialFields: ["webSession", "vendorNumber"] }; },
+  }, {
+    "./connectors/app-store-connect-web": { discoverAppStoreVendorNumber: async (cookie) => (cookie === "myacinfo=fresh" ? "94249739" : undefined) },
+  });
+  const response = await app.fetch(new Request("https://hub.example/api/spaces/space-1/app-connections/appstoreconnect/credentials", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ fields: { webSession: "myacinfo=fresh" } }),
+  }), {});
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].fields.webSession, "myacinfo=fresh");
+  assert.equal(puts[0].fields.vendorNumber, "94249739");
+});

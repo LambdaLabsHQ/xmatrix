@@ -142,11 +142,12 @@ refunded/voided orders via `androidpublisher v3`.
 
 Google Play Console exports installs, store performance (visitors and
 conversion), daily ratings history and financial CSVs only to a developer
-Cloud Storage bucket (`pubsite_prod_rev_*`). `store_reports` reads those
-exports without adding any new OAuth scopes to the company OAuth client: save
-the optional `reportsBucket` (`pubsite_prod_rev_…`, or pass `bucket=` once) and
-`reportsServiceAccount` (a Google Cloud Service Account JSON granted "View app
-information and download bulk reports" / "View financial data" in Play Console).
+Cloud Storage bucket (`pubsite_prod_rev_*`). `store_reports` tries the
+connection's own Google OAuth token first (for grants carrying
+`devstorage.read_only`) and also accepts an optional `reportsServiceAccount`
+(a Google Cloud Service Account JSON granted "View app information and download
+bulk reports" / "View financial data" in Play Console) alongside `reportsBucket`
+(`pubsite_prod_rev_…`, or pass `bucket=` once).
 
 ## Catalog operations
 

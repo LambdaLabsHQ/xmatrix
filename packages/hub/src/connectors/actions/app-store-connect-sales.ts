@@ -2,7 +2,7 @@ import { appStoreConnect, appleApp } from "../app-store-connect-api";
 import { record, text } from "../event-format";
 import { ConnectorRemedy, ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
-import { webSession } from "../app-store-connect-web";
+import { sapVendorNumbers, webSession } from "../app-store-connect-web";
 import { bundleId } from "./app-store-connect";
 import { quoteRetrievedText } from "./common";
 import { isoDate, keyedOptions } from "./google-report";
@@ -91,25 +91,13 @@ function tallyReport(tsv: string, app: { id: string; sku: string } | undefined,
   }
 }
 
-/** Every 6–12 digit value under a key that names a vendor, anywhere in the website's answer. */
-function vendorNumbers(value: unknown, key = ""): string[] {
-  if (Array.isArray(value)) return [...new Set(value.flatMap(item => vendorNumbers(item, key)))];
-  if (value && typeof value === "object") {
-    return [...new Set(Object.entries(value).flatMap(([name, item]) => vendorNumbers(item, /vendor/iu.test(name) ? name : key)))];
-  }
-  const number = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : "";
-  return key && VENDOR.test(number) ? [number] : [];
-}
-
 /** The vendor numbers the website's Payments page lists for the team; none without a working web session. */
 async function websiteVendor(context: Parameters<ConnectorAction["execute"]>[0]): Promise<string[]> {
   if (!context.credentials.webSession) return [];
   const session = webSession(context);
   try {
     const provider = record((await session.read("/olympus/v1/session")).provider);
-    const id = text(provider.providerId) || (typeof provider.providerId === "number" ? String(provider.providerId) : "");
-    if (!/^\d{1,20}$/u.test(id)) return [];
-    return vendorNumbers(await session.read(`/WebObjects/iTunesConnect.woa/ra/paymentConsolidation/providers/${id}/sapVendorNumbers`));
+    return await sapVendorNumbers(session, provider.providerId);
   } catch { return []; } finally { await session.settle(); }
 }
 
@@ -143,7 +131,7 @@ async function resolveVendor(context: Parameters<ConnectorAction["execute"]>[0],
 }
 
 const SUB_REPORT_TYPES: Readonly<Record<string, { reportType: string; subType: string; version: string; label: string }>> = {
-  summary: { reportType: "SUBSCRIPTION", subType: "SUMMARY", version: "1_4", label: "Subscription summary" },
+  summary: { reportType: "SUBSCRIPTION", subType: "SUMMARY", version: "1_3", label: "Subscription summary" },
   events: { reportType: "SUBSCRIPTION_EVENT", subType: "SUMMARY", version: "1_3", label: "Subscription events" },
   subscriber: { reportType: "SUBSCRIBER", subType: "DETAILED", version: "1_3", label: "Subscriber detail" },
 };
