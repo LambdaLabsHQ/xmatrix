@@ -58,9 +58,11 @@ const MAX_LARGE_RESPONSE_BYTES = 4 * 1024 * 1024;
 export const MAIL_SNAPSHOT_RESPONSE_BYTES = 48 * 1024 * 1024;
 
 export async function providerJson(url: URL | string, init: RequestInit & { json?: unknown; timeoutMs?: number; maxBytes?: number;
-  mailSnapshot?: boolean; describeError?: (payload: Record<string, unknown>) => string | undefined } = {}):
+  mailSnapshot?: boolean; describeError?: (payload: Record<string, unknown>) => string | undefined;
+  /** Answer `{ text }` with the successful body as received, for a provider that may stream it (MCP's SSE). */
+  rawText?: boolean } = {}):
   Promise<Record<string, unknown>> {
-  const { json, describeError, timeoutMs = TIMEOUT_MS, maxBytes = MAX_RESPONSE_BYTES, mailSnapshot = false, ...rest } = init;
+  const { json, describeError, timeoutMs = TIMEOUT_MS, maxBytes = MAX_RESPONSE_BYTES, mailSnapshot = false, rawText = false, ...rest } = init;
   const limit = Math.min(Math.max(maxBytes, 1), mailSnapshot ? MAIL_SNAPSHOT_RESPONSE_BYTES : MAX_LARGE_RESPONSE_BYTES);
   const timeout = AbortSignal.timeout(Math.min(Math.max(timeoutMs, 1), MAX_TIMEOUT_MS));
   const headers = new Headers(rest.headers);
@@ -87,5 +89,5 @@ export async function providerJson(url: URL | string, init: RequestInit & { json
       .find(Boolean) ?? response.statusText;
     throw new ProviderRequestError(response.status, `Provider returned ${response.status}${reason ? `: ${String(reason).slice(0, 200)}` : ""}`, "http_status");
   }
-  return payload;
+  return rawText ? { text: textBody } : payload;
 }

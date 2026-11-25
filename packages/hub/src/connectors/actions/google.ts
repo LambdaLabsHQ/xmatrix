@@ -4,6 +4,7 @@ import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText, requireText } from "./common";
 import { googleHeaders } from "./google-headers";
 import { GOOGLE_SHEETS_ACTIONS } from "./google-sheets";
+import { workspaceMcpActions } from "./workspace-mcp";
 
 const FILE_ID = /^[A-Za-z0-9_-]{10,200}$/u;
 const TAB_ID = /^[A-Za-z0-9_.-]{1,100}$/u;
@@ -109,6 +110,7 @@ export function googleDocumentExcerpt(document: Record<string, unknown>, tabId?:
 
 export const GOOGLE_ACTIONS: Record<string, ConnectorAction> = {
   ...GOOGLE_SHEETS_ACTIONS,
+  ...workspaceMcpActions(["docs", "drive", "sheets", "slides"], "Google Docs & Drive"),
   read_doc: {
     effect: "read", requires: ["oauthToken"],
     parse(statement) {
