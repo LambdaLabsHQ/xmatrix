@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: App Store Connect and Google Play Console operational analytics actions
+
+Agents and operators can now query App Store and Google Play operational metrics directly from Channels without leaving xMatrix or adding new Google OAuth consent scopes:
+
+- **App Store Connect (`@appstoreconnect`)**: added `analytics` (downloads and aggregates gzipped Apple Analytics Reports TSVs using the existing API key alone — no vendor number needed — covering discovery impressions/page views/conversion/sources, downloads, installs/deletions, sessions, crashes, purchases and subscriptions, with strict Apple/S3 segment host allowlisting and zero credential forwarding to pre-signed URLs), `enable_analytics` (idempotently creates an `ONGOING` or `ONE_TIME_SNAPSHOT` Analytics Report Request), `metrics` (Xcode `perfPowerMetrics` launch/hang/memory/battery/disk/termination metrics and regression insights), `subscription_reports` (daily `SUBSCRIPTION`, `SUBSCRIPTION_EVENT` and `SUBSCRIBER` reports), and `finance` (monthly settled `FINANCIAL` reports by region or `ZZ`).
+- **Google Play Console (`@googleplay`)**: added `vitals` (Android Vitals overview and daily crash/ANR/slow-start/slow-rendering/LMK/wakeup/wakelock/error trends sliced by version, API level, device or country via the existing `playdeveloperreporting` OAuth scope, clamped to Play's `freshnessInfo`), `error_issues` (top grouped crash/ANR clusters), `anomalies` (Play-detected metric anomalies), `reviews` (recent customer reviews with rating distribution and `unanswered` filter), `voided_purchases` (refunded/cancelled/charged-back orders and subscriptions), and `store_reports` (reads Play Console `pubsite_prod_rev_*` Cloud Storage CSV exports including UTF-16LE files for installs, store performance, ratings, crashes, sales, earnings and subscriptions using optional `reportsBucket` and `reportsServiceAccount` credentials without changing Google OAuth scopes).
+
+Hub and protocol only; no schema migration. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Gmail, Google Docs/Drive/Sheets and Calendar results expire at 29 days
 
 Google's Workspace AI Tools Addendum (from 2027-02-01) lets data an AI tool

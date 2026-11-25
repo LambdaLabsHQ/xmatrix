@@ -125,6 +125,114 @@ function salesText(summary: SalesSummary, frequency: SalesOptions["frequency"]):
   return lines.join("\n");
 }
 
+async function resolveVendor(context: Parameters<ConnectorAction["execute"]>[0], explicit?: string): Promise<{ vendor: string; saved: string }> {
+  const saved = context.credentials.vendorNumber?.trim() ?? "";
+  let vendor = explicit ?? (VENDOR.test(saved) ? saved : "");
+  if (!vendor) {
+    const found = await websiteVendor(context);
+    if (found.length === 1) vendor = found[0]!;
+    else {
+      throw new ConnectorRemedy(400, found.length
+        ? `The team has several vendor numbers (${found.join(", ")}); name one with vendor=<number>, and the connection keeps it`
+        : "Apple's API does not return the vendor number. Sign in to App Store Connect under Credentials and it is read from the " +
+          "Payments page, or add vendor=<number> (Payments and Financial Reports, top left) once; the connection keeps it",
+      { kind: "credential", field: found.length ? "vendorNumber" : "webSession" });
+    }
+  }
+  return { vendor, saved };
+}
+
+const SUB_REPORT_TYPES: Readonly<Record<string, { reportType: string; subType: string; version: string; label: string }>> = {
+  summary: { reportType: "SUBSCRIPTION", subType: "SUMMARY", version: "1_4", label: "Subscription summary" },
+  events: { reportType: "SUBSCRIPTION_EVENT", subType: "SUMMARY", version: "1_3", label: "Subscription events" },
+  subscriber: { reportType: "SUBSCRIBER", subType: "DETAILED", version: "1_3", label: "Subscriber detail" },
+};
+const SUB_USAGE = "use <com.example.app|*> [kind=summary|events|subscriber] [vendor=<vendor number>] [days=1-31]";
+const FINANCE_USAGE = "use * [vendor=<vendor number>] [region=ZZ|US|EU|JP|…] [month=YYYY-MM]";
+
+function summarizeSubscriptionTsv(kind: string, periods: Array<{ period: string; tsv?: string }>, appName?: string): string {
+  const byEvent = new Map<string, number>(), byCountry = new Map<string, number>();
+  const lines = [kind === "summary" ? "day\tactive paid\tactive trials\tgrace/retry\trows" : "day\trows\tquantity/events"];
+  for (const { period, tsv } of periods) {
+    if (tsv === undefined) { lines.push(`${period}\t(no report)`); continue; }
+    const [head = "", ...rawLines] = tsv.split(/\r?\n/u);
+    const cols = head.split("\t").map(c => c.trim().toLowerCase());
+    const idx = (name: string) => cols.indexOf(name);
+    const appCol = idx("app name");
+    const countryCol = idx("country");
+    const eventCol = idx("event");
+    const paidCol = idx("active standard price subscriptions");
+    const trialCol = idx("active free trial introductory offer subscriptions");
+    const graceCol = idx("subscribers in grace period");
+    const retryCol = idx("subscribers in billing retry");
+    const qtyCol = idx("quantity");
+    let rows = 0, paid = 0, trials = 0, graceRetry = 0, qty = 0;
+    for (const l of rawLines) {
+      if (!l.trim()) continue;
+      const c = l.split("\t");
+      if (appName && appCol >= 0 && (c[appCol]?.trim().toLowerCase() ?? "") !== appName.toLowerCase()) continue;
+      rows += 1;
+      const q = qtyCol >= 0 ? (Number(c[qtyCol]) || 0) : 1;
+      qty += q;
+      if (paidCol >= 0) paid += Number(c[paidCol]) || 0;
+      if (trialCol >= 0) trials += Number(c[trialCol]) || 0;
+      if (graceCol >= 0) graceRetry += Number(c[graceCol]) || 0;
+      if (retryCol >= 0) graceRetry += Number(c[retryCol]) || 0;
+      if (eventCol >= 0 && c[eventCol]?.trim()) {
+        const ev = c[eventCol]!.trim();
+        byEvent.set(ev, (byEvent.get(ev) ?? 0) + q);
+      }
+      if (countryCol >= 0 && c[countryCol]?.trim()) {
+        const cc = c[countryCol]!.trim();
+        byCountry.set(cc, (byCountry.get(cc) ?? 0) + (kind === "summary" ? Math.max(paid, 1) : q));
+      }
+    }
+    lines.push(kind === "summary" ? `${period}\t${paid}\t${trials}\t${graceRetry}\t${rows}` : `${period}\t${rows}\t${qty}`);
+  }
+  if (byEvent.size) {
+    lines.push("", `events: ${[...byEvent].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+  }
+  if (byCountry.size) {
+    lines.push(`top countries: ${[...byCountry].sort((a, b) => b[1] - a[1]).slice(0, TOP_COUNTRIES).map(([k, v]) => `${k} ${v}`).join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+function summarizeFinanceTsv(tsv: string): string {
+  const [head = "", ...rawLines] = tsv.split(/\r?\n/u);
+  const cols = head.split("\t").map(c => c.trim().toLowerCase());
+  const idx = (name: string) => cols.indexOf(name);
+  const skuCol = idx("vendor identifier"), titleCol = idx("title"), qtyCol = idx("quantity");
+  const shareCol = idx("extended partner share"), currCol = idx("partner share currency");
+  const totalsByCurrency = new Map<string, number>(), bySku = new Map<string, { title: string; units: number; currency: string; share: number }>();
+  let rowCount = 0;
+  for (const l of rawLines) {
+    if (!l.trim() || l.startsWith("Total_")) continue;
+    const c = l.split("\t");
+    if (c.length < 4) continue;
+    rowCount += 1;
+    const units = qtyCol >= 0 ? (Number(c[qtyCol]) || 0) : 0;
+    const share = shareCol >= 0 ? (Number(c[shareCol]) || 0) : 0;
+    const curr = (currCol >= 0 ? c[currCol]?.trim() : "") || "USD";
+    const sku = (skuCol >= 0 ? c[skuCol]?.trim() : "") || "(unknown)";
+    const title = (titleCol >= 0 ? c[titleCol]?.trim() : "") || sku;
+    totalsByCurrency.set(curr, (totalsByCurrency.get(curr) ?? 0) + share);
+    const key = `${sku}|${curr}`;
+    const entry = bySku.get(key) ?? { title, units: 0, currency: curr, share: 0 };
+    entry.units += units; entry.share += share;
+    bySku.set(key, entry);
+  }
+  const lines = ["sku\ttitle\tunits\tpartner share"];
+  for (const [key, item] of [...bySku.entries()].sort((a, b) => b[1].share - a[1].share).slice(0, 25)) {
+    const sku = key.split("|")[0]!;
+    lines.push(`${sku}\t${item.title.slice(0, 60)}\t${item.units}\t${item.share.toFixed(2)} ${item.currency}`);
+  }
+  const totals = [...totalsByCurrency].filter(([, amount]) => Math.abs(amount) >= 0.005)
+    .map(([curr, amount]) => `${amount.toFixed(2)} ${curr}`).join(", ");
+  lines.push("", `rows: ${rowCount}${totals ? `; total partner share: ${totals}` : ""}`);
+  return lines.join("\n");
+}
+
 export const APP_STORE_CONNECT_SALES_ACTIONS: Record<string, ConnectorAction> = {
   sales: {
     effect: "read", requires: ["keyId", "privateKey"],
@@ -137,19 +245,7 @@ export const APP_STORE_CONNECT_SALES_ACTIONS: Record<string, ConnectorAction> = 
     async execute(context, input) {
       const { credentials, saveCredentials } = context;
       const options = JSON.parse(input.options!) as SalesOptions;
-      const saved = credentials.vendorNumber?.trim() ?? "";
-      let vendor = options.vendor ?? (VENDOR.test(saved) ? saved : "");
-      if (!vendor) {
-        const found = await websiteVendor(context);
-        if (found.length === 1) vendor = found[0]!;
-        else {
-          throw new ConnectorRemedy(400, found.length
-            ? `The team has several vendor numbers (${found.join(", ")}); name one with vendor=<number>, and the connection keeps it`
-            : "Apple's API does not return the vendor number. Sign in to App Store Connect under Credentials and it is read from the " +
-              "Payments page, or add vendor=<number> (Payments and Financial Reports, top left) once; the connection keeps it",
-          { kind: "credential", field: found.length ? "vendorNumber" : "webSession" });
-        }
-      }
+      const { vendor, saved } = await resolveVendor(context, options.vendor);
       const api = appStoreConnect(credentials);
       const resource = input.app === "*" ? undefined : await appleApp(api, input.app!);
       const app = resource ? { id: resource.id, sku: text(resource.attributes.sku) } : undefined;
@@ -175,6 +271,78 @@ export const APP_STORE_CONNECT_SALES_ACTIONS: Record<string, ConnectorAction> = 
         "Downloads are first-time installs; a period without a report has no sales or is not published yet:\n" +
         quoteRetrievedText(salesText(summary, options.frequency)),
         url: `https://appstoreconnect.apple.com/trends/insights` };
+    },
+  },
+  subscription_reports: {
+    effect: "read", requires: ["keyId", "privateKey"],
+    parse(statement) {
+      const app = statement.target === "*" ? "*" : bundleId(statement.target);
+      if (!app) return SUB_USAGE;
+      const options = keyedOptions(statement.text, ["kind", "vendor", "days"], SUB_USAGE);
+      if (typeof options === "string") return options;
+      const kind = (options.get("kind") ?? "summary").toLowerCase();
+      if (!Object.hasOwn(SUB_REPORT_TYPES, kind)) return SUB_USAGE;
+      const vendor = options.get("vendor");
+      if (vendor !== undefined && !VENDOR.test(vendor)) return `vendor is the number from Payments and Financial Reports: ${SUB_USAGE}`;
+      const days = Number(options.get("days") ?? "7");
+      if (!Number.isSafeInteger(days) || days < 1 || days > MAX_DAYS) return `days is a whole number from 1 to ${MAX_DAYS}`;
+      const today = Math.floor(Date.now() / DAY_MS) * DAY_MS;
+      const periods = Array.from({ length: days }, (_, i) => isoDate(today - (i + 1) * DAY_MS));
+      return { app, kind, periods: JSON.stringify(periods), ...(vendor ? { vendor } : {}) };
+    },
+    async execute(context, input) {
+      const { credentials, saveCredentials } = context;
+      const spec = SUB_REPORT_TYPES[input.kind!]!;
+      const periods = JSON.parse(input.periods!) as string[];
+      const { vendor, saved } = await resolveVendor(context, input.vendor);
+      const api = appStoreConnect(credentials);
+      const resource = input.app === "*" ? undefined : await appleApp(api, input.app!);
+      const appName = resource ? text(resource.attributes.name) : undefined;
+      const reports: Array<string | undefined> = [];
+      for (let start = 0; start < periods.length; start += PARALLEL) {
+        reports.push(...await Promise.all(periods.slice(start, start + PARALLEL).map(period => api.report("/v1/salesReports", {
+          "filter[frequency]": "DAILY", "filter[reportType]": spec.reportType, "filter[reportSubType]": spec.subType,
+          "filter[vendorNumber]": vendor, "filter[reportDate]": period, "filter[version]": spec.version }))));
+      }
+      if (vendor !== saved && saveCredentials) await saveCredentials({ vendorNumber: vendor }).catch(() => undefined);
+      const rows = periods.map((period, index) => ({ period, tsv: reports[index] }));
+      const subject = resource ? `${appName || input.app} (${input.app})` : "all apps";
+      return { summary: `App Store ${spec.label} for ${subject}, per Pacific-time day, newest first:\n` +
+        quoteRetrievedText(summarizeSubscriptionTsv(input.kind!, rows, appName)),
+        url: "https://appstoreconnect.apple.com/trends/subscriptions" };
+    },
+  },
+  finance: {
+    effect: "read", requires: ["keyId", "privateKey"],
+    parse(statement) {
+      if (statement.target !== "*") return FINANCE_USAGE;
+      const options = keyedOptions(statement.text, ["vendor", "region", "month"], FINANCE_USAGE);
+      if (typeof options === "string") return options;
+      const vendor = options.get("vendor");
+      if (vendor !== undefined && !VENDOR.test(vendor)) return `vendor is the number from Payments and Financial Reports: ${FINANCE_USAGE}`;
+      const region = (options.get("region") ?? "ZZ").toUpperCase();
+      if (!/^[A-Z]{2}$/u.test(region)) return "region must be a two-letter Apple financial region code (default ZZ for all regions)";
+      const prev = new Date();
+      prev.setUTCDate(1);
+      prev.setUTCMonth(prev.getUTCMonth() - 1);
+      const month = options.get("month") ?? prev.toISOString().slice(0, 7);
+      if (!/^20\d{2}-(?:0[1-9]|1[0-2])$/u.test(month)) return "month must be YYYY-MM (Apple fiscal month)";
+      return { region, month, ...(vendor ? { vendor } : {}) };
+    },
+    async execute(context, input) {
+      const { credentials, saveCredentials } = context;
+      const { vendor, saved } = await resolveVendor(context, input.vendor);
+      const api = appStoreConnect(credentials);
+      const tsv = await api.report("/v1/financeReports", {
+        "filter[vendorNumber]": vendor, "filter[reportType]": "FINANCIAL",
+        "filter[regionCode]": input.region!, "filter[reportDate]": input.month!,
+      });
+      if (vendor !== saved && saveCredentials) await saveCredentials({ vendorNumber: vendor }).catch(() => undefined);
+      if (tsv === undefined) {
+        return { summary: `No App Store financial report is published for ${input.month} (region ${input.region}). Apple publishes monthly financial reports after each fiscal month closes.` };
+      }
+      return { summary: `App Store financial report for ${input.month} (region ${input.region}):\n` + quoteRetrievedText(summarizeFinanceTsv(tsv)),
+        url: "https://appstoreconnect.apple.com/finance" };
     },
   },
 };
