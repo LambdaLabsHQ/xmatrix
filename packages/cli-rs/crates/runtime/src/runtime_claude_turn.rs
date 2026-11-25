@@ -138,6 +138,7 @@ pub(crate) async fn run_claude_stream_turn(
     )
     .await;
 
+    let mut steered_image_files: Vec<LocalImageFiles> = Vec::new();
     let outcome = {
         let interrupter = session.interrupter();
         let content_blocks = match content_blocks {
@@ -182,9 +183,44 @@ pub(crate) async fn run_claude_stream_turn(
                     .into_iter()
                     .next()
                     .and_then(|source| runtime_state.join_message_turn_source(source));
-                let input =
-                    steered_turn_input(&message.prompt_text(agent, None), instruction.as_deref());
-                match interrupter.steer_active_turn(&input).await {
+                let inbound_images = if message
+                    .attachments
+                    .as_deref()
+                    .is_some_and(|items| !items.is_empty())
+                {
+                    Some(
+                        crate::materialize_inbound_image_files(
+                            message.attachments.as_deref(),
+                            relay,
+                        )
+                        .await,
+                    )
+                } else {
+                    None
+                };
+                let input = steered_turn_input(
+                    &message.prompt_text(agent, inbound_images.as_ref()),
+                    instruction.as_deref(),
+                );
+                let steer_blocks = match prompt_content_blocks(
+                    &input,
+                    message.attachments.as_deref(),
+                    inbound_images.as_ref().map(LocalImageFiles::image_paths),
+                    ImageBlockShape::Anthropic,
+                ) {
+                    Ok(blocks) => blocks,
+                    Err(err) => {
+                        eprintln!(
+                            "{} Claude steer content block build failed: {err}; falling back to text-only steer",
+                            "⚠".yellow().bold()
+                        );
+                        vec![serde_json::json!({ "type": "text", "text": input })]
+                    }
+                };
+                if let Some(files) = inbound_images.filter(|files| !files.paths().is_empty()) {
+                    steered_image_files.push(files);
+                }
+                match interrupter.steer_active_turn_blocks(steer_blocks).await {
                     Ok(true) => {
                         ack_inbound_channel_messages(relay, std::slice::from_ref(&message));
                         return true;

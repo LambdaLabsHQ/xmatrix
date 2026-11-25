@@ -314,7 +314,7 @@ fn active_turn_steer_message(
 /// What the harness reads for a message joined to its running turn.
 fn steered_turn_input(message_text: &str, final_reply_instruction: Option<&str>) -> String {
     let mut input = format!(
-        "[xMatrix] This message arrived while you were working. It joins your current turn and did not interrupt it: finish or adjust the work in progress as it asks.\n\n{message_text}"
+        "[xMatrix] This message arrived while you were working. It joins your current turn and did not interrupt it: if continuing will take more than one quick step, send a brief Channel acknowledgment first, then finish or adjust the work in progress as it asks.\n\n{message_text}"
     );
     if let Some(instruction) = final_reply_instruction {
         input.push_str("\n\n");
