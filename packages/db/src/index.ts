@@ -4,6 +4,11 @@ export {
   type AuthorityDatabaseOptions,
 } from "./client.js";
 export {
+  awaitPoolClientRemovals,
+  CloudflarePostgresSocket,
+  cloudflarePostgresStream,
+} from "./cloudflare-socket.js";
+export {
   legacyChannelRouteUuidRanges,
   PostgresChannelCatalogRepository,
   type ChannelCatalogPageCursor,

@@ -2,6 +2,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { utf8ByteLength } from "@xmatrix/protocol";
 import { Client, Pool, type ClientConfig, type PoolConfig, type QueryResult, type QueryResultRow } from "pg";
 
+import { awaitPoolClientRemovals, cloudflarePostgresStream } from "./cloudflare-socket.js";
+
 import type {
   AuthorityDatabase,
   AuthorityDatabaseSession,
@@ -164,6 +166,7 @@ function resolveOptions(input: AuthorityDatabaseOptions): ResolvedOptions {
     throw new DatabaseContractError("transactionTimeoutMs cannot be shorter than statementTimeoutMs");
   }
   const shardId = boundedLabel(input.shardId, "", "shardId");
+  const stream = cloudflarePostgresStream();
   return {
     connectionString: input.connectionString,
     shardId,
@@ -176,10 +179,10 @@ function resolveOptions(input: AuthorityDatabaseOptions): ResolvedOptions {
     ...(input.observer ? { observer: input.observer } : {}),
     ...(input.sessionObserver ? { sessionObserver: input.sessionObserver } : {}),
     ...(input.placementHints ? { placementHints: input.placementHints } : {}),
-    clientFactory: input.clientFactory ?? ((config) => new Client(config)),
+    clientFactory: input.clientFactory ?? ((config) => new Client(stream ? { ...config, stream } : config)),
     poolFactory: input.poolFactory ?? (input.clientFactory
       ? ((config) => new SingleClientPool(config, input.clientFactory!))
-      : ((config) => new Pool(config) as unknown as PgPoolPort)),
+      : ((config) => awaitPoolClientRemovals(new Pool(stream ? { ...config, stream } : config)) as unknown as PgPoolPort)),
     connectivityBreaker: input.connectivityBreaker ?? shardConnectivityBreaker(shardId),
   };
 }
