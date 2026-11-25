@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Terms and Privacy state who owns records kept from connector results
+
+Terms §10 and Privacy §12 (version 2026-11-25) state the split Daniel approved
+on 2026-11-25: where a provider limits how long API results may be stored,
+xMatrix deletes the original connector results at that limit (29 days today
+for Google Cloud, Gmail, Google Docs/Drive/Sheets and Calendar) and at
+disconnect; records the Customer, its members or Agents write from them are
+Customer Data the Customer controls and is responsible for under that
+provider's terms. Web only.
 ## Unreleased: Antigravity first-step acknowledgment, on-demand ACP images, and steered execution tracking
 
 - **Immediate first-step and mid-turn Channel feedback + shorter turn tail**: tightened `channel-contract.md`, `steered_turn_input`, and Antigravity's native `_meta.antigravity.systemPrompt.append` note so Agents send a one-sentence acknowledgment in their very first step on multi-step work or mid-turn instructions and end immediately after `xmatrix send --final-for` instead of writing a duplicate local closing summary.
