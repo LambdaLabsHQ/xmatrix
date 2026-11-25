@@ -1,6 +1,6 @@
 import type { AlternativeLocaleCopy, AlternativeSlug } from "../types";
 
-/** Spanish copy for all 19 competitor alternative pages. */
+/** Spanish copy for all competitor alternative pages. */
 export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLocaleCopy>> = {
   raft: {
     alsoKnownAs: "antes Slock",
@@ -1145,110 +1145,6 @@ export const alternativesCopyEs: Readonly<Record<AlternativeSlug, AlternativeLoc
         question: "¿xMatrix es de código abierto o cerrado?",
         answer:
           "xMatrix tiene su código disponible bajo FSL-1.1-ALv2 en GitHub (LambdaLabsHQ/xmatrix), mientras que Seedmux es de código cerrado.",
-      },
-    ],
-  },
-  "claude-code": {
-    alsoKnownAs: "Claude Code Desktop, Cowork y Dispatch",
-    verifiedDate: "22 de noviembre de 2026",
-    metaTitle: "Alternativas a Claude Code (2026): equipos y Páginas",
-    metaDescription:
-      "Conserva Claude Code y suma Canales multijugador, Páginas vivas y 34 agentes de código más en xMatrix, con traspaso automático al llegar al límite de 5 horas.",
-    eyebrow: "Alternativa a Claude Code · Claude Code vs xMatrix",
-    headline: "¿Alternativa a Claude Code? Conserva Claude Code y rodéalo de tu equipo, otros 34 agentes y Páginas vivas",
-    lead: "Claude Code Desktop y Cowork son excelentes para trabajar a solas con una sesión de Claude, pero dejan a tus compañeros fuera de la sala, atrapan el contexto en sesiones individuales y se detienen en seco cuando llegan los topes más estrictos de 5 horas o semanales de noviembre de 2026. xMatrix rodea a Claude Code con Canales compartidos, Páginas vivas, otros 34 agentes de código y secretos del Space.",
-    productCaption:
-      "Dentro de xMatrix: sigue ejecutando tu CLI local de Claude Code mientras tus compañeros y otros 34 agentes de código colaboran en el mismo Canal y mantienen las Páginas vivas al día.",
-    painPoints: [
-      {
-        title: "Pensado para trabajar en solitario, no para equipos multijugador ni docs vivos compartidos",
-        problem:
-          "Claude Code Desktop está diseñado para una persona vigilando un agente paso a paso; la memoria de Projects pertenece a un solo usuario, Claude Tag está limitado a Slack Team/Enterprise y no existe una Página viva compartida mantenida entre humanos y varios harnesses.",
-        xmatrixAnswer:
-          "xMatrix se sitúa una capa por encima: compañeros y decenas de agentes en paralelo colaboran en Canales compartidos, mientras cada ejecución terminada actualiza la Página viva para que supervises resultados y decisiones en vez de cada línea de terminal.",
-      },
-      {
-        title: "Los topes compartidos de 5 horas y semanales detienen el trabajo en seco",
-        problem:
-          "Como Claude Code, Claude Desktop y Cowork consumen del mismo cupo del plan —y los subagentes en segundo plano junto con /code-review aceleran el gasto de tokens (muchos usuarios en r/claude reportan un consumo 3x en noviembre de 2026)—, los planes Pro e inferiores alcanzan su límite a mitad del día sin posibilidad de continuar con otro proveedor.",
-        xmatrixAnswer:
-          "xMatrix no sustituye a Claude Code: lo potencia. Cuando Claude Code alcanza su tope de 5 horas o semanal, xMatrix puede traspasar el checkout (incluidos los cambios sin confirmar) y el contexto de la Página a Codex, Gemini, Cursor u otro agente registrado para que el trabajo siga avanzando.",
-      },
-      {
-        title: "Sin secretos del Space ni gobernanza entre harnesses en todas tus máquinas",
-        problem:
-          "Claude Code Desktop ata la ejecución local al ecosistema de Anthropic, carece de inyección de secretos del Space entre harnesses heterogéneos y las restricciones regionales de Anthropic bloquean directamente territorios sin soporte.",
-        xmatrixAnswer:
-          "xMatrix coordina 34 agentes de código (más cualquier CLI personalizada con --runtime) en todas tus máquinas macOS, Windows y Linux bajo un solo conjunto de Secretos del Space y aprobaciones por app en 35 aplicaciones conectadas.",
-      },
-    ],
-    comparisonRows: [
-      {
-        dimension: "Colaboración y memoria compartida",
-        xmatrix: "Canales multijugador públicos/privados + Páginas vivas coeditadas por personas y agentes",
-        competitor: "Sesiones individuales y Projects personales; Claude Tag limitado a planes pagos de Slack",
-      },
-      {
-        dimension: "Agentes de código compatibles",
-        xmatrix: "34 agentes de código integrados (Claude Code, Codex, Cursor, Gemini, Antigravity, etc.) + --runtime",
-        competitor: "Solo Claude",
-      },
-      {
-        dimension: "Cuando Claude alcanza su límite de uso",
-        xmatrix: "Traspasa automáticamente el checkout y el contexto de la Página a otro agente disponible",
-        competitor: "El trabajo se pausa hasta el reinicio de 5 horas/semanal o exige pagar claves API",
-      },
-      {
-        dimension: "Modelo de supervisión",
-        xmatrix: "Dirige decenas de ejecuciones en paralelo leyendo Páginas, checks de PR y tarjetas de aprobación",
-        competitor: "Emparejamiento cercano con el visor de diffs, terminal y prompts de una sola sesión",
-      },
-      {
-        dimension: "Conectores de ops y secretos",
-        xmatrix: "Secretos del Space + 35 aplicaciones conectadas con políticas por app",
-        competitor: "Herramientas MCP por sesión; VM en la nube Duet aún en lista de espera solo en EE. UU.",
-      },
-    ],
-    stayWhen: [
-      "Solo utilizas Claude, trabajas completamente solo y buscas un visor de diffs en línea muy integrado junto con VMs en la nube incluidas en tu suscripción de Anthropic.",
-    ],
-    switchWhen: [
-      "Estás cansado de perder media jornada cada vez que salta el límite de 5 horas o semanal de Claude y quieres que Codex o Gemini tomen el relevo sin fricción.",
-      "Quieres que compañeros y varios harnesses compartan los mismos Canales, Páginas vivas y Secretos del Space.",
-      "Supervisas muchos frentes en paralelo y prefieres leer Páginas de proyecto y tarjetas de excepción en vez de vigilar cada terminal.",
-    ],
-    migrationSteps: [
-      {
-        title: "Conserva tu CLI actual de Claude Code, no la desinstales",
-        detail:
-          "xMatrix ejecuta directamente tu CLI local oficial de Claude Code usando tu sesión existente; no pierdes nada.",
-      },
-      {
-        title: "Añade un segundo harness para continuidad automática de cuota",
-        detail:
-          "Registra Codex, Gemini, Cursor u OpenCode junto a Claude Code mediante xmatrix agent add para que @auto esquive topes de cuota automáticamente.",
-      },
-      {
-        title: "Mueve el contexto recurrente de archivos CLAUDE.md locales a Páginas vivas",
-        detail:
-          "Mantén estado del proyecto, decisiones y tareas abiertas en Páginas que comparten todos los harnesses y compañeros.",
-      },
-    ],
-    faqs: [
-      {
-        question: "¿Tengo que dejar de usar Claude Code para usar xMatrix?",
-        answer:
-          "Para nada. Claude Code es un harness de primera clase en xMatrix: sigues usando Claude Code en tus propias máquinas mientras ganas Canales multijugador, Páginas vivas y conmutación automática a Codex o Gemini cuando Claude alcanza sus límites.",
-      },
-      {
-        question: "¿Pueden mis compañeros compartir mi suscripción personal de Claude en xMatrix?",
-        answer:
-          "No: xMatrix respeta los términos de servicio de cada proveedor y no promueve el uso compartido de suscripciones personales. Cada máquina y usuario aporta sus propias suscripciones autorizadas o claves de API.",
-      },
-      {
-        question: "¿xMatrix incluye VMs en la nube como Claude Cowork?",
-        answer:
-          "Hoy no. xMatrix conecta tus propios portátiles, equipos de escritorio y servidores autogestionados en macOS, Windows y Linux.",
       },
     ],
   },

@@ -20,7 +20,7 @@ test("every competitor alternative page works across all 6 site locales and reso
   const slugs = new Set();
 
   assert.equal(SITE_LOCALE_IDS.length, 6, "Top6 locales are published");
-  assert.ok(alternativePages.length >= 19, "publishes the full competitor alternatives set");
+  assert.ok(alternativePages.length >= 18, "publishes the full competitor alternatives set");
   assert.equal(isSitePath("/alternatives"), false, "no /alternatives hub page is exposed at the site origin");
 
   for (const page of alternativePages) {
@@ -69,7 +69,13 @@ test("every competitor alternative page works across all 6 site locales and reso
 
   assert.equal(findAlternativePageByRouteSlug("does-not-exist-alternatives", "en"), undefined);
 
-  assert.equal(footerAlternativePages.length, 8, "footer links stay focused on 8 flagship/window competitors");
+  assert.deepEqual(
+    footerAlternativePages.map((p) => p.slug),
+    ["raft", "lody", "multica", "paradev", "conductor", "lobehub", "orca", "t3-code", "cumora"],
+    "footer lists only direct competitors, not harnesses xMatrix runs, shut-down products or adjacent tools",
+  );
+  assert.equal(findAlternativePageByRouteSlug("claude-code-alternatives", "en"), undefined, "Claude Code is a harness, not a competitor");
+  assert.equal(findAlternativeRedirect("claude-code-alternatives"), "/docs/agents");
   const bySlug = new Map(alternativePages.map((p) => [p.slug, p]));
   const hops = new Map(footerAlternativePages.map((p) => [p.slug, 0]));
   const queue = footerAlternativePages.map((p) => p.slug);

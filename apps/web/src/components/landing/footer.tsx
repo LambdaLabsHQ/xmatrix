@@ -4,7 +4,6 @@ import { agentDocFiles, aiAskLinks } from "@/lib/agent-docs";
 import { footerAlternativePages } from "@/lib/alternatives";
 import { landingCopy, type LandingCopy, type Locale } from "@/lib/landing-copy";
 import { SITE_LOCALE_IDS, SITE_LOCALES, localizedPath } from "@/lib/site-locales";
-import { sitePagesCopy } from "@/lib/site-pages-copy";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 import { appHref } from "@/lib/site-url";
 
@@ -54,7 +53,6 @@ const ROW = "mt-11 grid gap-3 md:grid-cols-[7rem_minmax(0,1fr)] md:gap-x-8";
  */
 export function Footer({ locale = "en", basePath = "/" }: { locale?: Locale; basePath?: string }) {
   const copy = landingCopy[locale];
-  const altChrome = sitePagesCopy[locale].alternatives;
   return (
     <footer className="site-footer pt-[clamp(1.5rem,3vw,2.5rem)] pb-10 text-sm leading-[1.6] text-[var(--site-ink-muted)]">
       <div className="x-container">
@@ -77,7 +75,7 @@ export function Footer({ locale = "en", basePath = "/" }: { locale?: Locale; bas
           <h4 className={HEADING}>{copy.footer.compare}</h4>
           <ul className={INLINE}>
             {footerAlternativePages.map((page) => (
-              <li key={page.slug}><a href={localizedPath(locale, page.basePath)} className={LINK}>{altChrome.linkLabel(page.name)}</a></li>
+              <li key={page.slug}><a href={localizedPath(locale, page.basePath)} className={LINK}>{page.name}</a></li>
             ))}
           </ul>
         </div>
