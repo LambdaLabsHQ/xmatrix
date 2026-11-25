@@ -128,7 +128,7 @@ test("retired launch suffixes are detected for rejection but stay non-executable
   }
   for (const body of ["`@grok:new:owner/repo`", "> @grok:new:owner/repo",
     "```\n@grok:new:owner/repo\n```", "@grok:3 task", "@grok:3:stop", "@auto repo:owner/repo go",
-    "ordinary prose"]) {
+    "ordinary prose", "@google:create_doc:new Weekly notes", "@google:create_sheet:new Budget", "@GOOGLE:create_doc:new T"]) {
     assert.equal(hasRetiredAgentLaunchMention(body), false, body);
   }
 });
