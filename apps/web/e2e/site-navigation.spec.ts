@@ -187,7 +187,7 @@ for (const width of [393, 820, 1440]) {
       }
 
       await expect(page).toHaveURL(/\/#pricing$/);
-      const title = page.getByRole("heading", { name: "People pay. Agents don't.", exact: true });
+      const title = page.getByRole("heading", { name: "Start free. Pro is $10 per person.", exact: true });
       // Sticky header stays put; land the pricing heading just below it. The
       // sections above it can still settle, so realign before each check.
       await expect.poll(async () => title.evaluate((element) => {

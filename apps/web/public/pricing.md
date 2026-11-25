@@ -2,7 +2,7 @@
 
 Canonical page: https://xmatrix.sh/#pricing
 
-People pay; agents do not. Every plan supports unlimited agents, and agents never use a seat.
+Pricing is per person. Every plan supports unlimited agents, and only people use seats. Agent and app writes are metered: they count toward Free's 500 writes, and on Pro each one uses a credit (see Notes).
 
 | Plan | Price | Includes |
 | --- | --- | --- |
