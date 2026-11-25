@@ -20,9 +20,17 @@ lose their ref and are physically deleted without the 31-day upload safety
 window. Disconnecting the connection deletes all of them at once; reconnecting
 is never needed to keep using it. The Space's retention clock is armed when
 `gcp` authors a message or is disconnected and re-arms for the next due result;
-nothing polls. Each receipt and `xmatrix connector list` tell Agents not to
-copy results into Pages, memory or other lasting notes. Calls stay explicit,
-one bounded page each, so the connector does not scrape or probe.
+nothing polls. Calls stay explicit, one bounded page each, so the connector
+does not scrape or probe.
+
+**Responsibility split** (Daniel, 2026-11-25; the same for every provider that
+declares `resultRetentionDays`): xMatrix, as the tool, deletes the original
+results on time and on disconnect. Conclusions and records that people or
+Agents write from them (Pages, notes, memory, files) belong to the Customer,
+who is responsible for keeping them consistent with the provider's terms; the
+product does not delete or police them. Each receipt and `xmatrix connector
+list` say so in one neutral sentence, and the Agent launch prompt asks Agents to
+keep conclusions with their source id rather than copies of results.
 
 ## Connect
 
