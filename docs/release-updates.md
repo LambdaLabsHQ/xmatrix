@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: app result expiry and message appends stay within the connection round-trip budget
+
+The daily PostgreSQL connection report flagged `content.app-results.expire` (105.9 round trips per session, 58 sessions over 1 s) and `message.append` (15.7 round trips per session) above the 12-round-trip budget. `RelaySummonDecisionClock` previously held one database session open across every retained provider's expiry batches, next-due lookups, and R2 `bucket.delete` calls; each maintenance call now runs its own short transaction. `expireAppAuthoredMessages`, `expireAppResults`, `expireDecisionRefs`, and `nextAppResultsExpiry` now batch message tombstones, ref deletions, GC nominations, storage metering, and `entityDirectory.publishMany` route updates into set-based statements. `message.append` consolidates Agent Run authorization (preserving Channel-first lock ordering), sequence reservation verification, message/attachment/attention/wait-release writes, and live delivery routing into bounded statements, bringing both operations well under 12 round trips per session. Hub and `@xmatrix/db` only; no schema migration. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the T3 Code comparison no longer says it stalls at quota limits
 
 The T3 Code page's intro (all 6 languages) said a thread "stalls at 'Limited'"

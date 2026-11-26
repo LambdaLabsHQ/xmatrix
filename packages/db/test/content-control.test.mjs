@@ -263,6 +263,69 @@ function commitBlob(repository, hash, commandId, refId) {
   });
 }
 
+test('app result and decision expiry batch messages, refs and directory routes within the round-trip budget', async () => {
+  const hash = 'a'.repeat(64);
+  const scope = 'channel-user:channel-1:owner-1';
+  const refRow = (index) => ({
+    ref_id: `connector-result:msg-${index}`,
+    root_set_id: scope,
+    child_object_id: `scoped:${scope}:sha256:${hash}`,
+    storage_key: `restricted/${encodeURIComponent(scope)}/objects/${hash}`,
+    checksum: hash,
+    gc_not_before: new Date('2026-01-01T00:00:00.000Z'),
+    byte_length: 128,
+  });
+  const expiredMessages = Array.from({ length: 50 }, (_, index) => ({
+    channel_id: 'channel-1', message_id: `msg-${index}`, entity_version: 2,
+    timeline_sequence: index + 1, channel_mode: 'open',
+  }));
+  const expiredRefs = Array.from({ length: 50 }, (_, index) => refRow(index));
+  const db = database((query) => {
+    if (query.name === 'space_placement_resolve_v1') return [activePlacementRow()];
+    if (query.name === 'content_app_results_execution_clear_v2') return [{ cutoff: new Date('2026-10-01T00:00:00.000Z'), executions: 50 }];
+    if (query.name === 'message_app_retention_delete_batch_v1') return expiredMessages;
+    if (query.name === 'content_app_results_ref_lock_v2' || query.name === 'content_decision_expiry_lock_v1') return expiredRefs;
+    if (query.name === 'content_app_results_ref_expire_batch_v1' || query.name === 'content_decision_ref_expire_batch_v1') {
+      return [{ released_objects: 50, released_bytes: 6400 }];
+    }
+    if (query.name === 'storage_usage_meter_v1') return [{ logical_bytes: 0 }];
+    if (query.name === 'content_commit_batch_v1') return [{ commit_sequence: 9, updated_at: new Date('2026-11-26T00:00:00.000Z') }];
+    if (query.name === 'entity_space_route_batch_placement_fence_v1') return [{ space_id: 'space-1', shard_id: 'shard-0', placement_epoch: 1 }];
+    if (query.name === 'content_app_results_next_v3') return [{ cutoff: new Date('2026-10-28T00:00:00.000Z'), oldest: new Date('2026-11-20T00:00:00.000Z') }];
+    return [];
+  });
+  const repository = new PostgresContentRepository(db, 'shard-0');
+  const appResult = await repository.expireAppResults({
+    requestId: 'expire-app-batch', spaceId: 'space-1', appId: 'gmail', retentionDays: 29, limit: 50,
+  });
+  assert.deepEqual({ messages: appResult.messages, executions: appResult.executions, refs: appResult.refs },
+    { messages: 50, executions: 50, refs: 50 });
+  const expireTxIndex = db.calls.findIndex((call) => call.context?.operation === 'content.app-results.expire');
+  const publishTxIndex = db.calls.findIndex((call) => call.context?.operation === 'content-ref.directory-publish');
+  const expireQueries = db.calls.slice(expireTxIndex + 1, publishTxIndex).filter((call) => call.name);
+  // BEGIN + SQL queries + COMMIT must stay within the 12-round-trip session budget even for a full 50-item batch.
+  assert.ok(expireQueries.length + 2 <= 12, `content.app-results.expire used ${expireQueries.length + 2} round trips (budget 12)`);
+  assert.equal(db.calls.filter((call) => call.name === 'entity_space_route_publish_many_v1').length, 1,
+    'directory route deletions are published in one batch');
+  assert.equal(db.calls.some((call) => call.name === 'content_entity_route_source_v1'), false,
+    'commit batch already supplies the route version without an extra directory-source transaction');
+
+  db.calls.length = 0;
+  const decisionResult = await repository.expireDecisionRefs({ requestId: 'expire-decisions-batch', spaceId: 'space-1', limit: 50 });
+  assert.equal(decisionResult.expired, 50);
+  const decisionTxIndex = db.calls.findIndex((call) => call.context?.operation === 'content.decisions.expire');
+  const decisionPublishIndex = db.calls.findIndex((call) => call.context?.operation === 'content-ref.directory-publish');
+  const decisionQueries = db.calls.slice(decisionTxIndex + 1, decisionPublishIndex).filter((call) => call.name);
+  assert.ok(decisionQueries.length + 2 <= 12, `content.decisions.expire used ${decisionQueries.length + 2} round trips (budget 12)`);
+  assert.equal(db.calls.filter((call) => call.name === 'entity_space_route_publish_many_v1').length, 1);
+
+  db.calls.length = 0;
+  const nextDue = await repository.nextAppResultsExpiry({ requestId: 'next-due', spaceId: 'space-1', appId: 'gmail', retentionDays: 29 });
+  assert.ok(Number.isFinite(nextDue));
+  assert.deepEqual(db.calls.filter((call) => call.name && call.name !== 'space_placement_resolve_v1').map((call) => call.name),
+    ['content_app_results_next_v3']);
+});
+
 function decisionRef(ref_id, root_set_id) {
   return { ref_id, root_set_id, owner_kind: 'summon_decision', owner_id: 'message',
     checksum: 'a'.repeat(64), storage_key: 'restricted/key', byte_length: 10, created_at: new Date() };
