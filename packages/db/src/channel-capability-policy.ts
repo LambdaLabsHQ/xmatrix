@@ -206,6 +206,29 @@ export async function lockChannelLifecycle(
     values: [input.channelId], maxRows: 1 });
 }
 
+/**
+ * Take the same Channel lock on a sorted set of Channels in one round trip,
+ * preserving deterministic lock ordering across multi-Channel commands.
+ */
+export async function lockChannelLifecycles(
+  transaction: DatabaseTransaction,
+  input: { channelIds: readonly string[]; capability: ChannelCapability },
+): Promise<void> {
+  const unique = [...new Set(input.channelIds)].sort();
+  if (unique.length === 0) return;
+  if (unique.length === 1) {
+    await lockChannelLifecycle(transaction, { channelId: unique[0]!, capability: input.capability });
+    return;
+  }
+  const lock = lockClause(CHANNEL_CAPABILITY_POLICIES[input.capability].lock);
+  if (!lock) throw new Error(`Channel capability ${input.capability} takes no Channel lock`);
+  await transaction.query({
+    name: `channel_lifecycle_lock_${input.capability}_v2`,
+    text: `SELECT 1 FROM data.channels c WHERE c.channel_id = ANY($1::text[]) ORDER BY c.channel_id${lock}`,
+    values: [unique], maxRows: unique.length,
+  });
+}
+
 export function channelCapabilityCte(input: {
   capability: ChannelCapability;
   inputCte: string;

@@ -80,13 +80,8 @@ function requireRestrictedRecordObject(row: QueryResultRow): void {
 }
 
 /** A provider keeps results for its retention while connected; once disconnected or removed, for none. */
-async function appResultCutoff(tx: DatabaseTransaction, spaceId: string, appId: string, retentionDays: number, now: string):
-  Promise<string> {
-  const rows = await tx.query<QueryResultRow>({ name: "content_app_results_connection_v1",
-    text: "SELECT status FROM data.app_connector_connections WHERE space_id=$1 AND provider_id=$2",
-    values: [spaceId, appId], maxRows: 1 });
-  const connected = rows[0] !== undefined && rows[0].status !== "disconnected";
-  return connected ? new Date(Date.parse(now) - retentionDays * 86_400_000).toISOString() : now;
+function retentionCutoffTimestamp(now: string, retentionDays: number): string {
+  return new Date(Date.parse(now) - retentionDays * 86_400_000).toISOString();
 }
 
 function command(input: { requestId: string; commandId: string }) {
@@ -195,6 +190,43 @@ export class PostgresContentRepository {
     return { spaceId: route.spaceId, channelId: match[2]! };
   }
 
+  private async publishEntityRoutes(
+    requestId: string,
+    placement: SpacePlacement,
+    kind: EntitySpaceRouteKind,
+    entities: readonly { entityId: string; state: "active" | "deleted"; entityVersion: number }[],
+    source?: { routeVersion: number; updatedAt: string },
+  ): Promise<void> {
+    if (!entities.length) return;
+    let resolved = source;
+    if (!resolved) {
+      const rows = await this.database.transaction({
+        requestId,
+        operation: `${kind}.directory-source`,
+        placement: { spaceId: placement.spaceId, shardId: placement.shardId,
+          placementEpoch: placement.placementEpoch },
+      }, (tx) => tx.query<QueryResultRow & { route_version: string | number; updated_at: Date | string }>({
+        name: "content_entity_route_source_v1",
+        text: `SELECT commit_sequence AS route_version,updated_at
+          FROM data.space_control_heads WHERE space_id = $1 LIMIT 1`,
+        values: [placement.spaceId], maxRows: 1,
+      }));
+      if (!rows[0]) throw new ContentControlError(
+        "entity_directory_source_incomplete", 503, "Content directory source is incomplete", true,
+      );
+      resolved = { routeVersion: Number(rows[0].route_version), updatedAt: storedIso(rows[0].updated_at) };
+    }
+    const unique = [...new Map(entities.map((entity) => [entity.entityId, entity])).values()];
+    await this.entityDirectory.publishMany(
+      { requestId, operation: `${kind}.directory-publish` },
+      unique.map((entity) => ({
+        kind, entityId: entity.entityId, spaceId: placement.spaceId, shardId: placement.shardId,
+        placementEpoch: placement.placementEpoch, entityVersion: entity.entityVersion,
+        routeVersion: resolved.routeVersion, state: entity.state, updatedAt: resolved.updatedAt,
+      })),
+    );
+  }
+
   private async publishEntityRoute(
     requestId: string,
     placement: SpacePlacement,
@@ -281,6 +313,46 @@ export class PostgresContentRepository {
     return readSpaceCommandReplay(tx, "content_idempotency_read_v1",
       { spaceId, commandId, commandKind: kind, requestDigest },
       () => new ContentControlError("idempotency_conflict", 409, "command id was reused"));
+  }
+
+  private async commitBatch(
+    tx: DatabaseTransaction,
+    input: { spaceId: string; commandId: string; kind: string; requestDigest: string;
+      aggregateId: string; result: Record<string, unknown>; now: string },
+  ): Promise<{ routeVersion: number; updatedAt: string }> {
+    const rows = await tx.query<QueryResultRow & { commit_sequence: string | number; updated_at: Date | string }>({
+      name: "content_commit_batch_v1",
+      text: `WITH head AS MATERIALIZED (
+          UPDATE data.space_control_heads
+          SET commit_sequence = commit_sequence + 1, updated_at = $2
+          WHERE space_id = $1
+          RETURNING commit_sequence, updated_at
+        ), outbox_row AS (
+          INSERT INTO data.outbox
+            (outbox_id,space_id,topic,aggregate_kind,aggregate_id,aggregate_sequence,
+             payload_json,status,attempts,available_at,lease_until,created_at,updated_at)
+          SELECT 'content:'||$1||':'||head.commit_sequence,$1,'content','content',$3,
+            head.commit_sequence,$4::jsonb,'pending',0,$2,NULL,$2,$2
+          FROM head
+        ), replay_row AS (
+          INSERT INTO data.idempotency_keys
+            (space_id,idempotency_key,command_kind,request_digest,result_json,
+             commit_sequence,created_at,expires_at)
+          SELECT $1,$5,$6,$7,$4::jsonb,head.commit_sequence,$2,$8
+          FROM head
+        ) SELECT commit_sequence, updated_at FROM head`,
+      values: [
+        input.spaceId, input.now, input.aggregateId, JSON.stringify(input.result),
+        input.commandId, input.kind, input.requestDigest,
+        new Date(Date.parse(input.now) + IDEMPOTENCY_TTL_MS).toISOString(),
+      ],
+      maxRows: 1,
+    });
+    const head = rows[0];
+    if (!head) throw new ContentControlError(
+      "space_control_head_missing", 500, "Space control head is unavailable",
+    );
+    return { routeVersion: Number(head.commit_sequence), updatedAt: storedIso(head.updated_at) };
   }
 
   private async commit(
@@ -1040,6 +1112,111 @@ export class PostgresContentRepository {
     });
   }
 
+  /** Delete locked restricted refs in one batch, nominate newly unreferenced objects, and meter storage once. */
+  private async expireRestrictedRefsBatch(
+    tx: DatabaseTransaction,
+    input: {
+      spaceId: string;
+      rows: readonly QueryResultRow[];
+      now: string;
+      mode: "decision" | "app_result";
+      cutoff?: string;
+    },
+  ): Promise<void> {
+    for (const row of input.rows) requireRestrictedRecordObject(row);
+    if (!input.rows.length) return;
+    const isDecision = input.mode === "decision";
+    const targets = input.rows.map((row) => ({
+      root_set_id: String(row.root_set_id),
+      ref_id: String(row.ref_id),
+      child_object_id: String(row.child_object_id),
+      storage_key: String(row.storage_key),
+      checksum: String(row.checksum),
+      byte_length: Number(row.byte_length),
+      not_before: isDecision
+        ? new Date(Math.max(Date.parse(input.now) + GC_SAFETY_MS,
+            new Date(row.gc_not_before as Date | string).getTime())).toISOString()
+        : input.now,
+    }));
+    const deletePredicate = isDecision
+      ? "AND r.owner_kind IN ('summon_decision','connector_result') AND r.created_at <= $4::timestamptz"
+      : "AND r.owner_kind='connector_result'";
+    const updateObjectsCte = isDecision
+      ? ""
+      : `, updated_objects AS (
+          UPDATE data.content_objects o SET gc_not_before=$3
+          FROM unreferenced u
+          WHERE o.space_id=$1 AND o.object_id=u.child_object_id
+        )`;
+    const gcConflict = isDecision
+      ? "DO NOTHING"
+      : "DO UPDATE SET not_before=LEAST(data.content_gc_candidates.not_before,EXCLUDED.not_before)";
+    const values = isDecision
+      ? [input.spaceId, JSON.stringify(targets), input.now, input.cutoff]
+      : [input.spaceId, JSON.stringify(targets), input.now];
+    const released = (await tx.query<QueryResultRow & {
+      released_objects: string | number; released_bytes: string | number;
+    }>({
+      name: isDecision ? "content_decision_ref_expire_batch_v1" : "content_app_results_ref_expire_batch_v1",
+      text: `WITH targets AS MATERIALIZED (
+          SELECT * FROM jsonb_to_recordset($2::jsonb) AS t(
+            root_set_id text,ref_id text,child_object_id text,
+            storage_key text,checksum text,byte_length bigint,not_before timestamptz
+          )
+        ), deleted_refs AS MATERIALIZED (
+          DELETE FROM data.content_refs r USING targets t
+          WHERE r.space_id=$1 AND r.root_set_id=t.root_set_id AND r.generation=0 AND r.ref_id=t.ref_id
+            ${deletePredicate}
+          RETURNING r.root_set_id,r.ref_id,r.child_object_id
+        ), unreferenced AS MATERIALIZED (
+          SELECT DISTINCT ON (t.child_object_id)
+            t.child_object_id,t.storage_key,t.checksum,t.byte_length,t.not_before
+          FROM targets t
+          JOIN deleted_refs d ON d.root_set_id=t.root_set_id AND d.ref_id=t.ref_id
+          WHERE NOT EXISTS (
+            SELECT 1 FROM data.content_refs r
+            WHERE r.space_id=$1 AND r.child_object_id=t.child_object_id
+              AND NOT (r.generation=0 AND EXISTS (
+                SELECT 1 FROM deleted_refs dd
+                WHERE dd.root_set_id=r.root_set_id AND dd.ref_id=r.ref_id
+              ))
+          )
+          ORDER BY t.child_object_id
+        )${updateObjectsCte}, nominated AS (
+          INSERT INTO data.content_gc_candidates
+            (space_id,object_id,storage_key,content_hash,reason,unreferenced_at,not_before,
+             status,version,lease_until,attempts,last_checked_at,created_at,updated_at)
+          SELECT $1,u.child_object_id,u.storage_key,u.checksum,'decision-expired',$3,u.not_before,
+            'pending',1,NULL,0,NULL,$3,$3
+          FROM unreferenced u
+          ON CONFLICT (space_id,object_id) ${gcConflict}
+        )
+        SELECT COUNT(*)::int AS released_objects,
+          COALESCE(SUM(byte_length),0)::bigint AS released_bytes
+        FROM unreferenced`,
+      values,
+      maxRows: 1,
+    }))[0];
+    const releasedObjects = Number(released?.released_objects ?? 0);
+    if (releasedObjects > 0) await meterBlobStorage(tx, this.billing, {
+      spaceId: input.spaceId, objects: -releasedObjects, bytes: -Number(released?.released_bytes ?? 0), now: input.now,
+    });
+  }
+
+  private async publishDeletedRefRoutes(
+    requestId: string,
+    placement: SpacePlacement,
+    refIds: readonly string[],
+    source?: { routeVersion: number; updatedAt: string },
+  ): Promise<void> {
+    if (!refIds.length) return;
+    await this.publishEntityRoutes(
+      requestId, placement, "content-ref",
+      refIds.map(refId => ({ entityId: refId, state: "deleted" as const, entityVersion: 2 })),
+      source,
+    );
+  }
+
   /** Internal maintenance only: expire bounded decision refs, retaining GC safety.
    * This does not delete payload bytes; the content collector owns that step. */
   async expireDecisionRefs(input: { requestId: string; spaceId: string; limit?: number }):
@@ -1056,31 +1233,17 @@ export class PostgresContentRepository {
           ORDER BY r.created_at,r.ref_id LIMIT $3 FOR UPDATE OF r,o SKIP LOCKED`,
         values: [spaceId, cutoff, limit], maxRows: limit,
       });
-      for (const row of rows) {
-        requireRestrictedRecordObject(row);
-        await tx.query({ name: "content_decision_expire_v1",
-          text: `DELETE FROM data.content_refs WHERE space_id=$1 AND root_set_id=$2
-            AND generation=0 AND ref_id=$3 AND owner_kind IN ('summon_decision','connector_result')
-            AND created_at <= $4::timestamptz`,
-          values: [spaceId, row.root_set_id, row.ref_id, cutoff], maxRows: 0 });
-        if (await this.releaseHeldObject(tx, spaceId, String(row.child_object_id), Number(row.byte_length), now)) await tx.query({ name: "content_decision_gc_nominate_v1",
-          text: `INSERT INTO data.content_gc_candidates
-            (space_id,object_id,storage_key,content_hash,reason,unreferenced_at,not_before,
-             status,version,lease_until,attempts,last_checked_at,created_at,updated_at)
-            VALUES ($1,$2,$3,$4,'decision-expired',$5,$6,'pending',1,NULL,0,NULL,$5,$5)
-            ON CONFLICT (space_id,object_id) DO NOTHING`,
-          values: [spaceId,row.child_object_id,row.storage_key,row.checksum,now,
-            new Date(Math.max(Date.parse(now) + GC_SAFETY_MS,
-              new Date(row.gc_not_before as Date | string).getTime())).toISOString()], maxRows: 0 });
-      }
-      const result = { expired: rows.length, refIds: rows.map(row => String(row.ref_id)) };
-      if (rows.length) await this.commit(tx, { spaceId, commandId: `decision-expiry:${crypto.randomUUID()}`,
-        kind: "expire-decision-refs", requestDigest: await digest({ spaceId, cutoff, refIds: result.refIds }),
-        aggregateId: spaceId, result, now });
-      return result;
+      await this.expireRestrictedRefsBatch(tx, { spaceId, rows, now, mode: "decision", cutoff });
+      const refIds = rows.map(row => String(row.ref_id));
+      const payload = { expired: rows.length, refIds };
+      const routeSource = rows.length ? await this.commitBatch(tx, {
+        spaceId, commandId: `decision-expiry:${crypto.randomUUID()}`,
+        kind: "expire-decision-refs", requestDigest: await digest({ spaceId, cutoff, refIds }),
+        aggregateId: spaceId, result: payload, now }) : undefined;
+      return { ...payload, routeSource };
     });
-    for (const refId of result.refIds) await this.publishEntityRoute(requestId, placement, "content-ref", refId, "deleted", 2);
-    return result;
+    await this.publishDeletedRefRoutes(requestId, placement, result.refIds, result.routeSource);
+    return { expired: result.expired, refIds: result.refIds };
   }
 
   /**
@@ -1101,15 +1264,26 @@ export class PostgresContentRepository {
     const placement = await this.spaces.resolve(requestId, "content.app-results.expire", spaceId);
     const result = await this.spaces.transaction(requestId, "content.app-results.expire", placement, async tx => {
       const now = new Date().toISOString();
-      const cutoff = await appResultCutoff(tx, spaceId, appId, retentionDays, now);
+      const retainedCutoff = retentionCutoffTimestamp(now, retentionDays);
+      const executionPass = (await tx.query<QueryResultRow & { cutoff: Date | string; executions: string | number }>({
+        name: "content_app_results_execution_clear_v2",
+        text: `WITH cutoff_row AS MATERIALIZED (
+            SELECT CASE WHEN EXISTS (
+              SELECT 1 FROM data.app_connector_connections
+              WHERE space_id=$1 AND provider_id=$2 AND status<>'disconnected'
+            ) THEN $3::timestamptz ELSE $4::timestamptz END AS cutoff
+          ), cleared AS (
+            UPDATE data.app_connector_executions SET result_summary=NULL,reason=NULL,version=version+1,updated_at=$4
+            WHERE execution_id IN (SELECT e.execution_id FROM data.app_connector_executions e, cutoff_row c
+              WHERE e.space_id=$1 AND e.provider_id=$2 AND e.created_at <= c.cutoff
+                AND e.status IN ('completed','failed','blocked') AND (e.result_summary IS NOT NULL OR e.reason IS NOT NULL)
+              LIMIT $5 FOR UPDATE SKIP LOCKED) RETURNING execution_id
+          ) SELECT (SELECT cutoff FROM cutoff_row) AS cutoff,
+              (SELECT COUNT(*)::int FROM cleared) AS executions`,
+        values: [spaceId, appId, retainedCutoff, now, limit], maxRows: 1 }))[0];
+      const cutoff = executionPass?.cutoff ? storedIso(executionPass.cutoff) : now;
+      const executions = Number(executionPass?.executions ?? 0);
       const messages = await expireAppAuthoredMessages(tx, { spaceId, appId, cutoff, now, limit });
-      const executions = await tx.query({ name: "content_app_results_execution_clear_v1",
-        text: `UPDATE data.app_connector_executions SET result_summary=NULL,reason=NULL,version=version+1,updated_at=$4
-          WHERE execution_id IN (SELECT execution_id FROM data.app_connector_executions
-            WHERE space_id=$1 AND provider_id=$2 AND created_at <= $3::timestamptz
-              AND status IN ('completed','failed','blocked') AND (result_summary IS NOT NULL OR reason IS NOT NULL)
-            LIMIT $5 FOR UPDATE SKIP LOCKED) RETURNING execution_id`,
-        values: [spaceId, appId, cutoff, now, limit], maxRows: limit });
       // Private originals are owned by the receipt (`…:<app>`) or the inbound event (`app:<app>:…`).
       const rows = await tx.query<QueryResultRow>({ name: "content_app_results_ref_lock_v2",
         text: `SELECT r.ref_id,r.root_set_id,r.child_object_id,o.storage_key,o.checksum,o.byte_length
@@ -1120,31 +1294,15 @@ export class PostgresContentRepository {
             AND r.created_at <= $3::timestamptz
           ORDER BY r.created_at,r.ref_id LIMIT $4 FOR UPDATE OF r,o SKIP LOCKED`,
         values: [spaceId, appId, cutoff, limit], maxRows: limit });
-      for (const row of rows) {
-        requireRestrictedRecordObject(row);
-        await tx.query({ name: "content_app_results_ref_expire_v1",
-          text: `DELETE FROM data.content_refs WHERE space_id=$1 AND root_set_id=$2
-            AND generation=0 AND ref_id=$3 AND owner_kind='connector_result'`,
-          values: [spaceId, row.root_set_id, row.ref_id], maxRows: 0 });
-        if (!await this.releaseHeldObject(tx, spaceId, String(row.child_object_id), Number(row.byte_length), now)) continue;
-        await tx.query({ name: "content_app_results_object_due_v1",
-          text: "UPDATE data.content_objects SET gc_not_before=$3 WHERE space_id=$1 AND object_id=$2",
-          values: [spaceId, row.child_object_id, now], maxRows: 0 });
-        await tx.query({ name: "content_app_results_gc_nominate_v1",
-          text: `INSERT INTO data.content_gc_candidates
-            (space_id,object_id,storage_key,content_hash,reason,unreferenced_at,not_before,
-             status,version,lease_until,attempts,last_checked_at,created_at,updated_at)
-            VALUES ($1,$2,$3,$4,'decision-expired',$5,$5,'pending',1,NULL,0,NULL,$5,$5)
-            ON CONFLICT (space_id,object_id) DO UPDATE SET not_before=LEAST(data.content_gc_candidates.not_before,EXCLUDED.not_before)`,
-          values: [spaceId, row.child_object_id, row.storage_key, row.checksum, now], maxRows: 0 });
-      }
+      await this.expireRestrictedRefsBatch(tx, { spaceId, rows, now, mode: "app_result" });
       const refIds = rows.map(row => String(row.ref_id));
-      if (refIds.length) await this.commit(tx, { spaceId, commandId: `app-results-expiry:${crypto.randomUUID()}`,
+      const routeSource = refIds.length ? await this.commitBatch(tx, {
+        spaceId, commandId: `app-results-expiry:${crypto.randomUUID()}`,
         kind: "expire-app-results", requestDigest: await digest({ spaceId, appId, cutoff, refIds }),
-        aggregateId: spaceId, result: { expired: refIds.length, refIds }, now });
-      return { messages, executions: executions.length, refIds, cutoff };
+        aggregateId: spaceId, result: { expired: refIds.length, refIds }, now }) : undefined;
+      return { messages, executions, refIds, cutoff, routeSource };
     });
-    for (const refId of result.refIds) await this.publishEntityRoute(requestId, placement, "content-ref", refId, "deleted", 2);
+    await this.publishDeletedRefRoutes(requestId, placement, result.refIds, result.routeSource);
     return { messages: result.messages, executions: result.executions, refs: result.refIds.length, cutoff: result.cutoff };
   }
 
@@ -1156,19 +1314,26 @@ export class PostgresContentRepository {
     const retentionDays = positive(input.retentionDays, "retentionDays", 3_650);
     return this.spaces.transaction(requestId, "content.app-results.next", spaceId, async tx => {
       const now = new Date().toISOString();
-      const cutoff = await appResultCutoff(tx, spaceId, appId, retentionDays, now);
-      const rows = await tx.query<QueryResultRow>({ name: "content_app_results_next_v2",
-        text: `SELECT MIN(created_at) AS oldest FROM (
-          SELECT MIN(created_at) AS created_at FROM data.messages
-            WHERE space_id=$1 AND author_kind='app' AND author_id=$2 AND deleted_at IS NULL
-          UNION ALL SELECT MIN(created_at) FROM data.app_connector_executions
-            WHERE space_id=$1 AND provider_id=$2 AND status IN ('completed','failed','blocked')
-              AND (result_summary IS NOT NULL OR reason IS NOT NULL)
-          UNION ALL SELECT MIN(created_at) FROM data.content_refs
-            WHERE space_id=$1 AND generation=0 AND owner_kind='connector_result'
-              AND (right(owner_id, length($2)+1)=':'||$2 OR left(owner_id, length($2)+5)='app:'||$2||':')
-        ) oldest`, values: [spaceId, appId], maxRows: 1 });
+      const retainedCutoff = retentionCutoffTimestamp(now, retentionDays);
+      const rows = await tx.query<QueryResultRow>({ name: "content_app_results_next_v3",
+        text: `WITH cutoff_row AS MATERIALIZED (
+            SELECT CASE WHEN EXISTS (
+              SELECT 1 FROM data.app_connector_connections
+              WHERE space_id=$1 AND provider_id=$2 AND status<>'disconnected'
+            ) THEN $3::timestamptz ELSE $4::timestamptz END AS cutoff
+          )
+          SELECT (SELECT cutoff FROM cutoff_row) AS cutoff, MIN(created_at) AS oldest FROM (
+            SELECT MIN(created_at) AS created_at FROM data.messages
+              WHERE space_id=$1 AND author_kind='app' AND author_id=$2 AND deleted_at IS NULL
+            UNION ALL SELECT MIN(created_at) FROM data.app_connector_executions
+              WHERE space_id=$1 AND provider_id=$2 AND status IN ('completed','failed','blocked')
+                AND (result_summary IS NOT NULL OR reason IS NOT NULL)
+            UNION ALL SELECT MIN(created_at) FROM data.content_refs
+              WHERE space_id=$1 AND generation=0 AND owner_kind='connector_result'
+                AND (right(owner_id, length($2)+1)=':'||$2 OR left(owner_id, length($2)+5)='app:'||$2||':')
+          ) oldest`, values: [spaceId, appId, retainedCutoff, now], maxRows: 1 });
       if (!rows[0]?.oldest) return null;
+      const cutoff = rows[0].cutoff ? storedIso(rows[0].cutoff) : now;
       const oldest = new Date(rows[0].oldest as string | Date).getTime();
       // The cutoff trails now by the retention; whatever is older is due now.
       return Math.max(Date.parse(now), oldest + (Date.parse(now) - Date.parse(cutoff)));
