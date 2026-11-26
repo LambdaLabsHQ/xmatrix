@@ -138,7 +138,7 @@ test("a newcomer's join window is context, and a catch-up backlog is work", asyn
     .every((frame) => !("interruptRequested" in frame)));
 });
 
-test("catch-up steers like live delivery: an Agent's exact address interrupts, its other replies queue", async () => {
+test("catch-up steers like live delivery: an exact address interrupts, other replies join the turn", async () => {
   const agent = (sequence, body) => ({ ...CORPUS[sequence - 1], body,
     from: { kind: "agent", label: "codex", identityId: "agent-peer", agentName: "codex", userId: "user-2" } });
   const corpus = CORPUS.map((message) => message.sequence === 19 ? agent(19, "@builder:3 stop that")
@@ -147,7 +147,8 @@ test("catch-up steers like live delivery: an Agent's exact address interrupts, i
     run: { ...session("instance-steer").run, channelInstanceId: "3" } };
   const batch = await port(18, corpus).join(runtime, { type: "join_channel", channelId: CHANNEL_ID, historyLimit: 50 });
   assert.deepEqual(batch.filter((frame) => frame.type === "channel_history_replay")
-    .map((frame) => [frame.message.sequence, frame.interruptRequested]), [[19, true], [20, false]]);
+    .map((frame) => [frame.message.sequence, frame.interruptRequested, frame.steerAllowed]),
+  [[19, true, undefined], [20, true, true]]);
 });
 
 test("a reconnect that offers its own waterline is work, never orientation", async () => {

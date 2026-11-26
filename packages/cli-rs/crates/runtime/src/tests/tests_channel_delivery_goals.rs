@@ -226,6 +226,54 @@ fn active_turn_interrupt_covers_marked_live_messages_and_catch_up() {
     ));
 }
 
+/// A message the Hub lets join the turn never cancels it, whoever wrote it: a
+/// runtime that cannot join it (or whose join failed) holds it for the next
+/// turn. Only an exact address, which the Hub does not let steer, cancels.
+#[test]
+fn a_joinable_message_never_cancels_the_running_turn() {
+    let live = |message, steer_allowed| {
+        AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
+            prompt: None,
+            message,
+            client_message_id: None,
+            ack_required: Some(true),
+            interrupt_requested: Some(true),
+            steer_allowed,
+            delivery_intent: None,
+        })
+    };
+    let replay = |message, steer_allowed| {
+        AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelHistoryReplay {
+            prompt: None,
+            message,
+            ack_required: Some(true),
+            delivery_intent: None,
+            interrupt_requested: Some(true),
+            steer_allowed,
+        })
+    };
+    for message in [
+        test_channel_message("m1", "chan-a", "also check the docs"),
+        agent_channel_message("m2", "chan-a", "agent:peer", "my analysis is ready"),
+    ] {
+        assert!(!event_requests_active_turn_interrupt(
+            &live(message.clone(), Some(true)),
+            Some("chan-a"),
+            Some("agent:self")
+        ));
+        assert!(!event_requests_active_turn_interrupt(
+            &replay(message.clone(), Some(true)),
+            Some("chan-a"),
+            Some("agent:self")
+        ));
+        assert!(event_requests_active_turn_interrupt(
+            &live(message, None),
+            Some("chan-a"),
+            Some("agent:self")
+        ));
+    }
+}
+
 #[test]
 fn hub_verdict_decides_whether_catch_up_interrupts() {
     let replay = |message, interrupt_requested| {

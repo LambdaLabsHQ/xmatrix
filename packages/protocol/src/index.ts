@@ -154,6 +154,7 @@ export {
   canonicalMentionToken, isMentionAddressStart, MENTION_BROADCAST_NAMES, mentionAddressTokens,
   scanMentionAddresses,
 } from "./mention-address.js";
+export { addressesInstance, type AddressableInstance } from "./instance-address.js";
 export type {
   MentionAddressMatch,
 } from "./mention-address.js";

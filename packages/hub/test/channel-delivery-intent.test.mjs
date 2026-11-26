@@ -44,19 +44,28 @@ test("quoted instance addresses neither route Automation work nor interrupt peer
   for (const body of ["`@codex:2`", "> @codex:2", "```\n@codex:2\n```", "[@codex:2](https://example.test)"]) {
     assert.equal(agentChannelMessageDeliveryIntent(framed({ body,
       metadata: { xmatrixProvenance: "scheduled_automation" } }), recipient), "context");
-    assert.equal(agentChannelMessageRequestsInterrupt(framed({ body,
-      from: { ...BASE.from, kind: "agent", identityId: "peer" } }), recipient), false);
+    // A quoted address is ordinary text: it joins a busy turn, it never cancels it.
+    assert.equal(agentChannelMessageMaySteer(framed({ body,
+      from: { ...BASE.from, kind: "agent", identityId: "peer" } }), recipient), true);
   }
   assert.equal(agentChannelMessageDeliveryIntent(framed({ body: "ordinary Human text" }), recipient), "work");
 });
 
-test("ambiguous live display names cannot route scheduled work or interrupt both peers", () => {
-  const recipient = { agentName: "codex", agentId: "agent:owner:first", channelInstanceId: "2", nameIsAmbiguous: true };
-  const scheduled = framed({ body: "@codex:2 inspect", metadata: { xmatrixProvenance: "scheduled_automation" } });
-  assert.equal(agentChannelMessageDeliveryIntent(scheduled, recipient), "context");
-  assert.equal(agentChannelMessageRequestsInterrupt(framed({ body: "@codex:2 inspect",
-    from: { ...BASE.from, kind: "agent", identityId: "peer" } }), recipient), false);
-  assert.equal(agentChannelMessageDeliveryIntent({ ...scheduled, body: "@agent:owner:first:2 inspect" }, recipient), "work");
+// Channel 5017cc66: with antigravity:1 and antigravity:2 both live, the Hub
+// dropped the shared name and `@antigravity:2` woke no one, from a person or an Agent.
+test("an exact name:N is work for that Instance even when a live peer shares the name", () => {
+  const target = { agentName: "antigravity", agentId: "agent:laptop", instanceId: "ch-1:2", channelInstanceId: "2" };
+  const peer = { agentName: "antigravity", agentId: "agent:server", instanceId: "ch-1:1", channelInstanceId: "1" };
+  for (const from of [BASE.from, { kind: "agent", identityId: "agent:claude", label: "claude:3" }]) {
+    const message = framed({ from, body: "电流改好了。\n\n@antigravity:2 请用 82af058 刷一版小红书预览码。" });
+    assert.equal(agentChannelMessageDeliveryIntent(message, target), "work", from.kind);
+    assert.equal(agentChannelMessageRequestsInterrupt(message, target), true, from.kind);
+    assert.equal(agentChannelMessageDeliveryIntent(message, peer), "context", from.kind);
+    assert.equal(agentChannelMessageRequestsInterrupt(message, peer), false, from.kind);
+  }
+  const scheduled = framed({ body: "@antigravity:2 inspect", metadata: { xmatrixProvenance: "scheduled_automation" } });
+  assert.equal(agentChannelMessageDeliveryIntent(scheduled, target), "work");
+  assert.equal(agentChannelMessageDeliveryIntent(scheduled, peer), "context");
 });
 
 test("a system fact is context, whoever is receiving it", () => {
@@ -143,28 +152,24 @@ test("Auto summons are context for existing live instances", () => {
   }
 });
 
-test("Agent peer replies queue unless they address this exact Instance", () => {
-  const peer = framed({
-    from: {
-      kind: "agent",
-      identityId: "agent:critic",
-      userId: "user-1",
-      label: "Critic",
-      email: "critic@example.test",
-    },
-    body: "My analysis is ready",
-  });
-  const recipient = { agentName: "Analyst", channelInstanceId: "2" };
-  assert.equal(agentChannelMessageDeliveryIntent(peer, recipient), "work");
-  assert.equal(agentChannelMessageRequestsInterrupt(peer, recipient), false);
-  assert.equal(
-    agentChannelMessageRequestsInterrupt({ ...peer, body: "@Analyst:2 revise this" }, recipient),
-    true,
-  );
-  assert.equal(
-    agentChannelMessageRequestsInterrupt({ ...peer, body: "@Analyst:3 revise this" }, recipient),
-    false,
-  );
+test("a person's message and an Agent's are delivered by the same rule", () => {
+  const recipient = { agentName: "Analyst", agentId: "agent:analyst", channelInstanceId: "2" };
+  const human = BASE.from;
+  const agent = { kind: "agent", identityId: "agent:critic", userId: "user-1", label: "Critic", email: "critic@example.test" };
+  for (const body of ["My analysis is ready", "@Analyst:2 revise this", "@Analyst:3 revise this", "@Analyst look",
+    "`@Analyst:2` is an example", "@all heads up", "/kill all"]) {
+    const verdict = (from) => {
+      const message = framed({ from, body });
+      return [agentChannelMessageDeliveryIntent(message, recipient), agentChannelMessageRequestsInterrupt(message, recipient),
+        agentChannelMessageMaySteer(message, recipient)];
+    };
+    assert.deepEqual(verdict(agent), verdict(human), body);
+  }
+  const peer = framed({ from: agent, body: "My analysis is ready" });
+  assert.equal(agentChannelMessageRequestsInterrupt(peer, recipient), true);
+  assert.equal(agentChannelMessageMaySteer(peer, recipient), true, "an ordinary reply joins the turn, it does not cancel it");
+  const addressed = framed({ from: agent, body: "@Analyst:2 revise this" });
+  assert.equal(agentChannelMessageMaySteer(addressed, recipient), false, "an exact address cancels, whoever wrote it");
 });
 
 // The transport intent is the execution boundary: retaining the message as
@@ -185,7 +190,7 @@ test("an exact Instance assignment is context for its peers on live delivery and
   assert.equal(agentChannelMessageDeliveryIntent(framed({ body: "@opencode:11 and @opencode:8 check your tasks" }), peer), "work");
 });
 
-test("a Human message steers the active turn unless it @-addresses this Instance", () => {
+test("a message steers the active turn unless it @-addresses this Instance", () => {
   const recipient = { agentName: "claude", agentId: "agent:owner:claude", channelInstanceId: "1" };
   for (const body of ["不是", "看下竞品页", "`@claude` is the CLI", "看下 codex 的输出"]) {
     const message = framed({ body });
@@ -199,7 +204,7 @@ test("a Human message steers the active turn unless it @-addresses this Instance
   }
   const peer = framed({ body: "@claude:1 revise", from: { kind: "agent", identityId: "agent:critic", label: "critic" } });
   assert.equal(agentChannelMessageRequestsInterrupt(peer, recipient), true);
-  assert.equal(agentChannelMessageMaySteer(peer, recipient), false, "an Agent's exact address is a deliberate interrupt");
+  assert.equal(agentChannelMessageMaySteer(peer, recipient), false, "an exact address cancels, whoever wrote it");
   assert.equal(agentChannelMessageMaySteer(framed({ body: "/kill all" }), recipient), false, "control is context");
 });
 
