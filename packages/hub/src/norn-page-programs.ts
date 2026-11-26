@@ -9,6 +9,7 @@ import {
 } from "./norn-host";
 import { nornFlow } from "./norn-plan";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
+import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import { openConversation } from "./system-conversation";
@@ -26,6 +27,7 @@ import { text, variant } from "./vendor/norn/runtime/value";
 
 function database(env: Env) {
   return createPostgresAuthorityDatabase(env, { applicationName: "xmatrix-norn-page-programs",
+    connectTimeoutMs: POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS,
     statementTimeoutMs: 5_000, transactionTimeoutMs: 15_000, lockTimeoutMs: 2_000 });
 }
 
@@ -46,6 +48,21 @@ const DELETED_PROBLEM = "This program's conversation was deleted, which ended it
 
 /** What decides whether a revision changed the Page's programs. */
 export const pageProgramsKey = (body: string): string => JSON.stringify(nornBlocks(body));
+
+/** The names of Norn programs currently running on a Page (excluding blocks whose conversation was deleted). */
+export async function runningPageNornPrograms(
+  env: Env,
+  input: { spaceId: string; pageId: string },
+): Promise<Array<{ name: string }>> {
+  const db = database(env);
+  const programs = await readPageNornPrograms(db, {
+    requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId,
+  });
+  const running = programs.filter(program => program.state === "running");
+  if (!running.length) return [];
+  const deleted = await deletedBlocks(db, input.spaceId, input.pageId, running.map(program => program.name));
+  return running.filter(program => !deleted.has(program.name)).map(program => ({ name: program.name }));
+}
 
 /**
  * Makes the Page's programs what its blocks say, as `userId`: a new block

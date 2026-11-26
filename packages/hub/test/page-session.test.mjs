@@ -11,7 +11,7 @@ import * as Y from "yjs";
 
 import {
   PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_AWARENESS, PAGE_MESSAGE_NOTICE, PAGE_MESSAGE_SYNC, PageSession,
-  PageSessionConflict, pageFragmentMarkdown, setPageFragmentMarkdown,
+  PageSessionConflict, PageSessionProgramGuardError, pageFragmentMarkdown, setPageFragmentMarkdown,
 } from "../src/page-session.ts";
 import { CO_WRITER_KEEP_UP_MS, CO_WRITER_PAUSE_MS, CO_WRITER_TURN_MS, CO_WRITER_WRITE_EVERY_MS } from "../src/page-co-writer.ts";
 import { PAGE_MESSAGE_CO_WRITE } from "@xmatrix/protocol";
@@ -62,7 +62,7 @@ function documentText(fragment) {
 const cleanups = [];
 test.afterEach(() => { while (cleanups.length) cleanups.pop()(); });
 
-function harness({ head = HEAD, suggestOnly = false, commit } = {}) {
+function harness({ head = HEAD, suggestOnly = false, commit, runningPrograms } = {}) {
   const revisions = new Map([[1, head]]);
   let headRevision = 1;
   const commits = [];
@@ -88,6 +88,7 @@ function harness({ head = HEAD, suggestOnly = false, commit } = {}) {
     send: (id, data) => clients.get(id)?.deliver(data),
     broadcast: (data, except) => { for (const [id, client] of clients) if (id !== except) client.deliver(data); },
     wakeCoWriters: () => { wakes.push(1); },
+    ...(runningPrograms ? { runningPrograms } : {}),
     sleep: async () => {},
   };
   const session = new PageSession(ports);
@@ -1912,6 +1913,43 @@ test("an Agent's committed edit reaches someone reading the page whole, as soon 
   assert.equal(result.revision, 2);
   assert.equal(ann.text.toString(), body, "the reader holds the committed page");
   assert.equal(coWriterOf(ann).activity, "editing", "it is done writing");
+});
+
+test("submitEdit refuses removing or breaking a running norn run block before committing", async () => {
+  const withProgram = `${HEAD}\n\`\`\`norn 1 run daily\nafter(1d)->wait\n\`\`\`\n`;
+  const h = harness({ head: withProgram, runningPrograms: async () => [{ name: "daily" }] });
+  const ann = await annConnected(h);
+
+  await assert.rejects(
+    h.session.submitEdit(agent, { baseRevision: 1, body: HEAD, conversationIds: ["conv-1"] }),
+    (error) => error instanceof PageSessionProgramGuardError
+      && error.violations.length === 1
+      && error.violations[0].name === "daily"
+      && error.violations[0].reason === "removed",
+  );
+  assert.equal(h.commits.length, 0, "guard stops the edit before commit");
+  assert.equal(ann.text.toString(), withProgram, "live document stays untouched");
+
+  await assert.rejects(
+    h.session.submitEdit(agent, {
+      baseRevision: 1,
+      body: withProgram.replace("after(1d)->wait", `run(@codex, "no wait")`),
+      conversationIds: ["conv-1"],
+    }),
+    (error) => error instanceof PageSessionProgramGuardError
+      && error.violations[0].reason === "broken",
+  );
+  assert.equal(h.commits.length, 0);
+
+  const removed = await h.session.submitEdit(agent, {
+    baseRevision: 1,
+    body: HEAD,
+    conversationIds: ["conv-1"],
+    removePrograms: ["daily"],
+  });
+  assert.equal(removed.revision, 2);
+  assert.equal(h.commits.length, 1);
+  assert.equal(ann.text.toString(), HEAD);
 });
 
 // Co-writing stays until the person stops it. Leaving does not end it. Typing wakes an Agent that is not
