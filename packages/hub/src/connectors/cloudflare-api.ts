@@ -1,3 +1,4 @@
+import { utf8ByteLength } from "@xmatrix/protocol";
 import { ConnectorRemedy, providerJson, providerUrl, ProviderRequestError } from "./http";
 import { oneLine, record, text } from "./event-format";
 import type { ConnectorAction, ConnectorSubscriptionSync } from "./provider";
@@ -806,7 +807,7 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
       if (!parts) return usage;
       const name = parts[1]!;
       const value = parts[2]!.trim();
-      if (!SECRET_NAME.test(name) || !value || /[\r\n\p{Cc}]/u.test(value) || new TextEncoder().encode(value).byteLength > MAX_SECRET_BYTES) {
+      if (!SECRET_NAME.test(name) || !value || /[\r\n\p{Cc}]/u.test(value) || utf8ByteLength(value) > MAX_SECRET_BYTES) {
         return usage;
       }
       return { ...target, name, value };
