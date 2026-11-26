@@ -104,6 +104,8 @@ export interface ConnectorActionContext {
 export interface ConnectorActionResult {
   summary: string;
   url?: string;
+  /** Optional structured JSON fields returned alongside `summary` for typed Norn `Actions.read` consumers. */
+  data?: Readonly<Record<string, unknown>>;
 }
 
 export interface ConnectorAction {

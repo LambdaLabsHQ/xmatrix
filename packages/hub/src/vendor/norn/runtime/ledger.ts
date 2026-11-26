@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@8a2e680fa215444fb94b023bf7c1f0e976af4631; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@a667dd5a0243281efd075834e7d42a8f371a30d5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -85,8 +85,9 @@ export interface LedgerRequest {
   form: ReportForm | null;
   /**
    * For a request of the host itself (`Actions.prepare`, `Actions.perform`,
-   * spec §6.3): the connected app and its action. A `prepare` holds the input
-   * it fixed; a `perform` names the `prepare` request whose answer it does.
+   * `Actions.read`, spec §6.3): the connected app and its action. A `prepare`
+   * or a `read` holds its input; a `perform` names the `prepare` request whose
+   * answer it does.
    * Absent on every request of a participant.
    */
   action?: { app: string; name: string; input: Value | null; prepared: string | null };
@@ -357,7 +358,7 @@ class ProgramError extends Error {}
 
 const VERBS = ["ask", "confirm", "choose", "run", "judge"];
 /** The requests a program makes of the host's connected apps (spec §6.3), by the name the ledger keeps as their verb. */
-const ACTION_VERBS: Record<string, "prepare" | "perform"> = { "Actions.prepare": "prepare", "Actions.perform": "perform" };
+const ACTION_VERBS: Record<string, "prepare" | "perform" | "read"> = { "Actions.prepare": "prepare", "Actions.perform": "perform", "Actions.read": "read" };
 /** Who holds a request of a connected app: the app, never a participant. */
 export const appHolder = (app: string): string => `app:${app}`;
 /**
@@ -368,7 +369,7 @@ export const appHolder = (app: string): string => `app:${app}`;
  */
 export const preparedAction = (request: Pick<LedgerRequest, "id">): Value => variant("Prepared", text(request.id));
 const LABELS: Record<string, string[]> = {
-  "Actions.prepare": ["by", "about"], "Actions.perform": ["by"],
+  "Actions.prepare": ["by", "about"], "Actions.perform": ["by"], "Actions.read": ["by", "about"],
   ask: ["key", "by", "about"], confirm: ["key", "by", "about"], choose: ["key", "by", "about"], run: ["key", "context", "by", "about", "form"], judge: ["key", "about"],
   wait: [], waitUntil: [], cancel: [], handOver: [], status: [], say: [], first: [], sameAs: [], spawn: ["key"], withinEnter: [], withinExit: [],
 };
@@ -508,7 +509,7 @@ function formError(request: LedgerRequest, reply: Reply): string | null {
     case "judge": return answer.type === "bool" ? null : "A judgement must be true or false";
     // Only the host admits an action, and the answer is the request's own token; what an action answers is the host's to check.
     case "prepare": return equal(answer, preparedAction(request)) ? null : "A prepared action is answered with preparedAction(request)";
-    case "perform": return null;
+    case "perform": case "read": return null;
     default: return runFormError(answer, request.form);
   }
 }
@@ -1239,10 +1240,10 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
     if (ACTION_VERBS[name]) {
       const verb = ACTION_VERBS[name];
       let action: NonNullable<LedgerRequest["action"]>;
-      if (verb === "prepare") {
+      if (verb === "prepare" || verb === "read") {
         const [named, input] = args;
         if (args.length !== 2 || named?.type !== "variant" || named.name !== "Action" || named.args[0]?.type !== "string" || named.args[1]?.type !== "string") {
-          throw new ProgramError("Actions.prepare needs an action and its input");
+          throw new ProgramError(`Actions.${verb} needs an action and its input`);
         }
         action = { app: named.args[0].value, name: named.args[1].value, input: input!, prepared: null };
       } else {

@@ -3,6 +3,7 @@ import {
   readLibrary,
   type ConnectorActionSpec,
   type ConnectorEventSpec,
+  type ConnectorFieldSpec,
   type ConnectorManifest,
   type HostInterface,
   type Library,
@@ -33,9 +34,17 @@ const summaryManifest = (app: string, kinds: readonly string[]): ConnectorManife
 const GITHUB_BRANCH_FIELDS = [field("branch", "string"), field("defaultBranch", "string"), field("url", "string")];
 
 /** What every action answers: the receipt's words, and the link it gave when it gave one. */
-const ACTION_OUTPUT = [field("summary", "string"), field("url", "string", false)];
+const ACTION_OUTPUT: readonly ConnectorFieldSpec[] = [field("summary", "string"), field("url", "string", false)];
+/** Extra structured fields a read action returns alongside `summary` and `url`. */
+const ACTION_OUTPUTS: Readonly<Record<string, Readonly<Record<string, readonly ConnectorFieldSpec[]>>>> = {
+  cloudflare: {
+    query_database: [...ACTION_OUTPUT, field("rows", "json")],
+    query_logs: [...ACTION_OUTPUT, field("counts", "json")],
+  },
+};
 /** An action as a Channel command writes it: `@app:action:<target> <text>`. */
-const commandAction = (name: string): ConnectorActionSpec => ({ name, input: [field("target", "string"), field("text", "string")], output: ACTION_OUTPUT });
+const commandAction = (name: string, effect: "read" | "write", output: readonly ConnectorFieldSpec[] = ACTION_OUTPUT): ConnectorActionSpec =>
+  ({ name, effect, input: [field("target", "string"), field("text", "string")], output });
 /**
  * Actions whose input a program writes as named fields instead of a command's
  * target and text. Every other action a connected app declares takes the two
@@ -43,8 +52,8 @@ const commandAction = (name: string): ConnectorActionSpec => ({ name, input: [fi
  */
 const FIELD_ACTIONS: Readonly<Record<string, readonly ConnectorActionSpec[]>> = {
   x: [
-    { name: "post", input: [field("account", "string"), field("text", "string")], output: ACTION_OUTPUT },
-    { name: "publish_video", input: [field("account", "string"), field("text", "string"), field("video", "string")], output: ACTION_OUTPUT },
+    { name: "post", effect: "write", input: [field("account", "string"), field("text", "string")], output: ACTION_OUTPUT },
+    { name: "publish_video", effect: "write", input: [field("account", "string"), field("text", "string"), field("video", "string")], output: ACTION_OUTPUT },
   ],
 };
 /** The actions a program may ask of a connected app: every action the app declares, in the app's manifest. */
@@ -54,7 +63,12 @@ function manifestActions(app: string): readonly ConnectorActionSpec[] {
   if (app === "github") return [];
   const declared = APP_CONNECTOR_PROVIDER_MANIFESTS.find(manifest => manifest.id === app)?.actions ?? [];
   const fields = FIELD_ACTIONS[app] ?? [];
-  return declared.filter(action => Boolean(action.effect)).map(action => fields.find(spec => spec.name === action.id) ?? commandAction(action.id));
+  const outputs = ACTION_OUTPUTS[app] ?? {};
+  return declared.filter(action => Boolean(action.effect)).map(action => {
+    const custom = fields.find(spec => spec.name === action.id);
+    if (custom) return { ...custom, effect: action.effect };
+    return commandAction(action.id, action.effect!, outputs[action.id] ?? ACTION_OUTPUT);
+  });
 }
 
 const text = (value: Value | undefined): string | undefined => value?.type === "string" ? value.value : undefined;
