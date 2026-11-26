@@ -222,6 +222,9 @@ function flow(reading: Reading, ledger: Ledger, from: number, path: Path): PageP
 export function nornFlow(code: Code, ledger: Ledger, now: number): PageProgramStep[] {
   if (ledger.ended) return [];
   const copy = structuredClone(ledger);
+  // The flow answers every request with the same sample, so a function that calls itself asks the same thing again
+  // here where real answers would differ; numbering the repeats lets the flow show it going back instead of failing.
+  delete copy.uniqueAddresses;
   const open = new Set(Object.values(copy.requests).filter(request => request.reply === null).map(request => request.id));
   const passes = Math.max(24, Math.min(300, Math.floor(20_000_000 / JSON.stringify(copy).length)));
   try {
