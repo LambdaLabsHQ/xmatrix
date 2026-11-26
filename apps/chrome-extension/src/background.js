@@ -377,7 +377,7 @@ async function askDock(tab, { spaceId, channelId, messageId } = {}) {
     : "";
   await enablePanel(tab.id).catch(() => undefined);
   if (resolvedSpaceId && resolvedChannelId) {
-    const hash = cleanMessageId ? `#message:${encodeURIComponent(cleanMessageId)}` : "";
+    const hash = cleanMessageId ? `#message:${cleanMessageId}` : "";
     await chrome.storage.session.set({
       [`openPath:${tab.id}`]: {
         channel: existing?.snapshot ?? null,

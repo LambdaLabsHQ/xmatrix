@@ -310,7 +310,7 @@ export function isExtensionInlinePopover(): boolean {
 /** A conversation of this app, as `/app/<space>/channels/<conversation>`; nothing else. */
 const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-9_-]{1,128}$/u;
 /** A conversation open address, optionally targeting a specific card/message (`#message:<id>`). */
-const APP_CONVERSATION_OPEN_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-9_-]{1,128}(?:#message:[A-Za-z0-9_.:-]{1,128})?$/u;
+const APP_CONVERSATION_OPEN_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-9_-]{1,128}(?:#message:[A-Za-z0-9_.%:-]{1,256})?$/u;
 
 let inlineHostTabId: number | null = null;
 
