@@ -815,6 +815,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       readAction("check_domain", "Check domain", "Check whether a domain can be registered now, and its price.", "[<account id>/]<domain>"),
       writeAction("register_domain", "Register domain", "Register a standard domain on this account, with auto-renew on. Premium names are refused. This charges the account.", "[<account id>/]<domain>"),
       readAction("list_workers", "List Workers", "List the Workers in an account.", "<account id>|*"),
+      readAction("list_worker_secrets", "List Worker secrets", "List the secret names configured on a Worker (never returns values).", "[<account id>/]<worker>"),
+      writeAction("put_worker_secret", "Set Worker secret", "Create or update an encrypted text secret on a Worker (receipts and approval cards never echo the value).", "[<account id>/]<worker> <NAME> <value>"),
       writeAction("attach_domain", "Attach hostname", "Route a hostname in an existing zone to a Worker.", "[<account id>/]<hostname> <worker>"),
     ],
   }),

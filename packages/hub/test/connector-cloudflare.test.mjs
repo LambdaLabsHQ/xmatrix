@@ -615,3 +615,51 @@ test("put_dns proxies only A, AAAA and CNAME records, and only when asked", () =
     "a TXT record keeps the word as content");
   assert.equal(typeof parse("@cloudflare:put_dns:xmatrix.page CNAME beta two words"), "string");
 });
+
+test("list_worker_secrets and put_worker_secret manage Worker secrets without echoing values", async () => {
+  const parse = (body) => {
+    const parsed = parseActionCommand("cloudflare", body);
+    return CLOUDFLARE_ACTIONS[parsed.actionId].parse(parsed.statement);
+  };
+  assert.deepEqual(parse("@cloudflare:list_worker_secrets:billing-api"), { script: "billing-api" });
+  assert.deepEqual(parse("@cloudflare:put_worker_secret:billing-api SENTRY_DSN https://pub@o1.ingest.sentry.io/42"), {
+    script: "billing-api", name: "SENTRY_DSN", value: "https://pub@o1.ingest.sentry.io/42",
+  });
+  assert.equal(typeof parse("@cloudflare:put_worker_secret:billing-api 1BAD val"), "string");
+  assert.equal(typeof parse("@cloudflare:put_worker_secret:billing-api SENTRY_DSN"), "string");
+  assert.equal(typeof parse("@cloudflare:put_worker_secret:billing-api SENTRY_DSN line1\nline2"), "string");
+
+  const secretValue = "https://0123456789abcdef0123456789abcdef@o12345.ingest.us.sentry.io/999";
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const method = init.method ?? "GET";
+    const path = new URL(String(url)).pathname.replace("/client/v4/", "");
+    calls.push({ method, path, body: init.body ? JSON.parse(init.body) : undefined });
+    if (path === "accounts") return Response.json({ success: true, result: [{ id: ACCOUNT, name: "Acme" }] });
+    if (method === "GET" && path === `accounts/${ACCOUNT}/workers/scripts/billing-api/secrets`) {
+      return Response.json({ success: true, result: [{ name: "SENTRY_DSN", type: "secret_text" }] });
+    }
+    if (method === "PUT" && path === `accounts/${ACCOUNT}/workers/scripts/billing-api/secrets`) {
+      return Response.json({ success: true, result: { name: "SENTRY_DSN", type: "secret_text" } });
+    }
+    return Response.json({ success: false, errors: [{ code: 7003, message: "no route" }] }, { status: 404 });
+  };
+  try {
+    const creds = { apiToken: "cf-token", accountId: ACCOUNT };
+    const listed = await CLOUDFLARE_ACTIONS.list_worker_secrets.execute({ credentials: creds }, { script: "billing-api" });
+    assert.match(listed.summary, /billing-api: 1 secret/u);
+    assert.match(listed.summary, /SENTRY_DSN\s+secret_text/u);
+
+    const put = await CLOUDFLARE_ACTIONS.put_worker_secret.execute({ credentials: creds }, {
+      script: "billing-api", name: "SENTRY_DSN", value: secretValue,
+    });
+    assert.equal(put.summary, `Set secret SENTRY_DSN on Worker billing-api (${secretValue.length} chars).`);
+    assert.ok(!put.summary.includes(secretValue), "receipt never echoes the secret value");
+    const putCall = calls.find((c) => c.method === "PUT");
+    assert.deepEqual(putCall?.body, { name: "SENTRY_DSN", text: secretValue, type: "secret_text" });
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
