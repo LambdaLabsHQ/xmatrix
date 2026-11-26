@@ -26,6 +26,8 @@ To keep a connected computer stable across reinstalls under your account, the da
 
 **What reaches the Hub:** Channel messages, threads, Pages, attachments, Space/Agent/Machine metadata, normalized quota facts, connected app results, and encrypted Saved Secrets (whose values are never shown in messages or Agent catalogs and are injected into a Run only under its access policy—`auto` or per-Run `ask` approval).
 
+**Where your account came from.** When your account is created, the Hub records once the domain of the website that sent you to xMatrix (for example `x.com`, or `direct`) and the `?ref=` tag on the link you followed, so we can tell which channels bring people. Never the full address, and nothing is stored on your device for it; the Web carries it only in its own links and page memory until the account exists. It is deleted with your account.
+
 **Machine connections and internal access boundary:**
 
 - Connecting a machine requires explicit approval by the signed-in owner (not an open default-on tunnel). You can disconnect a machine or stop any running Agent at any time, and external connectors enforce per-app read-only, ask, or read-write policies.

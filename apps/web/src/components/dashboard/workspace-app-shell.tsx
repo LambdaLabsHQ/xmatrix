@@ -5,6 +5,7 @@ import { isPlaceholderHumanName } from "@xmatrix/protocol";
 import { NameYourselfStep } from "@/components/auth/name-yourself-step";
 import { NEW_ACCOUNT_FLAG, NewAccountStep } from "@/components/auth/new-account-step";
 import { useAuth } from "@/lib/auth-context";
+import { sendSignupSource } from "@/lib/signup-source-send";
 import { useWorkspaceShellState } from "./use-workspace-shell-state";
 import { useWorkspaceShellActions } from "./use-workspace-shell-actions";
 import { WorkspaceShellView } from "./workspace-shell-view";
@@ -18,6 +19,10 @@ export default function WorkspaceAppShell({ children }: { children?: ReactNode }
   const [named, setNamed] = useState(false);
   const [newAccount, setNewAccount] = useState(false);
   useEffect(() => setNewAccount(new URLSearchParams(window.location.search).has(NEW_ACCOUNT_FLAG)), []);
+  const token = session?.access_token;
+  useEffect(() => {
+    if (token) sendSignupSource(token, { newAccount: new URLSearchParams(window.location.search).has(NEW_ACCOUNT_FLAG) });
+  }, [token]);
   if (user && session && !named && isPlaceholderHumanName(user.name, user.id)) {
     return <NameYourselfStep token={session.access_token} email={user.email} onNamed={() => setNamed(true)} />;
   }

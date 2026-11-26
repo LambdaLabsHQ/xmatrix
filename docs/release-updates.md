@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: a new account records where it came from
+
+Daniel asked how a burst of seven new accounts found xMatrix, and nothing said.
+A new account now records once the domain of the site that sent the person
+(or `direct`) and the link's `?ref=` tag, in `control.auth_users` (migration
+0277, expand). The Web reads them when a visit's first page loads, holds them
+in page memory, and carries them in the URL only across its own full page
+loads: xmatrix.page to xmatrix.sh, plain links to `/login` and `/app`, and a
+Google or GitHub sign-in's new-account return. The new account's first page
+sends them to `POST /api/me/signup-source`; the Hub keeps them only for an
+account under 24 hours old that has none. Nothing is written to the device,
+and no full URL or page view is kept. The daily new-user funnel prints
+`source` per person. Privacy guide and policy updated. Hub and Web, with a
+PostgreSQL expand migration.
 ## Unreleased: a topped-up prepaid account shows its balance again without running a turn
 
 An Agent whose provider said "Insufficient Balance" was held as refused for up to a year, and later balance readings were discarded, so after a top-up `xmatrix agent list` and the Agents page still showed 0% and unnamed `@auto` skipped it until someone named it and a turn succeeded. A provider reading that says the account covers requests again (DeepSeek's balance endpoint, `allowed: true`) now replaces that hold. `xmatrix agent list` asks the daemons to read quota again, like the Agents page, so the next list shows the balance. The balance endpoint is free. Hub/DB and CLI. Recovery is a CI-validated beta reverting this change.

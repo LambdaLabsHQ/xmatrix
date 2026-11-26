@@ -1,6 +1,7 @@
 "use client";
 
 import { AUTH_TOKEN_REJECTED_EVENT } from "@/lib/auth-events";
+import { withCurrentSignupSource } from "@/lib/signup-source";
 import { subscribeResume } from "@/lib/connectivity/connectivity";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -692,7 +693,8 @@ function newAccountCallbackUrl(callbackURL: string): string {
   // Only the app itself says so; an outside app's authorization query must stay as it was signed.
   if (url.pathname !== "/app" && !url.pathname.startsWith("/app/")) return callbackURL;
   url.searchParams.set("new_account", "1");
-  return url.toString();
+  // The new account's first page tells the Hub where the visit came from.
+  return withCurrentSignupSource(url.toString());
 }
 
 function isBetterAuthGoogleEnabled(): boolean {

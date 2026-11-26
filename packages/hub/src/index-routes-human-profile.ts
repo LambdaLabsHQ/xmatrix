@@ -1,10 +1,11 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import {
   HUB_ROUTES,
   canonicalHumanHandle,
   humanDisplayNameRefusal,
   humanHandleRefusal,
   humanTimeZoneRefusal,
+  parseSignupSource,
   type HumanProfile,
   type HumanProfileEdit,
 } from "@xmatrix/protocol";
@@ -20,6 +21,7 @@ import {
   requestDiagnosticsRegime,
   requestFromPersonsConnection,
 } from "./diagnostics-consent";
+import { recordSignupSource } from "./signup-source";
 
 export function registerIndexRoutesHumanProfile(app: Hono<{ Bindings: Env }>): void {
   app.patch(HUB_ROUTES.me_profile, async (c) => {
@@ -114,20 +116,35 @@ export function registerIndexRoutesHumanProfile(app: Hono<{ Bindings: Env }>): v
   });
   // Only the person's own explicit act writes here: ticking the opt-in box or
   // turning the switch. Defaults and dismissed notices never do.
-  app.put(HUB_ROUTES.me_diagnostics, async (c) => {
-    try {
-      const authUser = requireHumanAuth(await requireAuth(c.req.raw, c.env));
-      let body: unknown;
-      try { body = await c.req.json<unknown>(); }
-      catch { return c.json({ code: "invalid_json", message: "Request body must be valid JSON" }, 400); }
-      const choice = parseDiagnosticsChoice((body as { choice?: unknown } | null)?.choice);
-      if (!choice) return c.json({ code: "invalid_choice", message: "choice must be opted-in or opted-out" }, 400);
-      if (!await recordDiagnosticsChoice(c.env, authUser.id, choice)) {
-        return c.json({ code: "account_not_found", message: "Account not found" }, 404);
-      }
-      return c.json({ choice }, 200, { "cache-control": "private, no-store" });
-    } catch (error) {
-      return c.json({ code: "diagnostics_choice_failed", message: (error as Error).message }, requestErrorStatus(error));
+  app.put(HUB_ROUTES.me_diagnostics, (c) => signedInJsonRoute(c, "diagnostics_choice_failed", async (userId, body) => {
+    const choice = parseDiagnosticsChoice((body as { choice?: unknown } | null)?.choice);
+    if (!choice) return c.json({ code: "invalid_choice", message: "choice must be opted-in or opted-out" }, 400);
+    if (!await recordDiagnosticsChoice(c.env, userId, choice)) {
+      return c.json({ code: "account_not_found", message: "Account not found" }, 404);
     }
-  });
+    return c.json({ choice }, 200, { "cache-control": "private, no-store" });
+  }));
+
+  // Where a new account came from, sent once by its first page. Taken only
+  // while the account is new and has none, so a later visit cannot rewrite it.
+  app.post(HUB_ROUTES.me_signup_source, (c) => signedInJsonRoute(c, "signup_source_failed", async (userId, body) => {
+    const source = parseSignupSource(body);
+    if (!source) return c.json({ code: "invalid_source", message: "host must be a domain or direct" }, 400);
+    const recorded = await recordSignupSource(c.env, userId, source);
+    return c.json({ recorded }, 200, { "cache-control": "private, no-store" });
+  }));
+}
+
+/** A signed-in person's JSON request: its body to `handle`, or the refusal, or the failure under `failureCode`. */
+async function signedInJsonRoute(c: Context<{ Bindings: Env }>, failureCode: string,
+  handle: (userId: string, body: unknown) => Promise<Response>): Promise<Response> {
+  try {
+    const authUser = requireHumanAuth(await requireAuth(c.req.raw, c.env));
+    let body: unknown;
+    try { body = await c.req.json<unknown>(); }
+    catch { return c.json({ code: "invalid_json", message: "Request body must be valid JSON" }, 400); }
+    return await handle(authUser.id, body);
+  } catch (error) {
+    return c.json({ code: failureCode, message: (error as Error).message }, requestErrorStatus(error));
+  }
 }
