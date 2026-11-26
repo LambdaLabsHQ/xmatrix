@@ -6,8 +6,7 @@ import { WEB_PROXY_ROUTES, type SetupIntentStatus } from "@xmatrix/protocol";
 import { XMatrixApiError, xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
-
-const POLL_MS = 2_000;
+import { setupIntentPollIntervalMs, setupIntentReported } from "./connect-machine";
 
 function storageKey(spaceId: string): string {
   return `xmatrix:setup-intent:${spaceId}`;
@@ -32,13 +31,15 @@ function remember(spaceId: string, intentId: string | null): void {
 
 /**
  * The setup command this page shows for a Space and what has happened since:
- * one intent per Space and tab, kept across a reload, replaced once expired.
- * It is read every two seconds while the page waits, and not once the machine
- * reports an installed harness: from there the installed-harness switches,
- * which read the same machine report, carry on.
+ * one intent per Space and tab, kept across a reload. A stale intent restored
+ * from sessionStorage is replaced once on reload; an intent created in this
+ * session stops polling when it expires after 30 minutes rather than minting
+ * new intents indefinitely in an unattended tab. Polling slows while waiting
+ * idle and stops once the machine reports an installed harness.
  */
 export function useSetupIntent(spaceId: string | null, token: string | undefined, userId: string | undefined) {
   const [intentId, setIntentId] = useState<string | null>(() => (spaceId ? rememberedIntent(spaceId) : null));
+  const [restoredFromStorage, setRestoredFromStorage] = useState<boolean>(() => Boolean(spaceId && rememberedIntent(spaceId)));
   const [shownAt, setShownAt] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -46,7 +47,9 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    setIntentId(spaceId ? rememberedIntent(spaceId) : null);
+    const saved = spaceId ? rememberedIntent(spaceId) : null;
+    setIntentId(saved);
+    setRestoredFromStorage(Boolean(saved));
   }, [spaceId]);
 
   useEffect(() => {
@@ -59,6 +62,7 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
       if (cancelled) return;
       remember(spaceId, created.intentId);
       setIntentId(created.intentId);
+      setRestoredFromStorage(false);
       setShownAt(Date.now());
     }).catch((reason: unknown) => {
       if (!cancelled) setError(userErrorMessage(reason, "Couldn't prepare a setup command"));
@@ -72,22 +76,27 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
       url: WEB_PROXY_ROUTES.setup_intent(intentId!), token, signal,
     }),
     enabled: Boolean(intentId && token),
-    refetchInterval: (query) => (query.state.error || reported(query.state.data) ? false : POLL_MS),
+    refetchInterval: (query) => (query.state.error ? false : setupIntentPollIntervalMs(query.state.data, Date.now() - shownAt)),
   });
 
-  const machineReported = reported(status.data);
+  const machineReported = setupIntentReported(status.data);
   useEffect(() => {
     if (!machineReported || !userId) return;
     void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons") });
   }, [machineReported, queryClient, userId]);
 
-  // An expired or unknown command is replaced by a fresh one.
-  const expired = status.error instanceof XMatrixApiError && status.error.status === 404;
+  // A stale remembered command from a reload is replaced once; a freshly
+  // created command that sat idle until expiry stops until the user asks again.
+  const statusExpired = status.error instanceof XMatrixApiError && status.error.status === 404;
+  const expired = statusExpired && !restoredFromStorage;
   useEffect(() => {
-    if (!expired || !spaceId) return;
+    if (!statusExpired || !spaceId) return;
     remember(spaceId, null);
-    setIntentId(null);
-  }, [expired, spaceId]);
+    if (restoredFromStorage) {
+      setIntentId(null);
+      setRestoredFromStorage(false);
+    }
+  }, [statusExpired, restoredFromStorage, spaceId]);
 
   const act = useCallback(async (work: () => Promise<unknown>) => {
     setBusy(true);
@@ -110,16 +119,19 @@ export function useSetupIntent(spaceId: string | null, token: string | undefined
   }));
   const retry = () => {
     setError(null);
+    if (expired) {
+      if (spaceId) remember(spaceId, null);
+      if (intentId) queryClient.removeQueries({ queryKey: ["setup-intent", intentId] });
+      setIntentId(null);
+      setPreparationAttempt((attempt) => attempt + 1);
+      return;
+    }
     if (intentId) void status.refetch();
     else setPreparationAttempt((attempt) => attempt + 1);
   };
   return {
-    intentId, status: status.error ? undefined : status.data, shownAt,
-    error: error || (!expired && status.error ? userErrorMessage(status.error, "Couldn't prepare a setup command", "Couldn't check the connection") : null),
+    intentId, status: status.error ? undefined : status.data, shownAt, expired,
+    error: error || (!statusExpired && status.error ? userErrorMessage(status.error, "Couldn't prepare a setup command", "Couldn't check the connection") : null),
     busy, retrying: status.isFetching, approve, decline, retry,
   };
-}
-
-function reported(status: SetupIntentStatus | undefined): boolean {
-  return status?.phase === "connected" && Boolean(status.machine?.harnesses?.some((harness) => harness.installed));
 }

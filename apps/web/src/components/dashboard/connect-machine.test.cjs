@@ -3,7 +3,8 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  connectStep, defaultInstallPlatform, setupInstallCommand, terminalInstallPlatform,
+  connectStep, defaultInstallPlatform, setupInstallCommand, setupIntentNeeded,
+  setupIntentPollIntervalMs, setupIntentReported, terminalInstallPlatform,
 } = require("./connect-machine.ts");
 
 const INTENT = "0123456789abcdef0123456789abcdef";
@@ -64,4 +65,45 @@ test("a signed-in terminal's own platform picks the installers it is shown", () 
   assert.equal(terminalInstallPlatform("macos-aarch64"), "unix");
   assert.equal(terminalInstallPlatform("linux-x86_64"), "unix");
   assert.equal(terminalInstallPlatform(undefined), undefined);
+});
+
+test("setup intents are only created when a terminal setup command is actually shown", () => {
+  const emptyLinux = {
+    another: false,
+    phone: false,
+    appFirst: false,
+    platformReady: true,
+    catalogSettled: true,
+    daemonsSettled: true,
+    hasEnabledAgents: false,
+    hasInstalledCandidates: false,
+  };
+  assert.equal(setupIntentNeeded(emptyLinux), true);
+  assert.equal(setupIntentNeeded({ ...emptyLinux, phone: true }), false);
+  assert.equal(setupIntentNeeded({ ...emptyLinux, platformReady: false }), false);
+  assert.equal(setupIntentNeeded({ ...emptyLinux, appFirst: true }), false);
+  assert.equal(setupIntentNeeded({ ...emptyLinux, catalogSettled: false }), false);
+  assert.equal(setupIntentNeeded({ ...emptyLinux, daemonsSettled: false }), false);
+  assert.equal(setupIntentNeeded({ ...emptyLinux, hasEnabledAgents: true }), false);
+  assert.equal(setupIntentNeeded({ ...emptyLinux, hasInstalledCandidates: true }), false);
+  // Adding another machine explicitly asks for a setup command even when the Space already has agents.
+  assert.equal(setupIntentNeeded({
+    ...emptyLinux, another: true, appFirst: true, hasEnabledAgents: true, hasInstalledCandidates: true,
+  }), true);
+  assert.equal(setupIntentNeeded({ ...emptyLinux, another: true, phone: true }), false);
+});
+
+test("setup intent polling backs off while waiting idle, stays fast once active, and stops when reported", () => {
+  const waiting = status({ phase: "waiting" });
+  assert.equal(setupIntentPollIntervalMs(undefined, 0), 2_000);
+  assert.equal(setupIntentPollIntervalMs(waiting, 60_000), 2_000);
+  assert.equal(setupIntentPollIntervalMs(waiting, 2 * 60_000), 5_000);
+  assert.equal(setupIntentPollIntervalMs(waiting, 10 * 60_000), 15_000);
+
+  const terminal = { userCode: "WDJB-MJHT", hostname: "daniel-laptop" };
+  assert.equal(setupIntentPollIntervalMs(status({ phase: "approval", terminal }), 20 * 60_000), 2_000);
+  assert.equal(setupIntentPollIntervalMs(status({ phase: "connecting", terminal }), 20 * 60_000), 2_000);
+  assert.equal(setupIntentPollIntervalMs(connected([{ id: "gemini", installed: false }]), 20 * 60_000), 2_000);
+  assert.equal(setupIntentReported(connected([{ id: "claude", installed: true }])), true);
+  assert.equal(setupIntentPollIntervalMs(connected([{ id: "claude", installed: true }]), 1_000), false);
 });

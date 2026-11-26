@@ -46,6 +46,46 @@ export type ConnectStep =
 const CHECK_TERMINAL_AFTER_MS = 45_000;
 const TRY_DESKTOP_AFTER_MS = 3 * 60_000;
 
+const ACTIVE_POLL_MS = 2_000;
+const SLOW_WAIT_POLL_MS = 5_000;
+const IDLE_WAIT_POLL_MS = 15_000;
+const SLOW_WAIT_AFTER_MS = 2 * 60_000;
+const IDLE_WAIT_AFTER_MS = 10 * 60_000;
+
+export interface SetupIntentNeed {
+  another: boolean;
+  phone: boolean;
+  appFirst: boolean;
+  platformReady: boolean;
+  catalogSettled: boolean;
+  daemonsSettled: boolean;
+  hasEnabledAgents: boolean;
+  hasInstalledCandidates: boolean;
+}
+
+/** Whether this setup card actually shows a terminal command and needs a live setup intent. */
+export function setupIntentNeeded(input: SetupIntentNeed): boolean {
+  if (input.phone) return false;
+  if (input.another) return true;
+  if (!input.platformReady || input.appFirst) return false;
+  if (!input.catalogSettled || !input.daemonsSettled) return false;
+  return !input.hasEnabledAgents && !input.hasInstalledCandidates;
+}
+
+/** Whether the connected machine already reported at least one installed harness. */
+export function setupIntentReported(status: SetupIntentStatus | undefined): boolean {
+  return status?.phase === "connected" && Boolean(status.machine?.harnesses?.some((harness) => harness.installed));
+}
+
+/** Adaptive poll cadence: snappy while a terminal is active or just shown, slower while idle, stopped once reported. */
+export function setupIntentPollIntervalMs(status: SetupIntentStatus | undefined, elapsedMs: number): number | false {
+  if (setupIntentReported(status)) return false;
+  if (status && status.phase !== "waiting") return ACTIVE_POLL_MS;
+  if (elapsedMs >= IDLE_WAIT_AFTER_MS) return IDLE_WAIT_POLL_MS;
+  if (elapsedMs >= SLOW_WAIT_AFTER_MS) return SLOW_WAIT_POLL_MS;
+  return ACTIVE_POLL_MS;
+}
+
 export function connectStep(status: SetupIntentStatus, waitingForMs: number): ConnectStep {
   const hostname = status.terminal?.hostname || "A terminal";
   if (status.phase === "waiting") {

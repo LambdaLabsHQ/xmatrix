@@ -24,7 +24,9 @@ import {
 } from "./app-sign-in";
 import {
   boundedRedemptionExpiry,
+  DEVICE_AUTH_PRUNE_INTERVAL_MS,
   DeviceAuthRedemptionCoordinator,
+  shouldPruneDeviceAuth,
   type DeviceAuthRedemptionResult,
 } from "./device-auth-redemption";
 
@@ -128,6 +130,7 @@ interface StartDeviceAuthResponse {
 export class DeviceAuthBroker extends DurableObject<Env> {
   private readonly redemptionCoordinator = new DeviceAuthRedemptionCoordinator();
   private attemptPruneCursor: string | undefined;
+  private lastPrunedAt = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -135,7 +138,11 @@ export class DeviceAuthBroker extends DurableObject<Env> {
   }
 
   async fetch(request: Request): Promise<Response> {
-    await this.pruneExpiredSessions();
+    const now = Date.now();
+    if (shouldPruneDeviceAuth(this.lastPrunedAt, now, DEVICE_AUTH_PRUNE_INTERVAL_MS)) {
+      await this.pruneExpiredSessions(now);
+      this.lastPrunedAt = now;
+    }
 
     const url = new URL(request.url);
     if (request.method !== "POST") {
@@ -790,8 +797,7 @@ export class DeviceAuthBroker extends DurableObject<Env> {
     );
   }
 
-  private async pruneExpiredSessions(): Promise<void> {
-    const now = Date.now();
+  private async pruneExpiredSessions(now = Date.now()): Promise<void> {
     const sessions = await this.ctx.storage.list<DeviceAuthSession>({
       prefix: "device-auth:",
     });

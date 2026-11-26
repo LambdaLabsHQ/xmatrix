@@ -128,3 +128,45 @@ test("a connected machine with no agent offers the installer of whichever agent 
   await picker.getByRole("option", { name: "Qwen Code" }).click();
   await expect(picker).toContainText("npm install -g @qwen-code/qwen-code@latest");
 });
+
+test("an expired setup command stops polling until the user asks for a fresh one", async ({ page }) => {
+  const connect = await openWithIntent(page, { ...base, phase: "waiting" });
+  await expect(connect).toContainText(`bash -s -- --connect ${INTENT}`);
+  const initialCreates = (await fixtureRequests(page, "intent-create")).length;
+  expect(initialCreates).toBe(1);
+
+  await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`,
+    responder: { kind: "static", status: 404, json: { error: "Setup request not found", code: "setup_intent_not_found" } } });
+  await expect(connect.getByRole("alert")).toContainText("This setup command expired.", { timeout: 20_000 });
+  await expect(connect).not.toContainText("Waiting for your computer…");
+  // Must not auto-create a fresh intent loop in an unattended tab.
+  expect((await fixtureRequests(page, "intent-create")).length).toBe(initialCreates);
+
+  const SECOND = "fedcba9876543210fedcba9876543210";
+  await fixtureRule(page, { id: "intent-create", pattern: "**/api/xmatrix/setup-intents",
+    responder: { kind: "static", json: { ...base, intentId: SECOND, phase: "waiting" } } });
+  await fixtureRule(page, { id: "intent-read-second", pattern: `**/api/xmatrix/setup-intents/${SECOND}`,
+    responder: { kind: "static", json: { ...base, intentId: SECOND, phase: "waiting" } } });
+  await connect.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(connect).toContainText(`bash -s -- --connect ${SECOND}`);
+  await expect(connect).toContainText("Waiting for your computer…");
+  await expect(connect.getByRole("alert")).toHaveCount(0);
+});
+
+test.describe("macOS desktop browser", () => {
+  test.use({
+    ...E2E_DESKTOP_CONTEXT,
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  });
+
+  test("app-first setup does not create or poll a setup intent until the terminal path is chosen", async ({ page }) => {
+    const connect = await openWithIntent(page, { ...base, phase: "waiting" });
+    await expect(connect).toContainText("Get the xMatrix app on this computer");
+    expect(await fixtureRequests(page, "intent-create")).toHaveLength(0);
+    expect(await fixtureRequests(page, "intent-read")).toHaveLength(0);
+
+    await connect.getByRole("button", { name: "Use a terminal instead" }).click();
+    await expect(connect).toContainText(`bash -s -- --connect ${INTENT}`);
+    await expect.poll(async () => (await fixtureRequests(page, "intent-create")).length).toBe(1);
+  });
+});
