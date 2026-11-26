@@ -42,6 +42,7 @@ Leave unset to keep the feature off.
 | --- | --- | --- |
 | `APPLE_SUBSCRIPTIONS_CONFIG` | secret | Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases. |
 | `CONNECTOR_DINGTALK_COMPANY_CONFIG` | secret | Verified company-console JSON: suite-ticket protocol, sync-http delivery, numeric suiteId, developerCorpId, appId and approved templateId/templateField. Requires complete native suite keys; unset keeps company routes and actions unavailable. |
+| `CONNECTOR_GOOGLEPLAY_STORAGE_SCOPE` | var | Set to `1` once Google OAuth verification approves `devstorage.read_only` for Google Play Console bulk reports (`store_reports`). Unset keeps Google Play OAuth on its two verified scopes. |
 | `DIAGNOSTICS_AE` | binding | Analytics Engine dataset for client diagnostics. Unset: diagnostics are dropped. |
 | `DIAGNOSTICS_HASH_SECRET` | secret | Key that pseudonymizes users in diagnostics; defaults to BETTER_AUTH_SECRET. |
 | `GITHUB_APP_CLIENT_ID` | var | GitHub App OAuth client id (public). Connect and GitHub account linking need it with the other GITHUB_APP_* values. |

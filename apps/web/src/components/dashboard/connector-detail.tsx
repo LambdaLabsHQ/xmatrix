@@ -89,6 +89,7 @@ export function ConnectorDetailPage({
   connector, Icon, connection, spaceId, token, userId, members, oauth, native,
   executions, executionsLoading, executionsError, notice, error, connecting, checking, disconnecting, removing = false,
   onBack, onConnect, onCheck, onDisconnect, onRemove, onRefreshExecutions, onSaveMetadata, ensureConnectionRow, refreshConnections,
+  autoSyncPlayBucket = false,
 }: {
   connector: AppConnectorManifest;
   Icon: ComponentType<{ className?: string }>;
@@ -122,6 +123,8 @@ export function ConnectorDetailPage({
   /** Creates the unconnected row credentials and links are stored on. */
   ensureConnectionRow: () => Promise<void>;
   refreshConnections: () => Promise<void>;
+  /** Automatically attempt silent Play Console bucket sync right after Google Play OAuth connect. */
+  autoSyncPlayBucket?: boolean;
 }) {
   const available = connector.status === "available";
   const configured = connection?.status === "configured";
@@ -252,7 +255,7 @@ export function ConnectorDetailPage({
         {connector.id === "googleplay" && configured ? (
           <ConnectorSection title="Bulk reports (Cloud Storage)" testId="google-play-reports-bucket"
             note="Optional for @googleplay:store_reports. Sync your Play Console bucket ID in one click from Chrome, or paste from Play Console → Download reports → Copy Cloud Storage URI.">
-            <GooglePlayReportsBucket key={spaceId} credentials={credentials} />
+            <GooglePlayReportsBucket key={spaceId} credentials={credentials} autoSync={autoSyncPlayBucket} />
           </ConnectorSection>
         ) : null}
 

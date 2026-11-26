@@ -27,6 +27,8 @@ import { xOAuthFields } from "./x-oauth";
 
 const STATE_TTL_MS = 10 * 60_000;
 const REFRESH_MARGIN_MS = 2 * 60_000;
+/** Read-only Cloud Storage scope for Google Play Console bulk export buckets (`pubsite_prod_rev_*`). */
+export const GOOGLE_PLAY_STORAGE_SCOPE = "https://www.googleapis.com/auth/devstorage.read_only";
 /* Each Google provider holds its own bounded grant, connection and token. */
 const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   google: { scope: "https://www.googleapis.com/auth/drive.file", name: "per-file" },
@@ -54,17 +56,31 @@ export function grantFieldsForgottenOnDisconnect(providerId: string): Record<str
 /* Providers that sign in with another provider's company OAuth client. */
 const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlecalendar: "google", googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googleads: "google", googlebusinessprofile: "google", gcp: "google", googleplay: "google" };
 
-function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
+/** Whether this Hub requests Google Play's Cloud Storage read scope (`devstorage.read_only`) on OAuth connect. */
+export function googlePlayStorageScopeEnabled(env?: Env): boolean {
+  const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === "googleplay");
+  return Boolean(manifest?.oauth?.scopes.includes(GOOGLE_PLAY_STORAGE_SCOPE)
+    || (env && envValue(env, "CONNECTOR_GOOGLEPLAY_STORAGE_SCOPE") === "1"));
+}
+
+function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean, expectedScopes?: readonly string[]): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
   const expires = Number(payload.expires_in);
   const scopes = typeof payload.scope === "string" ? payload.scope.split(/\s+/u).filter(Boolean) : [];
-  const expected = APP_CONNECTOR_PROVIDER_MANIFESTS.find(candidate => candidate.id === providerId)!.oauth!.scopes;
-  // Old Search Console grants remain refreshable; only a new consent can add verification.
+  const expected = expectedScopes ?? APP_CONNECTOR_PROVIDER_MANIFESTS.find(candidate => candidate.id === providerId)!.oauth!.scopes;
+  // Old Search Console and Google Play grants remain refreshable across incremental scope additions;
+  // only a new consent requires the newly added scope.
   // The identity scopes only name the account; a grant without them (older ones) is still whole.
+  const allowed = !initial && providerId === "googleplay"
+    ? [...new Set([...expected, GOOGLE_PLAY_STORAGE_SCOPE])]
+    : expected;
   const required = expected.filter(value => !(GOOGLE_IDENTITY_SCOPES as readonly string[]).includes(value));
+  const requiredForGrant = !initial && providerId === "googleplay"
+    ? required.filter(value => value !== GOOGLE_PLAY_STORAGE_SCOPE)
+    : required;
   const validScopes = scopes.includes(scope) && new Set(scopes).size === scopes.length &&
-    scopes.every(value => expected.includes(value)) && ((!initial && providerId === "googlesearchconsole") ||
-      required.every(value => scopes.includes(value)));
+    scopes.every(value => allowed.includes(value)) && ((!initial && providerId === "googlesearchconsole") ||
+      requiredForGrant.every(value => scopes.includes(value)));
   if (!Number.isFinite(expires) || expires <= 0 || expires > 86_400 ||
       typeof payload.token_type !== "string" || payload.token_type.toLowerCase() !== "bearer" ||
       ((initial || payload.scope !== undefined) && !validScopes) ||
@@ -109,7 +125,11 @@ export function oauthClient(env: Env, providerId: string): OAuthClient | undefin
   const clientSecret = envValue(env, manifest.oauth.flow === "composio" ? "CONNECTOR_COMPOSIO_API_KEY" : `${prefix}_CLIENT_SECRET`);
   if (!clientId || !clientSecret) return undefined;
   if (manifest.oauth.flow === "stripe-app" && !stripeAppSecretsReady(env)) return undefined;
-  return { manifest: manifest as OAuthClient["manifest"], clientId, clientSecret };
+  const effectiveManifest = providerId === "googleplay" && googlePlayStorageScopeEnabled(env)
+    && !manifest.oauth.scopes.includes(GOOGLE_PLAY_STORAGE_SCOPE)
+    ? { ...manifest, oauth: { ...manifest.oauth, scopes: [...manifest.oauth.scopes, GOOGLE_PLAY_STORAGE_SCOPE] } }
+    : manifest;
+  return { manifest: effectiveManifest as OAuthClient["manifest"], clientId, clientSecret };
 }
 
 /** Providers whose one-click OAuth is configured on this Hub. */
@@ -261,7 +281,7 @@ export function oauthTokenFields(client: OAuthClient, payload: Record<string, un
     validatePagerDutyGrant(payload);
     fields.oauthScopes = String(payload.scope);
   }
-  if (client.manifest.id === "googlesearchconsole" && typeof payload.scope === "string") {
+  if ((client.manifest.id === "googlesearchconsole" || client.manifest.id === "googleplay") && typeof payload.scope === "string") {
     fields.oauthScopes = payload.scope;
   }
   return fields;
@@ -321,7 +341,7 @@ export async function exchangeOAuthGrant(client: OAuthClient, code: string, redi
     return { fields: await xOAuthFields(client, payload, String(claims.userId),
       typeof claims.accountId === "string" ? claims.accountId : undefined, meter) };
   }
-  if (GOOGLE_GRANTS[client.manifest.id]) validateGoogleGrant(client.manifest.id, payload, true);
+  if (GOOGLE_GRANTS[client.manifest.id]) validateGoogleGrant(client.manifest.id, payload, true, client.manifest.oauth.scopes);
   if (client.manifest.id === "bitbucket") validateBitbucketGrant(payload, true);
   const fields = oauthTokenFields(client, payload);
   const vercelFields = client.manifest.oauth.flow === "vercel-integration" ? await vercelOAuthFields(client, payload) : {};
@@ -437,7 +457,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
     return undefined;
   }
   const payload = await tokenRequest(client, { grant_type: "refresh_token", refresh_token: values.oauthRefreshToken });
-  if (GOOGLE_GRANTS[providerId]) validateGoogleGrant(providerId, payload, false);
+  if (GOOGLE_GRANTS[providerId]) validateGoogleGrant(providerId, payload, false, client.manifest.oauth.scopes);
   if (providerId === "bitbucket") validateBitbucketGrant(payload, false);
   if (providerId === "stripe") validateStripeGrant(payload, values.stripeUserId);
   if (providerId === "notion" && (typeof payload.refresh_token !== "string" || !payload.refresh_token)) {

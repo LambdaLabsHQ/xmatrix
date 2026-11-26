@@ -3,6 +3,7 @@ import { importPKCS8, SignJWT } from "jose";
 import { PACKAGE_NAME, play, playReporting } from "../google-play-api";
 import { oneLine, record, text } from "../event-format";
 import { ConnectorRemedy, providerJson, ProviderRequestError } from "../http";
+import { GOOGLE_PLAY_STORAGE_SCOPE } from "../oauth";
 import type { ConnectorAction } from "../provider";
 import { quoteRetrievedText } from "./common";
 import { cell, keyedOptions } from "./google-report";
@@ -342,7 +343,33 @@ function currentMonthYyyymm(now = Date.now()): string {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-async function fetchGcsObject(bucket: string, objectName: string, token: string, authMode: "oauth" | "service_account"): Promise<Uint8Array | undefined> {
+function grantedStorageScope(credentials: Readonly<Record<string, string>>): boolean | undefined {
+  const scopes = credentials.oauthScopes?.trim();
+  if (!scopes) return undefined;
+  return scopes.split(/\s+/u).includes(GOOGLE_PLAY_STORAGE_SCOPE);
+}
+
+function storageRefusedError(status: number, objectName: string, authMode: "oauth" | "service_account",
+  credentials: Readonly<Record<string, string>>, storageScopeEnabled: boolean): ProviderRequestError {
+  if (status === 403 && authMode === "oauth") {
+    if (grantedStorageScope(credentials) === true) {
+      return new ProviderRequestError(403,
+        "Google Cloud Storage refused the connected Google account for Play Console reports (grant View app information and download bulk reports / View financial data in Play Console → Users and permissions)");
+    }
+    if (storageScopeEnabled) {
+      return new ConnectorRemedy(401,
+        "Reconnect Google Play Console in Apps to grant Cloud Storage read access (devstorage.read_only) for bulk reports",
+        { kind: "reconnect" });
+    }
+    return new ProviderRequestError(403,
+      "Google Cloud Storage refused the Google Play OAuth token because devstorage.read_only is awaiting Google OAuth verification (once verified, reconnecting Google Play Console grants read access automatically; optional reportsServiceAccount also works in Apps → Google Play Console)");
+  }
+  const hint = status === 403 ? " (grant the service account View app information & download bulk reports / View financial data in Play Console)" : "";
+  return new ProviderRequestError(status, `Google Cloud Storage returned ${status} for ${objectName}${hint}`);
+}
+
+async function fetchGcsObject(bucket: string, objectName: string, token: string, authMode: "oauth" | "service_account",
+  credentials: Readonly<Record<string, string>>, storageScopeEnabled: boolean): Promise<Uint8Array | undefined> {
   const url = new URL(`/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectName)}`, GCS_ORIGIN);
   url.searchParams.set("alt", "media");
   const signal = AbortSignal.timeout(25_000);
@@ -351,13 +378,7 @@ async function fetchGcsObject(bucket: string, objectName: string, token: string,
   if (response.status === 404) { void response.body?.cancel().catch(() => undefined); return undefined; }
   const bytes = await readBoundedStream(response.body, MAX_GCS_BYTES, () => new ProviderRequestError(502, "Play Console report file is too large"), signal);
   if (!response.ok) {
-    if (response.status === 403 && authMode === "oauth") {
-      throw new ConnectorRemedy(403,
-        "Google Cloud Storage refused the current Google Play OAuth token (the connected grant does not include devstorage.read_only yet, or lacks View app information & download bulk reports in Play Console). Save optional reportsServiceAccount as a fallback until storage scope is enabled",
-        { kind: "credential", field: "reportsServiceAccount" });
-    }
-    const hint = response.status === 403 ? " (grant the service account View app information & download bulk reports / View financial data in Play Console)" : "";
-    throw new ProviderRequestError(response.status, `Google Cloud Storage returned ${response.status} for ${objectName}${hint}`);
+    throw storageRefusedError(response.status, objectName, authMode, credentials, storageScopeEnabled);
   }
   return bytes;
 }
@@ -638,10 +659,24 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
       if (rawBucket !== undefined && !bucket) return "bucket must be your Play Console Cloud Storage bucket id (pubsite_prod_rev_… or gs://pubsite_prod_rev_…)";
       return { packageName: statement.target, kind, month, ...(bucket ? { bucket } : {}) };
     },
-    async execute({ credentials, saveCredentials }, input) {
+    async execute({ credentials, saveCredentials, googlePlayStorageScope = false }, input) {
       const packageName = input.packageName!, kind = input.kind!, month = input.month!;
       const savedBucket = normalizePlayReportsBucket(credentials.reportsBucket ?? "") ?? "";
       const bucket = input.bucket ?? savedBucket;
+      const hasSa = Boolean(credentials.reportsServiceAccount?.trim());
+      const hasOAuth = Boolean(credentials.oauthToken?.trim());
+      const grantedStorage = grantedStorageScope(credentials);
+      if (!hasSa && hasOAuth) {
+        if (googlePlayStorageScope && grantedStorage === false) {
+          throw new ConnectorRemedy(401,
+            "Reconnect Google Play Console in Apps to grant Cloud Storage read access (devstorage.read_only) for bulk reports",
+            { kind: "reconnect" });
+        }
+        if (!bucket && !googlePlayStorageScope && grantedStorage !== true) {
+          throw new ProviderRequestError(503,
+            "Google Play bulk reports via one-click OAuth require the devstorage.read_only scope (awaiting Google OAuth verification) plus a synced reportsBucket. Do not ask a Space admin for reportsBucket or a Service Account JSON key until OAuth storage scope is verified (or unless reportsServiceAccount is already configured)");
+        }
+      }
       if (!bucket) {
         throw new ConnectorRemedy(400,
           "Set reportsBucket in Apps → Google Play Console (sync in one click from Play Console → Download reports via the xMatrix Chrome extension, or paste from Copy Cloud Storage URI, e.g. pubsite_prod_rev_…), or pass bucket=pubsite_prod_rev_… once",
@@ -649,12 +684,12 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
       }
       let token: string;
       let authMode: "oauth" | "service_account";
-      if (credentials.reportsServiceAccount?.trim()) {
-        const sa = parseServiceAccount(credentials.reportsServiceAccount);
+      if (hasSa) {
+        const sa = parseServiceAccount(credentials.reportsServiceAccount!);
         token = await serviceAccountStorageToken(sa);
         authMode = "service_account";
-      } else if (credentials.oauthToken?.trim()) {
-        token = credentials.oauthToken.trim();
+      } else if (hasOAuth) {
+        token = credentials.oauthToken!.trim();
         authMode = "oauth";
       } else {
         throw new ConnectorRemedy(400,
@@ -672,9 +707,7 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
           });
         } catch (error) {
           if (authMode === "oauth" && error instanceof ProviderRequestError && error.status === 403) {
-            throw new ConnectorRemedy(403,
-              "Google Cloud Storage refused the current Google Play OAuth token (the connected grant does not include devstorage.read_only yet, or lacks View app information & download bulk reports in Play Console). Save optional reportsServiceAccount as a fallback until storage scope is enabled",
-              { kind: "credential", field: "reportsServiceAccount" });
+            throw storageRefusedError(403, `stats/ (${bucket})`, authMode, credentials, googlePlayStorageScope);
           }
           throw error;
         }
@@ -687,7 +720,7 @@ export const GOOGLE_PLAY_ANALYTICS_ACTIONS: Record<string, ConnectorAction> = {
       let foundName = "";
       let foundBytes: Uint8Array | undefined;
       for (const name of candidates) {
-        const bytes = await fetchGcsObject(bucket, name, token, authMode);
+        const bytes = await fetchGcsObject(bucket, name, token, authMode, credentials, googlePlayStorageScope);
         if (bytes) { foundName = name; foundBytes = bytes; break; }
       }
       if (!foundBytes) {
