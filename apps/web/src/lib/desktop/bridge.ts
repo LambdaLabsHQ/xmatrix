@@ -160,13 +160,6 @@ export type DesktopBridge = {
   serviceSignIn?: (service: string, options?: { fresh?: boolean }) =>
     Promise<{ status: "signed-in"; session: string } | { status: "cancelled" }>;
   /**
-   * The session the shell's sign-in profile for `service` still holds,
-   * renewed without showing anything when it can be; `signed-out` when only
-   * the person can sign in again. Never opens a window. Absent on older shells.
-   */
-  serviceSession?: (service: string) =>
-    Promise<{ status: "signed-in"; session: string } | { status: "signed-out" }>;
-  /**
    * Open a Hub sign-in page in the system's sign-in sheet (iOS), a browser tab
    * over the app (Android) or the default browser (desktop), and answer the
    * URL the page finally returns to. The shell adds its own return address as

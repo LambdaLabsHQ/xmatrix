@@ -94,7 +94,6 @@ contextBridge.exposeInMainWorld("xmatrixDesktop", {
   checkRuntime: (runtime: string) => ipcRenderer.invoke("desktop:check-runtime", runtime),
   serviceSignIn: (service: string, options?: { fresh?: boolean }) =>
     ipcRenderer.invoke("desktop:service-sign-in", service, options),
-  serviceSession: (service: string) => ipcRenderer.invoke("desktop:service-session", service),
   authorizeInBrowser: (request: { url: string; redirectParam: string }) =>
     ipcRenderer.invoke("desktop:authorize-in-browser", request),
   checkForUpdates: () => ipcRenderer.invoke("desktop:check-for-updates"),
