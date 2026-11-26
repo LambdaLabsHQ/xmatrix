@@ -6,8 +6,9 @@ import { recordCommandResult } from "./command-result";
 import { installProgramActionOutcome, type ProgramActionOutcome } from "./connectors/connector-commands";
 import { deliverNornAppRequest, withdrawNornAppRequests } from "./norn-actions";
 import { agentHolder, appRequest, checkNornProgram, instanceHolder, nornActionAnswer, nornAnswerBody, nornAsking, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody,
-  nornPreparedReply, nornProgramIn, nornQuestionSource, nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion,
+  nornPreparedReply, nornProgramIn, nornQuestionSource, nornRequestCard, nornStartLedger, nornStep, personHolder, referencedLibraryNames, selectReferencedLibraries, type NornPassResult, type NornQuestion,
   type NornRequestCard } from "./norn-host";
+import { loadSpaceLibraryCatalog } from "./norn-page-programs";
 import { nornEventDeliveryAllowed, parseNornEventDeliveryPayload } from "./norn-events";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
@@ -98,14 +99,26 @@ export async function startNornProgram(input: ProductMessagePostCommitInput): Pr
   const program = nornProgramIn(input.body);
   if (!program) return undefined;
   if ("refusal" in program) return program;
-  const checked = checkNornProgram(program.source);
-  if ("refusal" in checked) return { refusal: `The program was not started:\n\n\`\`\`text\n${checked.refusal}\n\`\`\`` };
   const env = input.env as Env;
   const requestId = `norn-start:${input.messageId}`;
-  const started = await (await repository(env, input.channelId, requestId)).start({ requestId, channelId: input.channelId,
+  const repo = await repository(env, input.channelId, requestId);
+  let spaceLibs: Record<string, string> | undefined;
+  let libraryProblems: Record<string, string> | undefined;
+  if (referencedLibraryNames(program.source).size > 0) {
+    const catalog = await loadSpaceLibraryCatalog(env, {
+      spaceId: repo.spaceId,
+      principal: { kind: "user", id: input.actorUserId },
+    });
+    if (Object.keys(catalog.libraries).length) spaceLibs = catalog.libraries;
+    if (Object.keys(catalog.problems).length) libraryProblems = catalog.problems;
+  }
+  const checked = checkNornProgram(program.source, spaceLibs || libraryProblems ? { libraries: spaceLibs, libraryProblems } : undefined);
+  if ("refusal" in checked) return { refusal: `The program was not started:\n\n\`\`\`text\n${checked.refusal}\n\`\`\`` };
+  const pinnedLibs = spaceLibs ? selectReferencedLibraries(program.source, spaceLibs) : undefined;
+  const started = await repo.start({ requestId, channelId: input.channelId,
     programId: input.messageId, authorKind: input.senderKind, authorityUserId: input.actorUserId,
     authorId: input.senderKind === "agent" ? input.senderInstanceId ?? input.senderId : input.senderId,
-    source: program.source, ledger: nornStartLedger }, nornStep());
+    source: program.source, ledger: nornStartLedger }, nornStep(undefined, undefined, pinnedLibs && Object.keys(pinnedLibs).length ? { libraries: pinnedLibs } : undefined));
   // Its first requests wait in the ledger; the Channel's coordinator delivers them. A wake that fails loses
   // nothing: they stay due, and the coordinator's next pass for this conversation delivers them.
   if (started) await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]).catch((error: unknown) => {
