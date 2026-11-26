@@ -1070,6 +1070,7 @@ export function AppsView({
   const setSelectedConnectorId = (id: string) => selectConnector(id, { replace: true });
   const [connectionActionError, setConnectionsError] = useState<string | null>(null);
   const [setupNotice, setSetupNotice] = useState<{ tone: "success" | "warning"; message: string } | null>(null);
+  const [autoSyncPlayBucket, setAutoSyncPlayBucket] = useState(false);
   const [executionActionError, setExecutionsError] = useState<string | null>(null);
   const [updatingProviderId, setUpdatingProviderId] = useState<string | null>(null);
   const [disconnectingProviderId, setDisconnectingProviderId] = useState<string | null>(null);
@@ -1167,6 +1168,7 @@ export function AppsView({
       return;
     }
     if (!outcome || !providerId) return;
+    if (outcome === "connected" && providerId === "googleplay") setAutoSyncPlayBucket(true);
     const name = connectors.find((connector) => connector.id === providerId)?.name ?? providerId;
     setSetupNotice(outcome === "connected"
       ? { tone: "success", message: providerId === "x"
@@ -1465,6 +1467,7 @@ export function AppsView({
       onRefreshExecutions={() => void loadExecutions()}
       onSaveMetadata={(metadata) => saveConnectorMetadata(connector, metadata)}
       ensureConnectionRow={() => ensureConnectionRow(connector)}
+      autoSyncPlayBucket={connector.id === "googleplay" && autoSyncPlayBucket}
       refreshConnections={async () => { await connectionsQuery.refetch(); }} />
   ) : null;
 

@@ -131,8 +131,28 @@ test("store_reports decodes Play Console UTF-16LE CSVs, uses OAuth token directl
     statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=gs://pubsite_prod_rev_1234567890/stats/installs/"),
     { packageName: "sh.xmatrix.app", kind: "installs", month: "202611", bucket: "pubsite_prod_rev_1234567890" },
   );
-  await assert.rejects(ACTIONS.store_reports.execute({ credentials }, statement("@googleplay:store_reports:sh.xmatrix.app")),
-    error => error.fix?.field === "reportsBucket");
+  // Before devstorage.read_only is enabled on OAuth (and without reportsServiceAccount), do not emit a dead-end reportsBucket card.
+  await assert.rejects(
+    ACTIONS.store_reports.execute({ credentials }, statement("@googleplay:store_reports:sh.xmatrix.app")),
+    error => error.status === 503 && error.fix === undefined && /devstorage\.read_only/u.test(error.message),
+  );
+  // Once devstorage.read_only is enabled on the Hub, an older two-scope grant asks for one-click reconnect rather than a service account card.
+  await assert.rejects(
+    ACTIONS.store_reports.execute(
+      { credentials: { ...credentials, oauthScopes: "https://www.googleapis.com/auth/androidpublisher https://www.googleapis.com/auth/playdeveloperreporting" }, googlePlayStorageScope: true },
+      statement("@googleplay:store_reports:sh.xmatrix.app"),
+    ),
+    error => error.fix?.kind === "reconnect",
+  );
+  // When storage access is available (via verified OAuth scope or explicit service account) and only the bucket is missing, surface reportsBucket.
+  await assert.rejects(
+    ACTIONS.store_reports.execute({ credentials, googlePlayStorageScope: true }, statement("@googleplay:store_reports:sh.xmatrix.app")),
+    error => error.fix?.field === "reportsBucket",
+  );
+  await assert.rejects(
+    ACTIONS.store_reports.execute({ credentials: { ...credentials, reportsServiceAccount: saJson } }, statement("@googleplay:store_reports:sh.xmatrix.app")),
+    error => error.fix?.field === "reportsBucket",
+  );
 
   const saved = [];
   const origFetch = globalThis.fetch;
@@ -152,18 +172,37 @@ test("store_reports decodes Play Console UTF-16LE CSVs, uses OAuth token directl
   try {
     // OAuth token works directly without any Service Account JSON when the grant includes storage read access.
     const oauthRes = await ACTIONS.store_reports.execute(
-      { credentials, saveCredentials: async fields => { saved.push(fields); } },
+      { credentials: { ...credentials, oauthScopes: "https://www.googleapis.com/auth/androidpublisher https://www.googleapis.com/auth/devstorage.read_only" }, saveCredentials: async fields => { saved.push(fields); } },
       statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=pubsite_prod_rev_1234567890"),
     );
     assert.deepEqual(saved, [{ reportsBucket: "pubsite_prod_rev_1234567890" }]);
     assert.equal(calls[0].headers.get("authorization"), "Bearer play-access");
     assert.match(oauthRes.summary, /Totals across 2 row\(s\): Daily Device Installs: 60, Daily Device Uninstalls: 4/u);
 
-    // When the OAuth token lacks storage scope (403), surface the reportsServiceAccount fallback remedy.
+    // When the OAuth token gets 403 and storage scope is enabled on the Hub, prompt one-click reconnect (not a Service Account secret card).
     oauthStatus = 403;
     await assert.rejects(
-      ACTIONS.store_reports.execute({ credentials }, statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=pubsite_prod_rev_1234567890")),
-      error => error.fix?.field === "reportsServiceAccount" && /devstorage\.read_only/u.test(error.message),
+      ACTIONS.store_reports.execute(
+        { credentials, googlePlayStorageScope: true },
+        statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=pubsite_prod_rev_1234567890"),
+      ),
+      error => error.fix?.kind === "reconnect" && /devstorage\.read_only/u.test(error.message),
+    );
+    // When storage scope is not yet enabled on the Hub, explain cleanly without pushing a Service Account secret card.
+    await assert.rejects(
+      ACTIONS.store_reports.execute(
+        { credentials },
+        statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=pubsite_prod_rev_1234567890"),
+      ),
+      error => error.status === 403 && error.fix === undefined && /devstorage\.read_only/u.test(error.message),
+    );
+    // When the grant already has devstorage.read_only but GCS still returns 403, point to Play Console user permissions.
+    await assert.rejects(
+      ACTIONS.store_reports.execute(
+        { credentials: { ...credentials, oauthScopes: "https://www.googleapis.com/auth/androidpublisher https://www.googleapis.com/auth/devstorage.read_only" }, googlePlayStorageScope: true },
+        statement("@googleplay:store_reports:sh.xmatrix.app kind=installs month=202611 bucket=pubsite_prod_rev_1234567890"),
+      ),
+      error => error.status === 403 && error.fix === undefined && /Play Console → Users and permissions/u.test(error.message),
     );
 
     // Explicit reportsServiceAccount still works as fallback.

@@ -142,17 +142,20 @@ refunded/voided orders via `androidpublisher v3`.
 
 Google Play Console exports installs, store performance (visitors and
 conversion), daily ratings history and financial CSVs only to a developer
-Cloud Storage bucket (`pubsite_prod_rev_*`). `store_reports` tries the
-connection's own Google OAuth token first (for grants carrying
-`devstorage.read_only`) and also accepts an optional `reportsServiceAccount`
-(a Google Cloud Service Account JSON granted "View app information and download
-bulk reports" / "View financial data" in Play Console) alongside `reportsBucket`
-(`pubsite_prod_rev_…`, or a `gs://pubsite_prod_rev_…` URI, or pass `bucket=` once).
-With the xMatrix Chrome extension installed, a Space admin can sync
-`reportsBucket` in one click from an open Play Console → Download reports tab
-(from Apps → Google Play Console, from the extension's side panel bar, or via
-the Play Console page context menu); the extension extracts only the plain
-`pubsite_prod_rev_*` bucket identifier and never reads or stores Google cookies.
+Cloud Storage bucket (`pubsite_prod_rev_*`). `store_reports` uses the
+connection's own Google OAuth token when `devstorage.read_only` is enabled on
+the Hub (`CONNECTOR_GOOGLEPLAY_STORAGE_SCOPE=1` once Google OAuth verification
+approves the incremental scope; existing two-scope grants remain refreshable and
+prompt a one-click reconnect rather than a service account key) and also accepts
+an optional `reportsServiceAccount` fallback (a Google Cloud Service Account
+JSON granted "View app information and download bulk reports" / "View financial
+data" in Play Console) alongside `reportsBucket` (`pubsite_prod_rev_…`, or a
+`gs://pubsite_prod_rev_…` URI, or pass `bucket=` once). With the xMatrix Chrome
+extension installed, Apps → Google Play Console automatically syncs a single
+visible `pubsite_prod_rev_*` bucket right after Connect (or on click from the
+extension's side panel bar or Play Console page context menu); the extension
+extracts only the plain `pubsite_prod_rev_*` bucket identifier and never reads
+or stores Google cookies.
 
 ## Catalog operations
 

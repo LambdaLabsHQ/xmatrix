@@ -143,6 +143,8 @@ export interface Env {
   APP_BETA_URL?: string;
   /** Verified console protocol/delivery/identifiers and approved template; absent keeps company installation closed. */
   CONNECTOR_DINGTALK_COMPANY_CONFIG?: string;
+  /** Set to "1" once Google OAuth verification approves devstorage.read_only for Google Play bulk reports. */
+  CONNECTOR_GOOGLEPLAY_STORAGE_SCOPE?: string;
   /** Server-only Stripe API key. A public Payment Link is never an entitlement. */
   APPLE_SUBSCRIPTIONS_CONFIG?: string;
   GOOGLE_PLAY_SUBSCRIPTIONS_CONFIG?: string;
