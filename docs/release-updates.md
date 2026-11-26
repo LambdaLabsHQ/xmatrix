@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: an agent that refuses this client is not shown as signed out
+
+Gemini CLI now answers a personal Google account's `authenticate` with "This
+client is no longer supported for Gemini Code Assist for individuals". The CLI
+wrapped every refused `authenticate` as "authentication required", so the
+summon card told a new person to sign Gemini CLI in, which cannot help. A
+refusal that says the client is no longer supported now reads "<Agent> cannot
+be used here: <its words>" and is never classified as signed out. CLI only.
+
 ## Unreleased: stop idle setup-intent polling loops and throttle DeviceAuthBroker expiry sweeps
 
 `BringAgentsIn` previously created and polled a setup intent every 2 seconds even when the terminal command was hidden behind the desktop app recommendation (`appFirst`) or when the Space already had enabled agents or installed candidates, and `useSetupIntent` automatically created a fresh intent whenever a 30-minute intent expired (404), causing unattended tabs to loop indefinitely through the Web proxy, Hub, `RelayRequestAllowance`, and `DeviceAuthBroker`. `BringAgentsIn` now creates a setup intent only when a terminal setup command is actually shown and needed; `useSetupIntent` backs off idle waiting polls (2 s → 5 s after 2 min → 15 s after 10 min) and stops polling on expiry of a freshly created intent until the user clicks "Try again" (while still auto-replacing a stale intent restored from `sessionStorage` on reload). On the Hub, `DeviceAuthBroker` now runs its background 5-prefix `storage.list` expiry sweep at most once per minute instead of on every request (every read already enforces expiry on access). Web and Hub only; no schema migration. Recovery is a CI-validated beta reverting this change.

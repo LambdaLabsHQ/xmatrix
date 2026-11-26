@@ -298,7 +298,7 @@ impl AcpSession {
                 .await
                 {
                     Ok(answer) => answer.map(|_| ()).map_err(|err| {
-                        CliError::Launch(format!("{display_name} authentication required: {err}"))
+                        CliError::Launch(acp_authenticate_refusal(&display_name, &err.to_string()))
                     })?,
                     Err(_) => {
                         return Err(CliError::Launch(format!(
@@ -1744,6 +1744,24 @@ fn acp_auth_method_ids(initialize_result: &Value) -> Vec<String> {
         .filter_map(|method| method.get("id").and_then(Value::as_str))
         .map(str::to_string)
         .collect()
+}
+
+/// What an `authenticate` the agent refused means. Usually a sign-in problem,
+/// but an agent can refuse this client outright, however anyone signs in:
+/// Gemini CLI answers "This client is no longer supported for Gemini Code
+/// Assist for individuals" for a personal Google account. That is said in the
+/// agent's own words, not as a sign-in the person cannot fix by signing in.
+pub(crate) fn acp_authenticate_refusal(display_name: &str, err: &str) -> String {
+    if acp_client_no_longer_supported(err) {
+        format!("{display_name} cannot be used here: {err}")
+    } else {
+        format!("{display_name} authentication required: {err}")
+    }
+}
+
+/// The agent's provider no longer serves this client, whoever signs in.
+pub(crate) fn acp_client_no_longer_supported(detail: &str) -> bool {
+    detail.to_ascii_lowercase().contains("client is no longer supported")
 }
 
 fn acp_retry_auth_method(advertised: &[String]) -> String {
