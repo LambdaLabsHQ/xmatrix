@@ -208,6 +208,15 @@ async fn claude_wrapper_interrupt_is_cancelled_not_a_turn_failure() {
     fixture.finish().await;
 }
 
+/// The turn closed as completed, answered with `text`.
+async fn assert_completed_turn_answer(fixture: &ClaudeCliTurnFixture, text: &str) {
+    let completed = fixture
+        .wait_for_trace(0, |event| claude_turn_trace(event, "turn_completed"))
+        .await;
+    let trace = fixture.traces.lock().unwrap()[completed].clone();
+    assert_eq!(trace["metadata"]["payload"]["payload"]["text"], text);
+}
+
 /// A turn that a steered message joins after Claude's last tool call, as
 /// Claude Code 2.1.303 answers it: the turn's own result comes first, then
 /// Claude takes the queued input (`isReplay`) and answers it with a second
@@ -233,25 +242,7 @@ sleep 30
 #[tokio::test]
 async fn claude_steered_message_joins_the_running_turn_instead_of_cancelling_it() {
     let mut fixture = ClaudeCliTurnFixture::start(CLAUDE_STEERED_AFTER_LAST_TOOL).await;
-    let AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
-        message,
-        ack_required,
-        ..
-    }) = interrupting_channel_message_event("m-newer", "channel-1", "also check the docs")
-    else {
-        unreachable!("a channel message");
-    };
-    let steering = AgentInstanceConnectionEvent::Server(
-        AgentInstanceServerMessage::ChannelMessageReceived {
-            prompt: None,
-            message,
-            client_message_id: None,
-            ack_required,
-            interrupt_requested: Some(true),
-            steer_allowed: Some(true),
-            delivery_intent: None,
-        },
-    );
+    let steering = steering_channel_message_event("m-newer", "channel-1", "also check the docs");
     let pending = fixture.run_channel_turn(None, None, vec![steering]).await;
 
     // The message went into the turn, not into the queue for the next one.
@@ -259,16 +250,72 @@ async fn claude_steered_message_joins_the_running_turn_instead_of_cancelling_it(
     let steered = std::fs::read_to_string(fixture.root.join("steered")).expect("steered line");
     assert!(steered.contains(r#""type":"user""#), "{steered}");
     assert!(steered.contains("also check the docs"), "{steered}");
-    assert!(!steered.contains("control_request"), "the turn was interrupted: {steered}");
+    assert!(
+        !steered.contains("control_request"),
+        "the turn was interrupted: {steered}"
+    );
     // The turn is answered by the result that follows Claude taking the
     // steered input, not the one before it, and it is not cancelled.
-    let completed = fixture
-        .wait_for_trace(0, |event| claude_turn_trace(event, "turn_completed"))
-        .await;
-    let trace = fixture.traces.lock().unwrap()[completed].clone();
-    assert_eq!(trace["metadata"]["payload"]["payload"]["text"], "steered answer");
+    assert_completed_turn_answer(&fixture, "steered answer").await;
     assert!(!fixture.session.last_turn_interrupted);
     fixture.finish().await;
+}
+
+/// Two messages steered in after Claude's last tool call, as Claude Code
+/// 2.1.332 answers them: both wait behind the turn's own result, then reach
+/// Claude as one merged user message, echoed back once with a text block per
+/// input. The turn must close on the result that answers that merged input,
+/// not stay open waiting for a second echo that never comes.
+const CLAUDE_TWO_STEERS_MERGED: &str = r#"root="$1"
+emit() { printf '%s\n' "$1"; }
+read_user || exit 0
+emit '{"type":"system","subtype":"init","session_id":"s1","model":"claude-main"}'
+emit '{"type":"user","isReplay":true,"message":{"role":"user","content":"do the work"},"session_id":"s1"}'
+emit '{"type":"assistant","message":{"id":"m1","role":"assistant","model":"claude-main","content":[{"type":"tool_use","id":"toolu_B","name":"Bash","input":{"command":"sleep 5"}}]},"parent_tool_use_id":null,"session_id":"s1"}'
+touch "$root/turn-open"
+IFS= read -r first || exit 0
+IFS= read -r second || exit 0
+printf '%s\n%s\n' "$first" "$second" > "$root/steered"
+emit '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_B","content":"done"}]},"parent_tool_use_id":null,"session_id":"s1"}'
+emit '{"type":"result","subtype":"success","is_error":false,"result":"first answer","session_id":"s1"}'
+a=$(printf '%s' "$first" | sed -n 's/.*"text":"\([^"]*also check the docs[^"]*\)".*/\1/p')
+b=$(printf '%s' "$second" | sed -n 's/.*"text":"\([^"]*and the tests[^"]*\)".*/\1/p')
+emit "{\"type\":\"user\",\"isReplay\":true,\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"$a\\n\"},{\"type\":\"text\",\"text\":\"$b\"}]},\"session_id\":\"s1\"}"
+emit '{"type":"result","subtype":"success","is_error":false,"result":"merged answer","session_id":"s1"}'
+sleep 30
+"#;
+
+#[tokio::test]
+async fn claude_turn_closes_when_two_steered_messages_are_echoed_as_one() {
+    let mut fixture = ClaudeCliTurnFixture::start(CLAUDE_TWO_STEERS_MERGED).await;
+    let pending = fixture
+        .run_channel_turn(
+            None,
+            None,
+            vec![
+                steering_channel_message_event("m-a", "channel-1", "also check the docs"),
+                steering_channel_message_event("m-b", "channel-1", "and the tests"),
+            ],
+        )
+        .await;
+    assert!(pending.is_empty(), "{pending:?}");
+    assert_completed_turn_answer(&fixture, "merged answer").await;
+    fixture.finish().await;
+}
+
+#[test]
+fn one_replay_settles_every_steered_input_it_carries() {
+    use crate::runtime_claude_stream_session::ActiveStreamTurn;
+    let mut turn = ActiveStreamTurn::default();
+    turn.observe_replay("do the work");
+    assert!(turn.input_replayed);
+    turn.pending_steers = vec!["[xMatrix] A".into(), "[xMatrix] B".into()];
+    turn.observe_replay("[xMatrix] A\n\n[xMatrix] B");
+    assert!(turn.pending_steers.is_empty());
+    // An echo Claude reworded still settles one input, as a count did.
+    turn.pending_steers = vec!["[xMatrix] C".into(), "[xMatrix] D".into()];
+    turn.observe_replay("something else");
+    assert_eq!(turn.pending_steers, vec!["[xMatrix] D".to_string()]);
 }
 
 #[test]
