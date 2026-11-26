@@ -450,3 +450,107 @@ test("harness watch transport stages are readable without arbitrary extras or re
     assert.doesNotMatch(result.summary, /private-/);
   }
 });
+
+test("Sentry list_projects and get_dsn expose bounded project metadata and public DSN only", async () => {
+  const creds = { authToken: "test-token", organization: "made-by-robot" };
+  const listAction = SENTRY_ACTIONS.list_projects;
+  const dsnAction = SENTRY_ACTIONS.get_dsn;
+  assert.deepEqual(listAction.parse({ target: "*", text: "" }), {});
+  assert.equal(typeof listAction.parse({ target: "web", text: "" }), "string");
+  assert.deepEqual(dsnAction.parse({ target: "Billing-API", text: "" }), { project: "billing-api" });
+  assert.equal(typeof dsnAction.parse({ target: "../evil", text: "" }), "string");
+
+  const listStub = stubFetchResponses([{
+    body: [
+      { slug: "xmatrix-hub", name: "xMatrix Hub", platform: "javascript" },
+      { slug: "billing-api", name: "Billing API", platform: "rust" },
+    ],
+  }]);
+  try {
+    const res = await listAction.execute({ credentials: creds }, {});
+    assert.equal(listStub.calls[0].url, "https://sentry.io/api/0/organizations/made-by-robot/projects/");
+    assert.match(res.summary, /- xmatrix-hub · xMatrix Hub · javascript/);
+    assert.match(res.summary, /- billing-api · Billing API · rust/);
+  } finally { listStub.restore(); }
+
+  const publicDsn = "https://0123456789abcdef0123456789abcdef@o12345.ingest.us.sentry.io/9876543";
+  const secretDsn = "https://0123456789abcdef0123456789abcdef:supersecret@o12345.ingest.us.sentry.io/9876543";
+  const dsnStub = stubFetchResponses([{
+    body: [
+      { label: "Inactive", isActive: false, dsn: { public: "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@o1.ingest.sentry.io/1" } },
+      { label: "Default", isActive: true, dsn: { public: publicDsn, secret: secretDsn } },
+    ],
+  }]);
+  try {
+    const res = await dsnAction.execute({ credentials: creds }, { project: "billing-api" });
+    assert.equal(dsnStub.calls[0].url, "https://sentry.io/api/0/projects/made-by-robot/billing-api/keys/");
+    assert.ok(res.summary.includes(publicDsn));
+    assert.doesNotMatch(res.summary, /supersecret/);
+  } finally { dsnStub.restore(); }
+
+  const badDsnStub = stubFetchResponses([{
+    body: [{ label: "Bad", isActive: true, dsn: { public: secretDsn } }],
+  }]);
+  try {
+    await assert.rejects(dsnAction.execute({ credentials: creds }, { project: "billing-api" }), /active public DSN/);
+  } finally { badDsnStub.restore(); }
+});
+
+test("Sentry create_project auto-selects single team, handles ambiguity/409, and enforces Public Integration scopes", async () => {
+  const createAction = SENTRY_ACTIONS.create_project;
+  assert.deepEqual(createAction.parse({ target: "billing-api", text: 'platform=rust name="Billing API"' }), {
+    project: "billing-api", platform: "rust", name: "Billing API",
+  });
+  assert.deepEqual(createAction.parse({ target: "billing-api", text: "team=core platform=rust" }), {
+    project: "billing-api", team: "core", platform: "rust",
+  });
+  assert.equal(typeof createAction.parse({ target: "../bad", text: "" }), "string");
+  assert.equal(typeof createAction.parse({ target: "billing-api", text: "unknown=1" }), "string");
+
+  const publicDsn = "https://fedcba9876543210fedcba9876543210@o12345.ingest.us.sentry.io/424242";
+  const creds = { authToken: "test-token", organization: "made-by-robot" };
+
+  // Auto-discovers single team, creates project, and returns its public DSN.
+  const okStub = stubFetchResponses([
+    { body: [{ slug: "made-by-robot" }] },
+    { body: { slug: "billing-api", name: "Billing API", platform: "rust" } },
+    { body: [{ label: "Default", isActive: true, dsn: { public: publicDsn } }] },
+  ], { decodeBody: body => typeof body === "string" ? JSON.parse(body) : body });
+  try {
+    const res = await createAction.execute({ credentials: creds }, { project: "billing-api", platform: "rust", name: "Billing API" });
+    assert.deepEqual(okStub.calls.map(c => [c.method, c.url]), [
+      ["GET", "https://sentry.io/api/0/organizations/made-by-robot/teams/"],
+      ["POST", "https://sentry.io/api/0/teams/made-by-robot/made-by-robot/projects/"],
+      ["GET", "https://sentry.io/api/0/projects/made-by-robot/billing-api/keys/"],
+    ]);
+    assert.deepEqual(okStub.calls[1].body, { name: "Billing API", slug: "billing-api", platform: "rust" });
+    assert.ok(res.summary.includes(publicDsn));
+    assert.match(res.summary, /Created Sentry project `billing-api`/);
+  } finally { okStub.restore(); }
+
+  // Multiple teams without explicit team= refuses cleanly with available teams.
+  const multiTeamStub = stubFetchResponses([{ body: [{ slug: "core" }, { slug: "growth" }] }]);
+  try {
+    await assert.rejects(createAction.execute({ credentials: creds }, { project: "billing-api" }), /available: core, growth/);
+  } finally { multiTeamStub.restore(); }
+
+  // 409 already exists tells caller to use @sentry:get_dsn.
+  const conflictStub = stubFetchResponses([{ status: 409, body: { detail: "exists" } }]);
+  try {
+    await assert.rejects(createAction.execute({ credentials: creds }, { project: "billing-api", team: "core" }), /@sentry:get_dsn:billing-api/);
+  } finally { conflictStub.restore(); }
+
+  // Legacy 4-scope Sentry Public Integration fails cleanly with actionable upgrade guidance before hitting Sentry.
+  const legacyInstall = {
+    oauthToken: "tok", oauthRefreshToken: "ref", oauthExpiresAt: String(Date.now() + 3_600_000),
+    oauthClientId: "cid", oauthAppUuid: "11111111-2222-4333-8444-555555555555", oauthAppSlug: "xmatrix",
+    oauthInstallationId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", oauthOrganization: "made-by-robot",
+    oauthOrganizationId: "123", oauthScopes: "event:read event:write org:read project:read",
+  };
+  const legacyStub = stubFetchResponses([]);
+  try {
+    await assert.rejects(createAction.execute({ credentials: legacyInstall }, { project: "billing-api" }), /project:write.*team:read/i);
+    assert.equal(legacyStub.calls.length, 0);
+  } finally { legacyStub.restore(); }
+});
+
