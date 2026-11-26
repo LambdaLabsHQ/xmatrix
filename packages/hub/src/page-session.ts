@@ -14,7 +14,7 @@ import { absolutePositionToRelativePosition, updateYFragment, yXmlFragmentToPros
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
-import { guardRunningNornBlocks, nornProgramProblems, type NornEditGuardViolation } from "./norn-host";
+import { guardRunningNornBlocks, nornBlocks, nornProgramProblems, type NornEditGuardViolation } from "./norn-host";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 import type { PageCoWriteObservation } from "./page-co-write-timing";
 import { finishStoredTyping, type PageStoredTypingState } from "./page-stored-typing";
@@ -877,7 +877,7 @@ export class PageSession {
       const merge = lineMerge.ok ? lineMerge : mergePageWords(baseText, current, body);
       if (!merge.ok) throw new PageSessionConflict(this.base.revision, current);
       const target = merge.text === body ? body : canonicalPageMarkdown(merge.text);
-      if (this.ports.runningPrograms) {
+      if (this.ports.runningPrograms && nornBlocks(current).length > 0) {
         const running = await this.ports.runningPrograms();
         const violations = guardRunningNornBlocks(current, target, running, {
           removePrograms: input.removePrograms?.length ? new Set(input.removePrograms) : undefined,
