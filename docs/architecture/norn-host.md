@@ -231,6 +231,29 @@ the parent program's ledger stays the single source of truth. `GET
 /api/spaces/:space/pages/:page/programs` exposes per-branch status (`branches`)
 alongside the program's overall status.
 
+## Page fact blocks (`norn 1 facts`) and `Holds`
+
+Pages can declare typed facts about the thing they describe using top-level
+```` ```norn 1 facts <Type> ```` blocks (at most one block per type per Page).
+The Hub checks each block with Norn's `checkFacts` against the Space's
+`norn 1 lib` libraries and feeds validated values into running programs that
+hold `Holds.kind("page", "<Type>")`:
+
+- **Initial seeding**: when a program starts, revises, or adopts libraries and
+  reports `pass.holding` entries under `"page:"`, the Hub seeds its ledger with
+  all matching valid fact blocks across Pages its `authority_user_id` can edit.
+- **Prose isolation**: `pageFactsKey(body)` hashes only `norn 1 facts` blocks;
+  prose-only edits never trigger `Holds` propagation.
+- **Permission gate**: a Page's fact updates flow directly to a running program
+  only when the program's `authority_user_id` has `canEdit` on that Page.
+- **Anti-self-trigger**: edits authored by an Agent Run executing inside the
+  program's own conversation or any of its branch conversations call
+  `hold(..., { notify: false })`, updating the stored value for the next
+  `Holds.sample` without waking `Holds.changes`.
+- **Safe editing**: removing a fact block (or deleting the Page) retracts the
+  held value (`hold(..., null)`); saving a temporarily invalid fact block
+  reports diagnostics in `scheduleProblems` without retracting a running branch.
+
 The delivery message may start a Run for the program's authority and nobody
 else (`NORN_DELIVERY_SOURCE_SQL`, used by the launch source rule and by the
 Run's initial message source), so the Run's first turn is tied to it.

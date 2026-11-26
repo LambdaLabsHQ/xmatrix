@@ -335,3 +335,98 @@ test("keyed branches of a page program run in isolated conversations with separa
   const done = await until(async () => (await programs()).find(p => p.state === "completed"), "parent program completed");
   assert.deepEqual(done.branches.map(b => [b.label, b.state]), [["alpha", "completed"], ["beta", "completed"]]);
 }));
+
+test("Page norn 1 facts feed Holds into Std.each branches on start, creation, edit, and removal without prose triggers", () => pageScene("norn-page-facts", async ({
+  call, pages, until,
+}) => {
+  // 1. Space library declaring the product fact type.
+  await call(pages, "POST", {
+    title: "Libraries",
+    body: `# Libraries\n\n\`\`\`norn 1 lib Products\npub type site = { name: string }\n\`\`\`\n`,
+  });
+
+  // 2. Existing product Page A created BEFORE the program starts.
+  const { page: pageA } = await call(pages, "POST", {
+    title: "Alpha Product",
+    body: `# Alpha Product\n\nNotes.\n\n\`\`\`norn 1 facts Products.site\n{ name: "Alpha" }\n\`\`\`\n`,
+  });
+
+  // 3. Program using Std.each over Holds.kind("page", "Products.site") starts and immediately seeds Page A!
+  const progSource = [
+    `open Std`,
+    `needs Products`,
+    `let sites = Holds.kind("page", "Products.site")`,
+    `each(sites, site => {`,
+    `  switch site->Holds.sample {`,
+    `  | Some(s) =>`,
+    `    ignore(ask(@codex, "Daily report for " ++ s.name)->wait)`,
+    `    ()`,
+    `  | None => ()`,
+    `  }`,
+    `})`,
+  ].join("\n");
+  const { page: opsPage } = await call(pages, "POST", {
+    title: "Onboarding",
+    body: `# Onboarding\n\n${block(progSource, "norn 1 run users")}\n`,
+  });
+  const programs = async () => (await call(`${pages}/${opsPage.pageId}/programs`)).programs;
+
+  const seeded = await until(
+    async () => (await programs()).find(p => p.state === "running" && p.branches?.length === 1),
+    "initial Page A seeded into Std.each branch",
+  );
+  assert.equal(seeded.branches[0].label, "Alpha Product");
+  assert.deepEqual(seeded.branches[0].requests.map(r => r.text), ["Daily report for Alpha"]);
+
+  // 4. Creating a second product Page B automatically spawns a second isolated branch!
+  const { page: pageB } = await call(pages, "POST", {
+    title: "Beta Product",
+    body: `# Beta Product\n\n\`\`\`norn 1 facts Products.site\n{ name: "Beta" }\n\`\`\`\n`,
+  });
+  const twoBranches = await until(
+    async () => (await programs()).find(p => p.branches?.length === 2),
+    "Page B branch spawned",
+  );
+  const alphaBranch = twoBranches.branches.find(b => b.label === "Alpha Product");
+  const betaBranch = twoBranches.branches.find(b => b.label === "Beta Product");
+  assert.ok(alphaBranch && betaBranch);
+  assert.notEqual(alphaBranch.channelId, betaBranch.channelId);
+  assert.deepEqual(betaBranch.requests.map(r => r.text), ["Daily report for Beta"]);
+
+  // 5. Prose-only edit on Page A leaves branches and open requests untouched.
+  const headA = (await call(`${pages}/${pageA.pageId}`)).page.headRevision;
+  const proseEdit = await call(`${pages}/${pageA.pageId}`, "PUT", {
+    baseRevision: headA,
+    body: `# Alpha Product\n\nUpdated narrative only.\n\n\`\`\`norn 1 facts Products.site\n{ name: "Alpha" }\n\`\`\`\n`,
+  });
+  assert.deepEqual(proseEdit.scheduleProblems, []);
+
+  // 6. Broken fact block on Page B reports scheduleProblems and does NOT cancel Beta's active branch!
+  const headB = (await call(`${pages}/${pageB.pageId}`)).page.headRevision;
+  const brokenEdit = await call(`${pages}/${pageB.pageId}`, "PUT", {
+    baseRevision: headB,
+    body: `# Beta Product\n\n\`\`\`norn 1 facts Products.site\n{ name: 123 }\n\`\`\`\n`,
+  });
+  assert.equal(brokenEdit.scheduleProblems.length, 1);
+  assert.equal(brokenEdit.scheduleProblems[0].source, "```norn 1 facts Products.site");
+  const afterBroken = (await programs())[0].branches.find(b => b.label === "Beta Product");
+  assert.equal(afterBroken.state, "running");
+  assert.equal(afterBroken.requests[0].outcome, null);
+
+  // 7. Removing the fact block from Page B cancels Beta's branch while Alpha stays running!
+  const headB2 = (await call(`${pages}/${pageB.pageId}`)).page.headRevision;
+  await call(`${pages}/${pageB.pageId}`, "PUT", {
+    baseRevision: headB2,
+    body: `# Beta Product\n\nPaused.\n`,
+  });
+  const afterRemove = await until(
+    async () => {
+      const p = (await programs())[0];
+      const b = p.branches?.find(branch => branch.label === "Beta Product");
+      return b?.requests.some(r => r.outcome === "cancelled") ? p : null;
+    },
+    "Beta branch cancelled on fact removal",
+  );
+  assert.equal(afterRemove.branches.find(b => b.label === "Alpha Product").requests[0].outcome, null);
+  assert.equal(afterRemove.branches.find(b => b.label === "Beta Product").requests[0].outcome, "cancelled");
+}));

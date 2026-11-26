@@ -1,4 +1,4 @@
-import { APP_CONNECTOR_PROVIDER_MANIFESTS, isSupportedNornEdition, nornLibBlock, nornRunBlock, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken,
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, isSupportedNornEdition, nornFactsBlock, nornLibBlock, nornRunBlock, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken,
   utf8ByteLength } from "@xmatrix/protocol";
 import { NORN_HANDED_ON_REASON, type NornProgramState, type NornProgramWrite, type NornStep } from "@xmatrix/db";
 import {
@@ -8,8 +8,9 @@ import {
 import { NORN_STD, NORN_STD_LEGACY_V1 } from "./vendor/norn/std";
 import { parse } from "./vendor/norn/frontend/parser";
 import { compile, type Code } from "./vendor/norn/runtime/code";
+import { checkFacts } from "./vendor/norn/runtime/facts";
 import {
-  delegate, deliverEvent, emptyLedger, evaluate, migrateLedger, occur, preparedAction, previewEdit, reclaim, settle, stop, take, verifyMigration,
+  delegate, deliverEvent, emptyLedger, evaluate, hold, holdKind, holdKindKey, migrateLedger, occur, preparedAction, previewEdit, reclaim, settle, stop, take, verifyMigration,
   type CloudEventInput, type Delegation, type EditPreview, type Ledger, type LedgerRequest, type MigrationReport, type MigrationResult,
   type MigrationStep, type Pass, type PassOptions, type Reply,
 } from "./vendor/norn/runtime/ledger";
@@ -30,6 +31,8 @@ import { nornBranchConversationId, type NornBranchChannel } from "./norn-branche
 export interface NornBlock { name: string; source: string; edition?: string; problem?: string }
 /** A `norn 1 lib <Name>` Space library block on a Page. */
 export interface NornLibBlock { name: string; source: string; edition?: string; problem?: string }
+/** A `norn 1 facts <Type>` fact block on a Page. */
+export interface NornFactBlock { typeName: string; source: string; edition?: string; problem?: string }
 
 /** Extracts top-level `norn 1 lib <Name>` library blocks from Markdown text. */
 export function nornLibBlocks(body: string): NornLibBlock[] {
@@ -40,6 +43,43 @@ export function nornLibBlocks(body: string): NornLibBlock[] {
   });
   return blocks.map(block => block.problem || blocks.filter(other => other.name === block.name).length < 2 ? block
     : { ...block, problem: `Two library blocks are named ${block.name}; rename one.` });
+}
+
+/** Extracts top-level `norn 1 facts <Type>` fact blocks from Markdown text. */
+export function nornFactBlocks(body: string): NornFactBlock[] {
+  const root = parseMarkdown(body) as { children?: { type?: string; lang?: string | null; meta?: string | null; value?: string }[] };
+  const blocks = (root.children ?? []).flatMap(node => {
+    const block = node.type === "code" ? nornFactsBlock([node.lang, node.meta].filter(Boolean).join(" ")) : null;
+    return block ? [{ ...block, source: node.value ?? "" }] : [];
+  });
+  return blocks.map(block => block.problem || blocks.filter(other => other.typeName === block.typeName).length < 2 ? block
+    : { ...block, problem: `Two fact blocks declare ${block.typeName} on this page; keep only one.` });
+}
+
+/** Stable fingerprint of a Page's `norn 1 facts` blocks: prose-only edits produce the exact same key. */
+export const pageFactsKey = (body: string): string => JSON.stringify(
+  nornFactBlocks(body).map(b => [b.typeName, b.edition ?? "", b.source, b.problem ?? ""]),
+);
+
+/** Checks one `norn 1 facts <Type>` block against the Space's libraries and returns its Norn value or refusal. */
+export function checkPageFactBlock(
+  block: NornFactBlock,
+  spaceCatalog?: SpaceLibraryCatalog,
+): { ok: true; value: Value } | { ok: false; problem: string } {
+  if (block.problem) return { ok: false, problem: block.problem };
+  const seedNames = referencedLibraryNames(`let _fact: ${block.typeName} = (\n${block.source}\n)\n`);
+  const dot = block.typeName.indexOf(".");
+  if (dot > 0) seedNames.add(block.typeName.slice(0, dot));
+  const loaded = loadProgramLibraries(spaceCatalog?.libraries, undefined, {
+    seedNames,
+    libraryProblems: spaceCatalog?.problems,
+  });
+  if (loaded.refusal) return { ok: false, problem: loaded.refusal };
+  const checked = checkFacts(block.source, block.typeName, { host: HOST, std: STD, libraries: loaded.libraries });
+  if (!checked.ok) {
+    return { ok: false, problem: checked.diagnostics.map(d => d.message).join("\n") };
+  }
+  return { ok: true, value: checked.value };
 }
 
 /** Map of valid Space library sources defined on a Page body. */
@@ -859,6 +899,18 @@ export interface NornPassResult {
   branches?: NornBranchChannel[];
   /** Conversations (program and/or branch) whose work changed in this pass and need coordinator reconciliation. */
   wakeChannels?: string[];
+  /** `Holds.kind` keys (`"<source>:<Type>"`) the program holds (samples or listens to) after this pass. */
+  holding?: string[];
+}
+/** A host-asserted fact update applied to the program's ledger via `hold(...)`. */
+export interface NornHoldUpdate {
+  source: string;
+  typeName: string;
+  id: string;
+  /** Validated Norn value to hold, or `null` to retract. */
+  value: Value | null;
+  /** Explicit override for `Holds.changes` emission; defaults to `false` when authored by the program itself. */
+  notify?: boolean;
 }
 /** What a call does to one request of the program, in the step that runs its pass. */
 export type NornAct =
@@ -924,7 +976,15 @@ export function nornPasses(code: Code, ledger: Ledger, now: number, each: (pass:
 export function nornStep(act?: NornAct,
   /** An outside event and the streams it matches in this program (legacy text or CloudEvents 1.0.2). */
   occurred?: { id: string; streams: readonly NornStream[]; what: string; cloudEvent?: CloudEventInput },
-  options?: { libraries?: Readonly<Record<string, string>>; replacePinnedLibraries?: boolean; pinDependencies?: boolean }): NornStep<NornPassResult> {
+  options?: {
+    libraries?: Readonly<Record<string, string>>;
+    replacePinnedLibraries?: boolean;
+    pinDependencies?: boolean;
+    /** Host-asserted `Holds` updates to apply before evaluating this pass. */
+    holds?: readonly NornHoldUpdate[];
+    /** Conversation ID of an Agent edit that triggered `holds` (used for anti-self-trigger `notify: false`). */
+    editorConversationId?: string;
+  }): NornStep<NornPassResult> {
   return (state: NornProgramState) => {
     // The host's receipt travels with the occurrence. Older ledgers have no receipt on their occurrences.
     const ledger = state.ledger as Omit<Ledger, "occurrences"> & {
@@ -950,6 +1010,23 @@ export function nornStep(act?: NornAct,
       ledger.pinnedBuiltinLibraries ??= { ...BUILTIN_NORN_LIBRARY_SOURCES };
     }
     const activeLibraries = options?.replacePinnedLibraries ? ledger.pinnedLibraries : (options?.libraries ?? ledger.pinnedLibraries);
+    if (options?.holds?.length && state.stopReason === null) {
+      const branchChannels = Object.values(ledger.branchMeta ?? {}).map(b => b.channelId);
+      const isSelfChannel = Boolean(
+        options.editorConversationId && (options.editorConversationId === state.channelId || branchChannels.includes(options.editorConversationId)),
+      );
+      const beforeOcc = ledger.occurrences.length;
+      const beforeHolds = JSON.stringify(ledger.holds ?? null);
+      for (const update of options.holds) {
+        hold(ledger, holdKind(update.source, update.typeName), update.id, update.value, now, {
+          notify: update.notify ?? !isSelfChannel,
+        });
+      }
+      if (!act && !occurred && !options.libraries && !options.replacePinnedLibraries
+        && ledger.occurrences.length === beforeOcc && JSON.stringify(ledger.holds ?? null) === beforeHolds) {
+        return { write: null, result: { status: "running" } };
+      }
+    }
     if (occurred && state.stopReason === null) {
       const legacyStreams = occurred.streams.filter(stream => stream.name !== "Events.events");
       const eventsStreams = occurred.streams.filter(stream => stream.name === "Events.events");
@@ -985,6 +1062,7 @@ export function nornStep(act?: NornAct,
     const said: { to: string; text: string }[] = [];
     let waits: unknown[] = [];
     let latestPassBranches: Pass["branches"] = [];
+    let latestHolding: string[] = [];
     // A program is checked where it is written, so text that does not check here was written for another
     // build of the Hub: one being rolled out, or one rolled back. The program is left as it is and the pass is
     // tried again later, on a build that reads it. Stopping it would end work that nothing is wrong with.
@@ -1052,7 +1130,17 @@ export function nornStep(act?: NornAct,
         // The streams a plain wait is on, and those the program's loops take from while a handler works:
         // an event on one of the latter is kept for the loop, which handles it when the round is over.
         const streams = [...(pass.waiting?.targets ?? []).flatMap(target => target.kind === "stream" ? [target.source] : []), ...pass.listening];
-        waits = streams.filter((stream, index) => streams.findIndex(other => eventKey(other) === eventKey(stream)) === index);
+        const uniqueStreams = streams.filter((stream, index) => streams.findIndex(other => eventKey(other) === eventKey(stream)) === index);
+        const heldKinds = new Set<string>(pass.holding);
+        for (const stream of uniqueStreams) {
+          if (stream.name === "Holds.members" && stream.args[0]) {
+            try { heldKinds.add(holdKindKey(stream.args[0])); } catch { /* ignore */ }
+          } else if (stream.name === "Holds.changes" && stream.args[0]?.type === "variant" && stream.args[0].name === "Held" && stream.args[0].args[0]) {
+            try { heldKinds.add(holdKindKey(stream.args[0].args[0])); } catch { /* ignore */ }
+          }
+        }
+        latestHolding = [...heldKinds];
+        waits = [...uniqueStreams, ...latestHolding.map(kind => ({ type: "hold", kind }))];
         said.push(...pass.said);
         // A round whose handler ended in anything but an answer is told in the program's conversation, once.
         for (const entry of pass.log) {
@@ -1165,6 +1253,7 @@ export function nornStep(act?: NornAct,
       ...(returnedTo ? { returnedTo } : {}),
       ...(activeBranches.length ? { branches: activeBranches } : {}),
       ...(wakeSet.size ? { wakeChannels: [...wakeSet] } : {}),
+      ...(latestHolding.length ? { holding: latestHolding } : {}),
     } };
   };
 }
@@ -1194,7 +1283,12 @@ export function nornProgramProblems(
     const problem = nornBlockProblem(block, libraries, libraryProblems);
     return problem === undefined ? [] : [{ source: nornBlockSource(block.name, block.edition), problem }];
   });
-  return [...libProblems, ...runProblems];
+  const factProblems = nornFactBlocks(body).flatMap(block => {
+    const tag = block.edition === undefined ? `\`\`\`norn facts ${block.typeName}` : `\`\`\`norn ${block.edition} facts ${block.typeName}`;
+    const checked = checkPageFactBlock(block, catalog);
+    return checked.ok ? [] : [{ source: tag, problem: checked.problem }];
+  });
+  return [...libProblems, ...factProblems, ...runProblems];
 }
 
 /** How a block's opening line reads, to say which block a problem is about. */

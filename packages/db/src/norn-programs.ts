@@ -938,6 +938,42 @@ export async function readWaitingNornPrograms(database: AuthorityDatabase, input
 }
 
 /**
+ * Running programs in `spaceId` that hold at least one `Holds.kind` under
+ * `sourcePrefix` (e.g. `"page:"`), whose authority is still an active member
+ * able to run Space programs.
+ */
+export async function readHoldingNornPrograms(database: AuthorityDatabase, input: {
+  requestId: string; spaceId: string; sourcePrefix: string;
+}) {
+  return readInActiveSpace(database, { requestId: input.requestId, operation: "norn.holding-programs", spaceId: input.spaceId },
+    NornSpaceError, async tx => (await tx.query<QueryResultRow>({
+      name: "norn_holding_programs_v1",
+      text: `SELECT p.channel_id,p.program_id,p.page_id,p.page_name,p.authority_user_id,p.waits_json
+        FROM data.norn_programs p
+        JOIN data.space_members member ON member.space_id=p.space_id AND member.user_id=p.authority_user_id
+          AND member.role NOT IN ('viewer','participant')
+        WHERE p.space_id=$1 AND p.state='running' AND p.waits_json IS NOT NULL
+          AND EXISTS (SELECT 1 FROM jsonb_array_elements(p.waits_json) w
+            WHERE w->>'type'='hold' AND starts_with(COALESCE(w->>'kind',''), $2))
+        ORDER BY p.program_id LIMIT 200`,
+      values: [input.spaceId, input.sourcePrefix], maxRows: 200 }))
+      .map(row => {
+        const waits = Array.isArray(row.waits_json) ? row.waits_json as Array<{ type?: unknown; kind?: unknown }> : [];
+        const holdKinds = waits
+          .filter(w => w?.type === "hold" && typeof w.kind === "string" && w.kind.startsWith(input.sourcePrefix))
+          .map(w => w.kind as string);
+        return {
+          channelId: String(row.channel_id),
+          programId: String(row.program_id),
+          pageId: row.page_id === null || row.page_id === undefined ? null : String(row.page_id),
+          pageName: row.page_name === null || row.page_name === undefined ? null : String(row.page_name),
+          authorityUserId: String(row.authority_user_id),
+          holdKinds,
+        };
+      }));
+}
+
+/**
  * Record durable per-program outside-event delivery obligations at ingress.
  * Duplicate `(space_id, program_id, event_id)` rows are ignored so webhook
  * retries remain idempotent.
