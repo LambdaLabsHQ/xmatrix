@@ -299,8 +299,41 @@ fn channel_exact_route_id(selector: &str) -> Option<String> {
         .filter(|channel_id| !channel_id.is_empty())
 }
 
+/// The `c…` short token of a web conversation link. A whole Channel id is
+/// never one, even when its last group happens to read like one
+/// (`…-c85ecbf13e77`): taking it for a token sent the lookup through the whole
+/// catalog instead of straight to the Channel.
 fn channel_route_token(selector: &str) -> Option<String> {
-    route_key::key_token(&route_key::last_segment(selector)?, 'c')
+    let segment = route_key::last_segment(selector)?;
+    if uuid::Uuid::parse_str(segment.trim()).is_ok() {
+        return None;
+    }
+    route_key::key_token(&segment, 'c')
+}
+
+#[cfg(test)]
+mod channel_route_token_tests {
+    use super::channel_route_token;
+
+    #[test]
+    fn a_channel_id_is_not_a_route_token_even_when_its_last_group_starts_with_c() {
+        for id in ["d7143690-1c45-3638-12ab-c85ecbf13e77", "D7143690-1C45-3638-12AB-C85ECBF13E77"] {
+            assert_eq!(channel_route_token(id), None, "{id}");
+            assert_eq!(
+                channel_route_token(&format!("https://xmatrix.sh/app/space/channels/{id}")),
+                None,
+                "{id} in a link"
+            );
+        }
+    }
+
+    #[test]
+    fn a_web_link_token_is_still_one() {
+        assert_eq!(
+            channel_route_token("https://xmatrix.sh/app/space/channels/app-store-c1a2b3c4d5"),
+            Some("c1a2b3c4d5".into())
+        );
+    }
 }
 
 fn channel_entity_token(channel_id: &str) -> String {
