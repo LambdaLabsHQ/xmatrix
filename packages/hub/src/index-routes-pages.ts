@@ -407,6 +407,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     // shows them anything, including the current text of a conflict.
     const { spaceId, pageId, authUser } = await accessAsCaller(c);
     const conversationIds = stringList(body.conversationIds);
+    const removePrograms = stringList(body.removePrograms);
     const baseRevision = integer(body.baseRevision);
     let text = typeof body.body === "string" ? body.body : "";
     // An edit of one section is the revision it was read from with that section rewritten; it then
@@ -424,6 +425,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     }
     return sessionCall(c.env, spaceId, pageId, "/internal/edit", {
       principal: sessionPrincipal(authUser, conversationIds[0]), baseRevision, body: text, conversationIds,
+      ...(removePrograms.length ? { removePrograms } : {}),
     });
   }));
 

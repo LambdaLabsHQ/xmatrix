@@ -1145,6 +1145,31 @@ mod tests {
     }
 
     #[test]
+    fn page_edit_parses_repeatable_remove_program_flags() {
+        let cli = Cli::try_parse_from([
+            "xmatrix",
+            "page",
+            "edit",
+            "page-1",
+            "--base",
+            "7",
+            "--stdin",
+            "--remove-program",
+            "daily",
+            "--remove-program",
+            "watch",
+        ])
+        .expect("page edit with --remove-program should parse");
+        let Some(Commands::Page {
+            command: PageCommand::Edit { remove_programs, .. },
+        }) = cli.command
+        else {
+            panic!("expected page edit command");
+        };
+        assert_eq!(remove_programs, vec!["daily", "watch"]);
+    }
+
+    #[test]
     fn daemon_profile_control_commands_parse_with_global_selector() {
         for (name, expected) in [
             ("start-profile", "start"),
@@ -2295,6 +2320,9 @@ pub enum PageCommand {
         /// Conversation this edit comes from (defaults to this Run's conversation)
         #[arg(long)]
         conversation: Option<String>,
+        /// Running Norn program block names this edit intentionally removes and stops (repeatable)
+        #[arg(long = "remove-program")]
+        remove_programs: Vec<String>,
     },
     /// Write a page's one-line summary for the revision you read
     Summary {
