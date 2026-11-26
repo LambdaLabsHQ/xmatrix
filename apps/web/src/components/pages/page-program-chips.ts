@@ -2,7 +2,7 @@ import { nornRunBlock, type PageProgramStatus } from "@xmatrix/protocol";
 import { pageSchema } from "@xmatrix/protocol/page-document";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { pressOpens } from "./page-chip-press";
-import { drawProgramFlow } from "./program-flow";
+import { drawProgramBranches, drawProgramFlow } from "./program-flow";
 import type { Node as DocNode } from "prosemirror-model";
 import { Plugin, PluginKey } from "prosemirror-state";
 
@@ -35,7 +35,12 @@ function steps(program: PageProgramStatus | undefined, openConversation: (conver
   box.contentEditable = "false";
   pressOpens(box, program?.channelId, "Open the conversation it works in", openConversation);
   box.append(drawProgramFlow(program, { compact: true }).root);
-  return box;
+  if (!program?.branches?.length) return box;
+  const surface = document.createElement("div");
+  surface.className = "page-program-surface";
+  surface.contentEditable = "false";
+  surface.append(box, drawProgramBranches(program.branches, openConversation));
+  return surface;
 }
 
 function chipDecorations(doc: DocNode, programs: Map<string, PageProgramStatus>,
