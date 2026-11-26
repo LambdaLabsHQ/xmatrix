@@ -1,12 +1,13 @@
 import { NORN_REMOVED_FROM_PAGE, PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornProgram, readNornRequest, readPageNornPrograms, type PagePrincipal } from "@xmatrix/db";
-import type { NornRequestView, PageProgramStatus, PageScheduleProblem } from "@xmatrix/protocol";
+import type { NornRequestView, PageProgramBranchStatus, PageProgramRequest, PageProgramStatus, PageScheduleProblem } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./page-restriction";
 import { deterministicConversationId } from "./deterministic-id";
+import { ensureAndWakeNornBranches, type NornBranchChannel } from "./norn-branches";
 import {
   checkNornProgram, collectSpaceLibraries, diffNornProgramUpgrade, nornBlocks, nornBlockSource, nornRequestWords, nornStartLedger, nornStep,
-  pinNornProgram, plainAnswer as answerText, plainResult as resultText, previewNornEdit, selectReferencedLibraries, verifyNornLedgerMigration,
-  type SpaceLibraryCatalog,
+  personHolder, pinNornProgram, plainAnswer as answerText, plainResult as resultText, previewNornEdit, selectReferencedLibraries,
+  verifyNornLedgerMigration, type SpaceLibraryCatalog,
 } from "./norn-host";
 import { nornFlow } from "./norn-plan";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
@@ -142,9 +143,12 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
     }
     if (current?.state === "running") {
       const requestId = `norn-page-revise:${current.programId}:${crypto.randomUUID()}`;
-      await (await repository(current.channelId, requestId)).revise({ requestId, channelId: current.channelId,
+      const stepResult = await (await repository(current.channelId, requestId)).revise({ requestId, channelId: current.channelId,
         programId: current.programId, source: block.source, authorityUserId: userId }, nornStep(undefined, undefined, stepLibOpts));
-      await wakeAgentLaunchCoordinator(env, current.channelId, ["norn"]);
+      await ensureAndWakeNornBranches(env, {
+        spaceId, pageId, pageName: block.name, programChannelId: current.channelId, authorityUserId: userId,
+        branches: stepResult?.branches, wakeChannels: [current.channelId, ...(stepResult?.wakeChannels ?? [])],
+      });
       return;
     }
     // One conversation for the block's whole life; each run of its program is a message there.
@@ -163,9 +167,12 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
       body: `${run > 1 ? `Run ${run}.\n\n` : ""}\`\`\`norn\n${block.source}\n\`\`\`` });
     if (!response.ok) throw new Error(`Norn page program message append failed (${response.status})`);
     const requestId = `norn-page-start:${programId}`;
-    await (await repository(channelId, requestId)).start({ requestId, channelId, programId, authorKind: "user", authorId: userId,
+    const stepResult = await (await repository(channelId, requestId)).start({ requestId, channelId, programId, authorKind: "user", authorId: userId,
       authorityUserId: userId, source: block.source, page: { pageId, name: block.name }, ledger: nornStartLedger }, nornStep(undefined, undefined, stepLibOpts));
-    await wakeAgentLaunchCoordinator(env, channelId, ["norn"]);
+    await ensureAndWakeNornBranches(env, {
+      spaceId, pageId, pageName: block.name, programChannelId: channelId, authorityUserId: userId,
+      branches: stepResult?.branches, wakeChannels: [channelId, ...(stepResult?.wakeChannels ?? [])],
+    });
   });
   if (failures.length) throw new Error(failures.join("; "));
   // What only the sync can know, for whoever saved: the blocks whose conversation was deleted.
@@ -213,11 +220,14 @@ export async function adoptPageProgramLibraries(
       continue;
     }
     const requestId = `norn-page-adopt:${current.programId}:${crypto.randomUUID()}`;
-    await (await repository(current.channelId, requestId)).revise(
+    const stepResult = await (await repository(current.channelId, requestId)).revise(
       { requestId, channelId: current.channelId, programId: current.programId, source: block.source, authorityUserId: userId },
       nornStep(undefined, undefined, { libraries: nextLibs, replacePinnedLibraries: true }),
     );
-    await wakeAgentLaunchCoordinator(env, current.channelId, ["norn"]);
+    await ensureAndWakeNornBranches(env, {
+      spaceId: input.spaceId, pageId: input.pageId, pageName: block.name, programChannelId: current.channelId, authorityUserId: userId,
+      branches: stepResult?.branches, wakeChannels: [current.channelId, ...(stepResult?.wakeChannels ?? [])],
+    });
     adopted.push({ name: block.name, libraries: Object.keys(nextLibs) });
   }
   return { adopted, skipped };
@@ -242,6 +252,57 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
     ...(found.delegatedByReader ? { yoursToTakeBack: true } : {}) };
 }
 
+type ProgramLedger = Ledger & {
+  pinnedLibraries?: Record<string, string>;
+  branchMeta?: Record<string, NornBranchChannel & { active: boolean }>;
+  requestBranches?: Record<string, string>;
+};
+
+function formatProgramRequest(request: LedgerRequest): PageProgramRequest {
+  return {
+    ...nornRequestWords(request),
+    askedAt: new Date(request.openedAt).toISOString(),
+    by: request.by === null ? null : new Date(request.by).toISOString(),
+    outcome: request.reply === null ? null : OUTCOMES[request.reply.tag],
+    reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
+      : "reason" in request.reply ? request.reply.reason : null,
+    settledAt: request.settledAt === null ? null : new Date(request.settledAt).toISOString(),
+  };
+}
+
+function buildBranchStatuses(
+  ledger: ProgramLedger | undefined,
+  pageTitles?: ReadonlyMap<string, string>,
+): PageProgramBranchStatus[] {
+  const meta = ledger?.branchMeta;
+  if (!meta) return [];
+  const entries = Object.values(meta);
+  if (!entries.length) return [];
+  const reqBranches = ledger?.requestBranches ?? {};
+  const allRequests = Object.values(ledger?.requests ?? {}).filter(req => req.verb !== "spawn");
+  return entries
+    .map(entry => {
+      const branchReqs = allRequests
+        .filter(req => reqBranches[req.id] === entry.key)
+        .sort((a, b) => a.openedAt - b.openedAt);
+      const openReqs = branchReqs.filter(req => req.reply === null);
+      const failed = branchReqs.some(req => req.reply !== null && !["Answered", "Cancelled"].includes(req.reply.tag));
+      const state: PageProgramBranchStatus["state"] = entry.active
+        ? (openReqs.some(req => personHolder(req.holder)) ? "waiting" : "running")
+        : failed ? "failed" : "completed";
+      const label = pageTitles?.get(entry.label) ?? entry.label;
+      return {
+        key: entry.key,
+        label,
+        scope: entry.scope,
+        channelId: entry.channelId,
+        state,
+        requests: branchReqs.map(formatProgramRequest),
+      };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
+}
+
 /**
  * How a program stands for whoever reads it: its requests so far, how it
  * ended, and what it does from here on. `source` is the text to read the
@@ -250,8 +311,9 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
  */
 function programStatus(name: string, source: string, problem: string | undefined,
   program: { channelId: string; state: string; ledger: unknown } | undefined,
-  catalog?: SpaceLibraryCatalog): PageProgramStatus {
-  const ledger = program?.ledger as (Ledger & { pinnedLibraries?: Record<string, string> }) | undefined;
+  catalog?: SpaceLibraryCatalog,
+  pageTitles?: ReadonlyMap<string, string>): PageProgramStatus {
+  const ledger = program?.ledger as ProgramLedger | undefined;
   const pinned = program?.state === "running" && ledger?.pinnedLibraries && Object.keys(ledger.pinnedLibraries).length
     ? ledger.pinnedLibraries : undefined;
   const activeLibraries = pinned ?? (catalog && Object.keys(catalog.libraries).length ? catalog.libraries : undefined);
@@ -260,20 +322,17 @@ function programStatus(name: string, source: string, problem: string | undefined
     ? checkNornProgram(source, activeLibraries || libraryProblems ? { libraries: activeLibraries, libraryProblems } : undefined)
     : { refusal: problem };
   const now = Date.now();
+  const branches = buildBranchStatuses(ledger, pageTitles);
   return {
     name,
     ...(program ? { channelId: program.channelId } : {}),
     state: program ? program.state as PageProgramStatus["state"] : "not_started",
     ...("refusal" in checked ? { problem: checked.refusal } : {}),
     ...(ledger?.ended ? { result: ledger.ended.error ?? (ledger.ended.result ? resultText(ledger.ended.result) : "") } : {}),
-    requests: Object.values(ledger?.requests ?? {}).sort((a, b) => a.openedAt - b.openedAt).map(request => ({
-      ...nornRequestWords(request), askedAt: new Date(request.openedAt).toISOString(),
-      by: request.by === null ? null : new Date(request.by).toISOString(),
-      outcome: request.reply === null ? null : OUTCOMES[request.reply.tag],
-      reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
-        : "reason" in request.reply ? request.reply.reason : null,
-      settledAt: request.settledAt === null ? null : new Date(request.settledAt).toISOString() })),
+    requests: Object.values(ledger?.requests ?? {}).filter(request => request.verb !== "spawn")
+      .sort((a, b) => a.openedAt - b.openedAt).map(formatProgramRequest),
     next: "refusal" in checked ? [] : nornFlow(checked.code, ledger ?? nornStartLedger(now), now),
+    ...(branches.length ? { branches } : {}),
   };
 }
 
@@ -291,11 +350,31 @@ export async function pageProgramStatus(
   ]);
   const blocks = nornBlocks(input.body);
   const deleted = await deletedBlocks(db, input.spaceId, input.pageId, blocks.map(block => block.name));
+  // Resolve Space Page titles for branch partition labels that reference Page IDs.
+  const pageTitles = new Map<string, string>();
+  if (input.principal) {
+    const candidateLabels = new Set<string>();
+    for (const program of programs) {
+      const meta = (program.ledger as ProgramLedger | undefined)?.branchMeta;
+      if (!meta) continue;
+      for (const entry of Object.values(meta)) {
+        if (entry.label) candidateLabels.add(entry.label);
+      }
+    }
+    if (candidateLabels.size > 0) {
+      const pages = new PostgresPageRepository(db);
+      await Promise.all([...candidateLabels].map(async label => {
+        const found = await pages.read({ requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: label, principal: input.principal! })
+          .then(res => res.page.title, () => null);
+        if (found) pageTitles.set(label, found);
+      }));
+    }
+  }
   return blocks.map(block => programStatus(block.name, block.source,
     block.problem ?? (deleted.has(block.name) ? DELETED_PROBLEM : undefined),
     // A deleted conversation is cleared away over minutes: its program is gone from the page at once.
     deleted.has(block.name) ? undefined : programs.find(candidate => candidate.name === block.name),
-    catalog));
+    catalog, pageTitles));
 }
 
 function sampleReplyFor(request: LedgerRequest): Reply {

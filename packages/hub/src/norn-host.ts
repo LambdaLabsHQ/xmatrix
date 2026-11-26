@@ -17,6 +17,7 @@ import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
 import {
   BUILTIN_NORN_LIBRARY_SOURCES, loadBuiltinNornLibraries, nornActionStatement, nornConnectorActionSpecs, NORN_CONNECTOR_EVENT_MANIFESTS,
 } from "./norn-libraries";
+import { nornBranchConversationId, type NornBranchChannel } from "./norn-branches";
 
 /**
  * The xMatrix host of Norn (docs/architecture/norn-host.md): what a program
@@ -854,6 +855,10 @@ export interface NornPassResult {
   refusal?: string;
   /** A delegate refused or failed the request: it went back to this participant, who delegated it (Norn spec §7). */
   returnedTo?: string;
+  /** Active branch conversations for a Page program (`forEach(~per)` / `Std.each` / `spawn(~key)`). */
+  branches?: NornBranchChannel[];
+  /** Conversations (program and/or branch) whose work changed in this pass and need coordinator reconciliation. */
+  wakeChannels?: string[];
 }
 /** What a call does to one request of the program, in the step that runs its pass. */
 export type NornAct =
@@ -927,6 +932,8 @@ export function nornStep(act?: NornAct,
       pinnedLibraries?: Record<string, string>;
       pinnedStd?: string;
       pinnedBuiltinLibraries?: Record<string, string>;
+      branchMeta?: Record<string, NornBranchChannel & { active: boolean }>;
+      requestBranches?: Record<string, string>;
     };
     const now = Math.max(state.nowMs, ledger.startedAt);
     const isV2 = (ledger.identityScheme ?? 1) === 2;
@@ -977,6 +984,7 @@ export function nornStep(act?: NornAct,
     // What the program says is new to the ledger in the pass that says it, so it is collected here and nowhere else.
     const said: { to: string; text: string }[] = [];
     let waits: unknown[] = [];
+    let latestPassBranches: Pass["branches"] = [];
     // A program is checked where it is written, so text that does not check here was written for another
     // build of the Hub: one being rolled out, or one rolled back. The program is left as it is and the pass is
     // tried again later, on a build that reads it. Stopping it would end work that nothing is wrong with.
@@ -1032,6 +1040,7 @@ export function nornStep(act?: NornAct,
       }
       nornPasses(checked.code, ledger, now, pass => {
         nextDue = pass.nextDue;
+        latestPassBranches = pass.branches;
         // Surface `accepting` request validator rejections directly back to the respondent so they can retry.
         if (act && asked && "reply" in act) {
           const validationError = pass.validationErrors?.find(err => err.id === asked.id);
@@ -1052,15 +1061,111 @@ export function nornStep(act?: NornAct,
       });
     }
     if (act && !taken && refusal === undefined) refusal = "The request has already ended";
-    const refs = new Map(state.requests.map(row => [row.requestId, row.requestRef]));
+    const activeBranches: NornBranchChannel[] = [];
+    if (state.pageId && state.pageName) {
+      type BranchDescriptor = NornBranchChannel & { active: boolean; spawnId?: string };
+      const descriptors: BranchDescriptor[] = [];
+      for (const branch of latestPassBranches) {
+        const loopName = branch.loop.replace(/^loop:/u, "");
+        let partition = branch.partition;
+        if (partition.startsWith("\"") && partition.endsWith("\"")) {
+          try {
+            const parsed = JSON.parse(partition);
+            if (typeof parsed === "string") partition = parsed;
+          } catch { /* keep raw partition representation */ }
+        }
+        const key = `${loopName}:${partition}`;
+        descriptors.push({
+          key,
+          label: partition,
+          scope: branch.scope,
+          channelId: nornBranchConversationId(state.pageId, state.pageName, key),
+          active: true,
+        });
+      }
+      for (const req of Object.values(ledger.requests)) {
+        if (req.verb !== "spawn" || req.text === "$spawn" || !req.spawnScope) continue;
+        const outer = descriptors
+          .filter(d => !d.spawnId && (req.spawnScope === d.scope || req.spawnScope!.startsWith(`${d.scope}/`)))
+          .sort((a, b) => b.scope.length - a.scope.length)[0];
+        const key = outer ? `${outer.key}/spawn:${req.text}` : `spawn:${req.text}`;
+        const label = outer ? `${outer.label} · ${req.text}` : req.text;
+        descriptors.push({
+          key,
+          label,
+          scope: req.spawnScope,
+          channelId: nornBranchConversationId(state.pageId, state.pageName, key),
+          active: req.reply === null,
+          spawnId: req.id,
+        });
+      }
+      if (descriptors.length > 0 || ledger.branchMeta) {
+        const meta = (ledger.branchMeta ??= {});
+        const reqBranches = (ledger.requestBranches ??= {});
+        for (const existing of Object.values(meta)) existing.active = false;
+        for (const desc of descriptors) {
+          meta[desc.key] = { key: desc.key, label: desc.label, scope: desc.scope, channelId: desc.channelId, active: desc.active };
+        }
+        const byScopeDesc = [...descriptors].sort((a, b) => b.scope.length - a.scope.length);
+        const bySpawnId = new Map(descriptors.filter(d => d.spawnId).map(d => [d.spawnId!, d]));
+        for (const req of Object.values(ledger.requests)) {
+          if (req.verb === "spawn" || reqBranches[req.id]) continue;
+          const reqScope = req.scope ?? req.openedBy ?? "";
+          const matched = (req.spawnOwner ? bySpawnId.get(req.spawnOwner) : undefined)
+            ?? byScopeDesc.find(d => reqScope === d.scope || reqScope.startsWith(`${d.scope}/`));
+          if (matched) reqBranches[req.id] = matched.key;
+        }
+        for (const entry of Object.values(meta)) {
+          if (entry.active) activeBranches.push({ key: entry.key, label: entry.label, scope: entry.scope, channelId: entry.channelId });
+        }
+      }
+    }
+    const prevRequests = new Map(state.requests.map(row => [row.requestId, row]));
     const status = ledger.ended ? ledger.ended.status : "running";
+    const indexedRequests = Object.values(ledger.requests)
+      .filter(request => request.verb !== "spawn" && (prevRequests.has(request.id) || request.reply === null))
+      .map(request => {
+        const branchKey = ledger.requestBranches?.[request.id];
+        const branchChannelId = branchKey ? ledger.branchMeta?.[branchKey]?.channelId : undefined;
+        return {
+          requestId: request.id,
+          requestRef: prevRequests.get(request.id)?.requestRef ?? reference(),
+          epoch: request.epoch,
+          holder: request.holder,
+          settled: request.reply !== null,
+          delegated: Boolean(request.delegatedBy),
+          ...(branchChannelId ? { channelId: branchChannelId } : {}),
+        };
+      });
+    const wakeSet = new Set<string>();
+    if (status !== "running" || said.length > 0) wakeSet.add(state.channelId);
+    for (const req of indexedRequests) {
+      const targetChannel = req.channelId ?? state.channelId;
+      const prev = prevRequests.get(req.requestId);
+      if (!prev || prev.epoch !== req.epoch || prev.settled !== req.settled || (!req.settled && !prev.delivered)) {
+        wakeSet.add(targetChannel);
+      }
+    }
+    if (ledger.branchMeta) {
+      const activeBranchIds = new Set(activeBranches.map(b => b.channelId));
+      for (const entry of Object.values(ledger.branchMeta)) {
+        if (wakeSet.has(entry.channelId) && !activeBranchIds.has(entry.channelId)) {
+          activeBranches.push({ key: entry.key, label: entry.label, scope: entry.scope, channelId: entry.channelId });
+          activeBranchIds.add(entry.channelId);
+        }
+      }
+    }
     const write: NornProgramWrite = { ledger, state: status, nextDueMs: ledger.ended ? null : nextDue,
       // Only external participant requests that were or will be delivered are indexed; internal `spawn` handles are settled by the evaluator.
-      requests: Object.values(ledger.requests).filter(request => request.verb !== "spawn" && (refs.has(request.id) || request.reply === null))
-        .map(request => ({ requestId: request.id, requestRef: refs.get(request.id) ?? reference(), epoch: request.epoch,
-          holder: request.holder, settled: request.reply !== null, delegated: Boolean(request.delegatedBy) })),
+      requests: indexedRequests,
       waits, notices: said.map(({ to, text: body }) => ({ noticeId: reference(), recipient: to, body })) };
-    return { write, result: { status, ...(refusal === undefined ? {} : { refusal }), ...(returnedTo ? { returnedTo } : {}) } };
+    return { write, result: {
+      status,
+      ...(refusal === undefined ? {} : { refusal }),
+      ...(returnedTo ? { returnedTo } : {}),
+      ...(activeBranches.length ? { branches: activeBranches } : {}),
+      ...(wakeSet.size ? { wakeChannels: [...wakeSet] } : {}),
+    } };
   };
 }
 

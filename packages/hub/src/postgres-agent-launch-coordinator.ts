@@ -496,7 +496,7 @@ export async function channelsWithWork(database: AuthorityDatabase, shardId: str
   afterChannelId: string, limit: number): Promise<string[]> {
   return database.transaction({ requestId: `agent-launch:channels-with-work:${shardId}`,
     operation: "launch.coordinator.channels-with-work" }, async (tx) =>
-    (await tx.query<{ channel_id: string }>({ name: "agent_launch_channels_with_work_v7", text: `SELECT channel_id FROM (
+    (await tx.query<{ channel_id: string }>({ name: "agent_launch_channels_with_work_v8", text: `SELECT channel_id FROM (
         SELECT launch.channel_id FROM data.agent_launches launch
           WHERE ${ACTIVE_LAUNCH_SQL} AND ${CLAIMABLE_LAUNCH_SQL.replace("$3", "$1")}
         UNION SELECT intent.channel_id FROM data.agent_reborn_intents intent
@@ -508,6 +508,8 @@ export async function channelsWithWork(database: AuthorityDatabase, shardId: str
         UNION SELECT stop.channel_id FROM data.registration_stop_intents stop WHERE stop.state='pending'
         UNION SELECT choice.channel_id FROM data.first_message_launch_choices choice WHERE ${FIRST_MESSAGE_SUMMON_PENDING_SQL}
         UNION SELECT p.channel_id FROM data.norn_programs p WHERE ${NORN_PROGRAM_OPEN_SQL}
+        UNION SELECT r.channel_id FROM data.norn_requests r
+          WHERE r.settled_at IS NULL OR r.released_at IS NULL OR r.delegated_away_instance_id IS NOT NULL
         UNION SELECT prep.channel_id FROM data.registration_launch_intents prep
           WHERE prep.state='preparing' OR (prep.state='aborted' AND prep.cancellation_completed=FALSE)
         UNION SELECT run.channel_id FROM data.run_agent_registrations b JOIN data.runs run ON run.run_id=b.run_id AND run.owner_user_id=b.owner_user_id
