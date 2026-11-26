@@ -14,7 +14,7 @@ import { absolutePositionToRelativePosition, updateYFragment, yXmlFragmentToPros
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
-import { nornBlocks, nornLibBlocks, nornProgramProblems, type SpaceLibraryCatalog } from "./norn-host";
+import { guardRunningNornBlocks, nornBlocks, nornLibBlocks, nornProgramProblems, type NornEditGuardViolation, type SpaceLibraryCatalog } from "./norn-host";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 import type { PageCoWriteObservation } from "./page-co-write-timing";
 import { finishStoredTyping, type PageStoredTypingState } from "./page-stored-typing";
@@ -74,6 +74,28 @@ export class PageSessionConflict extends Error {
   }
 }
 
+function formatProgramGuardMessage(violations: readonly NornEditGuardViolation[]): string {
+  const removed = violations.filter((v) => v.reason === "removed");
+  const broken = violations.filter((v) => v.reason === "broken");
+  const parts: string[] = [];
+  if (removed.length) {
+    const names = removed.map((v) => `\`${v.name}\``).join(", ");
+    const flags = removed.map((v) => `--remove-program ${v.name}`).join(" ");
+    parts.push(`running program${removed.length > 1 ? "s" : ""} ${names} would be removed from the page (keep the \`norn run\` block${removed.length > 1 ? "s" : ""}, or pass ${flags} to stop ${removed.length > 1 ? "them" : "it"} explicitly)`);
+  }
+  if (broken.length) {
+    const items = broken.map((v) => `\`${v.name}\`: ${v.detail}`).join("; ");
+    parts.push(`running program${broken.length > 1 ? "s" : ""} would no longer check (${items})`);
+  }
+  return `Edit refused: ${parts.join("; ")}.`;
+}
+
+export class PageSessionProgramGuardError extends Error {
+  constructor(readonly violations: readonly NornEditGuardViolation[]) {
+    super(formatProgramGuardMessage(violations));
+  }
+}
+
 /** An editor whose edits are not committed yet, with the sequence of their latest edit. */
 export interface PendingEditor { principal: PageSessionPrincipal; seq: number }
 
@@ -122,6 +144,8 @@ export interface PageSessionPorts {
   wakeCoWriters?(): void;
   /** Space-wide `norn 1 lib` catalog readable by `principal`, with this page's text overridden. */
   spaceLibraries?(principal: PageSessionPrincipal, overrideBody: string): Promise<SpaceLibraryCatalog>;
+  /** Currently running Norn programs on this page, checked before committing a whole-document edit. */
+  runningPrograms?(): Promise<ReadonlyArray<{ name: string }>>;
 }
 
 /** A committed revision as the repository answers it, and whether the page takes Agent edits as suggestions. */
@@ -822,7 +846,7 @@ export class PageSession {
    * becomes a suggestion and never touches the live text.
    */
   submitEdit(principal: PageSessionPrincipal, input: {
-    baseRevision: number; body: string; conversationIds: string[];
+    baseRevision: number; body: string; conversationIds: string[]; removePrograms?: string[];
   }): Promise<PageEditResult> {
     return this.serial(async () => {
       if (!this.base) throw new Error("page session is not loaded");
@@ -855,6 +879,21 @@ export class PageSession {
       const merge = lineMerge.ok ? lineMerge : mergePageWords(baseText, current, body);
       if (!merge.ok) throw new PageSessionConflict(this.base.revision, current);
       const target = merge.text === body ? body : canonicalPageMarkdown(merge.text);
+      let spaceCatalog: SpaceLibraryCatalog | undefined;
+      const loadSpaceCatalog = async () => {
+        if (!spaceCatalog && this.ports.spaceLibraries) {
+          spaceCatalog = await this.ports.spaceLibraries(principal, target);
+        }
+        return spaceCatalog;
+      };
+      if (this.ports.runningPrograms && nornBlocks(current).length > 0) {
+        const [running, catalog] = await Promise.all([this.ports.runningPrograms(), loadSpaceCatalog()]);
+        const violations = guardRunningNornBlocks(current, target, running, {
+          removePrograms: input.removePrograms?.length ? new Set(input.removePrograms) : undefined,
+          extraLibraries: catalog?.libraries,
+        });
+        if (violations.length) throw new PageSessionProgramGuardError(violations);
+      }
       const key = principalKey(principal);
       const conversationId = principal.conversationId ?? input.conversationIds[0] ?? null;
       // The repository commits the edit first; that is where it is authorized.
@@ -891,12 +930,10 @@ export class PageSession {
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label }));
       const hasNorn = nornBlocks(target).length > 0 || nornLibBlocks(target).length > 0;
-      const spaceCatalog = hasNorn && this.ports.spaceLibraries
-        ? await this.ports.spaceLibraries(principal, target)
-        : undefined;
+      const catalog = hasNorn ? await loadSpaceCatalog() : undefined;
       return { ...result, removedSections: pageRemovedSections(current, target),
         scheduleProblems: [...pageSchedules(target).flatMap((line) => line.status === "done"
-          ? [] : [{ source: line.source, problem: SCHEDULE_LINE_PROBLEM }]), ...nornProgramProblems(target, spaceCatalog)] } as PageEditResult;
+          ? [] : [{ source: line.source, problem: SCHEDULE_LINE_PROBLEM }]), ...nornProgramProblems(target, catalog)] } as PageEditResult;
     });
   }
 

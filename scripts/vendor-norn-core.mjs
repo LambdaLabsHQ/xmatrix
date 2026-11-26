@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-const revision = "879866cb314729dd7e6be1621ac64fc433c3309e";
+const revision = "61e8a966a87029f980f965b95a41f63b3017dff5";
 const legacyV1StdRevision = "38245c85e0afacad4ce937b6b84fa1d72442af9a";
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/vendor-norn-core.mjs <norn-checkout>");
@@ -14,7 +14,7 @@ const git = (...args) => execFileSync("git", ["-C", resolve(checkout), ...args],
 const frontend = git("ls-tree", "-r", "--name-only", revision, "src/frontend").trim().split("\n")
   .map(path => path.slice("src/".length)).filter(file => file !== "frontend/check/node.ts");
 // The evaluator and the ledger; not the simulated team or the browser entry.
-const runtime = ["code", "machine", "pattern", "value", "std", "sha256", "form", "ledger"].map(name => `runtime/${name}.ts`);
+const runtime = ["code", "machine", "pattern", "value", "std", "sha256", "form", "ledger", "facts"].map(name => `runtime/${name}.ts`);
 const files = [...frontend, ...runtime].sort();
 // Each patch must find its text, so a refresh cannot silently drop one.
 const patches = {

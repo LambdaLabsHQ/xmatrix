@@ -5,7 +5,7 @@ import { failureResponse, transientFailure } from "./error-contract";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import {
-  PageSession, PageSessionConflict, encodeNotice, type PageSessionPorts, type PageSessionPrincipal,
+  PageSession, PageSessionConflict, PageSessionProgramGuardError, encodeNotice, type PageSessionPorts, type PageSessionPrincipal,
   type PageSessionState,
 } from "./page-session";
 import { startPageSummary } from "./page-summary";
@@ -17,7 +17,7 @@ import { tellPageCoWriter } from "./page-co-write-instruction";
 import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 import { parsePageOutputWrite } from "./page-output-receipts";
 import type { PageScheduleProblem } from "@xmatrix/protocol";
-import { loadSpaceLibraryCatalog, pageProgramsKey, syncPagePrograms } from "./norn-page-programs";
+import { loadSpaceLibraryCatalog, pageProgramsKey, runningPageNornPrograms, syncPagePrograms } from "./norn-page-programs";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 
 /**
@@ -177,6 +177,12 @@ export class RelayPageSession extends DurableObject<Env> {
         principal: pagePrincipalFromSession(principal),
         override: { pageId: this.need("page"), body: overrideBody },
       }),
+      runningPrograms: async () => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([this.programsSyncing, new Promise<void>((resolve) => { timer = setTimeout(resolve, 5_000); })]);
+        clearTimeout(timer);
+        return runningPageNornPrograms(this.env, { spaceId: this.need("space"), pageId: this.need("page") });
+      },
     };
     return new PageSession(ports);
   }
@@ -280,7 +286,7 @@ export class RelayPageSession extends DurableObject<Env> {
       if (url.pathname === "/ws") return await this.accept(request);
       if (request.method === "POST" && url.pathname === "/internal/edit") {
         const body = await request.json() as { spaceId: string; pageId: string; principal: PageSessionPrincipal;
-          baseRevision: number; body: string; conversationIds: string[] };
+          baseRevision: number; body: string; conversationIds: string[]; removePrograms?: string[] };
         this.bind(body.spaceId, body.pageId);
         await this.ctx.storage.put("identity", { spaceId: body.spaceId, pageId: body.pageId });
         await this.ready(body.principal);
@@ -305,6 +311,10 @@ export class RelayPageSession extends DurableObject<Env> {
           if (error instanceof PageSessionConflict) {
             return Response.json({ error: error.message, code: "page_revision_conflict",
               detail: { headRevision: error.headRevision, body: error.body } }, { status: 409 });
+          }
+          if (error instanceof PageSessionProgramGuardError) {
+            return Response.json({ error: error.message, code: "page_program_edit_blocked",
+              detail: { violations: error.violations } }, { status: 422 });
           }
           throw error;
         }

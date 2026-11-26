@@ -72,6 +72,17 @@ commit, a new Page, and a restored revision), as whoever wrote it:
 - A block changed after its program ended runs again.
 - A removed block, or a removed Page, stops its program.
 
+An atomic Page edit (`PUT /api/spaces/:space/pages/:page`, `xmatrix page edit`,
+MCP `edit_page`, or Git push) is guarded (`guardRunningNornBlocks`) before
+commit: if the merged text would remove a currently running `norn run` block
+(including via a mangled fence) or break a valid running block (or a Space
+library it depends on) so that it no longer checks, the Hub refuses the edit
+with `422` (`page_program_edit_blocked`) and leaves the Page and its running
+programs untouched. Callers that intentionally stop and remove a running
+program declare its block name in `removePrograms` (`--remove-program <name>`).
+Unsupported future edition headers (`norn 2 run <name>`) and pages whose block
+was already broken before the edit are not blocked.
+
 A person who deletes a program's conversation ends the program: it goes with
 the conversation, whose identity is never used again. Its block stays on the
 Page and runs nothing; the Page says so, and renaming the block makes it

@@ -1,4 +1,4 @@
-import { APP_CONNECTOR_PROVIDER_MANIFESTS, nornLibBlock, nornRunBlock, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken,
+import { APP_CONNECTOR_PROVIDER_MANIFESTS, isSupportedNornEdition, nornLibBlock, nornRunBlock, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken,
   utf8ByteLength } from "@xmatrix/protocol";
 import { NORN_HANDED_ON_REASON, type NornProgramState, type NornProgramWrite, type NornStep } from "@xmatrix/db";
 import {
@@ -216,6 +216,77 @@ export function nornBlockProblem(
   if (block.problem) return block.problem;
   const checked = checkNornProgram(block.source, libraries || libraryProblems ? { libraries, libraryProblems } : undefined);
   return "refusal" in checked ? checked.refusal : undefined;
+}
+
+/** A running Norn program that a proposed Page edit would silently remove or break. */
+export interface NornEditGuardViolation {
+  name: string;
+  reason: "removed" | "broken";
+  detail: string;
+}
+
+const librariesKey = (libs: Readonly<Record<string, string>>): string =>
+  JSON.stringify(Object.entries(libs).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+
+/**
+ * Guards an atomic Page edit (`current` -> `target`) against silently removing
+ * or breaking any currently running `norn run` block (or a Space library it
+ * depends on). Only programs present in `current` and currently running are
+ * checked, so unrelated edits on a page with an already-broken block still go
+ * through. Callers that intentionally stop and remove a running program list
+ * its block name in `removePrograms`.
+ */
+export function guardRunningNornBlocks(
+  current: string,
+  target: string,
+  runningPrograms: ReadonlyArray<{ name: string }>,
+  options?: {
+    removePrograms?: ReadonlySet<string>;
+    extraLibraries?: Readonly<Record<string, string>>;
+  },
+): NornEditGuardViolation[] {
+  if (!runningPrograms.length) return [];
+  const currentBlocks = nornBlocks(current);
+  const targetBlocks = nornBlocks(target);
+  const currentLibs = { ...options?.extraLibraries, ...pageSpaceLibraries(current) };
+  const targetLibs = { ...options?.extraLibraries, ...pageSpaceLibraries(target) };
+  const libsChanged = librariesKey(currentLibs) !== librariesKey(targetLibs);
+  const currentLibOpts = Object.keys(currentLibs).length ? { libraries: currentLibs } : undefined;
+  const targetLibOpts = Object.keys(targetLibs).length ? { libraries: targetLibs } : undefined;
+  const violations: NornEditGuardViolation[] = [];
+  const seen = new Set<string>();
+  for (const { name } of runningPrograms) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const before = currentBlocks.find(block => block.name === name);
+    if (!before) continue;
+    const after = targetBlocks.find(block => block.name === name);
+    if (!after) {
+      if (options?.removePrograms?.has(name)) continue;
+      violations.push({
+        name,
+        reason: "removed",
+        detail: `Running program \`${name}\` would be removed from the page.`,
+      });
+      continue;
+    }
+    if (after.problem) {
+      // An unsupported future edition header keeps the running program alive while reporting a notice.
+      if (after.edition !== undefined && !isSupportedNornEdition(after.edition)) continue;
+      if (!before.problem) violations.push({ name, reason: "broken", detail: after.problem });
+      continue;
+    }
+    if (after.source === before.source && !libsChanged) continue;
+    const afterChecked = checkNornProgram(after.source, targetLibOpts);
+    if (!("refusal" in afterChecked)) continue;
+    const beforeChecked = before.problem
+      ? { refusal: before.problem }
+      : checkNornProgram(before.source, currentLibOpts);
+    if (!("refusal" in beforeChecked)) {
+      violations.push({ name, reason: "broken", detail: afterChecked.refusal });
+    }
+  }
+  return violations;
 }
 
 /** The program a message starts: its one `norn run` block. */
