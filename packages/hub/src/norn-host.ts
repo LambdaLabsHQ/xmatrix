@@ -50,6 +50,145 @@ export function pageSpaceLibraries(body: string): Record<string, string> {
   return libs;
 }
 
+/** Reserved module names provided by the language or host that Space libraries cannot shadow. */
+const RESERVED_NORN_LIBRARY_NAMES = new Set([
+  "Std", "Events", "Actions", "Holds", ...Object.keys(BUILTIN_NORN_LIBRARY_SOURCES),
+]);
+
+/** Resolved Space-wide library catalog across all readable Pages in a Space. */
+export interface SpaceLibraryCatalog {
+  libraries: Record<string, string>;
+  problems: Record<string, string>;
+}
+
+/**
+ * Collects top-level `norn 1 lib <Name>` blocks across a Space's readable Pages.
+ * Optional `override` substitutes an unsaved or newly edited Page body in place
+ * of its stored revision. Cross-page name collisions and built-in module
+ * shadowing are recorded in `problems` and omitted from `libraries`.
+ */
+export function collectSpaceLibraries(
+  pages: ReadonlyArray<{ pageId: string; title?: string; body: string }>,
+  override?: { pageId: string; body: string },
+): SpaceLibraryCatalog {
+  const effective = override
+    ? [
+      ...pages.map(page => page.pageId === override.pageId ? { ...page, body: override.body } : page),
+      ...(pages.some(page => page.pageId === override.pageId) ? [] : [{ pageId: override.pageId, body: override.body }]),
+    ]
+    : [...pages];
+  const libraries: Record<string, string> = {};
+  const problems: Record<string, string> = {};
+  const owners = new Map<string, string[]>();
+  for (const page of effective) {
+    for (const block of nornLibBlocks(page.body)) {
+      if (!block.name) continue;
+      if (block.problem) {
+        problems[block.name] ??= block.problem;
+        continue;
+      }
+      if (RESERVED_NORN_LIBRARY_NAMES.has(block.name)) {
+        problems[block.name] = `Library ${block.name} conflicts with built-in module ${block.name}; rename it.`;
+        continue;
+      }
+      const list = owners.get(block.name) ?? [];
+      list.push(page.pageId);
+      owners.set(block.name, list);
+      if (list.length === 1) {
+        libraries[block.name] = block.source;
+      } else {
+        delete libraries[block.name];
+        problems[block.name] = `Library ${block.name} is defined on multiple pages (${list.map(id => `page:${id}`).join(", ")}); rename or remove one.`;
+      }
+    }
+  }
+  return { libraries, problems };
+}
+
+/** Walks a parsed Norn AST node to collect every module name referenced by `open`, `needs`, qualified values, or qualified types/constructors. */
+function collectAstModuleRefs(node: unknown, out: Set<string>): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectAstModuleRefs(item, out);
+    return;
+  }
+  const rec = node as Record<string, unknown>;
+  const kind = rec.kind;
+  if ((kind === "Open" || kind === "Needs" || kind === "QualifiedIdentifier") && typeof rec.module === "string") {
+    out.add(rec.module);
+  }
+  if ((kind === "TypeName" || kind === "Constructor" || kind === "ConstructorPattern")
+    && typeof rec.name === "string" && rec.name.includes(".")) {
+    out.add(rec.name.slice(0, rec.name.indexOf(".")));
+  }
+  for (const [key, value] of Object.entries(rec)) {
+    if (key === "span") continue;
+    collectAstModuleRefs(value, out);
+  }
+}
+
+/** Module names directly referenced by a Norn program or library source. */
+export function referencedLibraryNames(source: string): Set<string> {
+  const out = new Set<string>();
+  const parsed = parse(source);
+  if (parsed.ok) collectAstModuleRefs(parsed.program, out);
+  return out;
+}
+
+/**
+ * Resolves the transitive Space library dependencies of `source` in topological
+ * dependency order. Unreferenced libraries in `catalog` (including broken draft
+ * libraries on unrelated pages) are skipped so they never break other programs.
+ */
+export function resolveProgramLibraries(
+  source: string,
+  catalog: Readonly<Record<string, string>>,
+  problems?: Readonly<Record<string, string>>,
+  seedNames?: Iterable<string>,
+): { libraries: Record<string, string>; order: string[] } | { refusal: string } {
+  const roots = seedNames ? [...seedNames] : [...referencedLibraryNames(source)];
+  const visited = new Set<string>();
+  const visiting: string[] = [];
+  const order: string[] = [];
+
+  const visit = (name: string): string | undefined => {
+    if (problems?.[name]) return problems[name];
+    if (!(name in catalog)) return undefined;
+    if (visited.has(name)) return undefined;
+    const cycleAt = visiting.indexOf(name);
+    if (cycleAt !== -1) {
+      return `Circular library dependency: ${[...visiting.slice(cycleAt), name].join(" -> ")}`;
+    }
+    visiting.push(name);
+    for (const dep of referencedLibraryNames(catalog[name]!)) {
+      if (dep === name) continue;
+      const err = visit(dep);
+      if (err) return err;
+    }
+    visiting.pop();
+    visited.add(name);
+    order.push(name);
+    return undefined;
+  };
+
+  for (const root of roots) {
+    const err = visit(root);
+    if (err) return { refusal: err };
+  }
+  const libraries: Record<string, string> = {};
+  for (const name of order) libraries[name] = catalog[name]!;
+  return { libraries, order };
+}
+
+/** Returns only the transitive Space libraries from `catalog` referenced by `source`, in dependency order. */
+export function selectReferencedLibraries(
+  source: string,
+  catalog: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const resolved = resolveProgramLibraries(source, catalog);
+  return "refusal" in resolved ? {} : resolved.libraries;
+}
+
 /**
  * The programs a text carries: its top-level fenced blocks tagged `norn run`
  * (`nornRunBlock`), each under its name. A block tagged `norn` alone is only
@@ -69,9 +208,13 @@ export function nornBlocks(body: string): NornBlock[] {
 }
 
 /** Why a block does not run as written, or undefined when it runs. */
-export function nornBlockProblem(block: NornBlock, libraries?: Readonly<Record<string, string>>): string | undefined {
+export function nornBlockProblem(
+  block: NornBlock,
+  libraries?: Readonly<Record<string, string>>,
+  libraryProblems?: Readonly<Record<string, string>>,
+): string | undefined {
   if (block.problem) return block.problem;
-  const checked = checkNornProgram(block.source, libraries ? { libraries } : undefined);
+  const checked = checkNornProgram(block.source, libraries || libraryProblems ? { libraries, libraryProblems } : undefined);
   return "refusal" in checked ? checked.refusal : undefined;
 }
 
@@ -110,13 +253,22 @@ const BUILTIN_LIBRARIES = loadBuiltinNornLibraries(HOST);
 function loadProgramLibraries(
   extra?: Readonly<Record<string, string>>,
   pinnedBuiltins?: Readonly<Record<string, string>>,
+  options?: { source?: string; libraryProblems?: Readonly<Record<string, string>>; seedNames?: Iterable<string> },
 ): { libraries: Record<string, Library>; refusal?: string } {
   const libraries: Record<string, Library> = { ...BUILTIN_LIBRARIES };
   for (const [name, source] of Object.entries(pinnedBuiltins ?? {})) {
     const lib = readLibrary(source, `${name}.norn`, HOST, { name });
     if (lib.ok) libraries[name] = lib;
   }
-  for (const [name, source] of Object.entries(extra ?? {})) {
+  let orderedEntries: Array<[string, string]>;
+  if ((extra || options?.libraryProblems) && (options?.source !== undefined || options?.seedNames !== undefined)) {
+    const resolved = resolveProgramLibraries(options.source ?? "", extra ?? {}, options.libraryProblems, options.seedNames);
+    if ("refusal" in resolved) return { libraries, refusal: resolved.refusal };
+    orderedEntries = resolved.order.map(name => [name, resolved.libraries[name]!]);
+  } else {
+    orderedEntries = Object.entries(extra ?? {});
+  }
+  for (const [name, source] of orderedEntries) {
     const lib = readLibrary(source, `${name}.norn`, HOST, {
       name,
       libraries,
@@ -139,12 +291,16 @@ export function checkNornProgram(
   source: string,
   options?: {
     libraries?: Readonly<Record<string, string>>;
+    libraryProblems?: Readonly<Record<string, string>>;
     pinnedBuiltins?: Readonly<Record<string, string>>;
     stdSource?: string;
     legacyStd?: boolean;
   },
 ): Checked {
-  const loaded = loadProgramLibraries(options?.libraries, options?.pinnedBuiltins);
+  const loaded = loadProgramLibraries(options?.libraries, options?.pinnedBuiltins, {
+    source,
+    libraryProblems: options?.libraryProblems,
+  });
   if (loaded.refusal) return { refusal: loaded.refusal };
   const checkWithStd = (stdLib: Library): Checked => {
     const checked = checkSource(source, {
@@ -176,18 +332,22 @@ export function checkNornProgram(
 }
 
 /** Pins a program's source and every referenced library by SHA-256 content hash. */
-export function pinNornProgram(source: string, spaceLibraries?: Readonly<Record<string, string>>): ProgramPin | { refusal: string } {
+export function pinNornProgram(
+  source: string,
+  spaceLibraries?: Readonly<Record<string, string>>,
+  libraryProblems?: Readonly<Record<string, string>>,
+): ProgramPin | { refusal: string } {
   const parsed = parse(source);
   if (!parsed.ok) return { refusal: parsed.diagnostics.map(d => `${d.span.start.line}:${d.span.start.column} ${d.message}`).join("\n") };
-  const loaded = loadProgramLibraries(spaceLibraries);
+  const loaded = loadProgramLibraries(spaceLibraries, undefined, { source, libraryProblems });
   if (loaded.refusal) return { refusal: loaded.refusal };
   return pinProgramDefinitions(parsed.program, loaded.libraries);
 }
 
 /** Computes a 3-way upgrade diff (interface diff + effect lock diff + ledger diff) before updating a program or library. */
 export function diffNornProgramUpgrade(
-  before: { source: string; libraries?: Readonly<Record<string, string>> },
-  after: { source: string; libraries?: Readonly<Record<string, string>> },
+  before: { source: string; libraries?: Readonly<Record<string, string>>; libraryProblems?: Readonly<Record<string, string>> },
+  after: { source: string; libraries?: Readonly<Record<string, string>>; libraryProblems?: Readonly<Record<string, string>> },
   ledger: Ledger = emptyLedger(0),
   now = 0,
 ): UpgradeDiff | { refusal: string } {
@@ -195,9 +355,9 @@ export function diffNornProgramUpgrade(
   if (!beforeParsed.ok) return { refusal: beforeParsed.diagnostics.map(d => `${d.span.start.line}:${d.span.start.column} ${d.message}`).join("\n") };
   const afterParsed = parse(after.source);
   if (!afterParsed.ok) return { refusal: afterParsed.diagnostics.map(d => `${d.span.start.line}:${d.span.start.column} ${d.message}`).join("\n") };
-  const loadedBefore = loadProgramLibraries(before.libraries);
+  const loadedBefore = loadProgramLibraries(before.libraries, undefined, { source: before.source, libraryProblems: before.libraryProblems });
   if (loadedBefore.refusal) return { refusal: loadedBefore.refusal };
-  const loadedAfter = loadProgramLibraries(after.libraries);
+  const loadedAfter = loadProgramLibraries(after.libraries, undefined, { source: after.source, libraryProblems: after.libraryProblems });
   if (loadedAfter.refusal) return { refusal: loadedAfter.refusal };
   return diffProgramUpgrade({
     beforeProgram: beforeParsed.program,
@@ -218,11 +378,18 @@ export function previewNornEdit(
   afterSource: string,
   ledger: Ledger,
   now: number,
-  options?: { beforeLibraries?: Readonly<Record<string, string>>; afterLibraries?: Readonly<Record<string, string>> },
+  options?: {
+    beforeLibraries?: Readonly<Record<string, string>>;
+    afterLibraries?: Readonly<Record<string, string>>;
+    beforeLibraryProblems?: Readonly<Record<string, string>>;
+    afterLibraryProblems?: Readonly<Record<string, string>>;
+  },
 ): EditPreview | { refusal: string } {
-  const before = checkNornProgram(beforeSource, options?.beforeLibraries ? { libraries: options.beforeLibraries } : undefined);
+  const before = checkNornProgram(beforeSource, options?.beforeLibraries || options?.beforeLibraryProblems
+    ? { libraries: options?.beforeLibraries, libraryProblems: options?.beforeLibraryProblems } : undefined);
   if ("refusal" in before) return before;
-  const after = checkNornProgram(afterSource, options?.afterLibraries ? { libraries: options.afterLibraries } : undefined);
+  const after = checkNornProgram(afterSource, options?.afterLibraries || options?.afterLibraryProblems
+    ? { libraries: options?.afterLibraries, libraryProblems: options?.afterLibraryProblems } : undefined);
   if ("refusal" in after) return after;
   return previewEdit(before.code, after.code, ledger, now);
 }
@@ -681,7 +848,7 @@ export function nornPasses(code: Code, ledger: Ledger, now: number, each: (pass:
 export function nornStep(act?: NornAct,
   /** An outside event and the streams it matches in this program (legacy text or CloudEvents 1.0.2). */
   occurred?: { id: string; streams: readonly NornStream[]; what: string; cloudEvent?: CloudEventInput },
-  options?: { libraries?: Readonly<Record<string, string>>; pinDependencies?: boolean }): NornStep<NornPassResult> {
+  options?: { libraries?: Readonly<Record<string, string>>; replacePinnedLibraries?: boolean; pinDependencies?: boolean }): NornStep<NornPassResult> {
   return (state: NornProgramState) => {
     // The host's receipt travels with the occurrence. Older ledgers have no receipt on their occurrences.
     const ledger = state.ledger as Omit<Ledger, "occurrences"> & {
@@ -692,14 +859,19 @@ export function nornStep(act?: NornAct,
     };
     const now = Math.max(state.nowMs, ledger.startedAt);
     const isV2 = (ledger.identityScheme ?? 1) === 2;
-    if (options?.libraries && Object.keys(options.libraries).length > 0) {
-      ledger.pinnedLibraries = { ...options.libraries };
+    if (options?.replacePinnedLibraries) {
+      const referenced = options.libraries ? selectReferencedLibraries(state.source, options.libraries) : {};
+      if (Object.keys(referenced).length > 0) ledger.pinnedLibraries = referenced;
+      else delete ledger.pinnedLibraries;
+    } else if (options?.libraries && Object.keys(options.libraries).length > 0) {
+      const referenced = selectReferencedLibraries(state.source, options.libraries);
+      if (Object.keys(referenced).length > 0) ledger.pinnedLibraries = referenced;
     }
     if (isV2 && (options?.pinDependencies || !ledger.pinnedStd)) {
       ledger.pinnedStd ??= NORN_STD;
       ledger.pinnedBuiltinLibraries ??= { ...BUILTIN_NORN_LIBRARY_SOURCES };
     }
-    const activeLibraries = options?.libraries ?? ledger.pinnedLibraries;
+    const activeLibraries = options?.replacePinnedLibraries ? ledger.pinnedLibraries : (options?.libraries ?? ledger.pinnedLibraries);
     if (occurred && state.stopReason === null) {
       const legacyStreams = occurred.streams.filter(stream => stream.name !== "Events.events");
       const eventsStreams = occurred.streams.filter(stream => stream.name === "Events.events");
@@ -825,16 +997,25 @@ export function nornStep(act?: NornAct,
  * Each `norn run` or `norn 1 lib` block of a text that does not check as written, and why:
  * what whoever just wrote the text is told at once.
  */
-export function nornProgramProblems(body: string): { source: string; problem: string }[] {
+export function nornProgramProblems(
+  body: string,
+  spaceCatalog?: SpaceLibraryCatalog,
+): { source: string; problem: string }[] {
+  const catalog = spaceCatalog ?? collectSpaceLibraries([{ pageId: "self", body }]);
   const libProblems = nornLibBlocks(body).flatMap(block => {
     const tag = block.edition === undefined ? `\`\`\`norn lib ${block.name}` : `\`\`\`norn ${block.edition} lib ${block.name}`;
     if (block.problem) return [{ source: tag, problem: block.problem }];
-    const loaded = loadProgramLibraries({ [block.name]: block.source });
+    if (catalog.problems[block.name]) return [{ source: tag, problem: catalog.problems[block.name]! }];
+    const loaded = loadProgramLibraries({ ...catalog.libraries, [block.name]: block.source }, undefined, {
+      seedNames: [block.name],
+      libraryProblems: catalog.problems,
+    });
     return loaded.refusal ? [{ source: tag, problem: loaded.refusal }] : [];
   });
-  const libraries = pageSpaceLibraries(body);
+  const libraries = Object.keys(catalog.libraries).length ? catalog.libraries : undefined;
+  const libraryProblems = Object.keys(catalog.problems).length ? catalog.problems : undefined;
   const runProblems = nornBlocks(body).flatMap(block => {
-    const problem = nornBlockProblem(block, Object.keys(libraries).length ? libraries : undefined);
+    const problem = nornBlockProblem(block, libraries, libraryProblems);
     return problem === undefined ? [] : [{ source: nornBlockSource(block.name, block.edition), problem }];
   });
   return [...libProblems, ...runProblems];

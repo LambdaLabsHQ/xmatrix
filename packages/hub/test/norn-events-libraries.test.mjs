@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   checkNornProgram,
+  collectSpaceLibraries,
   diffNornProgramUpgrade,
   eventsStream,
   nornDelivery,
@@ -12,6 +13,7 @@ import {
   pageSpaceLibraries,
   pinNornProgram,
   previewNornEdit,
+  resolveProgramLibraries,
   verifyNornLedgerMigration,
 } from "../src/norn-host.ts";
 import { extractGmailEventData, nornConnectorEventSpecs } from "../src/norn-libraries.ts";
@@ -278,4 +280,60 @@ test("connector event manifests declare typed Norn Events kinds and fields for c
   assert.ok(github.some(e => e.kind === "issues.opened" && e.fields.some(f => f.name === "number")));
   assert.ok(github.some(e => e.kind === "workflow_run.completed" && e.fields.some(f => f.name === "conclusion")));
   assert.ok(gmail.some(e => e.kind === "message.received" && e.fields.some(f => f.name === "messageId")));
+});
+
+test("cross-page Space libraries resolve transitively in dependency order, isolate broken unrelated libs, and detect collisions or cycles", () => {
+  const pageLoops = `# Loops\n\n\`\`\`norn 1 lib Loops\nneeds Products\npub let promptFor = (p: Products.item): string => "Check " ++ Products.label(p)\n\`\`\`\n`;
+  const pageProducts = `# Products\n\n\`\`\`norn 1 lib Products\npub type item = { name: string }\npub let label = (p: item): string => p.name\n\`\`\`\n`;
+  const pageBrokenDraft = `# Scratch\n\n\`\`\`norn 1 lib BrokenDraft\npub let oops = (\n\`\`\`\n`;
+  // Intentionally place Loops before Products to prove topological ordering.
+  const catalog = collectSpaceLibraries([
+    { pageId: "p-loops", body: pageLoops },
+    { pageId: "p-products", body: pageProducts },
+    { pageId: "p-draft", body: pageBrokenDraft },
+  ]);
+  assert.deepEqual(Object.keys(catalog.problems), []);
+
+  const progSource = `needs Loops\nneeds Products\nask(@alice, Loops.promptFor({ name: "xMatrix" }), ~by=1d)->wait`;
+  const resolved = resolveProgramLibraries(progSource, catalog.libraries, catalog.problems);
+  assert.ok(!("refusal" in resolved));
+  assert.deepEqual(resolved.order, ["Products", "Loops"]);
+
+  // BrokenDraft on an unrelated page never breaks a program that does not reference it.
+  const checked = checkNornProgram(progSource, { libraries: catalog.libraries, libraryProblems: catalog.problems });
+  assert.ok(!("refusal" in checked));
+
+  // nornStep pins ONLY the transitively referenced libraries (never BrokenDraft).
+  const prog = makeProgram(progSource, { libraries: catalog.libraries });
+  const first = prog.step();
+  assert.deepEqual(Object.keys(first.write.ledger.pinnedLibraries).sort(), ["Loops", "Products"]);
+
+  // Cross-page duplicate module name is refused when referenced, while unrelated programs still check.
+  const dupCatalog = collectSpaceLibraries([
+    { pageId: "p-1", body: pageProducts },
+    { pageId: "p-2", body: pageProducts },
+  ]);
+  assert.match(dupCatalog.problems.Products ?? "", /multiple pages.*page:p-1.*page:p-2/u);
+  const dupChecked = checkNornProgram(`needs Products\nask(@alice, Products.label({ name: "x" }))->wait`, {
+    libraries: dupCatalog.libraries,
+    libraryProblems: dupCatalog.problems,
+  });
+  assert.ok("refusal" in dupChecked);
+  assert.match(dupChecked.refusal, /multiple pages/u);
+  assert.ok(!("refusal" in checkNornProgram(`ask(@alice, "No lib")->wait`, {
+    libraries: dupCatalog.libraries,
+    libraryProblems: dupCatalog.problems,
+  })));
+
+  // Built-in module shadowing is rejected.
+  const shadow = collectSpaceLibraries([{ pageId: "p-shadow", body: `\`\`\`norn 1 lib GitHub\npub let x = 1\n\`\`\`` }]);
+  assert.match(shadow.problems.GitHub ?? "", /built-in module GitHub/u);
+
+  // Cyclic library dependencies are refused cleanly.
+  const cyclic = resolveProgramLibraries(`needs Alpha\nask(@alice, Alpha.x)->wait`, {
+    Alpha: `needs Beta\npub let x = Beta.y`,
+    Beta: `needs Alpha\npub let y = Alpha.x`,
+  });
+  assert.ok("refusal" in cyclic);
+  assert.match(cyclic.refusal, /Circular library dependency: Alpha -> Beta -> Alpha/u);
 });

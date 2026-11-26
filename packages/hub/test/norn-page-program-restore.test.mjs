@@ -22,6 +22,7 @@ async function sync(program) {
       },
       PostgresPageRepository: class {
         async read() { return { page: { title: "Page", body: BODY } }; }
+        async libraryPages() { return { pages: [] }; }
         async link() {}
       },
       readDeletedConversations: async () => new Set(),
