@@ -34,7 +34,12 @@ import {
 import { sendHumanChannelFocus } from "./send-human-channel-focus";
 import { useChannelHistoryWarmup } from "./use-channel-history-warmup";
 import { ReconnectingSocket, type SocketTransport } from "@/lib/connectivity/reconnecting-socket";
-import { createHumanSocketOpener, type HumanSocketTransport } from "@/lib/connectivity/human-socket-transport";
+import {
+  clearSharedHumanSocketUser,
+  createHumanSocketOpener,
+  isSharedHumanSocketEnabled,
+  type HumanSocketTransport,
+} from "@/lib/connectivity/human-socket-transport";
 import { listenForForegroundRefresh } from "./foreground-refresh";
 import {
   channelLastMessagePreviewFromEntry,
@@ -103,6 +108,7 @@ import {
   channelAppPath,
   resolveChannelRouteKey,
   resolveSpaceRouteKey,
+  routeChannelTarget,
   spaceAppPath,
 } from "@/components/dashboard/channel-links";
 import { rerankWorkspaceSearch, searchWorkspaceMessages } from "./workspace-message-search";
@@ -862,18 +868,37 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setHistoryCacheRevision((current) => current + 1);
   }, []);
 
+  const applyRemoteHistoryRef = useRef<((
+    channelId: string,
+    messages: ChannelMessage[],
+    hasOlderMessages: boolean,
+    clientMessageId?: string,
+  ) => void) | null>(null);
+  const applyRemoteDeleteRef = useRef<((channelId: string) => void) | null>(null);
+  const [settledStartupCatalogKey, setSettledStartupCatalogKey] = useState<string | null>(null);
+
   const {
     relaySocketGenerationRef, historyTailBaseGenerationRef, productTailCacheGapRef,
     productTailCacheHydratedStampsRef, productTailCacheStoreRef,
     relaySocketLive, recordHistoryTailBase, beginHistoryTailRead, historyTailContiguous, productTailCacheHydrationTick,
-    scheduleProductTailCachePersist, purgeProductTailCacheChannel,
+    scheduleProductTailCachePersist, requestLiveChannelSnapshot,
+    broadcastChannelUpsert, broadcastChannelDelete,
+    broadcastOutgoingUpsert, broadcastOutgoingRemove, broadcastHistoryMessages,
+    purgeProductTailCacheChannel,
     cachedCatalogChannels, setCachedCatalogChannels,
   } = useWorkspaceShellTailCache({
-    user, mobileListFixture, channels, channelsRef, historyCacheRef,
+    user, mobileListFixture, channels, channelsRef,
+    hasAuthoritativeCatalog: settledStartupCatalogKey !== null,
+    setChannels,
+    outgoingMessagesRef, setOutgoingMessages,
+    historyCacheRef,
     historyRenderAuthoritiesRef, historyRevisionRef, selectedChannelIdRef,
     historyChannelIdRef, historyRef, hasOlderMessagesRef, latestHistorySequenceRef,
     relayPushConnectedRef, relaySocketRef, setHistory, setHasOlderMessages, setLoadingHistory,
     authorizeHistoryRender, bumpHistoryCacheRevision, clearChannelHistory, syncChannelSummaryFromHistory,
+    onRemoteHistoryMessages: (channelId, messages, hasOlderMessages, clientMessageId) =>
+      applyRemoteHistoryRef.current?.(channelId, messages, hasOlderMessages, clientMessageId),
+    onRemoteChannelDeleted: (channelId) => applyRemoteDeleteRef.current?.(channelId),
   });
 
   /* What is on screen reads the cache for the open conversation, its threads
@@ -1056,6 +1081,44 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     );
   }, [commitChannelHistory, heldChannelWindow]);
 
+  applyRemoteHistoryRef.current = (channelId, incoming, nextHasOlderMessages, clientMessageId) => {
+    if (incoming.length === 0) return;
+    if (clientMessageId) {
+      const confirmed = incoming[0];
+      if (confirmed?.messageId) {
+        outboundClientIdsByMessageIdRef.current.set(confirmed.messageId, clientMessageId);
+      }
+      setOutgoingMessages((current) =>
+        current.filter((item) => item.clientMessageId !== clientMessageId)
+      );
+    } else {
+      const incomingIds = new Set(incoming.map((item) => item.messageId));
+      setOutgoingMessages((current) =>
+        current.filter((item) => !incomingIds.has(item.clientMessageId))
+      );
+    }
+    mergeAndRememberChannelHistory(channelId, incoming, nextHasOlderMessages || undefined, true);
+    if (user?.id && selectedChannelIdRef.current === channelId) {
+      if (historyChannelIdRef.current !== channelId) {
+        historyChannelIdRef.current = channelId;
+        const cached = historyCacheRef.current.get(channelId);
+        if (cached) {
+          historyRef.current = cached.messages;
+          hasOlderMessagesRef.current = cached.hasOlderMessages;
+          latestHistorySequenceRef.current = latestSequence(cached.messages);
+          setHistory(cached.messages);
+          setHasOlderMessages(cached.hasOlderMessages);
+        }
+      }
+      setLoadingHistory(false);
+      authorizeHistoryRender({
+        userId: user.id,
+        channelId,
+        historyRevision: historyRevisionRef.current,
+      });
+    }
+  };
+
   const updateChannelReadCounts = useCallback((
     updater: (current: Record<string, number>) => Record<string, number>
   ) => {
@@ -1215,7 +1278,28 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const startupCatalogKey = token && authenticatedUserId
     ? JSON.stringify([authenticatedUserId, resolvedSpaceId]) : null;
-  const [settledStartupCatalogKey, setSettledStartupCatalogKey] = useState<string | null>(null);
+
+  // Ask any already-running same-origin view (e.g. an open floating card when the
+  // side panel opens) for its live authenticated channel + messages + pending sends
+  // right on mount, so the first screen paints from live peer state with zero Hub RTT.
+  const requestedLiveChannelId = useMemo(() => {
+    const raw = routeInfo.view === "messages"
+      ? routeInfo.channelKey || routeInfo.legacyChannelId
+      : routeInfo.conversationKey;
+    return raw ? routeChannelTarget(raw)?.channelId ?? null : null;
+  }, [routeInfo.channelKey, routeInfo.conversationKey, routeInfo.legacyChannelId, routeInfo.view]);
+  const requestedLiveChannelIdRef = useRef<string | null>(requestedLiveChannelId);
+  requestedLiveChannelIdRef.current = requestedLiveChannelId;
+
+  useEffect(() => {
+    if (!user?.id || !requestedLiveChannelId) return;
+    const hasChannel = channelsRef.current.some((item) => item.id === requestedLiveChannelId);
+    const hasRows = Boolean(historyCacheRef.current.get(requestedLiveChannelId)?.messages.length) ||
+      outgoingMessagesRef.current.some((item) => item.channelId === requestedLiveChannelId);
+    if (!hasChannel || !hasRows) {
+      requestLiveChannelSnapshot(requestedLiveChannelId);
+    }
+  }, [user?.id, requestedLiveChannelId, requestLiveChannelSnapshot]);
   const hasChannelRoute = Boolean(routeInfo.channelKey || routeInfo.legacyChannelId);
   const startupHistoryChannelId = exactRouteHistoryId || routeChannelId;
   const startupBackgroundReady = useStartupBackgroundReady(
@@ -1611,12 +1695,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   /* A deleted Channel leaves every place that still holds it: the list, its
      history, and the address. An address left naming it kept the reader on a
      Channel that no longer exists, so the deletion read as having failed. */
-  const forgetDeletedChannel = useCallback((channelId: string) => {
+  const forgetDeletedChannel = useCallback((channelId: string, { broadcast = true } = {}) => {
     const spaceId = channelsRef.current.find((channel) => channel.id === channelId)?.spaceId;
     invalidateAgentTraceChannels([channelId], "close");
     historyCacheRef.current.delete(channelId);
     historyTailBaseGenerationRef.current.delete(channelId);
     purgeProductTailCacheChannel(channelId);
+    if (broadcast) broadcastChannelDelete(channelId);
     setOutgoingMessages((current) => current.filter((item) => item.channelId !== channelId));
     setChannels((current) => current.filter((channel) => channel.id !== channelId));
     window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
@@ -1640,7 +1725,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setHistoryError(null);
     replaceBrowserPath(list);
     setBrowserPath(list);
-  }, [historyTailBaseGenerationRef, invalidateAgentTraceChannels, purgeProductTailCacheChannel, setChannels]);
+  }, [broadcastChannelDelete, historyTailBaseGenerationRef, invalidateAgentTraceChannels, purgeProductTailCacheChannel, setChannels]);
+
+  applyRemoteDeleteRef.current = (channelId) => forgetDeletedChannel(channelId, { broadcast: false });
 
   const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, onChannelNotFound: forgetDeletedChannel, setHistoryError, setLoadingHistory });
 
@@ -2163,6 +2250,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             setOutgoingMessages((current) =>
               current.filter((outgoing) => outgoing.clientMessageId !== message.clientMessageId)
             );
+            broadcastOutgoingRemove(entry.channelId, message.clientMessageId);
             announceEmbedOutboxAck(message.clientMessageId);
           }
           const cached = historyCacheRef.current.get(entry.channelId);
@@ -2186,6 +2274,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               setOutgoingMessages((current) =>
                 current.filter((item) => item.clientMessageId !== claimedOutboundClientId)
               );
+              broadcastOutgoingRemove(entry.channelId, claimedOutboundClientId);
               announceEmbedOutboxAck(claimedOutboundClientId);
             }
           }
@@ -2283,7 +2372,20 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       }
     }
 
-    const openHumanSocket = createHumanSocketOpener();
+    const openHumanSocket = createHumanSocketOpener({
+      shared: isSharedHumanSocketEnabled(isExtensionCompanion()),
+      userId,
+      focusChannelId: () => {
+        if (selectedChannelIdRef.current) return selectedChannelIdRef.current;
+        if (requestedLiveChannelIdRef.current) return requestedLiveChannelIdRef.current;
+        const route = appRouteInfo(currentBrowserLocation());
+        const raw = route.view === "messages"
+          ? route.channelKey || route.legacyChannelId
+          : route.conversationKey;
+        return raw ? routeChannelTarget(raw)?.channelId ?? null : null;
+      },
+      clientRole: isExtensionInlinePopover() ? "inline" : isExtensionCompanion() ? "panel" : "app",
+    });
     const connection = new ReconnectingSocket<HumanSocketTransport>({
       open: async () => openHumanSocket(relayUrl()),
       onOpen: (live) => {
@@ -2365,6 +2467,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     forgetDeletedChannel,
     commitChannelHistory,
     mergeAndRememberChannelHistory,
+    broadcastOutgoingRemove,
     observeChannelReadSequence,
     queueChannelTimelineScroll,
     recordHistoryTailBase,
@@ -3115,7 +3218,19 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   }, [agentStatusEvents, realtimeEventViews]);
 
 
+  const previousSharedSocketUserIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = previousSharedSocketUserIdRef.current;
+    previousSharedSocketUserIdRef.current = authenticatedUserId;
+    if (previous && previous !== authenticatedUserId && isExtensionCompanion()) {
+      clearSharedHumanSocketUser(previous);
+    }
+  }, [authenticatedUserId]);
+
   const logoutAndClearDeviceData = useCallback(async () => {
+    if (authenticatedUserId && isExtensionCompanion()) {
+      clearSharedHumanSocketUser(authenticatedUserId);
+    }
     setCachedCatalogChannels([]);
     await productTailCacheStoreRef.current?.clearAll();
     await clearProductMessageAttachmentMediaCache();
@@ -3123,7 +3238,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     clearChannelHistory();
     await logout();
     router.push("/login");
-  }, [clearChannelHistory, logout, productTailCacheStoreRef, router, setCachedCatalogChannels]);
+  }, [authenticatedUserId, clearChannelHistory, logout, productTailCacheStoreRef, router, setCachedCatalogChannels]);
 
   useEffect(() => {
     void removeRetiredBrowserReplica();
@@ -3387,6 +3502,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     handleTimelineMessageExposed,
     applyChannelHistory,
     cachedCatalogChannels,
+    requestLiveChannelSnapshot,
+    broadcastChannelUpsert,
+    broadcastChannelDelete,
+    broadcastOutgoingUpsert,
+    broadcastOutgoingRemove,
+    broadcastHistoryMessages,
     recordHistoryTailBase,
     routeSpaceId,
     routeChannelId,
