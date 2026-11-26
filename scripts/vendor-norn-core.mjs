@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-const revision = "61e8a966a87029f980f965b95a41f63b3017dff5";
+const revision = "8a2e680fa215444fb94b023bf7c1f0e976af4631";
 const legacyV1StdRevision = "38245c85e0afacad4ce937b6b84fa1d72442af9a";
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/vendor-norn-core.mjs <norn-checkout>");

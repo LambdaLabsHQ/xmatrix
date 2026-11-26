@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@61e8a966a87029f980f965b95a41f63b3017dff5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@8a2e680fa215444fb94b023bf7c1f0e976af4631; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * Exhaustiveness and unreachable cases (docs/types.md §6), by Maranget's
  * usefulness algorithm ("Warnings for pattern matching", 2007).
