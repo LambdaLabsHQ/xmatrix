@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   boundedRedemptionExpiry,
+  DEVICE_AUTH_PRUNE_INTERVAL_MS,
   DeviceAuthRedemptionCoordinator,
+  shouldPruneDeviceAuth,
 } from "../src/device-auth-redemption.ts";
 
 const issuedSession = {
@@ -90,4 +92,12 @@ test("concurrent device token polls share one durable issuance", async () => {
   assert.equal(persisted.length, 1);
   assert.equal(persisted[0].value, issuedSession);
   assert.ok(!Number.isNaN(Date.parse(persisted[0].issuedAt)));
+});
+
+test("device auth background prune runs on first request and then at most once per interval", () => {
+  const t0 = 1_700_000_000_000;
+  assert.equal(shouldPruneDeviceAuth(0, t0), true);
+  assert.equal(shouldPruneDeviceAuth(t0, t0 + 1_000), false);
+  assert.equal(shouldPruneDeviceAuth(t0, t0 + DEVICE_AUTH_PRUNE_INTERVAL_MS - 1), false);
+  assert.equal(shouldPruneDeviceAuth(t0, t0 + DEVICE_AUTH_PRUNE_INTERVAL_MS), true);
 });
