@@ -27,6 +27,7 @@ import { PaperPopover } from "@/components/ui/material-surfaces";
 import { sameValue } from "@/lib/same-value";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { programsKey } from "./page-program-chips";
+import { PageFactsStrip } from "./page-facts-strip";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
 import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
@@ -864,6 +865,22 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
             onClick={() => setMediaFailure(null)}>Dismiss</button>
         </div>
       )}
+      <PageFactsStrip
+        doc={drawn?.doc ?? null}
+        canEdit={canEdit}
+        onFocusFact={(pos, editable) => {
+          const editor = view.current;
+          if (!editor) return;
+          const target = Math.min(pos + 1, editor.state.doc.content.size);
+          if (editable) {
+            editor.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(target))).scrollIntoView());
+            editor.focus();
+          } else {
+            const dom = editor.nodeDOM(pos);
+            if (dom instanceof HTMLElement) dom.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }}
+      />
       <div ref={host} className="min-h-[50vh]" />
       {selectionMenu && (
         <div className="absolute z-20 -translate-y-full"

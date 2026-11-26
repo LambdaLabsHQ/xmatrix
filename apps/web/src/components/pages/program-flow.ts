@@ -1,4 +1,4 @@
-import { staticFace, type PageProgramRequest, type PageProgramStatus, type PageProgramStep } from "@xmatrix/protocol";
+import { staticFace, type PageProgramBranchStatus, type PageProgramRequest, type PageProgramStatus, type PageProgramStep } from "@xmatrix/protocol";
 
 /**
  * A program drawn as its flow (docs/architecture/norn-host.md, "What it does
@@ -207,4 +207,107 @@ export function drawProgramFlow(program: PageProgramStatus | undefined, options:
   }
   root.append(steps);
   return { root, texts };
+}
+
+export interface ProgramBranchItem {
+  key: string;
+  label: string;
+  channelId: string;
+  state: PageProgramBranchStatus["state"];
+  detail: string;
+  note: string;
+}
+
+export interface ProgramBranchSummary {
+  summary: string;
+  counts: Record<PageProgramBranchStatus["state"], number>;
+  items: ProgramBranchItem[];
+}
+
+const BRANCH_STATE_LABEL: Record<PageProgramBranchStatus["state"], string> = {
+  running: "running",
+  waiting: "waiting",
+  completed: "done",
+  failed: "failed",
+};
+
+/** Pure projection of a program's per-branch status for the generic Program → Branch Tree UI. */
+export function summarizeProgramBranches(
+  branches: readonly PageProgramBranchStatus[],
+  now = Date.now(),
+): ProgramBranchSummary {
+  const counts: Record<PageProgramBranchStatus["state"], number> = {
+    running: 0, waiting: 0, completed: 0, failed: 0,
+  };
+  const items: ProgramBranchItem[] = branches.map((branch) => {
+    counts[branch.state] += 1;
+    const latest = branch.requests.at(-1);
+    if (!latest) {
+      return {
+        key: branch.key,
+        label: branch.label,
+        channelId: branch.channelId,
+        state: branch.state,
+        detail: "",
+        note: BRANCH_STATE_LABEL[branch.state],
+      };
+    }
+    const step = programStep(latest, now);
+    return {
+      key: branch.key,
+      label: branch.label,
+      channelId: branch.channelId,
+      state: branch.state,
+      detail: `${step.holder.replace(/^@/u, "")}: ${firstLine(step.text)}`,
+      note: firstLine(step.note) || BRANCH_STATE_LABEL[branch.state],
+    };
+  });
+  const parts = [`${branches.length} ${branches.length === 1 ? "branch" : "branches"}`];
+  if (counts.running) parts.push(`${counts.running} running`);
+  if (counts.waiting) parts.push(`${counts.waiting} waiting`);
+  if (counts.failed) parts.push(`${counts.failed} failed`);
+  if (counts.completed) parts.push(`${counts.completed} done`);
+  return { summary: parts.join(" · "), counts, items };
+}
+
+/** Draws a generic clickable Program → Branch Tree below a program's flow. */
+export function drawProgramBranches(
+  branches: readonly PageProgramBranchStatus[],
+  openConversation: (conversationId: string) => void,
+  options: { now?: number } = {},
+): HTMLElement {
+  const summary = summarizeProgramBranches(branches, options.now);
+  const wrap = document.createElement("div");
+  wrap.className = "program-branches";
+  wrap.dataset.testid = "program-branch-tree";
+  const head = document.createElement("div");
+  head.className = "program-branches-head";
+  head.textContent = summary.summary;
+  wrap.append(head);
+
+  const list = document.createElement("div");
+  list.className = "program-branches-list";
+  for (const item of summary.items) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "program-branch-row";
+    row.dataset.state = item.state;
+    row.dataset.branchKey = item.key;
+    row.title = `Open branch conversation for ${item.label}`;
+    row.addEventListener("mousedown", (event) => event.preventDefault());
+    row.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openConversation(item.channelId);
+    });
+    const dot = el("program-branch-dot");
+    dot.dataset.state = item.state;
+    const label = el("program-branch-label", item.label);
+    const detail = item.detail ? el("program-branch-detail", item.detail) : null;
+    const note = el("program-branch-note", item.note);
+    row.append(dot, label, ...(detail ? [detail] : []), note);
+    list.append(row);
+  }
+  wrap.append(list);
+  return wrap;
 }

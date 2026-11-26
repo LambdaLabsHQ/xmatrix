@@ -2,7 +2,8 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
 const { problemRange } = require("./page-program-chips.ts");
-const { againText, conditionsText, endText, programFooter, programStep, waitText } = require("./program-flow.ts");
+const { againText, conditionsText, endText, programFooter, programStep, summarizeProgramBranches, waitText } = require("./program-flow.ts");
+const { factBlockRole, parseFactProperties, parseFactsHeader } = require("./page-facts-strip.tsx");
 
 const NOW = Date.parse("2026-11-12T10:00:00Z");
 const request = (change) => ({ holder: "@codex", text: "Review the design", askedAt: "2026-11-12T09:50:00Z", by: null, outcome: null,
@@ -50,4 +51,62 @@ test("a step of the flow reads as what the program does: when, under what, how i
     .map(each => endText({ kind: "end", ...each })), ["Ends with the answer", "Ends", "Stops without a result"]);
   assert.deepEqual([null, "Find what does not hold\nin the draft"].map(text => againText({ kind: "again", text })),
     ["Next round", "Back to “Find what does not hold”"]);
+});
+
+test("summarizeProgramBranches projects generic per-branch status counts and latest request summaries", () => {
+  const branches = [
+    {
+      key: "each:page-a",
+      label: "Alpha Product",
+      scope: "loop:each/round:1",
+      channelId: "ch-a",
+      state: "running",
+      requests: [request({ holder: "@codex", text: "Collect daily users\nwith breakdown" })],
+    },
+    {
+      key: "each:page-b",
+      label: "Beta Product",
+      scope: "loop:each/round:2",
+      channelId: "ch-b",
+      state: "waiting",
+      requests: [request({ holder: "@Daniel", text: "Approve schema change" })],
+    },
+    {
+      key: "each:page-c",
+      label: "Gamma Product",
+      scope: "loop:each/round:3",
+      channelId: "ch-c",
+      state: "completed",
+      requests: [request({ outcome: "answered", reply: "All green" })],
+    },
+  ];
+  const summary = summarizeProgramBranches(branches, NOW);
+  assert.equal(summary.summary, "3 branches · 1 running · 1 waiting · 1 done");
+  assert.deepEqual(summary.counts, { running: 1, waiting: 1, completed: 1, failed: 0 });
+  assert.equal(summary.items[0].detail, "codex: Collect daily users");
+  assert.equal(summary.items[0].note, "working");
+  assert.equal(summary.items[2].note, "All green");
+});
+
+test("page fact header and property parsers distinguish declared intent from observed status", () => {
+  assert.deepEqual(parseFactsHeader("norn 1 facts Products.UserDaily"), { typeName: "Products.UserDaily", edition: "1" });
+  assert.equal(parseFactsHeader("norn 1 run users"), null);
+  assert.match(parseFactsHeader("norn 2 facts Products.Site").problem, /Unsupported Norn edition 2/);
+
+  const props = parseFactProperties(`{
+    // daily user report config
+    name: "xMatrix",
+    cadence: Daily,
+    sources: [Postgres("main"), Stripe],
+    enabled: true,
+  }`);
+  assert.deepEqual(props, [
+    { key: "name", value: "xMatrix" },
+    { key: "cadence", value: "Daily" },
+    { key: "sources", value: "[Postgres(\"main\"), Stripe]" },
+    { key: "enabled", value: "true" },
+  ]);
+  assert.equal(factBlockRole("Products.UserDaily", "{ name: \"xMatrix\" }"), "declared");
+  assert.equal(factBlockRole("Products.UserDailyStatus", "{ lastRun: \"ok\" }"), "observed");
+  assert.equal(factBlockRole("Products.Meta", "// observed\n{ count: 12 }"), "observed");
 });
