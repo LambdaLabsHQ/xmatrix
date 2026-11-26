@@ -1151,6 +1151,9 @@ export function nornStep(act?: NornAct,
     if (act && !taken && refusal === undefined) refusal = "The request has already ended";
     const activeBranches: NornBranchChannel[] = [];
     if (state.pageId && state.pageName) {
+      // Nested `forEach` loops prepend `loop:` on each nesting level (`loop:loop:...`);
+      // stripping leading `loop:` prefixes restores a strict slash-delimited ancestry path.
+      const normalizeBranchScope = (scope: string): string => scope.replace(/^(?:loop:)+/u, "");
       type BranchDescriptor = NornBranchChannel & { active: boolean; spawnId?: string };
       const descriptors: BranchDescriptor[] = [];
       for (const branch of latestPassBranches) {
@@ -1173,9 +1176,14 @@ export function nornStep(act?: NornAct,
       }
       for (const req of Object.values(ledger.requests)) {
         if (req.verb !== "spawn" || req.text === "$spawn" || !req.spawnScope) continue;
+        const spawnNorm = normalizeBranchScope(req.spawnScope);
         const outer = descriptors
-          .filter(d => !d.spawnId && (req.spawnScope === d.scope || req.spawnScope!.startsWith(`${d.scope}/`)))
-          .sort((a, b) => b.scope.length - a.scope.length)[0];
+          .filter(d => {
+            if (d.spawnId) return false;
+            const dNorm = normalizeBranchScope(d.scope);
+            return spawnNorm === dNorm || spawnNorm.startsWith(`${dNorm}/`);
+          })
+          .sort((a, b) => normalizeBranchScope(b.scope).length - normalizeBranchScope(a.scope).length)[0];
         const key = outer ? `${outer.key}/spawn:${req.text}` : `spawn:${req.text}`;
         const label = outer ? `${outer.label} · ${req.text}` : req.text;
         descriptors.push({
@@ -1194,13 +1202,15 @@ export function nornStep(act?: NornAct,
         for (const desc of descriptors) {
           meta[desc.key] = { key: desc.key, label: desc.label, scope: desc.scope, channelId: desc.channelId, active: desc.active };
         }
-        const byScopeDesc = [...descriptors].sort((a, b) => b.scope.length - a.scope.length);
+        const byScopeDesc = [...descriptors]
+          .map(desc => ({ desc, norm: normalizeBranchScope(desc.scope) }))
+          .sort((a, b) => b.norm.length - a.norm.length);
         const bySpawnId = new Map(descriptors.filter(d => d.spawnId).map(d => [d.spawnId!, d]));
         for (const req of Object.values(ledger.requests)) {
           if (req.verb === "spawn" || reqBranches[req.id]) continue;
-          const reqScope = req.scope ?? req.openedBy ?? "";
-          const matched = (req.spawnOwner ? bySpawnId.get(req.spawnOwner) : undefined)
-            ?? byScopeDesc.find(d => reqScope === d.scope || reqScope.startsWith(`${d.scope}/`));
+          const reqNorm = normalizeBranchScope(req.scope ?? req.openedBy ?? "");
+          const matched = byScopeDesc.find(({ norm }) => reqNorm === norm || reqNorm.startsWith(`${norm}/`))?.desc
+            ?? (req.spawnOwner ? bySpawnId.get(req.spawnOwner) : undefined);
           if (matched) reqBranches[req.id] = matched.key;
         }
         for (const entry of Object.values(meta)) {
