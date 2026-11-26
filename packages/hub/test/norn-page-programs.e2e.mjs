@@ -274,3 +274,64 @@ test("a page program resolves Space libraries from another page, stays pinned ac
   );
   assert.equal(afterAdopt.channelId, running.channelId);
 }));
+
+test("keyed branches of a page program run in isolated conversations with separate Agent instances and per-branch status", () => pageScene("norn-branches", async ({
+  worker, daemon, scenario, call, pages, until,
+}) => {
+  const source = [
+    `let a = spawn(~key="alpha", () => ask(@codex, "Report for alpha")->wait)`,
+    `let b = spawn(~key="beta", () => ask(@codex, "Report for beta")->wait)`,
+    `ignore(a->wait)`,
+    `b->wait`,
+  ].join("\n");
+  const { page } = await call(pages, "POST", {
+    title: "Products",
+    body: `# Products\n\n${block(source, "norn 1 run users")}\n`,
+  });
+  const programs = async () => (await call(`${pages}/${page.pageId}/programs`)).programs;
+  const running = await until(
+    async () => (await programs()).find(p => p.state === "running" && p.branches?.length === 2),
+    "two running branches",
+  );
+  const alpha = running.branches.find(b => b.label === "alpha");
+  const beta = running.branches.find(b => b.label === "beta");
+  assert.ok(alpha && beta);
+  assert.notEqual(alpha.channelId, beta.channelId);
+  assert.notEqual(alpha.channelId, running.channelId);
+  assert.notEqual(beta.channelId, running.channelId);
+  assert.deepEqual(alpha.requests.map(r => r.text), ["Report for alpha"]);
+  assert.deepEqual(beta.requests.map(r => r.text), ["Report for beta"]);
+
+  // Each branch conversation spawns its own isolated Agent instance.
+  const [spawnAlpha, spawnBeta] = await Promise.all([
+    daemon.inbox.waitFor(m => m.type === "machine_spawn_agent" && m.channelId === alpha.channelId && isSpawnOf(m, scenario.registration), "alpha spawn"),
+    daemon.inbox.waitFor(m => m.type === "machine_spawn_agent" && m.channelId === beta.channelId && isSpawnOf(m, scenario.registration), "beta spawn"),
+  ]);
+  assert.notEqual(spawnAlpha.runId, spawnBeta.runId);
+
+  const refIn = async (channelId) => {
+    const history = await channelHistory(worker, MOCK_TOKEN, channelId, 20);
+    const delivery = history.messages.find(m => m.body.startsWith("@codex\n"));
+    return /`request:(r[a-z0-9]+)`/u.exec(delivery.body)[1];
+  };
+  const [refAlpha, refBeta] = await Promise.all([refIn(alpha.channelId), refIn(beta.channelId)]);
+
+  // Answering alpha completes only alpha while beta stays running.
+  const alphaToken = await mintAgentRunToken(worker, daemon, spawnAlpha, alpha.channelId);
+  assert.equal((await run(worker, alphaToken, ["reply", refAlpha, "Alpha OK"])).exitCode, 0);
+  const mid = await until(
+    async () => {
+      const p = (await programs())[0];
+      return p.branches?.find(b => b.label === "alpha")?.state === "completed" ? p : null;
+    },
+    "alpha branch completed",
+  );
+  assert.equal(mid.state, "running");
+  assert.equal(mid.branches.find(b => b.label === "beta")?.state, "running");
+
+  // Answering beta completes both beta and the parent program.
+  const betaToken = await mintAgentRunToken(worker, daemon, spawnBeta, beta.channelId);
+  assert.equal((await run(worker, betaToken, ["reply", refBeta, "Beta OK"])).exitCode, 0);
+  const done = await until(async () => (await programs()).find(p => p.state === "completed"), "parent program completed");
+  assert.deepEqual(done.branches.map(b => [b.label, b.state]), [["alpha", "completed"], ["beta", "completed"]]);
+}));
