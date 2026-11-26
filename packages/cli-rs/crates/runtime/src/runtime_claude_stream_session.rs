@@ -486,15 +486,18 @@ impl ClaudeStreamInterrupter {
             else {
                 return Ok(false);
             };
-            // Counted before the write so the turn cannot close on a result
+            // Recorded before the write so the turn cannot close on a result
             // that comes before Claude takes this input.
-            turn.inputs_steered += 1;
+            turn.pending_steers.push(steer_replay_key(&content_blocks));
             stdin
         };
+        let key = steer_replay_key(&content_blocks);
         let bytes = serde_json::to_vec(&claude_stream_user_message(content_blocks))?;
         if let Err(err) = write_json_line(&stdin, bytes, "Claude stream steer").await {
-            if let Some(turn) = self.active.lock().await.as_mut() {
-                turn.inputs_steered = turn.inputs_steered.saturating_sub(1);
+            if let Some(turn) = self.active.lock().await.as_mut()
+                && let Some(index) = turn.pending_steers.iter().rposition(|k| *k == key)
+            {
+                turn.pending_steers.remove(index);
             }
             return Err(CliError::Launch(err));
         }
@@ -550,6 +553,35 @@ impl ClaudeStreamInterrupter {
     }
 }
 
+/// The text a steered message is recognized by when Claude echoes it back.
+pub(crate) fn steer_replay_key(content_blocks: &[Value]) -> String {
+    content_blocks
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+        .filter_map(|block| block.get("text").and_then(Value::as_str))
+        .map(str::trim)
+        .find(|text| !text.is_empty())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+impl ActiveStreamTurn {
+    /// Settle the inputs one `isReplay` user message shows Claude took. The
+    /// first replay is the submitted input; later ones carry steered inputs,
+    /// possibly several merged into one message. A replay whose text matches
+    /// no steered input still settles the oldest one, as a count would.
+    pub(crate) fn observe_replay(&mut self, replay_text: &str) {
+        let before = self.pending_steers.len();
+        self.pending_steers
+            .retain(|key| key.is_empty() || !replay_text.contains(key.as_str()));
+        if !self.input_replayed {
+            self.input_replayed = true;
+        } else if self.pending_steers.len() == before && !self.pending_steers.is_empty() {
+            self.pending_steers.remove(0);
+        }
+    }
+}
+
 /// Shared, per-turn state the reader task fills in and the submitter reads back.
 /// Exactly one turn is ever active (strict serialization), so a single `Option`
 /// is sufficient. `generation` lets the reader notice a new turn began and
@@ -566,11 +598,10 @@ pub(crate) struct ActiveStreamTurn {
     pub(crate) interrupt_requested: bool,
     /// Claude echoed this turn's input back (`isReplay`), so it has consumed it.
     pub(crate) input_replayed: bool,
-    /// Inputs Claude has echoed back this turn: the submitted one, then each
-    /// steered one as Claude takes it.
-    pub(crate) inputs_replayed: u32,
-    /// Messages steered into this turn after it was submitted.
-    pub(crate) inputs_steered: u32,
+    /// Messages steered into this turn that Claude has not echoed back yet,
+    /// each kept as its text so one replay can settle several: inputs queued
+    /// behind a result reach Claude as a single merged user message.
+    pub(crate) pending_steers: Vec<String>,
     /// The result reported `terminal_reason: prompt_too_long`.
     pub(crate) context_exhausted: bool,
     /// A `rate_limit_event` rejected this turn on a used-up usage window.
