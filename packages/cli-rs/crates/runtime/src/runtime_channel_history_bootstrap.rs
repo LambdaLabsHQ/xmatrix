@@ -483,8 +483,8 @@ mod tests {
         question.metadata = Some(serde_json::json!({
             "browserPage": { "title": "Profile  Page", "href": "https://example.test/profile" }
         }));
-        let block = render_channel_context_block("channel-1", &[question], None)
-            .expect("context block");
+        let block =
+            render_channel_context_block("channel-1", &[question], None).expect("context block");
         assert!(
             block.contains(
                 "  Viewing in Chrome: Profile Page <https://example.test/profile> (`xmatrix browse` reads this page from their browser)\n"
