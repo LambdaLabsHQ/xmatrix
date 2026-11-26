@@ -32,11 +32,16 @@ async function withProvider(responses, operation) {
   finally { stub.restore(); }
 }
 
-test("native UI Issue Read & Write grants accept both scope orders and save the exact four scopes", async () => {
-  for (const scopes of [["event:read", "event:write", "org:read", "project:read"], [...grant.scopes].reverse()]) {
+test("native UI Issue Read & Write grants accept legacy 4-scope and expanded project-write/admin scope sets in any order", async () => {
+  for (const [scopes, expected] of [
+    [["event:read", "event:write", "org:read", "project:read"], "event:read event:write org:read project:read"],
+    [[...grant.scopes].reverse(), "event:read event:write org:read project:read"],
+    [["team:read", "project:write", "project:read", "org:read", "event:write", "event:read"], "event:read event:write org:read project:read project:write team:read"],
+    [["project:admin", "team:read", "project:write", "project:read", "org:read", "event:write", "event:read"], "event:read event:write org:read project:admin project:read project:write team:read"],
+  ]) {
     const run = await withProvider([{ body: { ...grant, scopes } }, { body: installed }],
       () => exchangeSentryInstallation(client, selected, now));
-    assert.equal(run.value.oauthScopes, "event:read event:write org:read project:read");
+    assert.equal(run.value.oauthScopes, expected);
     assert.equal(run.calls.length, 2);
   }
 });

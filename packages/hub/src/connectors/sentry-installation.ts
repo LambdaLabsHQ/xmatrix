@@ -1,4 +1,4 @@
-import { SENTRY_PUBLIC_INTEGRATION_SCOPES } from "@xmatrix/protocol";
+import { normalizeSentryPublicIntegrationScopes } from "@xmatrix/protocol";
 import { SignJWT } from "jose";
 import type { Env } from "../types";
 import { providerJson, ProviderRequestError } from "./http";
@@ -9,7 +9,6 @@ const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const SLUG = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
 const ID = /^[1-9][0-9]{0,31}$/u;
 const TOKEN = /^[\x21-\x7e]{1,8192}$/u;
-const SCOPES = SENTRY_PUBLIC_INTEGRATION_SCOPES;
 const CONTEXT_FIELDS = ["oauthClientId", "oauthAppUuid", "oauthAppSlug", "oauthInstallationId",
   "oauthOrganization", "oauthOrganizationId", "oauthScopes"];
 
@@ -44,9 +43,9 @@ export function isSentryInstallationGrant(values: Readonly<Record<string, string
 }
 
 function scopes(value: unknown): string {
-  if (!Array.isArray(value) || value.length !== SCOPES.length || value.some(scope => typeof scope !== "string") ||
-      [...value].sort().join(" ") !== SCOPES.join(" ")) invalidGrant();
-  return SCOPES.join(" ");
+  const normalized = Array.isArray(value) ? normalizeSentryPublicIntegrationScopes(value) : undefined;
+  if (!normalized) invalidGrant();
+  return normalized;
 }
 
 function grantFields(payload: Record<string, unknown>, now: number): Record<string, string> {
@@ -68,7 +67,8 @@ export function validateSentryInstallationCredentials(values: Readonly<Record<st
       !/^[A-Za-z0-9._-]{1,256}$/u.test(values.oauthClientId ?? "") ||
       !UUID.test(values.oauthAppUuid ?? "") || !UUID.test(values.oauthInstallationId ?? "") ||
       !SLUG.test(values.oauthAppSlug ?? "") || !SLUG.test(values.oauthOrganization ?? "") ||
-      !ID.test(values.oauthOrganizationId ?? "") || values.oauthScopes !== SCOPES.join(" ") ||
+      !ID.test(values.oauthOrganizationId ?? "") ||
+      normalizeSentryPublicIntegrationScopes(values.oauthScopes) !== values.oauthScopes ||
       !/^[1-9][0-9]{0,15}$/u.test(values.oauthExpiresAt ?? "") ||
       !Number.isSafeInteger(Number(values.oauthExpiresAt))) invalidGrant();
   if (client && (client.clientId !== values.oauthClientId || client.appUuid !== values.oauthAppUuid ||
@@ -168,4 +168,11 @@ export function sentryOrganization(values: Readonly<Record<string, string>>): st
   if (!isSentryInstallationGrant(values)) return values.organization ?? "";
   validateSentryInstallationCredentials(values);
   return values.oauthOrganization!;
+}
+
+/** Whether a Sentry Public Integration installation grant includes `scope`. */
+export function sentryInstallationHasScope(values: Readonly<Record<string, string>>, scope: string): boolean {
+  if (!isSentryInstallationGrant(values)) return true;
+  validateSentryInstallationCredentials(values);
+  return (values.oauthScopes ?? "").split(" ").includes(scope);
 }

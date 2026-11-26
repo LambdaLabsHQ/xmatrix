@@ -260,7 +260,7 @@ section, and none is ever shown again.
 | --- | --- |
 | Slack | `post:<channel id>[/<thread ts>]` |
 | Linear | `comment:<ENG-42>`, `create_issue:<team>` (first line is the title) |
-| Sentry | `resolve`, `unresolve`, `ignore` `:<short id>` |
+| Sentry | `read_issue:<short id>`, `list_issues:<project\|*> <search>`, `list_projects:*`, `get_dsn:<project>` (read), `create_project:<slug> [platform=<slug>] [team=<slug>] [name=<display name>]`, `resolve`, `unresolve`, `ignore` `:<short id>` |
 | PagerDuty | `read_incident:<incident id>` (read), `acknowledge`, `resolve`, `note` `:<incident id>` |
 | GitLab | `comment:<group/project!5 or #12>`, `merge:<group/project!5>`, `retry_pipeline:<group/project/123>` |
 | Bitbucket Cloud | `read_pull_request:<workspace/repo!5>` (read), `comment:<workspace/repo!5> <text>` |
