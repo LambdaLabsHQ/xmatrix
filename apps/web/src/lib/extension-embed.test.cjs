@@ -102,13 +102,19 @@ test("the extension may only open a conversation path of this app", (t) => {
   const stop = embed.subscribeEmbedOpen((path) => opened.push(path) > 0);
   const send = (path, origin = EXTENSION) => win.dispatch({ source: win.parent, origin, data: { protocol: "xmatrix-embed/1", type: "open", path } });
   send("/app/space-1/channels/channel_2");
+  send("/app/space-1/channels/channel_2#message:norn:r412fix:0");
+  send("/app/space-1/channels/channel_2#message:norn%3Ar412fix%3A0");
   send("https://evil.example/app/a/channels/b");
   send("/app/a/channels/b/../../login");
   send("//evil.example/app/a/channels/b");
   send("/app/a/settings/b");
   send("/app/a/channels/b", "https://evil.example");
   stop();
-  assert.deepEqual(opened, ["/app/space-1/channels/channel_2"]);
+  assert.deepEqual(opened, [
+    "/app/space-1/channels/channel_2",
+    "/app/space-1/channels/channel_2#message:norn:r412fix:0",
+    "/app/space-1/channels/channel_2#message:norn%3Ar412fix%3A0",
+  ]);
 });
 
 test("an address the page is asked to navigate to goes to the open app, which says whether it shows it", (t) => {
