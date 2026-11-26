@@ -1058,3 +1058,137 @@ ignore(all([overview, reports]))`;
   assert.equal(overviewReq.channelId, overviewBranch.channelId);
 });
 
+test("nornStep exposes nested each -> spawn -> Events.events in waits and dispatches Sentry events to the product branch", async () => {
+  const { text } = await import("../src/vendor/norn/runtime/value.ts");
+  const { checkPageFactBlock, eventsStream } = await import("../src/norn-host.ts");
+  const lib = `pub type service = { repo: string, every: duration, sentry: string }
+pub type issue = { summary: string }`;
+  const source = `open Std
+needs Health
+let issues: Events.kind<Health.issue> = Events.kind("sentry", "issue.created")
+each(~key="services", Holds.kind("page", "Health.service"), h => switch Holds.sample(h) {
+| Some(start) =>
+  let sentry = spawn(() =>
+    Events.events(issues, ~source=\`sentry:\${start.sentry}\`)->forEach(~key="pushed", ~each=Queue, e => switch Holds.sample(h) {
+    | Some(s) => ignore(run(@claude(~repo=s.repo), "Fix " ++ s.sentry ++ ": " ++ e.data.summary, ~about=e.id)->wait)
+    | None => ()
+    }))
+  every(start.every)->forEach(~key="pulled", _ => ())
+  ignore(sentry->wait)
+| None => ()
+})`;
+  const fact = checkPageFactBlock(
+    { typeName: "Health.service", source: `{ repo: "acme/billing", every: 6h, sentry: "billing-api" }` },
+    { libraries: { Health: lib }, problems: {} },
+  );
+  assert.equal(fact.ok, true);
+  const baseState = {
+    spaceId: "space", channelId: "ch-health", programId: "prog-health",
+    pageId: "page-health", pageName: "health",
+    source, nowMs: 1_000, stopReason: null, ledger: nornStartLedger(1_000), requests: [],
+  };
+  const s0 = nornStep(undefined, undefined, {
+    libraries: { Health: lib },
+    holds: [{ source: "page", typeName: "Health.service", id: "page-billing", value: fact.value }],
+  })(structuredClone(baseState));
+  const matched = s0.write.waits.filter(w => w.kind === "stream" && eventsStream("sentry", "issue.created", "sentry:billing-api")(w));
+  assert.equal(matched.length, 1, "nested Events.events stream must be persisted in program waits");
+
+  const billingBranch = s0.result.branches.find(b => b.label === "page-billing");
+  assert.ok(billingBranch);
+
+  const s1 = nornStep(undefined, {
+    id: "sentry-evt-1", streams: matched, what: "Issue 99 created",
+    cloudEvent: {
+      app: "sentry", kind: "issue.created", source: "sentry:billing-api", id: "sentry-evt-1",
+      data: { type: "record", fields: { summary: text("Issue 99 created"), url: text("https://sentry.io/o/issues/99/") } },
+    },
+  }, { libraries: { Health: lib } })({ ...baseState, nowMs: 2_000, ledger: structuredClone(s0.write.ledger) });
+  assert.equal(s1.write.requests.length, 1);
+  assert.equal(s1.write.requests[0].channelId, billingBranch.channelId);
+  assert.equal(s1.write.ledger.requests[s1.write.requests[0].requestId].text, "Fix billing-api: Issue 99 created");
+});
+
+test("revising a program with an expanded library fact type retracts stale held facts cleanly instead of crashing the branch", async () => {
+  const { checkPageFactBlock } = await import("../src/norn-host.ts");
+  const { compileCommonJsSourceModule } = await import("./support/commonjs-source-module.mjs");
+  const libV1 = `pub type service = { repo: string, sentry: string }`;
+  const libV2 = `pub type service = { repo: string, every: duration, sentry: string }`;
+  const srcV1 = `open Std
+needs Health
+each(~key="services", Holds.kind("page", "Health.service"), h => switch Holds.sample(h) {
+| Some(start) => ignore(run(@claude, "watch " ++ start.sentry)->wait)
+| None => ()
+})`;
+  const srcV2 = `open Std
+needs Health
+each(~key="services", Holds.kind("page", "Health.service"), h => switch Holds.sample(h) {
+| Some(start) =>
+  every(start.every)->forEach(~key="pulled", _ => ignore(run(@claude, "check " ++ start.sentry)->wait))
+| None => ()
+})`;
+
+  const oldFact = checkPageFactBlock(
+    { typeName: "Health.service", source: `{ repo: "acme/billing", sentry: "billing-api" }` },
+    { libraries: { Health: libV1 }, problems: {} },
+  );
+  assert.equal(oldFact.ok, true);
+  const startState = {
+    spaceId: "space", channelId: "ch-health", programId: "prog-health",
+    pageId: "page-health", pageName: "health",
+    source: srcV1, nowMs: 1_000, stopReason: null, ledger: nornStartLedger(1_000), requests: [],
+  };
+  const s0 = nornStep(undefined, undefined, {
+    libraries: { Health: libV1 },
+    holds: [{ source: "page", typeName: "Health.service", id: "page-billing", value: oldFact.value }],
+  })(structuredClone(startState));
+  assert.equal(s0.write.requests.length, 1);
+
+  // Use real revalidatePageFactHolds against the still-v1 page body and the v2 library catalog.
+  const hostMod = await import("../src/norn-host.ts");
+  const loadFacts = await compileCommonJsSourceModule(new URL("../src/norn-facts.ts", import.meta.url));
+  const v1PageBody = `# Billing\n\n\`\`\`norn 1 facts Health.service\n{ repo: "acme/billing", sentry: "billing-api" }\n\`\`\`\n`;
+  let currentBody = v1PageBody;
+  const factsMod = loadFacts(name => ({
+    "@xmatrix/db": {
+      PostgresNornProgramRepository: class {},
+      PostgresPageRepository: class {
+        async factPages() { return { pages: [{ pageId: "page-billing", canEdit: true, body: currentBody }] }; }
+      },
+      readHoldingNornPrograms: async () => [],
+    },
+    "./norn-branches": { ensureAndWakeNornBranches: async () => {} },
+    "./norn-host": hostMod,
+    "./postgres-authority-fleet": { createPostgresAuthorityDatabase: () => ({}) },
+    "./postgres-message-authority": { postgresMessageRoute: async () => ({}) },
+  })[name]);
+
+  const retracted = await factsMod.revalidatePageFactHolds({}, {
+    spaceId: "space", authorityUserId: "owner",
+    spaceCatalog: { libraries: { Health: libV2 }, problems: {} },
+    existingHolds: s0.write.ledger.holds,
+  });
+  assert.deepEqual(retracted, [{ source: "page", typeName: "Health.service", id: "page-billing", value: null }]);
+
+  // Revising with revalidated holds retracts the stale fact cleanly: zero handlerFailed / Missing record field error!
+  const s1 = nornStep(undefined, undefined, {
+    libraries: { Health: libV2 }, replacePinnedLibraries: true, holds: retracted,
+  })({ ...startState, source: srcV2, nowMs: 2_000, ledger: structuredClone(s0.write.ledger) });
+  assert.equal((s1.write.notices ?? []).length, 0, "must not emit handlerFailed on stale fact schema");
+  assert.equal((s1.result.branches ?? []).length, 0, "stale incompatible branch is retracted cleanly");
+
+  // Once the fact page is updated to v2, holding it starts the fresh branch cleanly.
+  currentBody = `# Billing\n\n\`\`\`norn 1 facts Health.service\n{ repo: "acme/billing", every: 1h, sentry: "billing-api" }\n\`\`\`\n`;
+  const newFact = checkPageFactBlock(
+    { typeName: "Health.service", source: `{ repo: "acme/billing", every: 1h, sentry: "billing-api" }` },
+    { libraries: { Health: libV2 }, problems: {} },
+  );
+  assert.equal(newFact.ok, true);
+  const s2 = nornStep(undefined, undefined, {
+    libraries: { Health: libV2 },
+    holds: [{ source: "page", typeName: "Health.service", id: "page-billing", value: newFact.value }],
+  })({ ...startState, source: srcV2, nowMs: 3_000, ledger: structuredClone(s1.write.ledger) });
+  assert.equal((s2.write.notices ?? []).length, 0);
+  assert.equal(s2.result.branches.length, 1);
+});
+

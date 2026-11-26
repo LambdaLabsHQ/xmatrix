@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@a667dd5a0243281efd075834e7d42a8f371a30d5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@95e9b165b4dc8f2657474f5b3341e26dc88ed6c0; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /** The Norn front-end: source text to the syntax tree of ast.ts. */
 export type * from "./ast.js";
 export { NODE_FIELDS, NODE_GROUPS, NODE_SCHEMA, OPTIONAL_V3_FIELDS, VERSION_2_KINDS, VERSION_3_KINDS } from "./ast.js";

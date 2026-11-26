@@ -4,7 +4,7 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./page-restriction";
 import { deterministicConversationId } from "./deterministic-id";
 import { ensureAndWakeNornBranches, type NornBranchChannel } from "./norn-branches";
-import { seedPageFactsForProgram } from "./norn-facts";
+import { revalidatePageFactHolds, seedPageFactsForProgram } from "./norn-facts";
 import {
   checkNornProgram, collectSpaceLibraries, diffNornProgramUpgrade, nornBlocks, nornBlockSource, nornRequestWords, nornStartLedger, nornStep,
   personHolder, pinNornProgram, plainAnswer as answerText, plainResult as resultText, previewNornEdit, selectReferencedLibraries,
@@ -144,8 +144,13 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
     }
     if (current?.state === "running") {
       const requestId = `norn-page-revise:${current.programId}:${crypto.randomUUID()}`;
+      const revalidatedHolds = await revalidatePageFactHolds(env, {
+        spaceId, authorityUserId: userId, spaceCatalog,
+        existingHolds: (current.ledger as Ledger | null | undefined)?.holds,
+      });
       const stepResult = await (await repository(current.channelId, requestId)).revise({ requestId, channelId: current.channelId,
-        programId: current.programId, source: block.source, authorityUserId: userId }, nornStep(undefined, undefined, stepLibOpts));
+        programId: current.programId, source: block.source, authorityUserId: userId },
+      nornStep(undefined, undefined, revalidatedHolds.length ? { ...stepLibOpts, holds: revalidatedHolds } : stepLibOpts));
       await ensureAndWakeNornBranches(env, {
         spaceId, pageId, pageName: block.name, programChannelId: current.channelId, authorityUserId: userId,
         branches: stepResult?.branches, wakeChannels: [current.channelId, ...(stepResult?.wakeChannels ?? [])],
@@ -233,9 +238,13 @@ export async function adoptPageProgramLibraries(
       continue;
     }
     const requestId = `norn-page-adopt:${current.programId}:${crypto.randomUUID()}`;
+    const revalidatedHolds = await revalidatePageFactHolds(env, {
+      spaceId: input.spaceId, authorityUserId: userId, spaceCatalog, existingHolds: ledger?.holds,
+    });
     const stepResult = await (await repository(current.channelId, requestId)).revise(
       { requestId, channelId: current.channelId, programId: current.programId, source: block.source, authorityUserId: userId },
-      nornStep(undefined, undefined, { libraries: nextLibs, replacePinnedLibraries: true }),
+      nornStep(undefined, undefined, { libraries: nextLibs, replacePinnedLibraries: true,
+        ...(revalidatedHolds.length ? { holds: revalidatedHolds } : {}) }),
     );
     await ensureAndWakeNornBranches(env, {
       spaceId: input.spaceId, pageId: input.pageId, pageName: block.name, programChannelId: current.channelId, authorityUserId: userId,
