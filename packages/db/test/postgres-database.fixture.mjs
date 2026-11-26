@@ -118,10 +118,26 @@ export async function applyTestMigrations(client, files, rewrite) {
     await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
 }
 
+const POSTGRES_IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/u;
+// Serializes CREATE DATABASE ... TEMPLATE across concurrent test files sharing
+// one cluster so PostgreSQL never rejects overlapping clones with SQLSTATE 55006.
+const TEMPLATE_CLONE_LOCK_KEY = 0x786d6174;
+
 /** A uniquely named database and runtime role, removed even if setup fails. */
-export async function isolatedPostgres(prefix, { migrate = true, shard = false, runtimeRole = true } = {}) {
+export async function isolatedPostgres(
+  prefix,
+  { migrate = true, shard = false, runtimeRole = true, freshMigration = false } = {},
+) {
   assert.ok(connectionString, "XMATRIX_TEST_POSTGRES_URL is required");
   assert.match(prefix, /^[a-z_][a-z0-9_]*$/u);
+  const cleanTemplate = migrate && !freshMigration
+    ? process.env.XMATRIX_TEST_POSTGRES_CLEAN_TEMPLATE?.trim() || ""
+    : "";
+  const templateRole = cleanTemplate
+    ? process.env.XMATRIX_TEST_POSTGRES_TEMPLATE_ROLE?.trim() || ""
+    : "";
+  if (cleanTemplate) assert.match(cleanTemplate, POSTGRES_IDENTIFIER);
+  if (templateRole) assert.match(templateRole, POSTGRES_IDENTIFIER);
   const suffix = randomUUID().replaceAll("-", "");
   const name = `${prefix}_${suffix}`, role = `${prefix}_rt_${suffix}`;
   const admin = new Client({ connectionString });
@@ -146,16 +162,27 @@ export async function isolatedPostgres(prefix, { migrate = true, shard = false, 
     } finally { await admin.end(); }
   };
   try {
-    await admin.query(`CREATE DATABASE ${name}`);
-    created = true;
+    if (cleanTemplate) {
+      await admin.query("SELECT pg_advisory_lock($1)", [TEMPLATE_CLONE_LOCK_KEY]);
+      try {
+        await admin.query(`CREATE DATABASE ${name} TEMPLATE ${cleanTemplate}`);
+        created = true;
+      } finally {
+        await admin.query("SELECT pg_advisory_unlock($1)", [TEMPLATE_CLONE_LOCK_KEY]);
+      }
+    } else {
+      await admin.query(`CREATE DATABASE ${name}`);
+      created = true;
+    }
     if (runtimeRole) {
       await admin.query(`CREATE ROLE ${role} NOLOGIN`);
       roleCreated = true;
+      if (templateRole) await admin.query(`GRANT ${templateRole} TO ${role}`);
     }
     const url = new URL(connectionString);
     url.pathname = `/${name}`;
     let applied;
-    if (migrate) applied = JSON.parse((await promisify(execFile)(process.execPath,
+    if (migrate && !cleanTemplate) applied = JSON.parse((await promisify(execFile)(process.execPath,
       [fileURLToPath(new URL("../scripts/migrate.mjs", import.meta.url)), "apply", "--revision=local", "--allow-contract"], {
         timeout: 120_000, env: { ...process.env, DATABASE_URL: url.toString(), POSTGRES_RUNTIME_ROLE: role },
       })).stdout);
@@ -176,7 +203,7 @@ export async function isolatedPostgres(prefix, { migrate = true, shard = false, 
 
 /** The isolated current schema plus one migration source tested for replay safety. */
 export async function migrationFixture(prefix, migration) {
-  const isolated = await isolatedPostgres(prefix);
+  const isolated = await isolatedPostgres(prefix, { freshMigration: true });
   try {
     assert.ok(isolated.applied.applied.includes(migration));
     const source = await readFile(new URL(`../migrations/${migration}.sql`, import.meta.url), "utf8");

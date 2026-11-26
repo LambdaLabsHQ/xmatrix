@@ -41,3 +41,26 @@ integration("isolated fixture cleanup fails on a leaked connection without killi
     await admin.end();
   }
 });
+
+integration("concurrent template-cloned isolated fixtures preserve empty shards and runtime role privileges", async () => {
+  const fixtures = await Promise.all([
+    isolatedPostgres("fixture_clone_a"),
+    isolatedPostgres("fixture_clone_b"),
+    isolatedPostgres("fixture_clone_c"),
+  ]);
+  try {
+    for (const fixture of fixtures) {
+      const migrations = await fixture.run("SELECT count(*)::int AS n FROM control.schema_migrations");
+      assert.ok(migrations[0].n > 0, "cloned fixture must retain the migrated schema");
+      const shards = await fixture.run("SELECT count(*)::int AS n FROM control.postgres_shards");
+      assert.equal(shards[0].n, 0, "cloned fixture must start without pre-seeded shard rows");
+      const privilege = await fixture.run(
+        "SELECT has_table_privilege($1, 'control.schema_migrations', 'SELECT') AS allowed",
+        [fixture.role],
+      );
+      assert.equal(privilege[0].allowed, true, "cloned fixture runtime role must inherit table privileges");
+    }
+  } finally {
+    await Promise.all(fixtures.map((fixture) => fixture.close()));
+  }
+});

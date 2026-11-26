@@ -171,7 +171,7 @@ export function affectedPartitions(changedFiles) {
     hubWorkflow ||
     hubDeployPolicy ||
     touches(files, "packages/hub", "packages/db", "packages/protocol",
-      "packages/cli-rs/crates/core/prompts");
+      "packages/cli-rs/crates/core/prompts", "scripts/run-auto-routing-repro.mjs");
   const desktop =
     rootShared ||
     setupPnpmAction ||

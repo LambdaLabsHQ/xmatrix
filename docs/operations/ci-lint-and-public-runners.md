@@ -177,7 +177,23 @@ public main and PR validation keep testing their triggering revision.
 
 Changes to `packages/db` select Node, Web/browser and Hub validation because
 both products consume the shared database package. Database unit tests alone
-do not validate the Hub's message coordination and authority fixtures.
+do not validate the Hub's message coordination and authority fixtures. In the
+Hub suite (`scripts/run-auto-routing-repro.mjs`), `packages/db/scripts/package-tests.mjs`
+auto-discovers PostgreSQL-gated test files under `packages/db/test` instead of
+maintaining a manual list, so newly added database integration tests run in
+`hub (static)` automatically (serializing the few fixtures that reset shared
+tables, and running `packages/billing-official` and the two-cluster DingTalk
+suite once via workspace `test:postgres`). After applying migrations once at
+cluster startup, the runner snapshots a clean unseeded template database
+(`XMATRIX_TEST_POSTGRES_CLEAN_TEMPLATE`) so `isolatedPostgres()` clones fresh
+isolated databases under a PostgreSQL advisory lock in tens of milliseconds
+instead of re-running the full migration sequence per test (while `migrate: false`
+and `migrationFixture()` still exercise `migrate.mjs` directly). The throwaway
+test clusters in `scripts/run-auto-routing-repro.mjs` and
+`packages/db/scripts/test-dingtalk-crossdb.mjs` start in non-durable mode
+(`initdb --no-sync` with `fsync=off`, `synchronous_commit=off`, and
+`full_page_writes=off`), preserving all PostgreSQL SQL, MVCC, lock, index and
+constraint semantics without disk-sync stalls.
 
 `public-ci.yml` runs the full shared matrix on manual dispatch. Public PRs use
 `ci.yml`'s fast tier and its hosted defaults, including the aggregate `ci`
