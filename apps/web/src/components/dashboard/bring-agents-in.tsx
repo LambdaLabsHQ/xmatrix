@@ -15,7 +15,7 @@ import { CommandBlock } from "./command-block";
 import { useNow } from "./agent-work-intent";
 import { detectIntelMac, detectPlatform, downloads, macDownloads, type Platform } from "../landing/download-recommendation";
 import {
-  connectStep, defaultInstallPlatform, setupInstallCommand, terminalInstallPlatform,
+  connectStep, defaultInstallPlatform, setupInstallCommand, setupIntentNeeded, terminalInstallPlatform,
   type ConnectStep, type InstallPlatform,
 } from "./connect-machine";
 import { signedOutRegistrations } from "./harness-sign-in";
@@ -61,32 +61,44 @@ export function BringAgentsIn({ spaceId, token, userId, surface, another = false
   // browser the App is the way in and the terminal is the alternative.
   const [inApp] = useState(() => !phone && onboardingDevice() === "desktop_app");
   const [os, setOs] = useState<Platform>("unknown");
+  const [platformReady, setPlatformReady] = useState(false);
   const [intelMac, setIntelMac] = useState(false);
   const [useTerminal, setUseTerminal] = useState(false);
   useEffect(() => {
     const detected = detectPlatform();
     setOs(detected);
+    setPlatformReady(true);
     if (detected === "macOS") void detectIntelMac().then(setIntelMac, () => undefined);
   }, []);
-  const intent = useSetupIntent(phone ? null : spaceId, token ?? undefined, userId);
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
   const { listNames } = copy;
   const [platform, setPlatform] = useState<InstallPlatform>(() =>
     typeof navigator === "undefined" ? "unix" : defaultInstallPlatform(navigator.userAgent));
+  const enabled = (fleet.catalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled");
+  const found = fleet.ready && fleet.candidates.length > 0;
+  const app = os === "macOS" ? macDownloads(copy)[intelMac ? "x64" : "arm64"] : os === "Windows" ? downloads(copy).Windows : null;
+  const appFirst = !another && !phone && !useTerminal && (inApp || Boolean(app));
+  const needsIntent = setupIntentNeeded({
+    another,
+    phone,
+    appFirst,
+    platformReady,
+    catalogSettled: !fleet.catalog.isPending,
+    daemonsSettled: !fleet.daemons.isPending,
+    hasEnabledAgents: enabled.length > 0,
+    hasInstalledCandidates: found,
+  });
+  const intent = useSetupIntent(needsIntent ? spaceId : null, token ?? undefined, userId);
   const now = useNow(1_000);
   const command = intent.intentId ? setupInstallCommand(intent.intentId, platform) : null;
   const step = intent.status ? connectStep(intent.status, now - intent.shownAt) : null;
-  const enabled = (fleet.catalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled");
-  const found = fleet.ready && fleet.candidates.length > 0;
   const stage: Stage = another ? connectStage(step) : enabled.length > 0 ? 4 : found ? 3 : connectStage(step);
   const state = (n: number): StepState => stage > n ? "done" : stage === n ? "active" : "pending";
   const spinner = <AnimatedIcon icon={Loader2} className="size-3.5 shrink-0 animate-spin" />;
   const machines = listNames([...new Set([...enabled, ...fleet.candidates].map((item) => item.machineName))]);
   const counted = useOnboardingSteps(token, surface);
   const count = useMemo<typeof counted>(() => another ? () => undefined : counted, [another, counted]);
-  const app = os === "macOS" ? macDownloads(copy)[intelMac ? "x64" : "arm64"] : os === "Windows" ? downloads(copy).Windows : null;
-  const appFirst = !another && !phone && !useTerminal && (inApp || Boolean(app));
   useEffect(() => { if (stage === 1 && command && !appFirst) count("command_shown"); }, [stage, command, count, appFirst]);
   useEffect(() => { if (step?.kind === "approval") count("terminal_seen"); }, [step?.kind, count]);
 
@@ -129,11 +141,13 @@ export function BringAgentsIn({ spaceId, token, userId, surface, another = false
           ) : stage > 1 && machines ? machines : null}>
           {stage === 1 && <>
             <CommandBlock command={command} copy={copy} onCopy={() => count("command_copied")} />
-            <div role="status" className="mt-2 text-[13px] leading-5 text-muted-foreground">
-              <p className="flex items-center gap-1.5">{spinner} {copy.waitingForComputer}</p>
-              {step?.kind === "waiting" && step.hint === "check-terminal" && <p>{copy.checkTerminal}</p>}
-              {step?.kind === "waiting" && step.hint === "try-desktop" && <p>{copy.tryDesktop}</p>}
-            </div>
+            {!intent.expired && (
+              <div role="status" className="mt-2 text-[13px] leading-5 text-muted-foreground">
+                <p className="flex items-center gap-1.5">{spinner} {copy.waitingForComputer}</p>
+                {step?.kind === "waiting" && step.hint === "check-terminal" && <p>{copy.checkTerminal}</p>}
+                {step?.kind === "waiting" && step.hint === "try-desktop" && <p>{copy.tryDesktop}</p>}
+              </div>
+            )}
           </>}
         </SetupRow>}
 
@@ -195,7 +209,8 @@ export function BringAgentsIn({ spaceId, token, userId, surface, another = false
       {!another && <SignedOutAgents registrations={signedOutRegistrations(enabled, userId, fleet.daemons.data)}
         token={token} userId={userId} copy={copy} />}
 
-      {intent.error && <p role="alert" className="mt-2 text-[13px] leading-5 text-destructive">{intent.error}{" "}
+      {(intent.error || intent.expired) && <p role="alert" className="mt-2 text-[13px] leading-5 text-destructive">
+        {intent.error ?? copy.commandExpired}{" "}
         <button type="button" disabled={intent.busy || intent.retrying} onClick={intent.retry}
           className="font-semibold underline-offset-2 hover:underline">{copy.tryAgain}</button></p>}
       {stage < 4 && !appFirst && (

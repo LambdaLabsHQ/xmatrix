@@ -70,6 +70,7 @@ const en = {
   /** After the sign-in an Agent asked for on its card. */
   tellAgent: (agent: string) => `Signed in. Tell ${agent} to go on.`,
   noAgentYet: (machine: string) => `${machine} has no agent yet. Install one there and it shows up here:`,
+  commandExpired: "This setup command expired.",
   tryAgain: "Try again",
   noTerminal: "No terminal?",
   phoneDownload: ["Download the desktop app on that computer from ", "xmatrix.sh/download", "."],
@@ -215,6 +216,7 @@ const zh: OnboardingCopy = {
   sendAgain: "再发一次消息就能继续。",
   tellAgent: (agent) => `已登录。告诉 ${agent} 可以继续了。`,
   noAgentYet: (machine) => `${machine} 上还没有 Agent。在那台电脑上装一个，它就会出现在这里：`,
+  commandExpired: "这条设置命令已过期。",
   tryAgain: "重试",
   noTerminal: "没有终端？",
   phoneDownload: ["在那台电脑上打开 ", "xmatrix.sh/download", " 下载桌面 App。"],

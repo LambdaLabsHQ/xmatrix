@@ -9,6 +9,20 @@ export interface DeviceAuthRedemptionResult {
   replayed: boolean;
 }
 
+export const DEVICE_AUTH_PRUNE_INTERVAL_MS = 60 * 1000;
+
+/**
+ * Background expiry sweeps in DeviceAuthBroker run at most once per interval;
+ * individual reads and mutations already enforce expiry directly on access.
+ */
+export function shouldPruneDeviceAuth(
+  lastPrunedAt: number,
+  now: number,
+  intervalMs = DEVICE_AUTH_PRUNE_INTERVAL_MS,
+): boolean {
+  return lastPrunedAt <= 0 || now - lastPrunedAt >= intervalMs;
+}
+
 export function boundedRedemptionExpiry(
   authorizationExpiresAt: string,
   issuedAt: string,
