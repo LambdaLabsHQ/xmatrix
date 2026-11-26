@@ -190,38 +190,48 @@ export function PageFactsStrip({ doc, canEdit, onFocusFact }: PageFactsStripProp
   const facts = extractPageFacts(doc);
   if (!facts.length) return null;
   return (
-    <section aria-label="Page facts" data-testid="page-facts-strip" className="page-facts-strip">
+    <section aria-label="Page facts" data-testid="page-facts-strip" className="mb-4 flex flex-wrap gap-2">
       {facts.map((fact) => {
         const editable = canEdit && fact.role === "declared";
+        const borderClass = fact.problem
+          ? "border-destructive/50"
+          : fact.role === "observed"
+            ? "border-dashed border-foreground/15"
+            : "border-foreground/10 hover:border-foreground/20";
         return (
           <button
             key={`${fact.typeName}:${fact.pos}`}
             type="button"
-            className="page-facts-card"
+            className={`flex min-w-48 max-w-full cursor-pointer flex-col gap-1.5 rounded-lg border bg-foreground/[0.03] px-3 py-2 text-left transition-colors hover:bg-foreground/[0.055] ${borderClass}`}
             data-role={fact.role}
             data-problem={fact.problem ? "true" : undefined}
             title={editable ? `Edit ${fact.typeName} facts` : `Inspect ${fact.typeName} (${fact.role})`}
             onClick={() => onFocusFact(fact.pos, editable)}
           >
-            <span className="page-facts-head">
-              <span className="page-facts-type">{fact.typeName}</span>
-              <span className="page-facts-badge" data-role={fact.role}>
+            <span className="flex items-center gap-2 text-xs">
+              <span className="font-mono font-semibold text-foreground">{fact.typeName}</span>
+              <span
+                className={fact.role === "observed"
+                  ? "ml-auto rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400"
+                  : "ml-auto rounded-full bg-foreground/[0.07] px-2 py-0.5 text-[11px] text-muted-foreground"}
+                data-role={fact.role}
+              >
                 {fact.role === "observed" ? "observed" : editable ? "edit" : "declared"}
               </span>
             </span>
             {fact.problem ? (
-              <span className="page-facts-problem">{fact.problem}</span>
+              <span className="text-xs text-destructive">{fact.problem}</span>
             ) : fact.properties.length > 0 ? (
-              <span className="page-facts-props">
+              <span className="flex flex-wrap gap-x-2.5 gap-y-1 text-xs">
                 {fact.properties.map((prop) => (
-                  <span key={prop.key} className="page-facts-prop">
-                    <span className="page-facts-key">{prop.key}</span>
-                    <span className="page-facts-val">{prop.value}</span>
+                  <span key={prop.key} className="inline-flex min-w-0 max-w-full items-baseline gap-1">
+                    <span className="text-muted-foreground">{prop.key}</span>
+                    <span className="max-w-72 truncate font-medium text-foreground">{prop.value}</span>
                   </span>
                 ))}
               </span>
             ) : fact.rawSummary ? (
-              <span className="page-facts-raw">{fact.rawSummary}</span>
+              <span className="text-xs text-muted-foreground">{fact.rawSummary}</span>
             ) : null}
           </button>
         );

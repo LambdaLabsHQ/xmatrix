@@ -270,6 +270,20 @@ export function summarizeProgramBranches(
   return { summary: parts.join(" · "), counts, items };
 }
 
+const BRANCH_DOT_CLASS: Record<PageProgramBranchStatus["state"], string> = {
+  running: "size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse",
+  waiting: "size-2 shrink-0 rounded-full bg-amber-500",
+  completed: "size-2 shrink-0 rounded-full bg-emerald-600",
+  failed: "size-2 shrink-0 rounded-full bg-destructive",
+};
+
+const BRANCH_NOTE_CLASS: Record<PageProgramBranchStatus["state"], string> = {
+  running: "ml-auto max-w-[32%] shrink-0 truncate rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400",
+  waiting: "ml-auto max-w-[32%] shrink-0 truncate rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-400",
+  completed: "ml-auto max-w-[32%] shrink-0 truncate rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400",
+  failed: "ml-auto max-w-[32%] shrink-0 truncate rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-destructive",
+};
+
 /** Draws a generic clickable Program → Branch Tree below a program's flow. */
 export function drawProgramBranches(
   branches: readonly PageProgramBranchStatus[],
@@ -278,19 +292,19 @@ export function drawProgramBranches(
 ): HTMLElement {
   const summary = summarizeProgramBranches(branches, options.now);
   const wrap = document.createElement("div");
-  wrap.className = "program-branches";
+  wrap.className = "block rounded-b-[10px] border-t border-foreground/10 bg-foreground/[0.03] px-3.5 py-2 text-xs";
   wrap.dataset.testid = "program-branch-tree";
   const head = document.createElement("div");
-  head.className = "program-branches-head";
+  head.className = "mb-1.5 text-[11px] font-semibold text-muted-foreground";
   head.textContent = summary.summary;
   wrap.append(head);
 
   const list = document.createElement("div");
-  list.className = "program-branches-list";
+  list.className = "flex flex-col gap-1";
   for (const item of summary.items) {
     const row = document.createElement("button");
     row.type = "button";
-    row.className = "program-branch-row";
+    row.className = "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left transition-colors hover:bg-foreground/[0.06]";
     row.dataset.state = item.state;
     row.dataset.branchKey = item.key;
     row.title = `Open branch conversation for ${item.label}`;
@@ -300,11 +314,11 @@ export function drawProgramBranches(
       event.stopPropagation();
       openConversation(item.channelId);
     });
-    const dot = el("program-branch-dot");
+    const dot = el(BRANCH_DOT_CLASS[item.state]);
     dot.dataset.state = item.state;
-    const label = el("program-branch-label", item.label);
-    const detail = item.detail ? el("program-branch-detail", item.detail) : null;
-    const note = el("program-branch-note", item.note);
+    const label = el("max-w-[34%] shrink-0 truncate font-semibold text-foreground", item.label);
+    const detail = item.detail ? el("min-w-0 flex-1 truncate text-muted-foreground", item.detail) : null;
+    const note = el(BRANCH_NOTE_CLASS[item.state], item.note);
     row.append(dot, label, ...(detail ? [detail] : []), note);
     list.append(row);
   }

@@ -37,7 +37,7 @@ function steps(program: PageProgramStatus | undefined, openConversation: (conver
   box.append(drawProgramFlow(program, { compact: true }).root);
   if (!program?.branches?.length) return box;
   const surface = document.createElement("div");
-  surface.className = "page-program-surface";
+  surface.className = "block w-full";
   surface.contentEditable = "false";
   surface.append(box, drawProgramBranches(program.branches, openConversation));
   return surface;
