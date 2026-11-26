@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@879866cb314729dd7e6be1621ac64fc433c3309e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@61e8a966a87029f980f965b95a41f63b3017dff5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * What every program sees without declaring it: the base types, `list`,
  * `option`, `result`, `reply`, `yesno`, `either`, the three source types, and
@@ -128,6 +128,25 @@ export function builtinTable(): TypeTable {
     params: ["i", "o"],
     equality: { never: false, params: new Set([0, 1]) },
   }));
+  // Standard capability interface `Holds`: what holds now, for each thing that has it.
+  table.qualifiedTypes.set("Holds.kind", typeInfo({
+    name: "Holds.kind", library: "Holds", visibility: "pub", kind: "abstract", origin: "builtin",
+    params: ["a"], equality: { never: false, params: new Set([0]) },
+  }));
+  table.qualifiedTypes.set("Holds.held", typeInfo({
+    name: "Holds.held", library: "Holds", visibility: "pub", kind: "abstract", origin: "builtin",
+    params: ["a"], equality: { never: false, params: new Set([0]) },
+  }));
+  const holdsMember = typeInfo({
+    name: "Holds.member", library: "Holds", visibility: "pub", kind: "record", origin: "builtin", params: [],
+    fields: [
+      { name: "id", type: t.string, decl: null },
+      { name: "present", type: t.bool, decl: null },
+    ],
+    equality: { never: false, params: new Set() },
+  });
+  table.qualifiedTypes.set("Holds.member", holdsMember);
+  table.records.push(holdsMember);
   table.qualifiedTypes.set("Actions.prepared", typeInfo({
     name: "Actions.prepared",
     library: "Actions",
@@ -155,16 +174,18 @@ export function builtinValues(): Builtin[] {
   const by = () => optional("by", g("deadline"));
   // What a request is about: the thing, and through its value the version.
   const about = () => optional("about", g());
+  // A request's own name in its scope: an answer holds for this slot only while its terms stay the same.
+  const key = () => optional("key", t.string);
   const values: [string, Family | null, () => Type][] = [
-    ["ask", "ask", () => fun([t.participant, t.string], [by(), about()], t.request(t.string))],
-    ["confirm", "confirm", () => fun([t.participant, t.string], [by(), about()], t.request(t.yesno))],
+    ["ask", "ask", () => fun([t.participant, t.string], [key(), by(), about()], t.request(t.string))],
+    ["confirm", "confirm", () => fun([t.participant, t.string], [key(), by(), about()], t.request(t.yesno))],
     ["choose", "choose", () => {
       const a = g();
-      return fun([t.participant, t.string, t.list(a)], [by(), about()], t.request(a));
+      return fun([t.participant, t.string, t.list(a)], [key(), by(), about()], t.request(a));
     }],
     // A run reports what the program uses its report as (§5a); `report` when nothing decides it.
-    ["run", "run", () => fun([t.participant, t.string], [optional("context", g()), by(), about()], t.request(g()))],
-    ["judge", "judge", () => fun([t.string], [optional("about", g())], t.request(t.bool))],
+    ["run", "run", () => fun([t.participant, t.string], [key(), optional("context", g()), by(), about()], t.request(g()))],
+    ["judge", "judge", () => fun([t.string], [key(), optional("about", g())], t.request(t.bool))],
     // Waiting on a source gives what it holds: a reply for a request, the value for a fact or a stream.
     ["wait", "wait", () => {
       const w = g();
@@ -350,6 +371,18 @@ export function builtinModuleExports(): Readonly<Record<string, readonly Builtin
           t.stream(con("Events.envelope", a)),
         );
       }],
+    ]),
+    Holds: wrap([
+      // A kind of thing that holds: `Holds.kind("page", "Products.Site")`, the `Products.Site` facts of the Space's Pages.
+      ["kind", () => { const a = g(); return fun([t.string, t.string], [], con("Holds.kind", a)); }],
+      // The things that have the kind: each one as it starts (`present: true`) or stops having it, from the whole set at first.
+      ["members", () => { const a = g(); return fun([con("Holds.kind", a)], [], t.stream(con("Holds.member"))); }],
+      // What holds for one thing, by its id.
+      ["held", () => { const a = g(); return fun([con("Holds.kind", a), t.string], [], con("Holds.held", a)); }],
+      // What holds for it now, read once in this scope and recorded: a later pass reads the same.
+      ["sample", () => { const a = g(); return fun([con("Holds.held", a)], [], t.option(a)); }],
+      // Each new value it has, and `None` when it stops having one.
+      ["changes", () => { const a = g(); return fun([con("Holds.held", a)], [], t.stream(t.option(a))); }],
     ]),
     Actions: wrap([
       // An action of a connected app, by the app's and the action's name: `Actions.action("x", "post")`.

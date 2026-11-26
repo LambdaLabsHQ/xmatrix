@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@879866cb314729dd7e6be1621ac64fc433c3309e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@61e8a966a87029f980f965b95a41f63b3017dff5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * What the checker reports. A diagnostic reads like a parse error: a message
  * that says what was expected and what was found, and a span. In JSON it also
@@ -107,6 +107,7 @@ export const CODES = {
   "type-hole": "a _ type hole inferred by the checker",
   "unknown-event-kind": "Events.kind names an app or event kind that is not in the connector manifest",
   "unknown-action": "Actions.action names an app or action that is not in the connector manifest",
+  "unknown-hold-type": "Holds.kind names a type that is not declared or exported where the program can see it",
   "manifest-field-mismatch": "a payload type does not fit the fields its connector manifest declares",
   "missing-row-field": "a record does not contain a field required by a row constraint",
   "default-report-form": "a run's report type was not constrained and defaulted to the host report",

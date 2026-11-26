@@ -1,6 +1,6 @@
 # Norn snapshot
 
-Source: https://github.com/norn-lang/norn/tree/879866cb314729dd7e6be1621ac64fc433c3309e
+Source: https://github.com/norn-lang/norn/tree/61e8a966a87029f980f965b95a41f63b3017dff5
 
 Apache-2.0; see LICENSE. The parser, the checker, the compiler, the evaluator and
 the request ledger are included. A program stores no state of its own: each pass
@@ -37,6 +37,7 @@ Refresh with `node scripts/vendor-norn-core.mjs <local-norn-checkout>`.
 - `frontend/parser.ts`
 - `frontend/pretty.ts`
 - `runtime/code.ts`
+- `runtime/facts.ts`
 - `runtime/form.ts`
 - `runtime/ledger.ts`
 - `runtime/machine.ts`

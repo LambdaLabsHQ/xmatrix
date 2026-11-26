@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@879866cb314729dd7e6be1621ac64fc433c3309e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@61e8a966a87029f980f965b95a41f63b3017dff5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import type { Argument, AstNode, BinaryOperator, Case, Expression, Lambda, Pattern, Statement, TopLevelItem } from "../frontend/ast.js";
 import type { Code } from "./code.js";
 import { match } from "./pattern.js";
@@ -52,7 +52,7 @@ export interface Machine {
   nextEnvironment: number;
   resumedAt: number;
 }
-const effectBuiltins = new Set(["ask", "confirm", "choose", "run", "wait", "waitUntil", "cancel", "handOver", "status", "say", "judge", "first", "sameAs", "spawn", "Actions.prepare", "Actions.perform"]);
+const effectBuiltins = new Set(["ask", "confirm", "choose", "run", "wait", "waitUntil", "cancel", "handOver", "status", "say", "judge", "first", "sameAs", "spawn", "Actions.prepare", "Actions.perform", "Holds.sample"]);
 const builtins = new Set([
   ...effectBuiltins,
   "now", "show", "ignore", "fail", "or", "merge", "never", "map", "mapRequest", "filter", "filterMap", "scan", "timed", "gather",
@@ -310,6 +310,30 @@ function builtin(code: Code, machine: Machine, name: string, args: Value[], labe
         throw new Error("Events.events needs an Events.kind value");
       }
       value = { type: "source", kind: "stream", name: "Events.events", args, labels }; break;
+    }
+    case "Holds.kind": {
+      if (args.length !== 2 || args[0].type !== "string" || args[1].type !== "string" || Object.keys(labels).length) {
+        throw new Error("Holds.kind needs a source and a type name");
+      }
+      value = variant("HoldKind", args[0], args[1]); break;
+    }
+    case "Holds.held": {
+      if (args.length !== 2 || args[0].type !== "variant" || args[0].name !== "HoldKind" || args[1].type !== "string" || Object.keys(labels).length) {
+        throw new Error("Holds.held needs a Holds.kind value and an id");
+      }
+      value = variant("Held", args[0], args[1]); break;
+    }
+    case "Holds.members": {
+      if (args.length !== 1 || args[0].type !== "variant" || args[0].name !== "HoldKind" || Object.keys(labels).length) {
+        throw new Error("Holds.members needs a Holds.kind value");
+      }
+      value = { type: "source", kind: "stream", name: "Holds.members", args, labels }; break;
+    }
+    case "Holds.changes": {
+      if (args.length !== 1 || args[0].type !== "variant" || args[0].name !== "Held" || Object.keys(labels).length) {
+        throw new Error("Holds.changes needs a Holds.held value");
+      }
+      value = { type: "source", kind: "stream", name: "Holds.changes", args, labels }; break;
     }
     case "Actions.action": {
       if (args.length !== 2 || args[0].type !== "string" || args[1].type !== "string" || Object.keys(labels).length) {
