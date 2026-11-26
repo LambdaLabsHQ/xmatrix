@@ -1761,35 +1761,52 @@ async fn codex_vendor_error_survives_combined_bootstrap_turn() {
 
 #[tokio::test]
 async fn codex_channel_interrupt_yields_without_provider_completion() {
-    // A steer Codex refuses, as when its turn just ended, interrupts the same
-    // way, so the message is never lost.
-    for (mode, event) in [
-        (
-            "codex-interrupt-no-completion",
+    tokio::time::timeout(Duration::from_secs(3), async {
+        let mode = "codex-interrupt-no-completion";
+        let mut codex = initialized_codex_fixture(mode).await;
+        let mut event_rx = test_event_after(
+            Duration::from_millis(100),
             interrupting_channel_message_event("m2", "chan-a", "continue now"),
-        ),
-        (
-            "codex-steer-rejected",
+            "deliver interrupting channel message",
+        );
+        let mut pending = VecDeque::new();
+        let agent = test_serialized_agent(mode);
+        let result =
+            submit_old_codex_test_turn(&mut codex, &mut event_rx, &mut pending, &agent).await;
+        assert_interrupted_for(&result, &pending, "m2");
+        codex.shutdown().await;
+    })
+    .await
+    .expect("wrapper waited for turn/completed after native interruption");
+}
+
+/// A steer Codex refuses, as when its turn just ended, does not cancel the
+/// turn: the message waits as the next input, so it is never lost.
+#[tokio::test]
+async fn codex_rejected_steer_waits_for_the_next_turn() {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        let mode = "codex-steer-rejected";
+        let mut codex = initialized_codex_fixture(mode).await;
+        let mut event_rx = test_event_after(
+            Duration::from_millis(100),
             steering_channel_message_event("m2", "chan-a", "also check the docs"),
-        ),
-    ] {
-        tokio::time::timeout(Duration::from_secs(3), async {
-            let mut codex = initialized_codex_fixture(mode).await;
-            let mut event_rx = test_event_after(
-                Duration::from_millis(100),
-                event,
-                "deliver interrupting channel message",
-            );
-            let mut pending = VecDeque::new();
-            let agent = test_serialized_agent(mode);
-            let result =
-                submit_old_codex_test_turn(&mut codex, &mut event_rx, &mut pending, &agent).await;
-            assert_interrupted_for(&result, &pending, "m2");
-            codex.shutdown().await;
-        })
-        .await
-        .expect("wrapper waited for turn/completed after native interruption");
-    }
+            "deliver steering channel message",
+        );
+        let mut pending = VecDeque::new();
+        let agent = test_serialized_agent(mode);
+        let result =
+            submit_old_codex_test_turn(&mut codex, &mut event_rx, &mut pending, &agent).await;
+        assert!(!matches!(result, super::InterruptibleCodexTurn::Interrupted));
+        assert!(matches!(
+            pending.front(),
+            Some(AgentInstanceConnectionEvent::Server(
+                AgentInstanceServerMessage::ChannelMessageReceived { message, .. }
+            )) if message.message_id == "m2"
+        ));
+        codex.shutdown().await;
+    })
+    .await
+    .expect("the turn with a rejected steer did not end");
 }
 
 /// The turn yielded to `message_id`, which waits as the next input.

@@ -799,9 +799,9 @@ test("a Human stop command fences its Runs before the message's first write", as
         ? [appendPreflight()]
         : (committedAppend(query, "pg:00000000000000000042") ?? (query.name === "channel_stop_fence_v4"
           ? [{ run_id: "run-1", version: 2, instance_id: "instance-1" }]
-        : query.name === "message_agent_target_resolve_v5"
-          ? JSON.parse(query.values[2]).filter((request) => request.address === "@codex:1")
-            .map((request) => ({ address: request.address, instance_id: "instance-1", run_id: "run-1" }))
+        : query.name === "message_agent_target_resolve_v6"
+          ? query.values[2].filter((ordinal) => ordinal === "1").map((ordinal) => ({ ordinal,
+            instance_id: "instance-1", run_id: "run-1", display_name: "Codex", harness: "codex" }))
         : query.name === "runtime_control_head_advance_v1"
           ? [{ commit_sequence: 9 }]
           : []))
