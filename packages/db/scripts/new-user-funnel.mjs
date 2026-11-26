@@ -72,7 +72,7 @@ export async function readNewUserFunnel(from, to, shardUrlEnvs = [], env = proce
   }
   return withReadOnlyShards(shardUrlEnvs, env, "20s", async (clients) => {
     const control = clients[0];
-    const users = (await control.query(`SELECT u.id, u.created_at,
+    const users = (await control.query(`SELECT u.id, u.created_at, u.signup_source_host, u.signup_source_ref,
         (SELECT s.user_agent FROM control.auth_sessions s WHERE s.user_id=u.id AND s.user_agent IS NOT NULL
           AND s.user_agent<>'' ORDER BY s.created_at LIMIT 1) AS first_agent
       FROM control.auth_users u WHERE u.created_at >= $1 AND u.created_at < $2
@@ -131,6 +131,9 @@ export async function readNewUserFunnel(from, to, shardUrlEnvs = [], env = proce
         registeredAt: new Date(user.created_at).toISOString(),
         device: deviceOf(user.first_agent),
         platform: platformOf(user.first_agent),
+        // Where the account came from: the referring domain (or "direct") and the
+        // link's ref tag; null for an account that carried none (migration 0277).
+        source: user.signup_source_host ? { host: user.signup_source_host, ref: user.signup_source_ref } : null,
         stage: stageOf(fact),
         machines: fact.machines,
         daemonOnline: fact.daemonOnline,

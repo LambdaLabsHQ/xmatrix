@@ -139,6 +139,29 @@ GROUP BY device, surface, step
 ORDER BY device, surface, people DESC
 ```
 
+## Where a new account came from
+
+A new account records once where it came from (`control.auth_users`,
+migration 0277): the domain of the site that sent the person, or `direct`, and
+the `?ref=` tag on the link they followed. Validation is shared by the Web and
+the Hub (`packages/protocol/src/signup-source.ts`).
+
+- Nothing is written to the device. The Web reads the referrer and the landing
+  URL once, when the first page of a visit loads (`lib/signup-source.ts`, from
+  `instrumentation-client.ts`), and holds the answer in page memory, which
+  client-side navigation keeps.
+- Where a full page load would lose it, the URL carries it as `xm_src` (and
+  `ref`): a link from xmatrix.page to xmatrix.sh, a plain anchor to `/login` or
+  `/app`, and a Google or GitHub sign-in's new-account return
+  (`newUserCallbackURL`). Our own sites and localhost are never a source.
+- The new account's first page posts it to `POST /api/me/signup-source`
+  (`lib/signup-source-send.ts`), once per visit. The Hub keeps it only while
+  the account is younger than 24 hours and has none, so a later visit cannot
+  rewrite it. A direct visit is sent only when the sign-in said it made the
+  account.
+- No full URL, path, page view or third-party tool is involved. The daily
+  funnel prints it per person (`docs/operations/new-user-funnel.md`).
+
 ## Measuring live co-writing
 
 The page session records `cowrite_first_text` when a session-requested turn

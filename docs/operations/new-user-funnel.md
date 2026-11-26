@@ -24,6 +24,15 @@ gives `reached` (people at or past each stage) and `stoppedAt` (people whose
 furthest stage it is), their first device and platform, the agents installed
 on their Machine with each sign-in state, and the failures.
 
+`source` says where the account came from: `host`, the domain of the site
+that sent the person (without `www.`), or `direct`; and `ref`, the `?ref=` tag
+on the link they followed. It is `null` for an account that carried none: one
+from before 2026-11-26, or a sign-up in a native app. Links we post carry a
+tag (`?ref=x` on X), so a channel can be told apart even when the referrer is
+a link shortener such as `t.co`. How the Web carries it, and what it never
+keeps, is in `docs/architecture/first-space.md` ("Where a new account came
+from").
+
 What only the person's screen sees (the steps of bringing agents in, which
 starter card they chose, why the desktop App could not start its service) is in
 the diagnostics dataset; queries are in `docs/architecture/first-space.md`.

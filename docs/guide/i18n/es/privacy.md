@@ -26,6 +26,8 @@ Para mantener estable un equipo conectado tras reinstalaciones bajo tu cuenta, e
 
 **Qué se almacena en el Hub:** mensajes de canales, hilos, Pages, adjuntos, metadatos de Space/Agent/máquina, datos normalizados de cuota, resultados de aplicaciones conectadas y Saved Secrets cifrados (cuyos valores nunca se muestran en mensajes ni catálogos de Agents y solo se inyectan en un Run según su política de acceso: `auto` o aprobación `ask` por ejecución).
 
+**De dónde llegó tu cuenta.** Al crear tu cuenta, el Hub registra una sola vez el dominio del sitio web que te llevó a xMatrix (por ejemplo `x.com`, o `direct`) y la etiqueta `?ref=` del enlace que seguiste, para saber qué canales atraen a las personas. Nunca la dirección completa, y no se guarda nada en tu dispositivo para ello: hasta que existe la cuenta, la Web solo lo lleva en sus propios enlaces y en la memoria de la página. Se elimina con tu cuenta.
+
 **Conexión de máquinas y límite de acceso interno:**
 
 - Conectar una máquina requiere la aprobación explícita del propietario con sesión iniciada (no es un túnel abierto por defecto). Puedes desconectar una máquina o detener cualquier Agent en ejecución en cualquier momento, y los conectores externos aplican políticas por aplicación de solo lectura, preguntar antes o lectura y escritura.
