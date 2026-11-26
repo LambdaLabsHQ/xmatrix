@@ -384,32 +384,38 @@ test("feature switch stays off outside extension and SharedWorker startup failur
   assert.equal(fallbackCalls, 1, "falls back seamlessly when SharedWorker fails");
   transport.dispose();
 
-  // Missing worker script falls back immediately via script probe instead of waiting 3s startup timeout.
+  // Worker error event falls back immediately instead of waiting out the 3s startup timeout.
   let fastFallbackCalls = 0;
   const fastSocket = createFakeSocket("wss://hub.example/ws/humans");
   fastSocket.subscribePackets = () => () => {};
-  const silentWorker = {
+  const errorListeners = [];
+  const failingWorker = {
     port: { start() {}, close() {}, addEventListener() {}, postMessage() {} },
-    addEventListener() {},
+    addEventListener(type, listener) {
+      if (type === "error") errorListeners.push(listener);
+    },
   };
   const startedAt = Date.now();
   const fastOpener = createSharedWorkerSocketOpener({
-    createSharedWorker: () => silentWorker,
+    createSharedWorker: () => {
+      setTimeout(() => {
+        for (const listener of errorListeners) listener(new Event("error"));
+      }, 0);
+      return failingWorker;
+    },
     fallbackOpener() {
       fastFallbackCalls += 1;
       setTimeout(() => fastSocket.openNow(), 0);
       return fastSocket;
     },
     userId: "u1",
-    workerScriptUrl: "chrome-extension://id/app/human-shared-socket.worker.js",
-    probeScript: async () => false,
     startupTimeoutMs: 3_000,
   });
   const fastTransport = fastOpener("wss://hub.example/ws/humans");
   await new Promise((resolve) => {
     fastTransport.addEventListener("open", resolve, { once: true });
   });
-  assert.equal(fastFallbackCalls, 1, "falls back immediately when worker script is missing");
+  assert.equal(fastFallbackCalls, 1, "falls back immediately when SharedWorker fires an error event");
   assert.ok(Date.now() - startedAt < 500, "must not wait out the 3s startup timeout");
   fastTransport.dispose();
 });

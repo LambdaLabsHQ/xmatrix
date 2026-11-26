@@ -44,7 +44,6 @@ export function createHumanSocketOpener(options?: {
     userId: options.userId,
     focusChannelId: options.focusChannelId,
     clientRole: options.clientRole,
-    workerScriptUrl: sharedWorkerUrl(),
   });
 }
 

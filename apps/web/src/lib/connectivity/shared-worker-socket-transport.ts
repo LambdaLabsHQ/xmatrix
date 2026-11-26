@@ -56,8 +56,6 @@ export function createSharedWorkerSocketOpener(options: {
   userId: string;
   focusChannelId?: () => string | null;
   clientRole?: SharedClientRole;
-  workerScriptUrl?: string | URL;
-  probeScript?: (url: string) => Promise<boolean>;
   startupTimeoutMs?: number;
 }): (url: string) => HumanSocketTransport {
   let useShared = true;
@@ -69,8 +67,6 @@ export function createSharedWorkerSocketOpener(options: {
       userId: options.userId,
       focusKey: options.focusChannelId?.() ?? null,
       clientRole: options.clientRole ?? "app",
-      workerScriptUrl: options.workerScriptUrl ? String(options.workerScriptUrl) : undefined,
-      probeScript: options.probeScript,
       startupTimeoutMs: options.startupTimeoutMs,
       onUnavailable: () => { useShared = false; },
     });
@@ -90,8 +86,6 @@ class SharedWorkerSocketTransport extends BaseHumanSocketTransport {
     userId: string;
     focusKey: string | null;
     clientRole: SharedClientRole;
-    workerScriptUrl?: string;
-    probeScript?: (url: string) => Promise<boolean>;
   }) {
     super(url, options);
   }
@@ -154,22 +148,6 @@ class SharedWorkerSocketTransport extends BaseHumanSocketTransport {
       };
       worker.addEventListener("error", failed);
       port.addEventListener("messageerror", failed);
-      // Chrome sometimes delays or omits `error` on a missing module SharedWorker
-      // script inside extension pages. Probe local chrome-extension:// assets in
-      // parallel so a deleted/missing worker file falls back in milliseconds.
-      const scriptUrl = this.options.workerScriptUrl;
-      const probe = this.options.probeScript ?? (
-        scriptUrl && scriptUrl.startsWith("chrome-extension://") && typeof fetch === "function"
-          ? (target: string) => fetch(target, { cache: "no-store" }).then((res) => res.ok, () => false)
-          : undefined
-      );
-      if (scriptUrl && probe) {
-        void probe(scriptUrl).then((ok) => {
-          if (!ok && !this.workerReady && this.port === port && this.readyState === 0) failed();
-        }, () => {
-          if (!this.workerReady && this.port === port && this.readyState === 0) failed();
-        });
-      }
       port.addEventListener("message", ({ data }) => {
         if (this.port !== port || this.readyState === 3) return;
         if (data.type === "port-ping") {
