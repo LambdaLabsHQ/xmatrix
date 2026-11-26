@@ -1,18 +1,20 @@
-import { AppControlError } from "@xmatrix/db";
+import { AppControlError, ControlError } from "@xmatrix/db";
 import { getAppConnectorProvider } from "./app-connectors";
-import { actionExecutor, announceActionRequests, heldAuthorityFailure, stageHeldAction } from "./connectors/connector-commands";
+import { actionExecutor, announceActionRequests, callConnectorRead, heldAuthorityFailure, stageHeldAction } from "./connectors/connector-commands";
 import { connectorActionRequestRepository } from "./connectors/credentials";
+import { ProviderRequestError } from "./connectors/http";
 import { enqueueXUpload } from "./connectors/x-upload-executor-do";
-import { nornPreparedReply, type NornAppRequest } from "./norn-host";
+import { nornActionAnswer, nornPreparedReply, type NornAppRequest } from "./norn-host";
 import { nornActionStatement } from "./norn-libraries";
 import type { Env } from "./types";
 import type { Reply } from "./vendor/norn/runtime/ledger";
 
 /**
  * What the host does for a Norn program's request of a connected app
- * (docs/architecture/norn-host.md "Asking a connected app"). `prepare` stages
- * the action as a Channel command would, frozen and held; `perform` runs what
- * was admitted, once, through the durable executor. No Agent takes part.
+ * (docs/architecture/norn-host.md "Asking a connected app"). `read` runs a
+ * declared read-only action at once under the program author's access; `prepare`
+ * stages a write action as a Channel command would, frozen and held; `perform`
+ * runs what was admitted, once, through the durable executor. No Agent takes part.
  */
 
 /** How long an approval can wait for an answer, and an approved action for its `perform`. */
@@ -33,11 +35,36 @@ export async function deliverNornAppRequest(env: Env, input: { spaceId: string; 
   preparedRef?: string }): Promise<NornAppDelivery> {
   const { app, name } = input.request.action;
   const label = `${getAppConnectorProvider(app)?.name ?? app} ${name}`;
-  if (input.request.verb === "prepare") {
+  if (input.request.verb === "read" || input.request.verb === "prepare") {
     const statement = nornActionStatement(app, name, input.request.action.input);
     if ("refusal" in statement) return { reply: { tag: "Broke", reason: statement.refusal } };
     const action = actionExecutor(app, name);
     if (!action) return { reply: { tag: "Broke", reason: `${label} is not an action this host runs` } };
+    if (input.request.verb === "read") {
+      if (action.effect !== "read") return { reply: { tag: "Broke", reason: `${label} is not a read-only action` } };
+      if (action.callerOnly) return { reply: { tag: "Broke", reason: `${label} is for the caller alone, so a program cannot read it` } };
+      try {
+        const result = await callConnectorRead(app, {
+          env, channelId: input.channelId, actorUserId: input.authorityUserId,
+          messageId: input.deliveryMessageId, commandMessageId: null, body: "", senderKind: "user",
+        }, name, action, statement, async () => {}, "private");
+        return { reply: nornActionAnswer(result) };
+      } catch (error) {
+        if (error instanceof ProviderRequestError) {
+          if (error.status === 403) return { reply: { tag: "Revoked" }, say: `${label}: blocked; ${error.message}` };
+          return { reply: { tag: "Broke", reason: error.message }, say: `${label}: failed; ${error.message}` };
+        }
+        if (error instanceof AppControlError || (error instanceof ControlError && (error.status === 403 || error.status === 404))) {
+          const reason = heldAuthorityFailure(error) ?? error.message;
+          return { reply: { tag: "Revoked" }, say: `${label}: revoked; ${reason}` };
+        }
+        if (error instanceof DOMException && error.name === "TimeoutError") {
+          const reason = "the provider did not answer in time";
+          return { reply: { tag: "Broke", reason }, say: `${label}: failed; ${reason}` };
+        }
+        throw error;
+      }
+    }
     const staged = await stageHeldAction(env, { channelId: input.channelId, actorUserId: input.authorityUserId,
       messageId: input.deliveryMessageId, providerId: app, actionId: name, action, statement, heldFor: input.requestRef });
     if ("reason" in staged) {

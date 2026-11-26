@@ -564,12 +564,23 @@ remembers each post by its key, and no edit sends one twice.
 
 **What an app can be asked.** Every action a connected app declares, GitHub's
 excepted (`NORN_CONNECTOR_EVENT_MANIFESTS`, `norn-libraries.ts`), which the checker
-reads `Actions.action(app, name)` against. Its input is the two parts of the
-Channel command, `{target, text}`, or named fields where the host gives the
-action some (`x` `post`, `publish_video`); `nornActionStatement` turns either
-into the command's statement, and the connector parses it as it parses a
-command. Every action answers `{summary, url}`. The `X` library gives X's
-actions their words: `X.preparePost`, `X.prepareVideo`, `X.publish`.
+reads `Actions.action(app, name)` against, carrying each action's `effect`
+(`"read"` or `"write"`). Its input is the two parts of the Channel command,
+`{target, text}`, or named fields where the host gives the action some (`x`
+`post`, `publish_video`); `nornActionStatement` turns either into the command's
+statement, and the connector parses it as it parses a command. Every action
+answers `{summary, url}`, and read actions that return structured data add typed
+`json` fields alongside them (`cloudflare` `query_database` adds `rows: json`,
+`query_logs` adds `counts: json`). The `X` library gives X's actions their
+words: `X.preparePost`, `X.prepareVideo`, `X.publish`.
+
+**Read** (`Actions.read`, `deliverNornAppRequest`, `norn-actions.ts`). A read
+changes nothing, so nobody admits it: the coordinator runs declared read-only
+actions immediately through `callConnectorRead` with `resultVisibility: "private"`
+under the program author's authority, and settles the request in the same pass
+with no chat receipt on success (so periodic checks stay quiet). Missing or
+revoked connection access settles as `Revoked`; invalid input, non-read actions,
+or provider failures settle as `Broke`.
 
 **Prepare** (`deliverNornAppRequest`, `norn-actions.ts`). The coordinator
 stages the action as a command would be staged (`stageHeldAction`): parsed,

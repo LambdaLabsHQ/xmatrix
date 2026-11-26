@@ -207,6 +207,10 @@ test("query_logs counts a Worker's log messages over a bounded window", async ()
   assert.deepEqual(query.parameters.filters.map((filter) => filter.value), ["xmatrix-hub", "error"]);
   assert.match(value.summary, /xmatrix-hub: 905 error events in 30 min/u);
   assert.ok(value.summary.indexOf("900 ×") < value.summary.indexOf("5 ×"), "largest group first");
+  assert.deepEqual(value.data, { counts: [
+    { count: 900, message: "hibernation attachment" },
+    { count: 5, message: "runtime session failure" },
+  ] });
   assert.equal(typeof CLOUDFLARE_ACTIONS.query_logs.parse({ target: "x", text: "99999" }), "string", "window is bounded");
   assert.equal(typeof CLOUDFLARE_ACTIONS.query_logs.parse({ target: "../x", text: "" }), "string");
 });
@@ -425,6 +429,11 @@ test("D1 queries run one read-only statement and show bounded rows", async () =>
   assert.match(value.summary, /stockpulse-db: 60 rows, first 50 shown \(60 rows read\)/u);
   assert.match(value.summary, /source    views\npod cast  0\ndirect    1\n/u, "columns line up and tabs in values cannot shift them");
   assert.doesNotMatch(value.summary, / 50\n| 59/u);
+  assert.equal(value.data.rows.length, 50);
+  assert.deepEqual(value.data.rows.slice(0, 2), [
+    { source: "pod\tcast", views: 0 },
+    { source: "direct", views: 1 },
+  ]);
 
   const listed = await actWith(twoLogins, `@cloudflare:list_databases:${OTHER}`, { ...perToken,
     [`GET accounts/${OTHER}/d1/database`]: [{ name: "stockpulse-db", uuid: db, num_tables: 0, file_size: 3 * 1_048_576 }] });

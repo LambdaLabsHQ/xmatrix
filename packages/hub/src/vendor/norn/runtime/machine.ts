@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@8a2e680fa215444fb94b023bf7c1f0e976af4631; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@a667dd5a0243281efd075834e7d42a8f371a30d5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import type { Argument, AstNode, BinaryOperator, Case, Expression, Lambda, Pattern, Statement, TopLevelItem } from "../frontend/ast.js";
 import type { Code } from "./code.js";
 import { match } from "./pattern.js";
@@ -52,7 +52,7 @@ export interface Machine {
   nextEnvironment: number;
   resumedAt: number;
 }
-const effectBuiltins = new Set(["ask", "confirm", "choose", "run", "wait", "waitUntil", "cancel", "handOver", "status", "say", "judge", "first", "sameAs", "spawn", "Actions.prepare", "Actions.perform", "Holds.sample"]);
+const effectBuiltins = new Set(["ask", "confirm", "choose", "run", "wait", "waitUntil", "cancel", "handOver", "status", "say", "judge", "first", "sameAs", "spawn", "Actions.prepare", "Actions.perform", "Actions.read", "Holds.sample"]);
 const builtins = new Set([
   ...effectBuiltins,
   "now", "show", "ignore", "fail", "or", "merge", "never", "map", "mapRequest", "filter", "filterMap", "scan", "timed", "gather",

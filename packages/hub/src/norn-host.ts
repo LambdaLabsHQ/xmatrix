@@ -14,7 +14,7 @@ import {
   type CloudEventInput, type Delegation, type EditPreview, type Ledger, type LedgerRequest, type MigrationReport, type MigrationResult,
   type MigrationStep, type Pass, type PassOptions, type Reply,
 } from "./vendor/norn/runtime/ledger";
-import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
+import { eventKey, number, show, text, unit, type Value } from "./vendor/norn/runtime/value";
 import {
   BUILTIN_NORN_LIBRARY_SOURCES, loadBuiltinNornLibraries, nornActionStatement, nornConnectorActionSpecs, NORN_CONNECTOR_EVENT_MANIFESTS,
 } from "./norn-libraries";
@@ -562,18 +562,47 @@ const appName = (app: string): string => APP_CONNECTOR_PROVIDER_MANIFESTS.find(m
 export function nornRequestWords(request: Pick<LedgerRequest, "holder" | "text" | "verb" | "action" | "context">): { holder: string; text: string } {
   if (!request.action) return { holder: request.holder, text: request.text };
   return { holder: `@${appName(request.action.app)}`, text: request.verb === "prepare"
-    ? `Approve ${request.text}${request.context ? `: ${request.context}` : ""}` : `Do ${request.text}, as approved` };
+    ? `Approve ${request.text}${request.context ? `: ${request.context}` : ""}`
+    : request.verb === "read"
+      ? `Read ${request.text}${request.context ? `: ${request.context}` : ""}`
+      : `Do ${request.text}, as approved` };
 }
 /** What the host answers a `prepare` it admitted with: the one value the program's `perform` takes. */
 export const nornPreparedReply = (request: LedgerRequest): Reply => ({ tag: "Answered", value: preparedAction(request) });
-/** What a completed action answers: the receipt's words, and its link when it gave one. */
-export const nornActionAnswer = (result: { summary: string; url?: string }): Reply => ({ tag: "Answered", value: { type: "record", fields: {
-  summary: text(result.summary), url: result.url ? { type: "variant", name: "Some", args: [text(result.url)] } : { type: "variant", name: "None", args: [] } } } });
+/** Converts bounded plain JSON from a connector action into a Norn `Value` for `json` fields. */
+function plainJsonToValue(raw: unknown): Value {
+  if (raw === null || raw === undefined) return unit;
+  if (typeof raw === "boolean") return { type: "bool", value: raw };
+  if (typeof raw === "number") return Number.isInteger(raw) ? { type: "int", value: String(raw) } : number(raw);
+  if (typeof raw === "string") return text(raw);
+  if (Array.isArray(raw)) return { type: "list", values: raw.map(plainJsonToValue) };
+  if (typeof raw === "object") {
+    const fields: Record<string, Value> = {};
+    for (const [key, item] of Object.entries(raw as Record<string, unknown>)) fields[key] = plainJsonToValue(item);
+    return { type: "record", fields };
+  }
+  return unit;
+}
+/** What a completed action answers: the receipt's words, its link when it gave one, and any structured JSON fields. */
+export const nornActionAnswer = (result: { summary: string; url?: string; data?: Readonly<Record<string, unknown>> }): Reply => {
+  const fields: Record<string, Value> = {
+    summary: text(result.summary),
+    url: result.url ? { type: "variant", name: "Some", args: [text(result.url)] } : { type: "variant", name: "None", args: [] },
+  };
+  if (result.data) {
+    for (const [key, value] of Object.entries(result.data)) {
+      if (key !== "summary" && key !== "url") fields[key] = plainJsonToValue(value);
+    }
+  }
+  return { tag: "Answered", value: { type: "record", fields } };
+};
 /** Why this host cannot do what a request asks of a connected app; undefined when it can try. */
 function appRefusal(request: NornAppRequest): string | undefined {
   const { app, name, input } = request.action;
-  if (!nornConnectorActionSpecs(app).some(spec => spec.name === name)) return `This host has no action ${name} of the app ${app}`;
-  if (request.verb !== "prepare") return undefined;
+  const spec = nornConnectorActionSpecs(app).find(candidate => candidate.name === name);
+  if (!spec) return `This host has no action ${name} of the app ${app}`;
+  if (request.verb === "read" && spec.effect !== "read") return `${app} ${name} is not a read-only action`;
+  if (request.verb !== "prepare" && request.verb !== "read") return undefined;
   const statement = nornActionStatement(app, name, input);
   return "refusal" in statement ? statement.refusal : undefined;
 }
@@ -1099,7 +1128,9 @@ export function nornStep(act?: NornAct,
         // The host held it for a connected app, and the time it gave itself to hear of an outcome has passed.
         if (appRequest(request)) {
           settle(ledger, request.id, request.holder, { tag: "Broke", reason: request.verb === "prepare"
-            ? "Nobody answered this approval request in 30 days" : "The action stopped without a confirmed result; it was not tried again" }, now, row.epoch);
+            ? "Nobody answered this approval request in 30 days"
+            : request.verb === "read" ? "The read stopped without a confirmed result"
+              : "The action stopped without a confirmed result; it was not tried again" }, now, row.epoch);
           continue;
         }
         const person = personHolder(request.holder);
