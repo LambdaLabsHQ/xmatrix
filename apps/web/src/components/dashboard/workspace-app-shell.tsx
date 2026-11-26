@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { isPlaceholderHumanName } from "@xmatrix/protocol";
 import { NameYourselfStep } from "@/components/auth/name-yourself-step";
 import { NEW_ACCOUNT_FLAG, NewAccountStep } from "@/components/auth/new-account-step";
@@ -8,7 +8,6 @@ import { useAuth } from "@/lib/auth-context";
 import { sendSignupSource } from "@/lib/signup-source-send";
 import { useWorkspaceShellState } from "./use-workspace-shell-state";
 import { useWorkspaceShellActions } from "./use-workspace-shell-actions";
-import { useDesktopSessionKeeper } from "./use-desktop-session-keeper";
 import { WorkspaceShellView } from "./workspace-shell-view";
 
 export * from "./workspace-shell-modules";
@@ -41,7 +40,5 @@ export default function WorkspaceAppShell({ children }: { children?: ReactNode }
 function WorkspaceShell({ children }: { children?: ReactNode }) {
   const state = useWorkspaceShellState({ children });
   const model = useWorkspaceShellActions(state);
-  const spaceIds = useMemo(() => state.spaces.map((space) => space.id), [state.spaces]);
-  useDesktopSessionKeeper({ token: state.token ?? undefined, spaceIds });
   return <WorkspaceShellView model={model} />;
 }

@@ -7,13 +7,6 @@ import { planWindowOpen } from "./window-navigation";
  * service at a time; asking again brings it forward. A profile still signed in
  * answers at once, without a window, which is what renewing a session usually
  * comes to.
- *
- * Renewing also runs on its own (heldOrRenewedSession): the page asks now and
- * then, while the app runs, and hands what the profile holds to the Hub. The
- * profile's own request keeps the session in use from the person's own network,
- * and a session Apple let lapse is given one chance to come back by loading the
- * service in a window never shown. Nothing here ever shows a window or asks for
- * a password; when the profile is signed out, the person is asked as before.
  */
 
 export type SignInResult = { status: "signed-in"; session: string } | { status: "cancelled" };
@@ -43,45 +36,6 @@ async function heldSession(id: SignInServiceId): Promise<string | null> {
     return null;
   }
   return sessionCookieHeader(await store.cookies.get({ url: service.cookieUrl })) || null;
-}
-
-const RENEW_MS = 20_000;
-const renewing = new Map<SignInServiceId, Promise<string | null>>();
-
-/** Load the service where no one sees it, for a profile Apple signs back in by itself, and answer what it then holds. */
-async function renewQuietly(id: SignInServiceId): Promise<string | null> {
-  const service = SIGN_IN_SERVICES[id];
-  const window = new BrowserWindow({ show: false, width: 980, height: 760,
-    webPreferences: { partition: `persist:sign-in-${id}`, contextIsolation: true, nodeIntegration: false, sandbox: true } });
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  const stay = (event: { preventDefault: () => void }, url: string) => { if (!allowedInSignIn(service, url)) event.preventDefault(); };
-  window.webContents.on("will-navigate", stay);
-  window.webContents.on("will-redirect", stay);
-  window.webContents.setAudioMuted(true);
-  try {
-    void window.loadURL(service.start).catch(() => undefined);
-    const deadline = Date.now() + RENEW_MS;
-    while (Date.now() < deadline && !window.isDestroyed()) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-      const held = await heldSession(id);
-      if (held) return held;
-    }
-    return null;
-  } finally {
-    if (!window.isDestroyed()) window.destroy();
-  }
-}
-
-/**
- * The session the profile holds, renewed without a window if it can be; null
- * when only the person can sign in again. Never opens anything they see.
- */
-export function heldOrRenewedSession(id: SignInServiceId): Promise<string | null> {
-  if (open.has(id)) return Promise.resolve(null);
-  const pending = renewing.get(id) ?? (async () => (await heldSession(id)) ?? (await renewQuietly(id)))()
-    .catch(() => null).finally(() => renewing.delete(id));
-  renewing.set(id, pending);
-  return pending;
 }
 
 export async function signInWithWindow(id: SignInServiceId, parent: BrowserWindow | null,
