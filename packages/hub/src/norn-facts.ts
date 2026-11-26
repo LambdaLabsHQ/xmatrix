@@ -4,6 +4,7 @@ import { checkPageFactBlock, collectSpaceLibraries, nornFactBlocks, nornStep, ty
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import type { Env } from "./types";
+import type { Ledger } from "./vendor/norn/runtime/ledger";
 
 const PAGE_HOLD_PREFIX = "page:";
 
@@ -20,6 +21,52 @@ function pageTypeNamesFromKinds(holdKinds: readonly string[]): string[] {
     if (kind.startsWith(PAGE_HOLD_PREFIX)) names.add(kind.slice(PAGE_HOLD_PREFIX.length));
   }
   return [...names];
+}
+
+/**
+ * Re-validates all `page:<Type>` facts currently held in a program's ledger
+ * against `spaceCatalog` before a revision or library adoption evaluates.
+ * Conforming blocks are refreshed; blocks that were removed, lost edit access,
+ * or no longer check against an updated library type are retracted (`null`) so
+ * the revised program never reads stale schema-mismatched records.
+ */
+export async function revalidatePageFactHolds(
+  env: Env,
+  input: {
+    spaceId: string;
+    authorityUserId: string;
+    spaceCatalog: SpaceLibraryCatalog;
+    existingHolds?: Ledger["holds"];
+  },
+): Promise<NornHoldUpdate[]> {
+  if (!input.existingHolds) return [];
+  const heldByType: Array<{ typeName: string; ids: string[] }> = [];
+  for (const [kind, entries] of Object.entries(input.existingHolds)) {
+    if (!kind.startsWith(PAGE_HOLD_PREFIX)) continue;
+    const ids = Object.keys(entries ?? {});
+    if (ids.length) heldByType.push({ typeName: kind.slice(PAGE_HOLD_PREFIX.length), ids });
+  }
+  if (!heldByType.length) return [];
+  const db = database(env);
+  const principal: PagePrincipal = { kind: "user", id: input.authorityUserId };
+  const { pages: factPages } = await new PostgresPageRepository(db).factPages({
+    requestId: crypto.randomUUID(), spaceId: input.spaceId, principal,
+  });
+  const editableById = new Map(factPages.filter(page => page.canEdit).map(page => [page.pageId, page.body]));
+  const updates: NornHoldUpdate[] = [];
+  for (const { typeName, ids } of heldByType) {
+    for (const pageId of ids) {
+      const body = editableById.get(pageId);
+      const block = body ? nornFactBlocks(body).find(candidate => candidate.typeName === typeName) : undefined;
+      if (!block) {
+        updates.push({ source: "page", typeName, id: pageId, value: null });
+        continue;
+      }
+      const checked = checkPageFactBlock(block, input.spaceCatalog);
+      updates.push({ source: "page", typeName, id: pageId, value: checked.ok ? checked.value : null });
+    }
+  }
+  return updates;
 }
 
 /**

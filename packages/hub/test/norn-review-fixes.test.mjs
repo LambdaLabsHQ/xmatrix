@@ -186,7 +186,7 @@ test("P1 #2: pageProgramPreview redacts raw ledger data and runs real forward-ad
     "./page-restriction": { effectivelyRestricted: async () => false },
     "./deterministic-id": { deterministicConversationId: async () => "id" },
     "./norn-branches": { ensureAndWakeNornBranches: async () => {} },
-    "./norn-facts": { seedPageFactsForProgram: async () => {} },
+    "./norn-facts": { seedPageFactsForProgram: async () => {}, revalidatePageFactHolds: async () => [] },
     "./norn-host": hostMod,
     "./norn-plan": { nornFlow: () => [] },
     "./postgres-authority-fleet": { createPostgresAuthorityDatabase: () => ({}) },
