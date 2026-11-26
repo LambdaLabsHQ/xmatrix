@@ -1,4 +1,4 @@
-import { staticFace, type PageProgramRequest, type PageProgramStatus, type PageProgramStep } from "@xmatrix/protocol";
+import { staticFace, type PageProgramBranchStatus, type PageProgramRequest, type PageProgramStatus, type PageProgramStep } from "@xmatrix/protocol";
 
 /**
  * A program drawn as its flow (docs/architecture/norn-host.md, "What it does
@@ -207,4 +207,121 @@ export function drawProgramFlow(program: PageProgramStatus | undefined, options:
   }
   root.append(steps);
   return { root, texts };
+}
+
+export interface ProgramBranchItem {
+  key: string;
+  label: string;
+  channelId: string;
+  state: PageProgramBranchStatus["state"];
+  detail: string;
+  note: string;
+}
+
+export interface ProgramBranchSummary {
+  summary: string;
+  counts: Record<PageProgramBranchStatus["state"], number>;
+  items: ProgramBranchItem[];
+}
+
+const BRANCH_STATE_LABEL: Record<PageProgramBranchStatus["state"], string> = {
+  running: "running",
+  waiting: "waiting",
+  completed: "done",
+  failed: "failed",
+};
+
+/** Pure projection of a program's per-branch status for the generic Program → Branch Tree UI. */
+export function summarizeProgramBranches(
+  branches: readonly PageProgramBranchStatus[],
+  now = Date.now(),
+): ProgramBranchSummary {
+  const counts: Record<PageProgramBranchStatus["state"], number> = {
+    running: 0, waiting: 0, completed: 0, failed: 0,
+  };
+  const items: ProgramBranchItem[] = branches.map((branch) => {
+    counts[branch.state] += 1;
+    const latest = branch.requests.at(-1);
+    if (!latest) {
+      return {
+        key: branch.key,
+        label: branch.label,
+        channelId: branch.channelId,
+        state: branch.state,
+        detail: "",
+        note: BRANCH_STATE_LABEL[branch.state],
+      };
+    }
+    const step = programStep(latest, now);
+    return {
+      key: branch.key,
+      label: branch.label,
+      channelId: branch.channelId,
+      state: branch.state,
+      detail: `${step.holder.replace(/^@/u, "")}: ${firstLine(step.text)}`,
+      note: firstLine(step.note) || BRANCH_STATE_LABEL[branch.state],
+    };
+  });
+  const parts = [`${branches.length} ${branches.length === 1 ? "branch" : "branches"}`];
+  if (counts.running) parts.push(`${counts.running} running`);
+  if (counts.waiting) parts.push(`${counts.waiting} waiting`);
+  if (counts.failed) parts.push(`${counts.failed} failed`);
+  if (counts.completed) parts.push(`${counts.completed} done`);
+  return { summary: parts.join(" · "), counts, items };
+}
+
+const BRANCH_DOT_CLASS: Record<PageProgramBranchStatus["state"], string> = {
+  running: "size-2 shrink-0 rounded-full bg-foreground animate-pulse",
+  waiting: "size-2 shrink-0 rounded-full bg-primary",
+  completed: "size-2 shrink-0 rounded-full bg-muted-foreground/50",
+  failed: "size-2 shrink-0 rounded-full bg-destructive",
+};
+
+const BRANCH_NOTE_CLASS: Record<PageProgramBranchStatus["state"], string> = {
+  running: "ml-auto max-w-[32%] shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] app-status-chip",
+  waiting: "ml-auto max-w-[32%] shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] app-status-chip app-status-chip-attention",
+  completed: "ml-auto max-w-[32%] shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] app-status-chip app-status-chip-secondary",
+  failed: "ml-auto max-w-[32%] shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] app-status-chip app-status-chip-alert",
+};
+
+/** Draws a generic clickable Program → Branch Tree below a program's flow. */
+export function drawProgramBranches(
+  branches: readonly PageProgramBranchStatus[],
+  openConversation: (conversationId: string) => void,
+  options: { now?: number } = {},
+): HTMLElement {
+  const summary = summarizeProgramBranches(branches, options.now);
+  const wrap = document.createElement("div");
+  wrap.className = "block rounded-b-[10px] border-t border-foreground/10 bg-foreground/[0.03] px-3.5 py-2 text-xs";
+  wrap.dataset.testid = "program-branch-tree";
+  const head = document.createElement("div");
+  head.className = "mb-1.5 text-[11px] font-semibold text-muted-foreground";
+  head.textContent = summary.summary;
+  wrap.append(head);
+
+  const list = document.createElement("div");
+  list.className = "flex flex-col gap-1";
+  for (const item of summary.items) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left transition-colors hover:bg-foreground/[0.06]";
+    row.dataset.state = item.state;
+    row.dataset.branchKey = item.key;
+    row.title = `Open branch conversation for ${item.label}`;
+    row.addEventListener("mousedown", (event) => event.preventDefault());
+    row.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openConversation(item.channelId);
+    });
+    const dot = el(BRANCH_DOT_CLASS[item.state]);
+    dot.dataset.state = item.state;
+    const label = el("max-w-[34%] shrink-0 truncate font-semibold text-foreground", item.label);
+    const detail = item.detail ? el("min-w-0 flex-1 truncate text-muted-foreground", item.detail) : null;
+    const note = el(BRANCH_NOTE_CLASS[item.state], item.note);
+    row.append(dot, label, ...(detail ? [detail] : []), note);
+    list.append(row);
+  }
+  wrap.append(list);
+  return wrap;
 }
