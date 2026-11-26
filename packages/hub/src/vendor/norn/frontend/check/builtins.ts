@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@8a2e680fa215444fb94b023bf7c1f0e976af4631; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@a667dd5a0243281efd075834e7d42a8f371a30d5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * What every program sees without declaring it: the base types, `list`,
  * `option`, `result`, `reply`, `yesno`, `either`, the three source types, and
@@ -305,7 +305,7 @@ export function builtinValues(): Builtin[] {
  * `JSON`, `Events`, `Actions`), available via qualified access
  * (`String.toLowerCase`, `List.map`, `Events.events`, etc.). Pure functions
  * except `Events.events`, which constructs a stream source, and
- * `Actions.prepare` and `Actions.perform`, which make requests of the host.
+ * `Actions.prepare`, `Actions.perform` and `Actions.read`, which make requests of the host.
  */
 export function builtinModuleExports(): Readonly<Record<string, readonly Builtin[]>> {
   const eq = () => newVar(GENERIC, null, true);
@@ -396,6 +396,11 @@ export function builtinModuleExports(): Readonly<Record<string, readonly Builtin
       ["perform", () => {
         const o = g();
         return fun([con("Actions.prepared", o)], [optional("by", g("deadline"))], t.request(o));
+      }, "act"],
+      // Reads from the app, changing nothing: done at once with the author's own access, nobody admits it.
+      ["read", () => {
+        const i = g(), o = g();
+        return fun([con("Actions.action", i, o), i], [optional("by", g("deadline")), optional("about", g())], t.request(o));
       }, "act"],
     ]),
   };

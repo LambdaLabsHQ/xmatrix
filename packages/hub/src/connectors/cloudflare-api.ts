@@ -306,10 +306,12 @@ async function queryLogs(credentials: Credentials, input: Record<string, string>
       message: text(record(Array.isArray(aggregate.groups) ? aggregate.groups[0] : undefined).value) }))
     .sort((left, right) => right.count - left.count).slice(0, LOG_GROUPS);
   const lines = groups.map((group) => `${group.count} × ${oneLine(group.message, 300)}`);
+  const counts = groups.map((group) => ({ count: group.count, message: oneLine(group.message, 300) }));
   return {
     summary: `${input.script}: ${groups.reduce((sum, group) => sum + group.count, 0)} ${input.level} events in ${minutes} min (sampled)` +
       (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
     url: dashboard(target.account, input.script!, "observability/events"),
+    data: { counts },
   };
 }
 
@@ -503,6 +505,21 @@ function dnsContent(type: string, raw: string): { content: string; priority?: nu
   return { content: match[2]!, priority: Number(match[1]) };
 }
 
+const QUERY_JSON_STRING = 2_000;
+function boundedJsonValue(value: unknown, depth = 0): unknown {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") return value.length > QUERY_JSON_STRING ? `${value.slice(0, QUERY_JSON_STRING)}…` : value;
+  if (Array.isArray(value)) return depth >= 4 ? "[…]" : value.slice(0, QUERY_ROWS).map((item) => boundedJsonValue(item, depth + 1));
+  if (typeof value === "object") {
+    if (depth >= 4) return "{…}";
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, QUERY_ROWS)
+      .map(([key, item]) => [key, boundedJsonValue(item, depth + 1)]));
+  }
+  return String(value);
+}
+
 function cell(value: unknown): string {
   if (value === null || value === undefined) return "NULL";
   return oneLine(typeof value === "object" ? JSON.stringify(value) : String(value), QUERY_CELL).replace(/\t/gu, " ");
@@ -629,7 +646,8 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
       return { summary: `${database.name}: ${rows.length} ${rows.length === 1 ? "row" : "rows"}${rows.length > shown.length ? `, first ${shown.length} shown` : ""}` +
         `${Number.isFinite(read) ? ` (${read} rows read)` : ""}` +
         (columns.length ? `\n${quoteRetrievedText(table, QUERY_OUTPUT)}` : ""),
-        url: `https://dash.cloudflare.com/${target.account}/workers/d1/databases/${database.id}` };
+        url: `https://dash.cloudflare.com/${target.account}/workers/d1/databases/${database.id}`,
+        data: { rows: shown.map((row) => boundedJsonValue(row)) } };
     },
   },
   list_zones: {

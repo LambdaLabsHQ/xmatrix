@@ -8,17 +8,33 @@ import * as libraries from "../src/norn-libraries.ts";
 
 const load = await compileCommonJsSourceModule(new URL("../src/norn-actions.ts", import.meta.url));
 class AppControlError extends Error { constructor(code, status, message) { super(message); this.code = code; this.status = status; } }
+class ControlError extends Error { constructor(code, status, message) { super(message); this.code = code; this.status = status; } }
+class ProviderRequestError extends Error { constructor(status, message) { super(message); this.status = status; } }
 
 // The connector tests own parsing, freezing and executing an action, and the PostgreSQL tests own the one step from
 // approved to executing. This owns what the host makes of each for a program: what it answers, says and waits for.
 function fixture({ staged = { status: "pending", requestId: "action-request:1" }, claim = { request: { requestId: "action-request:1" } },
-  known = true } = {}) {
+  readResult = { summary: "db: 1 row", url: "https://dash.cloudflare.com/a/d1", data: { rows: [{ failures: 12, kind: "upstream_timeout" }] } },
+  executor, known = true } = {}) {
   const calls = [];
   const actions = load(name => ({
-    "@xmatrix/db": { AppControlError },
-    "./app-connectors": { getAppConnectorProvider: id => (id === "x" ? { id: "x", name: "X" } : undefined) },
+    "@xmatrix/db": { AppControlError, ControlError },
+    "./app-connectors": { getAppConnectorProvider: id => (id === "x" ? { id: "x", name: "X" } : id === "cloudflare" ? { id: "cloudflare", name: "Cloudflare" } : undefined) },
+    "./connectors/http": { ProviderRequestError },
     "./connectors/connector-commands": {
-      actionExecutor: (providerId, actionId) => (known && providerId === "x" && actionId === "publish_video" ? { effect: "write" } : undefined),
+      actionExecutor: (providerId, actionId) => {
+        if (!known) return undefined;
+        if (executor) return executor(providerId, actionId);
+        if (providerId === "x" && actionId === "publish_video") return { effect: "write" };
+        if (providerId === "cloudflare" && actionId === "query_database") return { effect: "read" };
+        return undefined;
+      },
+      callConnectorRead: async (providerId, commandInput, actionId, action, statement, _authorize, visibility) => {
+        calls.push(["read", { providerId, channelId: commandInput.channelId, actorUserId: commandInput.actorUserId,
+          messageId: commandInput.messageId, actionId, action, statement, visibility }]);
+        if (readResult instanceof Error) throw readResult;
+        return readResult;
+      },
       stageHeldAction: async (_env, input) => { calls.push(["stage", input]); return staged; },
       heldAuthorityFailure: error => (error.code === "action_request_forbidden" ? "Current access no longer permits this approval; a Space admin must review it." : undefined),
       announceActionRequests: async (_env, spaceId, channelId) => { calls.push(["announce", spaceId, channelId]); },
@@ -30,12 +46,20 @@ function fixture({ staged = { status: "pending", requestId: "action-request:1" }
     "./connectors/x-upload-executor-do": { enqueueXUpload: async (_env, ref) => { calls.push(["queue", ref]); } },
     "./norn-host": host, "./norn-libraries": libraries,
   })[name]);
-  const input = { type: "record", fields: { account: { type: "string", value: "@acme" }, text: { type: "string", value: "Hello" },
+  const writeInput = { type: "record", fields: { account: { type: "string", value: "@acme" }, text: { type: "string", value: "Hello" },
     video: { type: "string", value: "message-1/video-1" } } };
-  const request = (verb, extra = {}) => ({ id: `request:${verb}`, verb, holder: "app:x", text: "publish_video",
-    action: { app: "x", name: "publish_video", input: verb === "prepare" ? input : null, prepared: verb === "prepare" ? null : "request:prepare" }, ...extra });
+  const readInput = { type: "record", fields: { target: { type: "string", value: "trace-db" }, text: { type: "string", value: "SELECT 1" } } };
+  const request = (verb, extra = {}) => ({
+    id: `request:${verb}`, verb,
+    holder: verb === "read" ? "app:cloudflare" : "app:x",
+    text: verb === "read" ? "query_database" : "publish_video",
+    action: verb === "read"
+      ? { app: "cloudflare", name: "query_database", input: readInput, prepared: null }
+      : { app: "x", name: "publish_video", input: verb === "prepare" ? writeInput : null, prepared: verb === "prepare" ? null : "request:prepare" },
+    ...extra,
+  });
   const deliver = (verb, extra = {}) => actions.deliverNornAppRequest({}, { spaceId: "space", channelId: "channel", authorityUserId: "owner",
-    request: request(verb), requestRef: `r${verb}`, deliveryMessageId: `norn:r${verb}:0`, ...extra });
+    request: request(verb, extra.request), requestRef: `r${verb}`, deliveryMessageId: `norn:r${verb}:0`, ...extra });
   return { calls, actions, deliver };
 }
 
@@ -88,6 +112,53 @@ test("withdrawing what programs no longer ask tells each conversation's admins o
   const f = fixture();
   await f.actions.withdrawNornAppRequests({}, { spaceId: "space", prepareRefs: ["r1", "r2"], ended: true });
   assert.deepEqual(f.calls, [["withdraw", { spaceId: "space", prepareRefs: ["r1", "r2"], approved: true }], ["announce", "space", "channel"]]);
+});
+
+test("a read runs at once under the program author's access, returns structured data quietly, and maps denials to Revoked", async () => {
+  const f = fixture();
+  const ok = await f.deliver("read");
+  assert.deepEqual(f.calls, [["read", {
+    providerId: "cloudflare", channelId: "channel", actorUserId: "owner", messageId: "norn:rread:0",
+    actionId: "query_database", action: { effect: "read" }, statement: { target: "trace-db", text: "SELECT 1" }, visibility: "private",
+  }]]);
+  assert.equal(ok.say, undefined, "a successful read posts no chat receipt");
+  assert.deepEqual(ok.reply, {
+    tag: "Answered",
+    value: {
+      type: "record",
+      fields: {
+        summary: { type: "string", value: "db: 1 row" },
+        url: { type: "variant", name: "Some", args: [{ type: "string", value: "https://dash.cloudflare.com/a/d1" }] },
+        rows: {
+          type: "list",
+          values: [{ type: "record", fields: { failures: { type: "int", value: "12" }, kind: { type: "string", value: "upstream_timeout" } } }],
+        },
+      },
+    },
+  });
+
+  const denied = await fixture({ readResult: new ProviderRequestError(403, "only Space members use its connected apps") }).deliver("read");
+  assert.deepEqual(denied.reply, { tag: "Revoked" });
+  assert.match(denied.say, /^Cloudflare query_database: blocked; only Space members/u);
+
+  const lostChannel = await fixture({ readResult: new ControlError("channel_not_found", 404, "Channel not found") }).deliver("read");
+  assert.deepEqual(lostChannel.reply, { tag: "Revoked" });
+  assert.match(lostChannel.say, /^Cloudflare query_database: revoked; Channel not found/u);
+
+  const badSql = await fixture({ readResult: new ProviderRequestError(400, "only SELECT queries run here") }).deliver("read");
+  assert.deepEqual(badSql.reply, { tag: "Broke", reason: "only SELECT queries run here" });
+  assert.match(badSql.say, /^Cloudflare query_database: failed; only SELECT/u);
+
+  const writeAttempt = fixture({ executor: () => ({ effect: "write" }) });
+  assert.deepEqual((await writeAttempt.deliver("read")).reply, { tag: "Broke", reason: "Cloudflare query_database is not a read-only action" });
+  assert.deepEqual(writeAttempt.calls, [], "write actions never execute via read");
+
+  const callerOnly = fixture({ executor: () => ({ effect: "read", callerOnly: true }) });
+  assert.deepEqual((await callerOnly.deliver("read")).reply,
+    { tag: "Broke", reason: "Cloudflare query_database is for the caller alone, so a program cannot read it" });
+  assert.deepEqual(callerOnly.calls, []);
+
+  await assert.rejects(fixture({ readResult: new Error("socket hang up") }).deliver("read"), /socket hang up/u);
 });
 
 // The connector's command runner is loaded by the registry's providers while they are built, so nothing it imports

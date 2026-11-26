@@ -1,5 +1,6 @@
 import type { PageProgramStep } from "@xmatrix/protocol";
 import { appRequest, nornActionAnswer, nornPasses, nornPreparedReply, nornRequestWords, plainResult } from "./norn-host";
+import { nornConnectorActionSpecs } from "./norn-libraries";
 import type { Form, ReportForm } from "./vendor/norn/frontend/check/index";
 import type { Code } from "./vendor/norn/runtime/code";
 import { occur, settle, type Ledger, type LedgerRequest, type Reply } from "./vendor/norn/runtime/ledger";
@@ -58,10 +59,19 @@ function answers(request: LedgerRequest): { label: string; value: Value }[] {
   if (request.verb === "choose") return (request.options ?? []).map(option => ({ label: show(option), value: option }));
   if (request.verb === "judge") return [true, false].map(value => ({ label: String(value), value: { type: "bool", value } }));
   if (request.verb === "ask") return [{ label: "answered", value: text(UNWRITTEN) }];
-  // A request of a connected app: admitted, or done with a receipt nobody has yet.
+  // A request of a connected app: admitted, read, or done with a receipt nobody has yet.
   if (appRequest(request)) {
-    const reply = request.verb === "prepare" ? nornPreparedReply(request) : nornActionAnswer({ summary: UNWRITTEN });
-    return reply.tag === "Answered" ? [{ label: request.verb === "prepare" ? "approved" : "done", value: reply.value }] : [];
+    if (request.verb === "prepare") {
+      const reply = nornPreparedReply(request);
+      return reply.tag === "Answered" ? [{ label: "approved", value: reply.value }] : [];
+    }
+    const spec = nornConnectorActionSpecs(request.action.app).find(candidate => candidate.name === request.action.name);
+    const data = spec ? Object.fromEntries(spec.output
+      .filter(field => field.name !== "summary" && field.name !== "url")
+      .map(field => [field.name, field.type === "int" || field.type === "float" ? 0
+        : field.type === "bool" ? false : field.type === "string" ? UNWRITTEN : []])) : undefined;
+    const reply = nornActionAnswer({ summary: UNWRITTEN, ...(data && Object.keys(data).length ? { data } : {}) });
+    return reply.tag === "Answered" ? [{ label: request.verb === "read" ? "read" : "done", value: reply.value }] : [];
   }
   const report = request.form;
   if (report === null) return [{ label: "answered", value: { type: "record", fields: { text: text(UNWRITTEN) } } }];

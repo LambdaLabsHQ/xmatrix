@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { nornFlow } from "../src/norn-plan.ts";
-import { appStream, checkNornProgram, githubStream, guardRunningNornBlocks, nornAnswerBody, nornAsking, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornProgramProblems, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, guardRunningNornBlocks, nornActionAnswer, nornAnswerBody, nornAsking, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornProgramProblems, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -696,6 +696,66 @@ let a: Actions.action<post, posted> = Actions.action("x", "post")\nignore(a)`), 
 let send: Actions.action<command, done> = Actions.action("slack", "post")
 let ready = Actions.prepare(send, {target: "#general", text: "Shipped."})->wait?
 Actions.perform(ready)->wait`), "");
+  // Declared read actions can be called via Actions.read with structured JSON outputs; write actions cannot.
+  const readQuery = `type query = {target: string, text: string}
+type dbAnswer = {summary: string, url: option<string>, rows: json}
+let q: Actions.action<query, dbAnswer> = Actions.action("cloudflare", "query_database")
+switch Actions.read(q, {target: "trace-db", text: "SELECT 1"})->wait {
+| Answered(r) => switch JSON.asList(r.rows) { | Some(rows) => if List.length(rows) > 0 { "some" } else { "none" } | None => "none" }
+| Revoked => "revoked"
+| other => "other"
+}`;
+  assert.equal(refusal(readQuery), "");
+  assert.equal(refusal(`type query = {target: string, text: string}
+type logAnswer = {summary: string, url: option<string>, counts: json}
+let q: Actions.action<query, logAnswer> = Actions.action("cloudflare", "query_logs")
+ignore(Actions.read(q, {target: "billing-api", text: "30 error"})->wait)`), "");
+  // A write action called through Actions.read is settled Broke immediately by the host before delivery.
+  const writeViaRead = `type command = {target: string, text: string}
+type done = {summary: string}
+let send: Actions.action<command, done> = Actions.action("slack", "post")
+switch Actions.read(send, {target: "#general", text: "nope"})->wait {
+| Broke(why) => why
+| _ => "unexpected"
+}`;
+  const blocked = nornStep()({ spaceId: "s", channelId: "c", programId: "p", source: writeViaRead, nowMs: 1_000, stopReason: null,
+    ledger: nornStartLedger(1_000), requests: [] });
+  assert.equal(blocked.result.status, "completed");
+  assert.deepEqual(blocked.write.ledger.ended, { status: "completed", at: 1_000, result: { type: "string", value: "slack post is not a read-only action" }, error: null });
+});
+
+test("Actions.read answers with structured JSON values readable via JSON.* and previews cleanly in nornFlow", () => {
+  const source = `type query = {target: string, text: string}
+type dbAnswer = {summary: string, url: option<string>, rows: json}
+let q: Actions.action<query, dbAnswer> = Actions.action("cloudflare", "query_database")
+switch Actions.read(q, {target: "trace-db", text: "SELECT failures FROM t"})->wait {
+| Answered(r) => switch JSON.asList(r.rows) {
+  | Some([first, ..._]) => switch JSON.get(first, "failures") {
+    | Some(v) => switch JSON.asInt(v) { | Some(n) => if n >= 10 { "alert" } else { "ok" } | None => "bad" }
+    | None => "missing"
+    }
+  | _ => "empty"
+  }
+| Revoked => "revoked"
+| _ => "broke"
+}`;
+  const checked = checkNornProgram(source);
+  assert.equal("refusal" in checked, false, "refusal" in checked ? checked.refusal : "");
+  const flow = nornFlow(checked.code, nornStartLedger(1_000), 1_000);
+  assert.deepEqual([flow[0].kind, flow[0].holder, flow[0].verb], ["ask", "@Cloudflare", "read"]);
+  assert.match(flow[0].text, /^Read query_database/u);
+
+  const ledger = nornStartLedger(1_000);
+  const first = nornStep()({ spaceId: "s", channelId: "c", programId: "p", source, nowMs: 1_000, stopReason: null, ledger, requests: [] });
+  assert.equal(first.write.requests.length, 1);
+  const [req] = first.write.requests;
+  const reply = nornActionAnswer({ summary: "trace-db: 1 row", data: { rows: [{ failures: 12 }] } });
+  const done = nornStep({ requestId: req.requestId, epoch: req.epoch, reply })({
+    spaceId: "s", channelId: "c", programId: "p", source, nowMs: 2_000, stopReason: null,
+    ledger: first.write.ledger, requests: first.write.requests,
+  });
+  assert.equal(done.result.status, "completed");
+  assert.deepEqual(done.write.ledger.ended, { status: "completed", at: 2_000, result: { type: "string", value: "alert" }, error: null });
 });
 
 test("the flow of a program that asks an app reads as the app, approved and then done", () => {

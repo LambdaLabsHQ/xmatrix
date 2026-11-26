@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@8a2e680fa215444fb94b023bf7c1f0e976af4631; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@a667dd5a0243281efd075834e7d42a8f371a30d5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * Standard capability interfaces `Events` (CloudEvents 1.0.2) and `Actions`,
  * and static connector manifest validation. Browser-safe.
@@ -33,6 +33,7 @@ type prepared<'o>
 external action: (string, string) => action<'i, 'o>
 external prepare: (action<'i, 'o>, 'i, ~by: 'd=?, ~about: 'c=?) => request<prepared<'o>>
 external perform: (prepared<'o>, ~by: 'd=?) => request<'o>
+external read: (action<'i, 'o>, 'i, ~by: 'd=?, ~about: 'c=?) => request<'o>
 `;
 
 export interface ConnectorFieldSpec {
@@ -54,6 +55,8 @@ export interface ConnectorActionSpec {
   doc?: string;
   input: readonly ConnectorFieldSpec[];
   output: readonly ConnectorFieldSpec[];
+  /** `read` for an action that changes nothing, which a program does with `Actions.read`; otherwise it is prepared and performed. */
+  effect?: "read" | "write";
 }
 
 export interface ConnectorManifest {
