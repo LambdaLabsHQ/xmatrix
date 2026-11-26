@@ -26,6 +26,8 @@ import { addCloudflareLogin, parseCloudflareLogins, type CloudflareAccountRef } 
  */
 
 const SCRIPT = /^[a-z0-9][a-z0-9_-]{0,62}$/u;
+const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/u;
+const MAX_SECRET_BYTES = 4_096;
 const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/u;
 const DNS_TYPE = /^(?:A|AAAA|CNAME|TXT|MX|NS|CAA)$/u;
 const DNS_LABEL = /^(?:@|\*|[a-z0-9_](?:[a-z0-9_-]{0,62}[a-z0-9_])?(?:\.[a-z0-9_](?:[a-z0-9_-]{0,62}[a-z0-9_])?)*)$/u;
@@ -391,6 +393,7 @@ function isGrantRefusal(error: unknown): error is ProviderRequestError {
 
 const D1_GRANT = "D1 read access";
 const ACCESS_GRANT = "zone, DNS and registrar access";
+const WORKERS_GRANT = "Workers script edit access";
 
 /*
  * One call that needs a scope a login may lack. Each login that reaches the
@@ -771,6 +774,54 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
       return { summary: `${oneLine(target.name, 80)}: ${scripts.length} Workers` +
         (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
         url: `https://dash.cloudflare.com/${target.account}/workers/overview` };
+    },
+  },
+  list_worker_secrets: {
+    effect: "read",
+    requires: ["logins|oauthToken|apiToken"],
+    parse: (statement) => workerTarget(statement, "@cloudflare:list_worker_secrets:[<account id>/]<worker>"),
+    async execute({ credentials }, input) {
+      const target = await cloudflareTarget(credentials, input.account);
+      const listed = await granted(target, WORKERS_GRANT, (token) =>
+        cloudflare(token, `accounts/${target.account}/workers/scripts/${encodeURIComponent(input.script!)}/secrets`));
+      const rows = (Array.isArray(listed) ? listed : []).map(record)
+        .map((item) => ({ name: text(item.name), type: text(item.type) || "secret_text" }))
+        .filter((item) => SECRET_NAME.test(item.name));
+      const lines = rows.slice(0, 100).map((item) => `${item.name}  ${item.type}`);
+      return {
+        summary: `${input.script}: ${rows.length} secret${rows.length === 1 ? "" : "s"}` +
+          (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
+        url: `https://dash.cloudflare.com/${target.account}/workers/services/view/${input.script}/production/settings`,
+      };
+    },
+  },
+  put_worker_secret: {
+    effect: "write",
+    requires: ["logins|oauthToken|apiToken"],
+    parse(statement) {
+      const usage = "name a Worker, secret name, and value: @cloudflare:put_worker_secret:[<account id>/]<worker> <NAME> <value>";
+      const target = workerTarget(statement, "@cloudflare:put_worker_secret:[<account id>/]<worker> <NAME> <value>");
+      if (typeof target === "string") return target;
+      const parts = statement.text.trim().match(/^(\S+)\s+([\s\S]+)$/u);
+      if (!parts) return usage;
+      const name = parts[1]!;
+      const value = parts[2]!.trim();
+      if (!SECRET_NAME.test(name) || !value || /[\r\n\p{Cc}]/u.test(value) || new TextEncoder().encode(value).byteLength > MAX_SECRET_BYTES) {
+        return usage;
+      }
+      return { ...target, name, value };
+    },
+    async execute({ credentials }, input) {
+      const target = await cloudflareTarget(credentials, input.account);
+      await granted(target, WORKERS_GRANT, (token) =>
+        cloudflare(token, `accounts/${target.account}/workers/scripts/${encodeURIComponent(input.script!)}/secrets`, {
+          method: "PUT",
+          json: { name: input.name, text: input.value, type: "secret_text" },
+        }));
+      return {
+        summary: `Set secret ${input.name} on Worker ${input.script} (${input.value!.length} chars).`,
+        url: `https://dash.cloudflare.com/${target.account}/workers/services/view/${input.script}/production/settings`,
+      };
     },
   },
   attach_domain: {

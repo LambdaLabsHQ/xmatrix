@@ -88,7 +88,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Grafana | `grafana` | Firing, resolved | |
 | Vercel | `vercel` | Deployment started, succeeded, failed | `redeploy` |
 | Netlify | `netlify` | Deploy started, succeeded, failed | |
-| Cloudflare | `cloudflare` | Alert fired, resolved | `query_logs`, `list_deployments`, `rollback` |
+| Cloudflare | `cloudflare` | Alert fired, resolved | `query_logs`, `list_deployments`, `list_worker_secrets`, `put_worker_secret`, `rollback` |
 | Google Cloud | `gcp` | Monitoring incident fired, resolved | Projects, Cloud Run, logs, metrics, costs, APIs |
 | CircleCI | `circleci` | Failed, succeeded | |
 | Buildkite | `buildkite` | Failed, passed | |
