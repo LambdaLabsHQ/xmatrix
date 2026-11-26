@@ -29,6 +29,10 @@ pub(crate) const AGENT_SIGNED_OUT_LIFECYCLE_REASON: &str = "harness_signed_out";
 /// a network block in front of the API while the program is still signed in.
 /// Only the refusal itself (a 401, an expired or missing credential) counts.
 pub(crate) fn harness_signed_out_error(detail: &str) -> bool {
+    // A provider that no longer serves this client refuses every sign-in.
+    if crate::acp_client_no_longer_supported(detail) {
+        return false;
+    }
     let text = detail.to_ascii_lowercase();
     [
         "api error: 401",

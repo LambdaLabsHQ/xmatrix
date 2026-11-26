@@ -1546,6 +1546,27 @@ fn a_network_block_while_authenticating_is_not_a_sign_out() {
 }
 
 #[test]
+fn a_client_the_provider_no_longer_serves_is_not_a_sign_out() {
+    // What Gemini CLI answered a personal Google account on 2026-11-24:
+    // signing in again cannot help, so no sign-in card may be offered.
+    let refusal = "gemini cli agent authenticate failed: This client is no longer supported for \
+        Gemini Code Assist for individuals. To continue using Gemini, please migrate to the \
+        Antigravity suite of products: https://antigravity.google | code=-32000";
+    let detail = crate::acp_authenticate_refusal("Gemini CLI", refusal);
+    assert!(detail.starts_with("Gemini CLI cannot be used here: "));
+    assert!(detail.contains("no longer supported"));
+    assert!(!crate::harness_signed_out_error(&detail));
+    // Wrapped the old way, the same words still do not read as signed out.
+    assert!(!crate::harness_signed_out_error(&format!("Gemini CLI authentication required: {refusal}")));
+    // An ordinary refused authenticate keeps its sign-in meaning.
+    let signed_out = crate::acp_authenticate_refusal(
+        "Cursor",
+        "cursor agent authenticate failed: Not logged in",
+    );
+    assert!(crate::harness_signed_out_error(&signed_out));
+}
+
+#[test]
 fn provider_quota_merge_keeps_windows_and_observation_metadata_together() {
     use crate::merge_llm_usage;
     let old = protocol::LlmUsage {
