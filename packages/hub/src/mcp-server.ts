@@ -98,7 +98,9 @@ const WRITE_TOOLS: McpTool[] = [
       "revision). Edits made by others meanwhile are merged; if yours overlaps them, read the page again and redo it.",
     inputSchema: { type: "object", properties: { spaceId: id("The Space."), pageId: id("The page."),
       baseRevision: { type: "integer", minimum: 1, description: "The revision your text is based on." },
-      body: { type: "string", maxLength: 200_000, description: "The page's whole new Markdown text." } },
+      body: { type: "string", maxLength: 200_000, description: "The page's whole new Markdown text." },
+      removePrograms: { type: "array", items: { type: "string" },
+        description: "Running Norn program block names this edit intentionally removes and stops." } },
     required: ["spaceId", "pageId", "baseRevision", "body"], additionalProperties: false },
   },
   {
@@ -234,8 +236,11 @@ export function mcpServer(env: Env, caller: McpCaller, dispatch: (request: Reque
       if (typeof args.baseRevision !== "number" || typeof args.body !== "string") {
         throw new McpToolError("baseRevision and body are required");
       }
+      const removePrograms = Array.isArray(args.removePrograms)
+        ? args.removePrograms.filter((name): name is string => typeof name === "string" && name.trim().length > 0)
+        : [];
       const edited = await route("PUT", `${pagesPath(spaceId)}/${encodeURIComponent(pageId)}`,
-        { baseRevision: args.baseRevision, body: args.body });
+        { baseRevision: args.baseRevision, body: args.body, ...(removePrograms.length ? { removePrograms } : {}) });
       return text({ pageId, revision: edited.headRevision, url: pageLink(spaceId, pageId) });
     },
     send_message: async (args) => {
