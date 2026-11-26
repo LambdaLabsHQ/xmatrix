@@ -1990,10 +1990,10 @@ export class PostgresSpaceControlRepository {
             name: "space_membership_stop_norn_programs_v1",
             text: `UPDATE data.norn_programs SET stop_reason = $3, updated_at = clock_timestamp()
               WHERE space_id = $1 AND authority_user_id = $2 AND state = 'running' AND stop_reason IS NULL
-              RETURNING DISTINCT channel_id`,
+              RETURNING channel_id`,
             values: [spaceId, userId, NORN_AUTHORITY_LEFT_SPACE], maxRows: 1_000,
           });
-          stoppedProgramChannels = stoppedPrograms.map((row) => String(row.channel_id));
+          stoppedProgramChannels = [...new Set(stoppedPrograms.map((row) => String(row.channel_id)))];
           entityVersion = expectedVersion + 1;
           recipientChanges = [{ userId, visibilityScopeId: `space:${spaceId}`, change: "revoked" }];
         }
