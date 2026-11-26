@@ -89,7 +89,7 @@ import { isVisibleLoadFailure, loadFailurePage } from "./load-failure";
 import { planWindowOpen } from "./window-navigation";
 import { deepLinkAppPath } from "./deep-link";
 import { signInServiceId } from "./sign-in-services";
-import { signInWithWindow } from "./sign-in-window";
+import { heldOrRenewedSession, signInWithWindow } from "./sign-in-window";
 import {
   authorizeInBrowser,
   hubSignInStartUrl,
@@ -3071,6 +3071,13 @@ function registerIpcHandlers() {
     if (!id) throw new Error("Unknown sign-in service");
     const fresh = typeof options === "object" && options !== null && (options as { fresh?: unknown }).fresh === true;
     return signInWithWindow(id, BrowserWindow.fromWebContents(event.sender), { fresh });
+  }));
+
+  ipcMain.handle("desktop:service-session", secureIpc(async (_event, service: unknown) => {
+    const id = signInServiceId(service);
+    if (!id) throw new Error("Unknown sign-in service");
+    const session = await heldOrRenewedSession(id);
+    return session ? { status: "signed-in", session } : { status: "signed-out" };
   }));
 
   ipcMain.handle("desktop:authorize-in-browser", secureIpc((event, request: unknown) => {
