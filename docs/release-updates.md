@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: a new account records where it came from
+
+Daniel asked how a burst of seven new accounts found xMatrix, and nothing said.
+A new account now records once the domain of the site that sent the person
+(or `direct`) and the link's `?ref=` tag, in `control.auth_users` (migration
+0277, expand). The Web reads them when a visit's first page loads, holds them
+in page memory, and carries them in the URL only across its own full page
+loads: xmatrix.page to xmatrix.sh, plain links to `/login` and `/app`, and a
+Google or GitHub sign-in's new-account return. The new account's first page
+sends them to `POST /api/me/signup-source`; the Hub keeps them only for an
+account under 24 hours old that has none. Nothing is written to the device,
+and no full URL or page view is kept. The daily new-user funnel prints
+`source` per person. Privacy guide and policy updated. Hub and Web, with a
+PostgreSQL expand migration.
+
 ## Unreleased: an agent that refuses this client is not shown as signed out
 
 Gemini CLI now answers a personal Google account's `authenticate` with "This

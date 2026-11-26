@@ -187,6 +187,8 @@ export const HUB_ROUTES = {
   me_sessions: "/api/me/sessions",
   /** This account's diagnostics consent: its signup regime, its explicit choice, and this request's regime. */
   me_diagnostics: "/api/me/diagnostics",
+  /** Where a new account came from, recorded once (signup-source.ts). */
+  me_signup_source: "/api/me/signup-source",
   me_session_revoke: "/api/me/sessions/revoke",
   me_sessions_revoke_others: "/api/me/sessions/revoke-others",
   account_deletion: "/api/account-deletion",
@@ -491,6 +493,7 @@ export const WEB_PROXY_ROUTES = {
   me_profile: "/api/xmatrix/me/profile",
   me_sessions: "/api/xmatrix/me/sessions",
   me_diagnostics: "/api/xmatrix/me/diagnostics",
+  me_signup_source: "/api/xmatrix/me/signup-source",
   me_session_revoke: "/api/xmatrix/me/sessions/revoke",
   me_sessions_revoke_others: "/api/xmatrix/me/sessions/revoke-others",
   account_deletion: "/api/xmatrix/account-deletion",

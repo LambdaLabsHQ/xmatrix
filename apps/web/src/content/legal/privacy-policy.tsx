@@ -41,7 +41,10 @@ export function PrivacyPolicyContent() {
             email address, account and user identifiers, name, profile image, invite records, sign-in
             provider, session information, and authentication and security records. If you choose
             Google authentication, we receive the profile information Google makes available for
-            sign-in.
+            sign-in. When your account is created we also record, once, the domain of the website
+            that sent you to xMatrix (for example x.com, or &quot;direct&quot;) and the campaign tag on the
+            link you followed, so we can tell which channels bring people; never the full address,
+            and nothing is stored on your device for it.
           </li>
           <li>
             <strong className="text-foreground">Customer Data and collaboration content:</strong>{" "}

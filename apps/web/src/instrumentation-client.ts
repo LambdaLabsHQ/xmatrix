@@ -2,6 +2,10 @@ import { clientErrorReport } from "@xmatrix/protocol";
 
 import { diagnosticsMaySendNow, isDiagnosticsEnabled, subscribeDiagnosticsPreference } from "./lib/diagnostics-preference";
 import { earlyScriptLocation, isBrowserNoticeReport, isStaleBuild } from "./lib/error-noise";
+import { carrySignupSourceAcrossOwnLinks } from "./lib/signup-source";
+
+// Read where this visit came from before any client-side navigation moves the URL.
+carrySignupSourceAcrossOwnLinks();
 
 // The Desktop and iOS apps load this same Web app, so this also reports their
 // page errors once the signed-in user opts in. Unauthenticated marketing and

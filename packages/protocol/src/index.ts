@@ -332,6 +332,11 @@ export type {
   DiagnosticsPrompt, DiagnosticsRegime,
 } from "./diagnostics-consent.js";
 export {
+  SIGNUP_SOURCE_DIRECT, SIGNUP_SOURCE_HOST_PARAM, SIGNUP_SOURCE_REF_PARAM, isOwnSignupSourceHost,
+  normalizeSignupSourceHost, normalizeSignupSourceRef, parseSignupSource, signupSourceOfVisit, withSignupSource,
+} from "./signup-source.js";
+export type { SignupSource } from "./signup-source.js";
+export {
   AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE, AGENT_RUN_PERMISSIONS, defaultAgentRunPermissions, parseAgentRunPermissions,
 } from "./agent-run-permissions.js";
 export type {
