@@ -46,7 +46,13 @@ test("a program block on a page runs in a conversation of its own, and the page 
     assert.deepEqual((await programs()).map(program => [program.name, program.state, Boolean(program.problem)]), [["review", "not_started", true]]);
 
     // Saved with a program that checks, the page starts it in a conversation named for the page and the block.
-    const edit = async body => call(`${pages}/${page.pageId}`, "PUT", { body, baseRevision: (await call(`${pages}/${page.pageId}`)).page.headRevision });
+    const edit = async (body, extra = {}) => call(`${pages}/${page.pageId}`, "PUT",
+      { body, baseRevision: (await call(`${pages}/${page.pageId}`)).page.headRevision, ...extra });
+    const rawEdit = async (body, extra = {}) => worker.fetch(`${pages}/${page.pageId}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${MOCK_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ body, baseRevision: (await call(`${pages}/${page.pageId}`)).page.headRevision, ...extra }),
+    });
     await edit(`# Design\n\n${block(REVIEW)}\n`);
     const running = await until(async () => (await programs()).find(program => program.state === "running" && program.requests.length), "the program");
     assert.deepEqual(running.requests.map(request => [request.holder, request.text, request.reply]), [["@codex", "Review the design", null]]);
@@ -72,11 +78,23 @@ test("a program block on a page runs in a conversation of its own, and the page 
     const ended = await until(async () => (await programs()).find(program => program.state === "completed"), "the program's end");
     assert.deepEqual([ended.result, ended.requests.map(request => request.reply)], ["no owner", ["Flawed(no owner)"]]);
 
-    // Changed after it ended, the block runs again in the same conversation; removed, its program stops.
+    // Changed after it ended, the block runs again in the same conversation; silent removal or breakage is refused, and explicit removePrograms stops it.
     await edit(`# Design\n\n${block(REVIEW.replace("Review the design", "Review the design again"))}\n`);
     const again = await until(async () => (await programs()).find(program => program.state === "running" && program.requests.length), "the second run");
     assert.deepEqual([again.channelId, again.requests.map(request => request.text)], [running.channelId, ["Review the design again"]]);
-    await edit("# Design\n\nNo program.\n");
+
+    const silentRemove = await rawEdit("# Design\n\nNo program.\n");
+    assert.equal(silentRemove.status, 422);
+    const silentRemoveBody = await silentRemove.json();
+    assert.equal(silentRemoveBody.code, "page_program_edit_blocked");
+    assert.equal((await programs())[0].state, "running");
+
+    const brokenEdit = await rawEdit(`# Design\n\n${block(`run(@codex, "broken")`)}\n`);
+    assert.equal(brokenEdit.status, 422);
+    assert.equal((await brokenEdit.json()).code, "page_program_edit_blocked");
+    assert.equal((await programs())[0].state, "running");
+
+    await edit("# Design\n\nNo program.\n", { removePrograms: ["review"] });
     assert.deepEqual(await programs(), []);
     await until(async () => (await channelHistory(worker, MOCK_TOKEN, running.channelId, 30)).messages
       .some(message => message.body === "Stopped: Removed from its page"), "the stop");
@@ -148,7 +166,8 @@ test("a program whose conversation a person deleted stays ended, says so on the 
   const wait = name => block("after(1d)->wait", `norn run ${name}`);
   const { page } = await call(pages, "POST", { title: "Reminders", body: `# Reminders\n\n${wait("one")}\n` });
   const programs = async () => (await call(`${pages}/${page.pageId}/programs`)).programs;
-  const edit = async body => call(`${pages}/${page.pageId}`, "PUT", { body, baseRevision: (await call(`${pages}/${page.pageId}`)).page.headRevision });
+  const edit = async (body, extra = {}) => call(`${pages}/${page.pageId}`, "PUT",
+    { body, baseRevision: (await call(`${pages}/${page.pageId}`)).page.headRevision, ...extra });
   const one = await until(async () => (await programs()).find(program => program.state === "running"), "the first program");
   // The person deletes the program's conversation: the program goes with it, and its block stays on the page.
   await call(`${pages.replace(/\/pages$/u, "")}/channels/${one.channelId}/deletion`, "POST", { confirmation: "DELETE", acknowledge: true, name: "Reminders · one" });
@@ -165,7 +184,7 @@ test("a program whose conversation a person deleted stays ended, says so on the 
   const renamed = await until(async () => (await programs()).find(program => program.name === "uno" && program.state === "running"), "the renamed program");
   assert.notEqual(renamed.channelId, one.channelId);
   // Renamed to a name that names no program, the block says so where it is saved and where the page shows it, never "starting".
-  const misnamed = await edit(`# Reminders\n\n${wait("uno")}\n\n${wait("2nd")}\n`);
+  const misnamed = await edit(`# Reminders\n\n${wait("uno")}\n\n${wait("2nd")}\n`, { removePrograms: ["two"] });
   assert.deepEqual(misnamed.scheduleProblems.map(problem => problem.source), ["```norn run 2nd"]);
   assert.match(misnamed.scheduleProblems[0].problem, /names no program/u);
   const shown = await programs();
@@ -176,7 +195,8 @@ test("a program whose conversation a person deleted stays ended, says so on the 
 test("moving a page block between norn run, norn 1 run and an unsupported edition preserves an open request across upgrade and rollback", () => pageScene("norn-edition", async ({ worker, scenario, daemon, call, pages, until }) => {
   const { page } = await call(pages, "POST", { title: "Edition", body: `# Edition\n\n${block(REVIEW, "norn run review")}\n` });
   const programs = async () => (await call(`${pages}/${page.pageId}/programs`)).programs;
-  const edit = async body => call(`${pages}/${page.pageId}`, "PUT", { body, baseRevision: (await call(`${pages}/${page.pageId}`)).page.headRevision });
+  const edit = async (body, extra = {}) => call(`${pages}/${page.pageId}`, "PUT",
+    { body, baseRevision: (await call(`${pages}/${page.pageId}`)).page.headRevision, ...extra });
   const running = await until(async () => (await programs()).find(program => program.state === "running" && program.requests.length), "the program");
   const spawn = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&
     message.channelId === running.channelId && isSpawnOf(message, scenario.registration), "the holder's spawn");

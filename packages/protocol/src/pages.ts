@@ -442,6 +442,11 @@ const NORN_LIBRARY_NAME = /^[A-Z][A-Za-z0-9_]{0,39}$/u;
 const NORN_EDITION = /^\d+(?:\.\d+)*$/u;
 const SUPPORTED_NORN_EDITIONS = new Set(["1"]);
 
+/** Whether this host supports the Norn edition written in a block header (e.g. `"1"`). */
+export function isSupportedNornEdition(edition: string): boolean {
+  return SUPPORTED_NORN_EDITIONS.has(edition);
+}
+
 /** Shared parser for `norn [edition] <keyword> [name]` fenced block headers. */
 function parseNornNamedBlock(
   info: unknown,

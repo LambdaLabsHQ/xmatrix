@@ -1132,6 +1132,7 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             mut blocks,
             section,
             conversation,
+            remove_programs,
         } => {
             let space = resolve_space(hub_url, token, space).await?;
             let text = read_body(body, file, stdin)?;
@@ -1154,27 +1155,20 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             let conversations: Vec<String> =
                 conversation.or_else(run_conversation).into_iter().collect();
             let url = with_route(hub_url, &page_route(&space, &page));
-            let result: error::Result<EditResponse> = http::request_json(
-                &url,
-                "PUT",
-                Some(token),
-                Some(match &section {
-                    Some(section) => json!({
-                        "baseRevision": base,
-                        "body": text,
-                        "conversationIds": conversations,
-                        "blockIds": blocks,
-                        "sectionId": section,
-                    }),
-                    None => json!({
-                        "baseRevision": base,
-                        "body": text,
-                        "conversationIds": conversations,
-                        "blockIds": blocks,
-                    }),
-                }),
-            )
-            .await;
+            let mut payload = json!({
+                "baseRevision": base,
+                "body": text,
+                "conversationIds": conversations,
+                "blockIds": blocks,
+            });
+            if let Some(section) = &section {
+                payload["sectionId"] = json!(section);
+            }
+            if !remove_programs.is_empty() {
+                payload["removePrograms"] = json!(remove_programs);
+            }
+            let result: error::Result<EditResponse> =
+                http::request_json(&url, "PUT", Some(token), Some(payload)).await;
             match result {
                 Ok(edited) => {
                     let verb = if edited.kind == "suggestion" {

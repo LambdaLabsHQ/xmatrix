@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { nornFlow } from "../src/norn-plan.ts";
-import { appStream, checkNornProgram, githubStream, nornAnswerBody, nornAsking, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornProgramProblems, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, guardRunningNornBlocks, nornAnswerBody, nornAsking, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornProgramProblems, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -692,4 +692,68 @@ test("the flow of a program that asks an app reads as the app, approved and then
   assert.match(approve.text, /^Approve publish_video: /u);
   assert.deepEqual(steps.slice(1, 3).map(each => [each.kind, each.holder ?? null, each.text ?? null]),
     [["wait", null, null], ["ask", "@X", "Do publish_video, as approved"]]);
+});
+
+test("guardRunningNornBlocks refuses silently removing or breaking running programs and their libraries", () => {
+  const lib = `\`\`\`norn 1 lib Helper\nlet greet = who => say(who, "hi")\n\`\`\``;
+  const prog = (name, body) => `\`\`\`norn 1 run ${name}\n${body}\n\`\`\``;
+  const page = `# Ops\n\nNotes.\n\n${lib}\n\n${prog("daily", `Helper.greet(@codex)`)}\n\n${prog("watch", `after(1d)->wait`)}\n`;
+  const running = [{ name: "daily" }, { name: "watch" }];
+
+  // Prose-only edit passes.
+  assert.deepEqual(guardRunningNornBlocks(page, page.replace("Notes.", "Updated notes."), running), []);
+
+  // Silent removal of a running block is refused; explicit removePrograms allows it.
+  const withoutWatch = `# Ops\n\nNotes.\n\n${lib}\n\n${prog("daily", `Helper.greet(@codex)`)}\n`;
+  assert.deepEqual(
+    guardRunningNornBlocks(page, withoutWatch, running).map(v => [v.name, v.reason]),
+    [["watch", "removed"]],
+  );
+  assert.deepEqual(
+    guardRunningNornBlocks(page, withoutWatch, running, { removePrograms: new Set(["watch"]) }),
+    [],
+  );
+
+  // A mangled closing fence that swallows subsequent running blocks is caught.
+  const mangled = page.replace(`Helper.greet(@codex)\n\`\`\``, `Helper.greet(@codex)\n\`\``);
+  assert.deepEqual(
+    guardRunningNornBlocks(page, mangled, running).map(v => [v.name, v.reason]),
+    [["daily", "broken"], ["watch", "removed"]],
+  );
+
+  // Syntax error introduced into a running block is refused.
+  const brokenDaily = page.replace(`Helper.greet(@codex)`, `run(@codex, "missing wait")`);
+  assert.deepEqual(
+    guardRunningNornBlocks(page, brokenDaily, running).map(v => [v.name, v.reason]),
+    [["daily", "broken"]],
+  );
+
+  // Duplicate block name colliding with a running block is refused.
+  const duplicate = `${page}\n${prog("watch", `after(2d)->wait`)}\n`;
+  assert.deepEqual(
+    guardRunningNornBlocks(page, duplicate, running).map(v => [v.name, v.reason]),
+    [["watch", "broken"]],
+  );
+
+  // Removing or breaking a Space library used by a running block is refused.
+  const withoutLib = `# Ops\n\nNotes.\n\n${prog("daily", `Helper.greet(@codex)`)}\n\n${prog("watch", `after(1d)->wait`)}\n`;
+  assert.deepEqual(
+    guardRunningNornBlocks(page, withoutLib, running).map(v => [v.name, v.reason]),
+    [["daily", "broken"]],
+  );
+  const brokenLib = page.replace(`let greet = who => say(who, "hi")`, `let greet = (`);
+  assert.deepEqual(
+    guardRunningNornBlocks(page, brokenLib, running).map(v => [v.name, v.reason]),
+    [["daily", "broken"], ["watch", "broken"]],
+  );
+
+  // Unsupported future edition header (`norn 2 run`) is allowed so the running program stays alive.
+  const futureEdition = page.replace("norn 1 run watch", "norn 2 run watch");
+  assert.deepEqual(guardRunningNornBlocks(page, futureEdition, running), []);
+
+  // A page whose block was already broken before the edit does not deadlock unrelated prose edits.
+  assert.deepEqual(
+    guardRunningNornBlocks(brokenDaily, brokenDaily.replace("Notes.", "Other note."), running),
+    [],
+  );
 });
