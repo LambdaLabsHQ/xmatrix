@@ -275,8 +275,13 @@ async fn list(
     machine: Option<&str>,
     json: bool,
 ) -> error::Result<()> {
+    // Like the Agents page, the list asks the Space's daemons to read quota
+    // again (each at most once a minute); the next list shows that reading.
     let value: Value = http::request_json(
-        &with_route(hub_url, &protocol::space_agent_registrations_route(space)),
+        &format!(
+            "{}?quota=refresh",
+            with_route(hub_url, &protocol::space_agent_registrations_route(space))
+        ),
         "GET",
         Some(token),
         None,
