@@ -9,7 +9,7 @@ import {
  * in `commands` and answers it with `respond`; history is inert.
  */
 export function recordingAgentInstancePort({ respond = () => ({}), signals = { async publish() {} },
-  pullRequestOpened, settleQuestionnaire, markResting, signedOutTurn, offerUsageLimitRetry, holdsNornRequest } = {}) {
+  pullRequestOpened, settleQuestionnaire, markResting, signedOutTurn, offerUsageLimitRetry, holdsNornRequest, recordSignedOutTurn } = {}) {
   const commands = [];
   const port = new PostgresAgentInstancePort({
     atomicInstanceConnect: true,
@@ -46,6 +46,10 @@ export function recordingAgentInstancePort({ respond = () => ({}), signals = { a
     ...(signedOutTurn ? { signedOutTurn: async (session) => {
       commands.push({ family: "signed-out-turn", input: session.principal.runId });
       return signedOutTurn(session);
+    } } : {}),
+    ...(recordSignedOutTurn ? { recordSignedOutTurn: async (session) => {
+      commands.push({ family: "signed-out-turn-recorded", input: session.principal.runId });
+      return recordSignedOutTurn(session);
     } } : {}),
     ...(settleQuestionnaire ? { settleQuestionnaire: async (input) => {
       commands.push({ family: "settle-questionnaire", input });

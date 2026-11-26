@@ -977,6 +977,29 @@ const ACCOUNT_BILLING_REFUSAL_PHRASES = [
   ...SCOPED_BILLING_REFUSAL_PHRASES,
 ] as const;
 
+/**
+ * Whether a failed turn's provider error refuses the harness's own credential:
+ * a sign-in that expired, or an API key that is missing or not accepted. Hub
+ * reads it from the original error, so every host's failures are judged alike
+ * (a host may report these as plain turn failures). Vendors' wording, as
+ * observed: Claude Code "OAuth session expired" / "Please run /login", Codex
+ * "Not logged in", Qwen Code "Missing API key", DeepSeek Harness "Authentication
+ * Fails, Your api key: ****ABCD is invalid" and "no API key for provider route".
+ * Claude Code's bare "Failed to authenticate" is a step, not a cause (a network
+ * block in front of the API reads the same), so it alone does not count.
+ */
+export function isHarnessCredentialRefusalError(error: string | undefined | null): boolean {
+  const lower = (error ?? "").toLowerCase();
+  return HARNESS_CREDENTIAL_REFUSAL_PHRASES.some((phrase) => lower.includes(phrase)) ||
+    /\bapi key\b[^\n]{0,40}\bis invalid\b/u.test(lower);
+}
+
+const HARNESS_CREDENTIAL_REFUSAL_PHRASES = [
+  "api error: 401", "oauth session expired", "oauth token has expired", "not logged in", "please run /login",
+  "run `claude /login`", "invalid api key", "missing api key", "no api key for", "authentication fails",
+  "authentication_error", "authentication required", "login required", "401 unauthorized",
+] as const;
+
 /** Whether a provider error refuses billing/payment until fixed (no time-based reset). */
 export function isAccountBillingRefusalError(error: string | undefined | null): boolean {
   const lower = (error ?? "").toLowerCase();
