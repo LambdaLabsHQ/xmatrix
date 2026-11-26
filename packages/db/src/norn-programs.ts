@@ -942,14 +942,16 @@ export async function readWaitingNornPrograms(database: AuthorityDatabase, input
   const limit = Math.max(1, Math.min(1000, Math.trunc(input.limit ?? 200)));
   return database.transaction({ requestId: input.requestId, operation: "norn.waiting-programs",
     statement: "single_read" }, async tx =>
-    (await tx.query<QueryResultRow>({ name: "norn_waiting_programs_v2", text: `SELECT p.space_id,p.channel_id,p.program_id,
-        p.authority_user_id,p.waits_json
+    (await tx.query<QueryResultRow>({ name: "norn_waiting_programs_v3", text: `SELECT p.space_id,p.channel_id,p.program_id,
+        p.page_id,p.page_name,p.authority_user_id,p.waits_json
       FROM data.norn_programs p JOIN data.space_members member ON member.space_id=p.space_id
         AND member.user_id=p.authority_user_id AND member.role NOT IN ('viewer','participant')
       WHERE p.state='running' AND p.waits_json IS NOT NULL AND ($1::text IS NULL OR p.space_id=$1)
         AND ($2::text IS NULL OR p.program_id>$2)
       ORDER BY p.program_id LIMIT $3`, values: [input.spaceId ?? null, input.afterProgramId ?? null, limit], maxRows: limit }))
       .map(row => ({ spaceId: String(row.space_id), channelId: String(row.channel_id), programId: String(row.program_id),
+        pageId: row.page_id === null || row.page_id === undefined ? null : String(row.page_id),
+        pageName: row.page_name === null || row.page_name === undefined ? null : String(row.page_name),
         authorityUserId: String(row.authority_user_id), waits: Array.isArray(row.waits_json) ? row.waits_json as unknown[] : [] })));
 }
 
