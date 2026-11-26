@@ -183,6 +183,19 @@ stopped, a deadline is due, or a request was abandoned. The coordinator's due
 read (`NORN_CHANNEL_DUE_SQL`) selects exactly what that step acts on. Nothing
 polls.
 
+Authority revocation is handled at two distinct layers:
+
+1. **Connector or resource permission revocation**: when an app connector's
+   permission is denied or revoked (at `prepare`, at `perform` claim, or during
+   durable execution), only that single request settles as `Revoked` (while the
+   reason is posted to the conversation). The program or loop itself stays alive
+   so it can match `| Revoked => ...` and recover (e.g. wait on `Holds`).
+   Explicit human decline on an approval card stays `Refused`.
+2. **Program author leaves the Space**: removing the program's `authority_user_id`
+   from `data.space_members` stops all of their running programs in that Space
+   (`NORN_AUTHORITY_LEFT_SPACE`), cancels open requests, and wakes their
+   coordinators immediately.
+
 ## Delivering a request
 
 This version delivers to a harness by its name (`@codex`, `@claude`, …) and

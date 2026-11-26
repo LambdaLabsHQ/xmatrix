@@ -20,6 +20,7 @@ import { writeOutbox } from "./outbox.js";
 import { advanceSpaceControlHead } from "./space-control-head.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import { accountRevokedSql } from "./account-deletion.js";
+import { NORN_AUTHORITY_LEFT_SPACE } from "./norn-programs.js";
 import {
   PostgresEntitySpaceDirectory,
   type EntitySpaceRouteKind,
@@ -1896,6 +1897,7 @@ export class PostgresSpaceControlRepository {
       let entityVersion: number;
       let projectionMutations: Record<string, unknown>[];
       let recipientChanges: Record<string, unknown>[];
+      let stoppedProgramChannels: string[] = [];
 
       if (input.kind === "space_member_put" || input.kind === "space_member_remove") {
         const userId = bounded(input.userId, "userId");
@@ -1983,6 +1985,15 @@ export class PostgresSpaceControlRepository {
             text: "DELETE FROM control.user_space_memberships WHERE user_id = $1 AND space_id = $2",
             values: [userId, spaceId], maxRows: 0,
           });
+          // When a program's author leaves the Space, their running programs stop and cancel open requests.
+          const stoppedPrograms = await transaction.query<QueryResultRow & { channel_id: string }>({
+            name: "space_membership_stop_norn_programs_v1",
+            text: `UPDATE data.norn_programs SET stop_reason = $3, updated_at = clock_timestamp()
+              WHERE space_id = $1 AND authority_user_id = $2 AND state = 'running' AND stop_reason IS NULL
+              RETURNING channel_id`,
+            values: [spaceId, userId, NORN_AUTHORITY_LEFT_SPACE], maxRows: 1_000,
+          });
+          stoppedProgramChannels = [...new Set(stoppedPrograms.map((row) => String(row.channel_id)))];
           entityVersion = expectedVersion + 1;
           recipientChanges = [{ userId, visibilityScopeId: `space:${spaceId}`, change: "revoked" }];
         }
@@ -2090,6 +2101,7 @@ export class PostgresSpaceControlRepository {
       const result: Record<string, unknown> = {
         commandId, kind: input.kind, entityId, entityVersion, reused: false,
         projectionMutations, recipientChanges,
+        ...(stoppedProgramChannels.length ? { stoppedProgramChannels } : {}),
       };
       await commitSpaceCommand(transaction, {
         name: "membership_outbox_v1", spaceId, commitSequence, aggregateKind: "membership",

@@ -649,6 +649,20 @@ test("an action a Space admin declines, or that can no longer run, is a reply th
   const [perform] = stale.step(undefined, { nowMs: waiting.write.nextDueMs }).open;
   stale.step({ requestId: perform.requestId, epoch: 0, reply: { tag: "Refused", reason: "The connected account changed" } });
   assert.equal(stale.state.ledger.ended.result.value, "not posted: The connected account changed");
+
+  // Connector permission revocation ends ONLY that single request as `Revoked` so the program can handle it and continue.
+  const recoverable = program(`let outcome = switch X.preparePost("@acme", "Hello")->wait {
+| Answered(_) => "ready"
+| Revoked => "needs-reconnect"
+| other => fail(other)
+}
+say(@Daniel, outcome)
+outcome`);
+  const [req] = recoverable.step().open;
+  const afterRevoked = recoverable.step({ requestId: req.requestId, epoch: 0, reply: { tag: "Revoked" } });
+  assert.equal(afterRevoked.result.status, "completed");
+  assert.equal(recoverable.state.ledger.ended.result.value, "needs-reconnect");
+  assert.deepEqual(afterRevoked.write.notices.map(n => n.body), ["needs-reconnect"]);
 });
 
 test("the host gives up on an app's request it never heard about, in words for each half", async () => {
