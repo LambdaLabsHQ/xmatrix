@@ -920,3 +920,81 @@ Holds.changes(alpha)->forEach(~key="watch", v =>
   assert.equal(sExt.write.requests.length, 1);
   assert.equal(sExt.write.ledger.requests[sExt.write.requests[0].requestId].text, "Changed Alpha v2");
 });
+
+test("nornStep routes requests inside spawn -> Std.each -> nested forEach to the innermost per-item branch", async () => {
+  const { text } = await import("../src/vendor/norn/runtime/value.ts");
+  const { hold, holdKind } = await import("../src/vendor/norn/runtime/ledger.ts");
+
+  const lib = `pub type product = { name: string }`;
+  const source = `open Std
+needs Users
+
+let overview = spawn(~key="overview", () =>
+  every(1d, ~from=2026-11-26T13:50:00Z)->forEach(~key="overview", _ =>
+    ignore(run(@claude, "overview report")->wait)))
+
+let reports = spawn(~key="reports", () =>
+  each(Holds.kind("page", "Users.product"), h => switch Holds.sample(h) {
+  | Some(_) =>
+    every(1d, ~from=2026-11-26T13:10:00Z)->forEach(~key="round", _ => switch Holds.sample(h) {
+    | Some(r) => ignore(run(@claude, "report " ++ r.name)->wait)
+    | None => ()
+    })
+  | None => ()
+  }))
+
+ignore(all([overview, reports]))`;
+
+  const t0 = Date.parse("2026-11-26T13:00:00Z");
+  const ledger = nornStartLedger(t0);
+  hold(ledger, holdKind("page", "Users.product"), "page-alpha", { type: "record", fields: { name: text("Alpha") } }, t0);
+  hold(ledger, holdKind("page", "Users.product"), "page-beta", { type: "record", fields: { name: text("Beta") } }, t0);
+
+  const baseState = {
+    spaceId: "space", channelId: "ch-users", programId: "prog-users",
+    pageId: "page-users", pageName: "users",
+    source, nowMs: t0, stopReason: null, ledger, requests: [],
+  };
+
+  // Initial pass before timers fire: all 4 branches (overview, reports, page-alpha, page-beta) exist.
+  const s0 = nornStep(undefined, undefined, { libraries: { Users: lib } })(structuredClone(baseState));
+  assert.equal(s0.result.status, "running");
+  assert.equal(s0.write.requests.length, 0);
+  const overviewBranch = s0.result.branches.find(b => b.label === "overview");
+  const reportsBranch = s0.result.branches.find(b => b.label === "reports");
+  const alphaBranch = s0.result.branches.find(b => b.label === "page-alpha");
+  const betaBranch = s0.result.branches.find(b => b.label === "page-beta");
+  assert.ok(overviewBranch && reportsBranch && alphaBranch && betaBranch);
+
+  // At 13:10:05Z, nested `every(...)->forEach(~key="round")` fires inside `spawn(~key="reports", () => each(...))`.
+  // Each product request must route to its own product branch, NOT the outer `reports` spawn!
+  const t1 = Date.parse("2026-11-26T13:10:05Z");
+  const s1 = nornStep(undefined, undefined, { libraries: { Users: lib } })({
+    ...baseState, nowMs: t1, ledger: structuredClone(s0.write.ledger),
+  });
+  assert.equal(s1.write.requests.length, 2);
+  const alphaReq = s1.write.requests.find(r => s1.write.ledger.requests[r.requestId].text === "report Alpha");
+  const betaReq = s1.write.requests.find(r => s1.write.ledger.requests[r.requestId].text === "report Beta");
+  assert.ok(alphaReq && betaReq);
+  assert.equal(alphaReq.channelId, alphaBranch.channelId);
+  assert.equal(betaReq.channelId, betaBranch.channelId);
+  assert.notEqual(alphaReq.channelId, reportsBranch.channelId);
+  assert.notEqual(betaReq.channelId, reportsBranch.channelId);
+  assert.ok(s1.result.wakeChannels.includes(alphaBranch.channelId));
+  assert.ok(s1.result.wakeChannels.includes(betaBranch.channelId));
+
+  // At 13:50:05Z, overview fires and routes to the `overview` branch.
+  const t2 = Date.parse("2026-11-26T13:50:05Z");
+  const s2 = nornStep(undefined, undefined, { libraries: { Users: lib } })({
+    ...baseState,
+    nowMs: t2,
+    ledger: structuredClone(s1.write.ledger),
+    requests: s1.write.requests.map(r => ({
+      ...r, deliveryMessageId: `norn:${r.requestRef}:0`, delivered: true, abandoned: false, brokeOff: false,
+    })),
+  });
+  const overviewReq = s2.write.requests.find(r => s2.write.ledger.requests[r.requestId].text === "overview report");
+  assert.ok(overviewReq);
+  assert.equal(overviewReq.channelId, overviewBranch.channelId);
+});
+
