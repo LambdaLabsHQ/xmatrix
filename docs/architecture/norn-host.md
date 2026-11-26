@@ -41,6 +41,26 @@ whole string. A space opens an ordinary one-word language (`` ```ts ``). Enter
 opens a fence whose info has a space in it (`` ```norn run review ``,
 `` ```norn 1 run review ``, `` ```norn run 物业费 ``).
 
+A block tagged `norn 1 lib <Name>` on any Page defines a reusable Space
+library module (with an uppercase ASCII module name such as `Products` or
+`Loops`). Space libraries are resolved Space-wide across every Page the
+program's authority can read (`PostgresPageRepository.libraryPages`): restricted
+Pages unreadable by the authority are never visible as libraries, built-in
+module names (`Std`, `Events`, `Actions`, `Holds`, `GitHub`, `Gmail`, `X`)
+cannot be shadowed, and a name declared on more than one readable Page is
+reported as a conflict. Libraries may depend on other Space libraries; only
+transitively referenced libraries are loaded (in topological order, with cycle
+detection), so an unfinished library on an unrelated Page never breaks other
+programs.
+
+When a program starts or is revised, its ledger pins the exact referenced
+Space library sources (`pinnedLibraries`). Editing a `norn 1 lib` block on
+another Page never mutates running programs mid-flight: callers inspect the
+3-way upgrade diff via `POST /api/spaces/:space/pages/:page/programs/preview`
+and explicitly adopt updated Space libraries via
+`POST /api/spaces/:space/pages/:page/programs/adopt` (requiring edit permission
+on the program's Page).
+
 A saved revision is synced (`syncPagePrograms`, from the Page session's
 commit, a new Page, and a restored revision), as whoever wrote it:
 

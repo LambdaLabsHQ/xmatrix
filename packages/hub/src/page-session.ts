@@ -14,7 +14,7 @@ import { absolutePositionToRelativePosition, updateYFragment, yXmlFragmentToPros
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
-import { guardRunningNornBlocks, nornBlocks, nornProgramProblems, type NornEditGuardViolation } from "./norn-host";
+import { guardRunningNornBlocks, nornBlocks, nornLibBlocks, nornProgramProblems, type NornEditGuardViolation, type SpaceLibraryCatalog } from "./norn-host";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 import type { PageCoWriteObservation } from "./page-co-write-timing";
 import { finishStoredTyping, type PageStoredTypingState } from "./page-stored-typing";
@@ -142,6 +142,8 @@ export interface PageSessionPorts {
   broadcast(data: Uint8Array, exceptConnectionId?: string): void;
   /** A person typed. Wake co-writers that are not on the page; do not wait on it. */
   wakeCoWriters?(): void;
+  /** Space-wide `norn 1 lib` catalog readable by `principal`, with this page's text overridden. */
+  spaceLibraries?(principal: PageSessionPrincipal, overrideBody: string): Promise<SpaceLibraryCatalog>;
   /** Currently running Norn programs on this page, checked before committing a whole-document edit. */
   runningPrograms?(): Promise<ReadonlyArray<{ name: string }>>;
 }
@@ -877,10 +879,18 @@ export class PageSession {
       const merge = lineMerge.ok ? lineMerge : mergePageWords(baseText, current, body);
       if (!merge.ok) throw new PageSessionConflict(this.base.revision, current);
       const target = merge.text === body ? body : canonicalPageMarkdown(merge.text);
+      let spaceCatalog: SpaceLibraryCatalog | undefined;
+      const loadSpaceCatalog = async () => {
+        if (!spaceCatalog && this.ports.spaceLibraries) {
+          spaceCatalog = await this.ports.spaceLibraries(principal, target);
+        }
+        return spaceCatalog;
+      };
       if (this.ports.runningPrograms && nornBlocks(current).length > 0) {
-        const running = await this.ports.runningPrograms();
+        const [running, catalog] = await Promise.all([this.ports.runningPrograms(), loadSpaceCatalog()]);
         const violations = guardRunningNornBlocks(current, target, running, {
           removePrograms: input.removePrograms?.length ? new Set(input.removePrograms) : undefined,
+          extraLibraries: catalog?.libraries,
         });
         if (violations.length) throw new PageSessionProgramGuardError(violations);
       }
@@ -919,9 +929,11 @@ export class PageSession {
       await this.persist();
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label }));
+      const hasNorn = nornBlocks(target).length > 0 || nornLibBlocks(target).length > 0;
+      const catalog = hasNorn ? await loadSpaceCatalog() : undefined;
       return { ...result, removedSections: pageRemovedSections(current, target),
         scheduleProblems: [...pageSchedules(target).flatMap((line) => line.status === "done"
-          ? [] : [{ source: line.source, problem: SCHEDULE_LINE_PROBLEM }]), ...nornProgramProblems(target)] } as PageEditResult;
+          ? [] : [{ source: line.source, problem: SCHEDULE_LINE_PROBLEM }]), ...nornProgramProblems(target, catalog)] } as PageEditResult;
     });
   }
 

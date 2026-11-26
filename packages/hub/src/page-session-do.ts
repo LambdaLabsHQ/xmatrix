@@ -17,7 +17,7 @@ import { tellPageCoWriter } from "./page-co-write-instruction";
 import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 import { parsePageOutputWrite } from "./page-output-receipts";
 import type { PageScheduleProblem } from "@xmatrix/protocol";
-import { pageProgramsKey, runningPageNornPrograms, syncPagePrograms } from "./norn-page-programs";
+import { loadSpaceLibraryCatalog, pageProgramsKey, runningPageNornPrograms, syncPagePrograms } from "./norn-page-programs";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 
 /**
@@ -172,6 +172,11 @@ export class RelayPageSession extends DurableObject<Env> {
         }
       },
       wakeCoWriters: () => this.onPeopleTyped(),
+      spaceLibraries: (principal, overrideBody) => loadSpaceLibraryCatalog(this.env, {
+        spaceId: this.need("space"),
+        principal: pagePrincipalFromSession(principal),
+        override: { pageId: this.need("page"), body: overrideBody },
+      }),
       runningPrograms: async () => {
         let timer: ReturnType<typeof setTimeout> | undefined;
         await Promise.race([this.programsSyncing, new Promise<void>((resolve) => { timer = setTimeout(resolve, 5_000); })]);

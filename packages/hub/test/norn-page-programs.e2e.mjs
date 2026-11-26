@@ -231,3 +231,46 @@ test("moving a page block between norn run, norn 1 run and an unsupported editio
   const direct = await until(async () => (await call(`${pages}/${created.page.pageId}/programs`)).programs.find(p => p.state === "completed"), "v1 direct start");
   assert.equal(direct.name, "direct");
 }));
+
+test("a page program resolves Space libraries from another page, stays pinned across library edits, and adopts updates explicitly", () => pageScene("norn-cross-lib", async ({ call, pages, until }) => {
+  const libBody = (prefix) => `# Libraries\n\n\`\`\`norn 1 lib Products\npub type item = { name: string }\npub let nameOf = (p: item): string => p.name\n\`\`\`\n\n\`\`\`norn 1 lib Prompts\nneeds Products\npub let daily = (p: Products.item): string => "${prefix} " ++ Products.nameOf(p)\n\`\`\`\n`;
+  const { page: libPage } = await call(pages, "POST", { title: "Libraries", body: libBody("Report for") });
+
+  const progSource = `needs Products\nneeds Prompts\nask(@codex, Prompts.daily({ name: "xMatrix" }))->wait`;
+  const { page: progPage } = await call(pages, "POST", {
+    title: "Ops",
+    body: `# Ops\n\n${block(progSource, "norn 1 run daily")}\n`,
+  });
+  const programs = async () => (await call(`${pages}/${progPage.pageId}/programs`)).programs;
+  const running = await until(async () => (await programs()).find(p => p.state === "running" && p.requests.length), "cross-page library program");
+  assert.deepEqual(running.requests.map(r => r.text), ["Report for xMatrix"]);
+
+  // Editing prose on the program page resolves Space libraries cleanly with zero false warnings.
+  const proseSaved = await call(`${pages}/${progPage.pageId}`, "PUT", {
+    baseRevision: (await call(`${pages}/${progPage.pageId}`)).page.headRevision,
+    body: `# Ops\n\nNote.\n\n${block(progSource, "norn 1 run daily")}\n`,
+  });
+  assert.deepEqual(proseSaved.scheduleProblems, []);
+
+  // Editing the library on another page leaves the running program pinned until explicitly adopted.
+  await call(`${pages}/${libPage.pageId}`, "PUT", {
+    baseRevision: (await call(`${pages}/${libPage.pageId}`)).page.headRevision,
+    body: libBody("Updated report for"),
+  });
+  assert.deepEqual((await programs())[0].requests.map(r => r.text), ["Report for xMatrix"]);
+
+  // Preview reports the library change and requires explicit adoption.
+  const { previews } = await call(`${pages}/${progPage.pageId}/programs/preview`, "POST", {});
+  assert.equal(previews.length, 1);
+  assert.equal(previews[0].upgrade.requiresExplicitAdoption, true);
+  assert.ok(previews[0].upgrade.interfaces.some(i => i.library === "Prompts" && i.definitionChanged));
+
+  // Explicit adoption revises the running program to the updated Space libraries.
+  const adopted = await call(`${pages}/${progPage.pageId}/programs/adopt`, "POST", { names: ["daily"] });
+  assert.deepEqual(adopted.adopted, [{ name: "daily", libraries: ["Products", "Prompts"] }]);
+  const afterAdopt = await until(
+    async () => (await programs()).find(p => p.requests.some(r => r.text === "Updated report for xMatrix")),
+    "adopted library request",
+  );
+  assert.equal(afterAdopt.channelId, running.channelId);
+}));

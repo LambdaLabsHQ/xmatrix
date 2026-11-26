@@ -744,7 +744,7 @@ test("guardRunningNornBlocks refuses silently removing or breaking running progr
   const brokenLib = page.replace(`let greet = who => say(who, "hi")`, `let greet = (`);
   assert.deepEqual(
     guardRunningNornBlocks(page, brokenLib, running).map(v => [v.name, v.reason]),
-    [["daily", "broken"], ["watch", "broken"]],
+    [["daily", "broken"]],
   );
 
   // Unsupported future edition header (`norn 2 run`) is allowed so the running program stays alive.
