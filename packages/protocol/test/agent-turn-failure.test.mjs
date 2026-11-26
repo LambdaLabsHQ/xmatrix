@@ -11,6 +11,7 @@ const {
   agentUsageLimitFromError,
   boundAgentTurnFailureDetail,
   isAccountBillingRefusalError,
+  isHarnessCredentialRefusalError,
   isScopedBillingRefusalError,
   isAgentTurnFailureLifecycle,
   isAgentUsageLimitLifecycle,
@@ -168,3 +169,15 @@ test("Hub reads a usage limit from the original provider error, never a plain ra
     undefined,
   ]) assert.equal(isScopedBillingRefusalError(error), false, String(error));
 });
+
+test("a credential the provider refused is told apart from a network block and a used-up balance", () => {
+  for (const error of ["Authentication Fails, Your api key: ****U6ZA is invalid", "no API key for provider route \"deepseek-official\"",
+    "Failed to authenticate: OAuth session expired and could not be refreshed", "Not logged in · Please run /login", "Missing API key"]) {
+    assert.equal(isHarnessCredentialRefusalError(error), true, error);
+  }
+  for (const error of ["Failed to authenticate. API Error: 403 Attention Required! | Cloudflare", "Insufficient Balance",
+    "The api key rotation finished", undefined]) {
+    assert.equal(isHarnessCredentialRefusalError(error), false, String(error));
+  }
+});
+
