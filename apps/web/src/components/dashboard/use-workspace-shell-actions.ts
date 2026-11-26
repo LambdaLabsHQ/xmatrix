@@ -1501,8 +1501,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       });
     }
     show((current) => replaceChannel(current, channel));
+    s.broadcastChannelUpsert(channel);
     const created = createConversation({ ...request, token, requestKey }).then((committed) => {
       show((current) => replaceChannel(current, committed));
+      s.broadcastChannelUpsert(committed);
       settled();
       // The Hub's answer says it exists: the lists take it now, whatever the socket hears.
       window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
@@ -1511,6 +1513,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       return committed;
     }, (error: unknown) => {
       show((current) => current.filter((item) => item.id !== channel.id));
+      s.broadcastChannelDelete(channel.id);
       if (s.selectedChannelIdRef.current === channel.id) setSelectedChannelId(null);
       settled();
       throw error;
@@ -2832,6 +2835,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       });
     }
     setOutgoingMessages((current) => [...current, outgoing]);
+    s.broadcastOutgoingUpsert(outgoing);
     return attemptOutgoingSend(s.token, channel, outgoing);
   }
 
@@ -2884,30 +2888,35 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         // historyHeadSequence); channelsRef is the read source for coversKnownHead.
         if (payload.message.sequence) {
           const confirmedSequence = payload.message.sequence;
+          let updatedRow: ChannelSnapshot | null = null;
           setChannels((current) =>
-            current.map((item) =>
-              item.id === channelId
-                ? {
-                    ...item,
-                    messageCount: Math.max(item.messageCount || 0, confirmedSequence),
-                    historyHeadSequence: Math.max(
-                      item.historyHeadSequence || 0,
-                      confirmedSequence,
-                    ),
-                  }
-                : item
-            )
+            current.map((item) => {
+              if (item.id !== channelId) return item;
+              updatedRow = {
+                ...item,
+                messageCount: Math.max(item.messageCount || 0, confirmedSequence),
+                historyHeadSequence: Math.max(
+                  item.historyHeadSequence || 0,
+                  confirmedSequence,
+                ),
+              };
+              return updatedRow;
+            })
           );
+          if (updatedRow) s.broadcastChannelUpsert(updatedRow);
         }
+        s.broadcastHistoryMessages(channelId, [payload.message], undefined, clientMessageId);
       } else if (payload.message) {
         void refreshSelectedHistory();
       }
       setOutgoingMessages((current) =>
         current.filter((message) => message.clientMessageId !== clientMessageId)
       );
+      s.broadcastOutgoingRemove(channelId, clientMessageId);
       announceEmbedOutboxAck(clientMessageId);
       if (payload.channel) {
         setChannels((current) => replaceChannel(current, payload.channel!));
+        s.broadcastChannelUpsert(payload.channel);
       }
       if (payload.appConnectorResultChannels?.length) {
         setChannels((current) =>
@@ -2950,6 +2959,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
             : item
         )
       );
+      s.broadcastOutgoingUpsert({ ...outgoing, status: failedStatus, error: message });
       if (unknownResult) {
         void reconcileUnconfirmedSend(channelId, clientMessageId);
       } else {
@@ -2977,6 +2987,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       }
       s.outboundPreviewByClientIdRef.current.delete(outgoing.clientMessageId);
       setOutgoingMessages((current) => current.filter((item) => item.clientMessageId !== outgoing.clientMessageId));
+      s.broadcastOutgoingRemove(outgoing.channelId, outgoing.clientMessageId);
       announceEmbedOutboxAck(outgoing.clientMessageId);
       setHistoryError(null);
       return;
@@ -3006,6 +3017,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setOutgoingMessages((current) =>
       current.map((item) => item.clientMessageId === retried.clientMessageId ? retried : item)
     );
+    s.broadcastOutgoingUpsert(retried);
     void attemptOutgoingSend(s.token, channel, retried);
   }
 
