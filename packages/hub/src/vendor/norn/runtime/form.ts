@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@879866cb314729dd7e6be1621ac64fc433c3309e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@61e8a966a87029f980f965b95a41f63b3017dff5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // Whether a reported value has the form its request asked for (docs/types.md §5a).
 import type { Form, ReportForm } from "../frontend/check/forms.js";
 import { show, type Value } from "./value.js";
