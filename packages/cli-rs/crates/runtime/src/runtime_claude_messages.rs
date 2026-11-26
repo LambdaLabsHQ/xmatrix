@@ -67,13 +67,16 @@ pub(crate) fn claude_message_id(value: &Value) -> Option<String> {
         .map(ToString::to_string)
 }
 
-pub(crate) fn claude_assistant_text(value: &Value) -> String {
+fn claude_text_blocks(value: &Value) -> Vec<&str> {
     claude_message_content_blocks(value)
         .into_iter()
         .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
         .filter_map(|block| block.get("text").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join("")
+        .collect()
+}
+
+pub(crate) fn claude_assistant_text(value: &Value) -> String {
+    claude_text_blocks(value).join("")
 }
 
 /// Every text a user message carries, string content or text blocks alike,
@@ -85,12 +88,7 @@ pub(crate) fn claude_replay_text(value: &Value) -> String {
     if let Some(text) = content.and_then(Value::as_str) {
         return text.to_owned();
     }
-    claude_message_content_blocks(value)
-        .into_iter()
-        .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-        .filter_map(|block| block.get("text").and_then(Value::as_str))
-        .collect::<Vec<_>>()
-        .join("\n")
+    claude_text_blocks(value).join("\n")
 }
 
 pub(crate) fn claude_tool_use_blocks(value: &Value) -> Vec<Value> {

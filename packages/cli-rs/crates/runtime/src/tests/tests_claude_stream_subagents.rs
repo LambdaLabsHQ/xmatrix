@@ -233,25 +233,7 @@ sleep 30
 #[tokio::test]
 async fn claude_steered_message_joins_the_running_turn_instead_of_cancelling_it() {
     let mut fixture = ClaudeCliTurnFixture::start(CLAUDE_STEERED_AFTER_LAST_TOOL).await;
-    let AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
-        message,
-        ack_required,
-        ..
-    }) = interrupting_channel_message_event("m-newer", "channel-1", "also check the docs")
-    else {
-        unreachable!("a channel message");
-    };
-    let steering = AgentInstanceConnectionEvent::Server(
-        AgentInstanceServerMessage::ChannelMessageReceived {
-            prompt: None,
-            message,
-            client_message_id: None,
-            ack_required,
-            interrupt_requested: Some(true),
-            steer_allowed: Some(true),
-            delivery_intent: None,
-        },
-    );
+    let steering = steering_event("m-newer", "also check the docs");
     let pending = fixture.run_channel_turn(None, None, vec![steering]).await;
 
     // The message went into the turn, not into the queue for the next one.
@@ -259,14 +241,20 @@ async fn claude_steered_message_joins_the_running_turn_instead_of_cancelling_it(
     let steered = std::fs::read_to_string(fixture.root.join("steered")).expect("steered line");
     assert!(steered.contains(r#""type":"user""#), "{steered}");
     assert!(steered.contains("also check the docs"), "{steered}");
-    assert!(!steered.contains("control_request"), "the turn was interrupted: {steered}");
+    assert!(
+        !steered.contains("control_request"),
+        "the turn was interrupted: {steered}"
+    );
     // The turn is answered by the result that follows Claude taking the
     // steered input, not the one before it, and it is not cancelled.
     let completed = fixture
         .wait_for_trace(0, |event| claude_turn_trace(event, "turn_completed"))
         .await;
     let trace = fixture.traces.lock().unwrap()[completed].clone();
-    assert_eq!(trace["metadata"]["payload"]["payload"]["text"], "steered answer");
+    assert_eq!(
+        trace["metadata"]["payload"]["payload"]["text"],
+        "steered answer"
+    );
     assert!(!fixture.session.last_turn_interrupted);
     fixture.finish().await;
 }
@@ -333,7 +321,10 @@ async fn claude_turn_closes_when_two_steered_messages_are_echoed_as_one() {
         .wait_for_trace(0, |event| claude_turn_trace(event, "turn_completed"))
         .await;
     let trace = fixture.traces.lock().unwrap()[completed].clone();
-    assert_eq!(trace["metadata"]["payload"]["payload"]["text"], "merged answer");
+    assert_eq!(
+        trace["metadata"]["payload"]["payload"]["text"],
+        "merged answer"
+    );
     fixture.finish().await;
 }
 
