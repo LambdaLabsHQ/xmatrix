@@ -41,7 +41,8 @@ export async function deliverNornAppRequest(env: Env, input: { spaceId: string; 
     const staged = await stageHeldAction(env, { channelId: input.channelId, actorUserId: input.authorityUserId,
       messageId: input.deliveryMessageId, providerId: app, actionId: name, action, statement, heldFor: input.requestRef });
     if ("reason" in staged) {
-      return { reply: staged.status === "blocked" ? { tag: "Refused", reason: staged.reason } : { tag: "Broke", reason: staged.reason },
+      // Connector or resource permission revocation ends only this request as `Revoked` so loops can recover.
+      return { reply: staged.status === "blocked" ? { tag: "Revoked" } : { tag: "Broke", reason: staged.reason },
         say: `${label}: ${staged.status}; ${staged.reason}` };
     }
     if (staged.status === "pending") {
@@ -58,7 +59,7 @@ export async function deliverNornAppRequest(env: Env, input: { spaceId: string; 
   } catch (error) {
     // What was approved no longer holds: the approver, the connection or its account changed. Anything else is tried again.
     if (!(error instanceof AppControlError)) throw error;
-    return { reply: { tag: "Refused", reason: heldAuthorityFailure(error) ?? error.message } };
+    return { reply: { tag: "Revoked" }, say: `${label}: revoked; ${heldAuthorityFailure(error) ?? error.message}` };
   }
   if (!claimed.request) return { reply: { tag: "Refused", reason: claimed.refusal } };
   // Durable before it is acknowledged: the executor runs it once and keeps its outcome until the program has it.
