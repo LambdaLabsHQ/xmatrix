@@ -194,7 +194,7 @@ integration("Agent message Channel lock failures retain either Channel's live bl
         tx => lockAgentRunChannels(tx, "private-b", "private-a")), error => {
         assert.equal(error.code, "55P03");
         const [evidence] = databaseFailureEvidence(error);
-        assert.equal(evidence.queryName, "channel_lifecycle_lock_runtime_new_work_v1");
+        assert.equal(evidence.queryName, "channel_lifecycle_lock_runtime_new_work_v2");
         assert.equal(evidence.lockWait?.status, "sampled");
         assert.equal(evidence.lockWait.waiter.owner, "op:message.append");
         assert.equal(evidence.lockWait.waiter.wait, "Lock");

@@ -32,7 +32,7 @@ integration("Run and message operations order behind Channel stops and recheck c
     transaction: (context, callback) => target.transaction(context, tx => callback({
       async query(query) {
         const result = await tx.query(query);
-        if (query.name === "message_append_run_proof_v3") await afterProof?.();
+        if (query.name === "message_append_run_proof_v3" || query.name === "message_append_agent_probe_v1") await afterProof?.();
         return result;
       },
     })),

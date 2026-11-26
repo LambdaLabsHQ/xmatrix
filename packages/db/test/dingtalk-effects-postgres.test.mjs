@@ -94,7 +94,7 @@ for(const late of ['abort','lease']) integration(`DingTalk append actual replay 
   const first=await f.cap();await f.messages.append(await f.appendInput(first),first);
   const controller=new AbortController(),cap=await f.cap('channel',controller.signal),input=await f.appendInput(cap);
   if(late==='lease') await f.sql("UPDATE data.app_dingtalk_inbound_jobs SET lease_until=clock_timestamp()+interval '500 milliseconds' WHERE app_identity=$1",[f.identity]);
-  const pause=pauseQuery(f.database,'message_append_preflight_v4');
+  const pause=pauseQuery(f.database,'message_append_preflight_v5');
   const pending=new PostgresMessageRepository(pause.database).append(input,cap);
   const rejection=assert.rejects(pending,denied);await pause.waiting;
   if(late==='abort') controller.abort();else await new Promise(r=>setTimeout(r,550));
