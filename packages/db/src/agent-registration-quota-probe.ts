@@ -607,8 +607,13 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
       if (narrowed) { record = narrowed.record; explainsHold = true; }
     }
 
+    // An account billing hold has no reset: the provider's own later word that
+    // the account covers requests again (a prepaid balance read after a top-up)
+    // ends it. A reading that says nothing about the account leaves it.
+    const liftsBillingHold = existingIsBillingHold && record.quotaAccount?.allowed === true;
     const accountPartNewer = clampedObserved >= existingObserved
-      && (existing.source !== "daemon" || existingExpires <= serverNow || (explainsHold && !existingIsBillingHold));
+      && (existing.source !== "daemon" || existingExpires <= serverNow || (explainsHold && !existingIsBillingHold)
+        || liftsBillingHold);
     const existingScopedObserved = time(existing.scoped_observed_at);
     const scopedPartNewer = record.scoped !== undefined
       && (!Number.isFinite(existingScopedObserved) || clampedObserved >= existingScopedObserved);

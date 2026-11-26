@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: a topped-up prepaid account shows its balance again without running a turn
+
+An Agent whose provider said "Insufficient Balance" was held as refused for up to a year, and later balance readings were discarded, so after a top-up `xmatrix agent list` and the Agents page still showed 0% and unnamed `@auto` skipped it until someone named it and a turn succeeded. A provider reading that says the account covers requests again (DeepSeek's balance endpoint, `allowed: true`) now replaces that hold. `xmatrix agent list` asks the daemons to read quota again, like the Agents page, so the next list shows the balance. The balance endpoint is free. Hub/DB and CLI. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: `@auto` stops choosing an Agent whose API key its provider refused
 
 A DeepSeek Harness turn that failed with "Your api key … is invalid" or "no API key for provider route" reached xMatrix as a plain failed turn. The person saw DeepSeek's own words, but `@auto` kept choosing the same Agent. Hub now reads such a refused credential from the provider's text (`isHarnessCredentialRefusalError`) and records it the way it records a signed-out turn. Automatic choice takes another Agent until this one replies or its machine next reports it ready, and naming it still starts it. The failure card is unchanged: the provider's text, in full. A used-up balance is still a usage limit (#1556). Hub only. Recovery is a CI-validated beta reverting this change.
