@@ -4,6 +4,7 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./page-restriction";
 import { deterministicConversationId } from "./deterministic-id";
 import { ensureAndWakeNornBranches, type NornBranchChannel } from "./norn-branches";
+import { seedPageFactsForProgram } from "./norn-facts";
 import {
   checkNornProgram, collectSpaceLibraries, diffNornProgramUpgrade, nornBlocks, nornBlockSource, nornRequestWords, nornStartLedger, nornStep,
   personHolder, pinNornProgram, plainAnswer as answerText, plainResult as resultText, previewNornEdit, selectReferencedLibraries,
@@ -149,6 +150,12 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
         spaceId, pageId, pageName: block.name, programChannelId: current.channelId, authorityUserId: userId,
         branches: stepResult?.branches, wakeChannels: [current.channelId, ...(stepResult?.wakeChannels ?? [])],
       });
+      if (stepResult?.holding?.length) {
+        await seedPageFactsForProgram(env, {
+          spaceId, channelId: current.channelId, programId: current.programId, pageId, pageName: block.name,
+          authorityUserId: userId, holdKinds: stepResult.holding,
+        });
+      }
       return;
     }
     // One conversation for the block's whole life; each run of its program is a message there.
@@ -173,6 +180,12 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
       spaceId, pageId, pageName: block.name, programChannelId: channelId, authorityUserId: userId,
       branches: stepResult?.branches, wakeChannels: [channelId, ...(stepResult?.wakeChannels ?? [])],
     });
+    if (stepResult?.holding?.length) {
+      await seedPageFactsForProgram(env, {
+        spaceId, channelId, programId, pageId, pageName: block.name,
+        authorityUserId: userId, holdKinds: stepResult.holding,
+      });
+    }
   });
   if (failures.length) throw new Error(failures.join("; "));
   // What only the sync can know, for whoever saved: the blocks whose conversation was deleted.
@@ -228,6 +241,12 @@ export async function adoptPageProgramLibraries(
       spaceId: input.spaceId, pageId: input.pageId, pageName: block.name, programChannelId: current.channelId, authorityUserId: userId,
       branches: stepResult?.branches, wakeChannels: [current.channelId, ...(stepResult?.wakeChannels ?? [])],
     });
+    if (stepResult?.holding?.length) {
+      await seedPageFactsForProgram(env, {
+        spaceId: input.spaceId, channelId: current.channelId, programId: current.programId, pageId: input.pageId,
+        pageName: block.name, authorityUserId: userId, holdKinds: stepResult.holding,
+      });
+    }
     adopted.push({ name: block.name, libraries: Object.keys(nextLibs) });
   }
   return { adopted, skipped };

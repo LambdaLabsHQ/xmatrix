@@ -557,7 +557,7 @@ export type {
   ChannelReferenceSpan, MessageReferenceSpan, NornRequestView, RequestReferenceSpan,
 } from "./message-references.js";
 export {
-  isSupportedNornEdition, nornLibBlock, nornRunBlock, PAGE_DOCUMENT_FRAGMENT, pageAuthorColor, pageAuthorLabel,
+  isSupportedNornEdition, nornFactsBlock, nornLibBlock, nornRunBlock, PAGE_DOCUMENT_FRAGMENT, pageAuthorColor, pageAuthorLabel,
 } from "./pages.js";
 export { pagePositionBetween, PagePositionError } from "./page-position.js";
 

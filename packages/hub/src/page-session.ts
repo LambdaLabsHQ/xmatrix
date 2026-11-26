@@ -14,7 +14,7 @@ import { absolutePositionToRelativePosition, updateYFragment, yXmlFragmentToPros
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
-import { guardRunningNornBlocks, nornBlocks, nornLibBlocks, nornProgramProblems, type NornEditGuardViolation, type SpaceLibraryCatalog } from "./norn-host";
+import { guardRunningNornBlocks, nornBlocks, nornFactBlocks, nornLibBlocks, nornProgramProblems, pageFactsKey, type NornEditGuardViolation, type SpaceLibraryCatalog } from "./norn-host";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 import type { PageCoWriteObservation } from "./page-co-write-timing";
 import { finishStoredTyping, type PageStoredTypingState } from "./page-stored-typing";
@@ -66,6 +66,8 @@ export interface PageCommitInput {
   conversationIds: string[];
   coAuthors: Array<{ kind: "user" | "agent"; id: string; label: string; ownerUserId?: string }>;
   blockIds: string[];
+  /** True only when `norn 1 facts` blocks changed between base and committed body; prose-only edits omit this. */
+  factsChanged?: boolean;
 }
 
 export class PageSessionConflict extends Error {
@@ -669,6 +671,7 @@ export class PageSession {
         kind: e.kind, id: e.id, label: e.label, ...(e.ownerUserId ? { ownerUserId: e.ownerUserId } : {}),
       })),
       blockIds: pageChangedBlocks(base.body, body).filter((id) => id),
+      ...(pageFactsKey(base.body) !== pageFactsKey(body) ? { factsChanged: true } : {}),
     });
     let committedBody = snapshot;
     let result;
@@ -900,7 +903,8 @@ export class PageSession {
       // Only a committed edit reaches the live text.
       const result = await this.ports.commit(principal, { baseRevision: this.base.revision, body: target,
         conversationIds: input.conversationIds, coAuthors: [],
-        blockIds: pageChangedBlocks(current, target).filter((id) => id) });
+        blockIds: pageChangedBlocks(current, target).filter((id) => id),
+        ...(pageFactsKey(current) !== pageFactsKey(target) ? { factsChanged: true } : {}) });
       // The repository decides what the edit became. A suggestion (the page turned suggest-only
       // meanwhile, or the Agent co-writes it with a person) waits for a person and never reaches the
       // text. Only a suggest-only page sends later Agent edits straight to suggestions.
@@ -929,7 +933,7 @@ export class PageSession {
       await this.persist();
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label }));
-      const hasNorn = nornBlocks(target).length > 0 || nornLibBlocks(target).length > 0;
+      const hasNorn = nornBlocks(target).length > 0 || nornLibBlocks(target).length > 0 || nornFactBlocks(target).length > 0;
       const catalog = hasNorn ? await loadSpaceCatalog() : undefined;
       return { ...result, removedSections: pageRemovedSections(current, target),
         scheduleProblems: [...pageSchedules(target).flatMap((line) => line.status === "done"

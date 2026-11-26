@@ -17,6 +17,7 @@ import { tellPageCoWriter } from "./page-co-write-instruction";
 import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 import { parsePageOutputWrite } from "./page-output-receipts";
 import type { PageScheduleProblem } from "@xmatrix/protocol";
+import { syncPageFacts } from "./norn-facts";
 import { loadSpaceLibraryCatalog, pageProgramsKey, runningPageNornPrograms, syncPagePrograms } from "./norn-page-programs";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 
@@ -139,6 +140,7 @@ export class RelayPageSession extends DurableObject<Env> {
             pageId: this.need("page"), principal: pagePrincipalFromSession(principal), ...input });
           if (result.revision.kind !== "suggestion") {
             this.programsChanged(principal, input.body);
+            if (input.factsChanged) this.factsChanged(principal);
           }
           return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision,
             agentSuggestOnly: result.page.agentSuggestOnly };
@@ -296,7 +298,10 @@ export class RelayPageSession extends DurableObject<Env> {
           // The programs this revision changed are started before its writer is answered, so the answer can say when
           // they were not. A sync of many programs is not waited out: it goes on, owed, and the writer is answered.
           let waited: ReturnType<typeof setTimeout> | undefined;
-          await Promise.race([this.programsSyncing, new Promise<void>(resolve => { waited = setTimeout(resolve, PROGRAMS_ANSWER_MS); })]);
+          await Promise.race([
+            Promise.all([this.programsSyncing, this.factsSyncing]),
+            new Promise<void>(resolve => { waited = setTimeout(resolve, PROGRAMS_ANSWER_MS); }),
+          ]);
           clearTimeout(waited);
           if (this.programsProblem && Array.isArray(result.scheduleProblems)) {
             result.scheduleProblems.push({ source: "```norn run", problem:
@@ -455,10 +460,24 @@ export class RelayPageSession extends DurableObject<Env> {
    */
   private programsSynced: string | null = null;
   private programsSyncing: Promise<void> = Promise.resolve();
+  private factsSyncing: Promise<void> = Promise.resolve();
   /** Why the page's programs are not yet what its text says; null once a sync succeeded. */
   private programsProblem: string | null = null;
   /** What the last sync that succeeded found wrong with blocks, for the text it synced (`key`). */
   private programsFound: { key: string; problems: PageScheduleProblem[] } | null = null;
+
+  private factsChanged(principal: PageSessionPrincipal): void {
+    const editorConversationId = principal.kind === "agent" ? principal.conversationId : undefined;
+    this.factsSyncing = this.factsSyncing.then(() =>
+      syncPageFacts(this.env, {
+        spaceId: this.need("space"),
+        pageId: this.need("page"),
+        ...(editorConversationId ? { editorConversationId } : {}),
+      }).catch((error: unknown) => {
+        console.error("Page facts did not sync", { pageId: this.pageId, error: error instanceof Error ? error.message : String(error) });
+      }));
+    this.later(this.factsSyncing);
+  }
 
   private programsChanged(principal: PageSessionPrincipal, body: string): void {
     // The first revision this session commits is synced whatever it holds: a block removed while
@@ -643,8 +662,8 @@ export class RelayPageSession extends DurableObject<Env> {
       console.error("Page session commit failed", { pageId: this.pageId,
         error: error instanceof Error ? error.message : String(error) });
     }
-    // The event that committed waits for the programs the revision changed.
-    await this.programsSyncing;
+    // The event that committed waits for the programs and facts the revision changed.
+    await Promise.all([this.programsSyncing, this.factsSyncing]);
   }
 
   /**
@@ -664,6 +683,7 @@ export class RelayPageSession extends DurableObject<Env> {
         if (await repository.exists(identity)) {
           const removed = await repository.remove({ ...identity, principal: pagePrincipalFromSession(principal) });
           for (const channelId of removed.programChannels ?? []) await wakeAgentLaunchCoordinator(this.env, channelId, ["norn"]);
+          await syncPageFacts(this.env, { spaceId: identity.spaceId, pageId: identity.pageId, deleted: true }).catch(() => undefined);
         }
       } catch (error) {
         await this.ctx.storage.delete("removing");
