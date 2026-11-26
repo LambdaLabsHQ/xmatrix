@@ -27,6 +27,7 @@ use crate::runtime_claude_messages::claude_frame_is_subagent;
 use crate::runtime_claude_messages::claude_init_details;
 use crate::runtime_claude_messages::claude_message_id;
 use crate::runtime_claude_messages::claude_partial_assistant_delta;
+use crate::runtime_claude_messages::claude_replay_text;
 use crate::runtime_claude_messages::claude_runtime_notice_payload;
 use crate::runtime_claude_messages::claude_tool_item_key;
 use crate::runtime_claude_messages::claude_tool_name;
@@ -827,8 +828,7 @@ pub(crate) async fn claude_stream_reader(
         if value_type == Some("user")
             && value.get("isReplay").and_then(Value::as_bool) == Some(true)
         {
-            turn.input_replayed = true;
-            turn.inputs_replayed += 1;
+            turn.observe_replay(&claude_replay_text(&value));
         }
         if cli_originated_result {
             set_cli_turn_channel(&cli_turn_channel, None);
@@ -918,7 +918,7 @@ pub(crate) async fn claude_stream_reader(
             Some("result")
                 if !turn.interrupt_requested
                     && turn.input_replayed
-                    && turn.inputs_replayed < 1 + turn.inputs_steered =>
+                    && !turn.pending_steers.is_empty() =>
             {
                 let (answer, _) = claude_result_answer(&value, &trace.visible_assistant_text);
                 turn.answer = Some(answer);
