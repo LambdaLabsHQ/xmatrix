@@ -208,6 +208,15 @@ async fn claude_wrapper_interrupt_is_cancelled_not_a_turn_failure() {
     fixture.finish().await;
 }
 
+/// The turn closed as completed, answered with `text`.
+async fn assert_completed_turn_answer(fixture: &ClaudeCliTurnFixture, text: &str) {
+    let completed = fixture
+        .wait_for_trace(0, |event| claude_turn_trace(event, "turn_completed"))
+        .await;
+    let trace = fixture.traces.lock().unwrap()[completed].clone();
+    assert_eq!(trace["metadata"]["payload"]["payload"]["text"], text);
+}
+
 /// A turn that a steered message joins after Claude's last tool call, as
 /// Claude Code 2.1.303 answers it: the turn's own result comes first, then
 /// Claude takes the queued input (`isReplay`) and answers it with a second
@@ -233,7 +242,7 @@ sleep 30
 #[tokio::test]
 async fn claude_steered_message_joins_the_running_turn_instead_of_cancelling_it() {
     let mut fixture = ClaudeCliTurnFixture::start(CLAUDE_STEERED_AFTER_LAST_TOOL).await;
-    let steering = steering_event("m-newer", "also check the docs");
+    let steering = steering_channel_message_event("m-newer", "channel-1", "also check the docs");
     let pending = fixture.run_channel_turn(None, None, vec![steering]).await;
 
     // The message went into the turn, not into the queue for the next one.
@@ -247,14 +256,7 @@ async fn claude_steered_message_joins_the_running_turn_instead_of_cancelling_it(
     );
     // The turn is answered by the result that follows Claude taking the
     // steered input, not the one before it, and it is not cancelled.
-    let completed = fixture
-        .wait_for_trace(0, |event| claude_turn_trace(event, "turn_completed"))
-        .await;
-    let trace = fixture.traces.lock().unwrap()[completed].clone();
-    assert_eq!(
-        trace["metadata"]["payload"]["payload"]["text"],
-        "steered answer"
-    );
+    assert_completed_turn_answer(&fixture, "steered answer").await;
     assert!(!fixture.session.last_turn_interrupted);
     fixture.finish().await;
 }
@@ -283,26 +285,6 @@ emit '{"type":"result","subtype":"success","is_error":false,"result":"merged ans
 sleep 30
 "#;
 
-fn steering_event(id: &str, text: &str) -> AgentInstanceConnectionEvent {
-    let AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
-        message,
-        ack_required,
-        ..
-    }) = interrupting_channel_message_event(id, "channel-1", text)
-    else {
-        unreachable!("a channel message");
-    };
-    AgentInstanceConnectionEvent::Server(AgentInstanceServerMessage::ChannelMessageReceived {
-        prompt: None,
-        message,
-        client_message_id: None,
-        ack_required,
-        interrupt_requested: Some(true),
-        steer_allowed: Some(true),
-        delivery_intent: None,
-    })
-}
-
 #[tokio::test]
 async fn claude_turn_closes_when_two_steered_messages_are_echoed_as_one() {
     let mut fixture = ClaudeCliTurnFixture::start(CLAUDE_TWO_STEERS_MERGED).await;
@@ -311,20 +293,13 @@ async fn claude_turn_closes_when_two_steered_messages_are_echoed_as_one() {
             None,
             None,
             vec![
-                steering_event("m-a", "also check the docs"),
-                steering_event("m-b", "and the tests"),
+                steering_channel_message_event("m-a", "channel-1", "also check the docs"),
+                steering_channel_message_event("m-b", "channel-1", "and the tests"),
             ],
         )
         .await;
     assert!(pending.is_empty(), "{pending:?}");
-    let completed = fixture
-        .wait_for_trace(0, |event| claude_turn_trace(event, "turn_completed"))
-        .await;
-    let trace = fixture.traces.lock().unwrap()[completed].clone();
-    assert_eq!(
-        trace["metadata"]["payload"]["payload"]["text"],
-        "merged answer"
-    );
+    assert_completed_turn_answer(&fixture, "merged answer").await;
     fixture.finish().await;
 }
 
