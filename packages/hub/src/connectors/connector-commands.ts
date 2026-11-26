@@ -369,6 +369,8 @@ function actionPreview(providerId: string, actionId: string, prepared: Record<st
       ...(prepared.mediaReceipt ? { video: "Video from this account and Channel's approved upload receipt" } : {}),
       ...(prepared.sourceName ? { filename: prepared.sourceName, bytes: prepared.sourceSize!,
         sha256: prepared.sourceHash!, attachment: `${prepared.messageId}/${prepared.attachmentId}` } : {}) }
+    : providerId === "cloudflare" && actionId === "put_worker_secret"
+    ? { worker: prepared.script ?? statement.target, secret: prepared.name ?? "", value: `<redacted, ${(prepared.value ?? "").length} chars>` }
     : { target: statement.target, text: statement.text };
 }
 
