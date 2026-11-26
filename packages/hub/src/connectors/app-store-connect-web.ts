@@ -19,8 +19,11 @@ import type { ConnectorAction, ConnectorActionContext, ConnectorActionResult, Co
  * pasted. Apple rotates some of the cookies as they are used; the rotated
  * values are saved back into the same credential. The Apple ID password never
  * reaches xMatrix. Apple keeps a session from a day to a month, shorter when
- * it is used from another region than it was signed in from, and signing in
- * again is the only renewal.
+ * it is used from another region than it was signed in from. While the desktop
+ * app runs it hands over, every few hours, the session its own sign-in profile
+ * holds (apps/web/src/components/dashboard/use-desktop-session-keeper.ts), so a
+ * lapse is usually mended before an action meets it; otherwise signing in again
+ * is the renewal.
  *
  * Only Apple's own origin, no redirects followed: a redirect is Apple asking
  * for a new sign-in. What reviewers wrote is untrusted text. The same session
