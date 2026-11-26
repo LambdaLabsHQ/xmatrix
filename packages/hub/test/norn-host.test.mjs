@@ -849,3 +849,74 @@ each(sites, site => {
   assert.ok(e2.result.wakeChannels.includes(betaReq.channelId));
   assert.ok(!e2.result.wakeChannels.includes(alphaReq.channelId));
 });
+
+test("norn 1 facts blocks validate against Space libraries, ignore prose edits, and suppress self-trigger via editorConversationId", async () => {
+  const { checkPageFactBlock, collectSpaceLibraries, nornFactBlocks, nornProgramProblems, pageFactsKey } = await import("../src/norn-host.ts");
+  const { text } = await import("../src/vendor/norn/runtime/value.ts");
+
+  const libPage = `# Libs\n\n\`\`\`norn 1 lib Products\npub type cadence = Daily | Weekly\npub type site = { name: string, cadence: cadence }\n\`\`\`\n`;
+  const catalog = collectSpaceLibraries([{ pageId: "lib-page", body: libPage }]);
+
+  const factPage = (prose, cadence = "Daily") =>
+    `# Alpha\n\n${prose}\n\n\`\`\`norn 1 facts Products.site\n{ name: "Alpha", cadence: ${cadence} }\n\`\`\`\n`;
+
+  // Prose-only edits leave pageFactsKey identical.
+  assert.equal(pageFactsKey(factPage("Old prose")), pageFactsKey(factPage("Updated prose")));
+  assert.notEqual(pageFactsKey(factPage("Same", "Daily")), pageFactsKey(factPage("Same", "Weekly")));
+
+  // Valid fact block checks to a typed Norn value; invalid fact block reports diagnostics in nornProgramProblems.
+  const [block] = nornFactBlocks(factPage("Note"));
+  const valid = checkPageFactBlock(block, catalog);
+  assert.equal(valid.ok, true);
+  assert.equal(valid.value.type, "record");
+  assert.equal(valid.value.fields.name.value, "Alpha");
+  assert.deepEqual(nornProgramProblems(factPage("Note"), catalog), []);
+
+  const badPage = `# Alpha\n\n\`\`\`norn 1 facts Products.site\n{ name: 42, cadence: Daily }\n\`\`\`\n`;
+  const problems = nornProgramProblems(badPage, catalog);
+  assert.equal(problems.length, 1);
+  assert.equal(problems[0].source, "```norn 1 facts Products.site");
+
+  // Anti-self-trigger: a hold update authored from the program's own conversation or branch conversation
+  // updates the held value for next sample without emitting on Holds.changes (notify: false).
+  const changesSource = `open Std
+needs Products
+let sites = Holds.kind("page", "Products.site")
+let alpha = Holds.held(sites, "page-a")
+Holds.changes(alpha)->forEach(~key="watch", v =>
+  switch v {
+  | Some(s) => ignore(ask(@codex, "Changed " ++ s.name)->wait)
+  | None => ()
+  }
+)`;
+  const state = {
+    spaceId: "space", channelId: "ch-prog", programId: "prog-self",
+    pageId: "page-ops", pageName: "watch",
+    source: changesSource, nowMs: 1_000, stopReason: null,
+    ledger: nornStartLedger(1_000), requests: [],
+  };
+  const s1 = nornStep(undefined, undefined, { libraries: catalog.libraries })(structuredClone(state));
+  assert.deepEqual(s1.result.holding, ["page:Products.site"]);
+  assert.ok(s1.write.waits.some(w => w.type === "hold" && w.kind === "page:Products.site"));
+
+  // Update authored from the program's own conversation -> notify: false -> value stored, zero requests opened!
+  const sSelf = nornStep(undefined, undefined, {
+    holds: [{ source: "page", typeName: "Products.site", id: "page-a", value: { type: "record", fields: { name: text("Alpha"), cadence: { type: "variant", name: "Daily", args: [] } } } }],
+    editorConversationId: "ch-prog",
+  })({ ...state, nowMs: 2_000, ledger: structuredClone(s1.write.ledger) });
+  assert.equal(sSelf.write.requests.length, 0);
+  assert.equal(sSelf.write.ledger.holds["page:Products.site"]["page-a"].value.fields.name.value, "Alpha");
+
+  // Same value repeated -> no-op returns write: null.
+  const sRepeat = nornStep(undefined, undefined, {
+    holds: [{ source: "page", typeName: "Products.site", id: "page-a", value: { type: "record", fields: { name: text("Alpha"), cadence: { type: "variant", name: "Daily", args: [] } } } }],
+  })({ ...state, nowMs: 2_500, ledger: structuredClone(sSelf.write.ledger) });
+  assert.equal(sRepeat.write, null);
+
+  // Update authored from outside (different value, human/external conversation) -> notify: true -> wakes Holds.changes!
+  const sExt = nornStep(undefined, undefined, {
+    holds: [{ source: "page", typeName: "Products.site", id: "page-a", value: { type: "record", fields: { name: text("Alpha v2"), cadence: { type: "variant", name: "Weekly", args: [] } } } }],
+  })({ ...state, nowMs: 3_000, ledger: structuredClone(sSelf.write.ledger) });
+  assert.equal(sExt.write.requests.length, 1);
+  assert.equal(sExt.write.ledger.requests[sExt.write.requests[0].requestId].text, "Changed Alpha v2");
+});

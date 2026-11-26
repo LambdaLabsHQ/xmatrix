@@ -672,6 +672,41 @@ export class PostgresPageRepository {
     });
   }
 
+  private async nornTaggedPages(
+    input: { requestId: string; spaceId: string; principal: PagePrincipal },
+    operation: string,
+    keyword: "lib" | "facts",
+  ): Promise<{ pages: Array<{ pageId: string; title: string; body: string; canEdit: boolean }> }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    return this.readInSpace(bounded(input.requestId, "requestId"), operation, spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, false);
+      const tree = await this.accessibleTree(tx, spaceId, actor);
+      if (tree.length === 0) return { pages: [] };
+      const editable = new Map(tree.map((row) => [row.page_id, row.canEdit]));
+      const rows = await tx.query<QueryResultRow & { page_id: string; title: string | null; body: string }>({
+        name: "page_norn_tagged_heads_v1",
+        text: `SELECT p.page_id, data.page_title(r.body) AS title, r.body
+          FROM data.pages p
+          JOIN data.page_revisions r
+            ON r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision
+          WHERE p.space_id=$1 AND p.page_id = ANY($2::text[])
+            AND strpos(r.body, 'norn') > 0 AND strpos(r.body, $3) > 0
+          ORDER BY p.page_id
+          LIMIT ${MAX_PAGES}`,
+        values: [spaceId, tree.map((row) => row.page_id), keyword],
+        maxRows: MAX_PAGES,
+      });
+      return {
+        pages: rows.map((row) => ({
+          pageId: row.page_id,
+          title: row.title ?? UNNAMED_PAGE,
+          body: row.body ?? "",
+          canEdit: editable.get(row.page_id) === true,
+        })),
+      };
+    });
+  }
+
   /**
    * Current head text of every page the principal can read that may declare a
    * `norn ... lib` Space library block. Uses `accessibleTree` so restricted
@@ -679,26 +714,17 @@ export class PostgresPageRepository {
    */
   async libraryPages(input: { requestId: string; spaceId: string; principal: PagePrincipal }):
     Promise<{ pages: Array<{ pageId: string; title: string; body: string }> }> {
-    const spaceId = bounded(input.spaceId, "spaceId");
-    return this.readInSpace(bounded(input.requestId, "requestId"), "page.library_pages", spaceId, async (tx) => {
-      const actor = await pageActor(tx, spaceId, input.principal, false);
-      const tree = await this.accessibleTree(tx, spaceId, actor);
-      if (tree.length === 0) return { pages: [] };
-      const rows = await tx.query<QueryResultRow & { page_id: string; title: string | null; body: string }>({
-        name: "page_library_heads_v1",
-        text: `SELECT p.page_id, data.page_title(r.body) AS title, r.body
-          FROM data.pages p
-          JOIN data.page_revisions r
-            ON r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision
-          WHERE p.space_id=$1 AND p.page_id = ANY($2::text[])
-            AND strpos(r.body, 'norn') > 0 AND strpos(r.body, 'lib') > 0
-          ORDER BY p.page_id
-          LIMIT ${MAX_PAGES}`,
-        values: [spaceId, tree.map((row) => row.page_id)],
-        maxRows: MAX_PAGES,
-      });
-      return { pages: rows.map((row) => ({ pageId: row.page_id, title: row.title ?? UNNAMED_PAGE, body: row.body ?? "" })) };
-    });
+    return this.nornTaggedPages(input, "page.library_pages", "lib");
+  }
+
+  /**
+   * Current head text and editability of every page the principal can read that
+   * may declare a `norn ... facts` fact block. Uses `accessibleTree` so restricted
+   * pages unreadable by the caller are never exposed.
+   */
+  async factPages(input: { requestId: string; spaceId: string; principal: PagePrincipal }):
+    Promise<{ pages: Array<{ pageId: string; title: string; body: string; canEdit: boolean }> }> {
+    return this.nornTaggedPages(input, "page.fact_pages", "facts");
   }
 
   /** Whether a principal may read a page and edit it, and its head, without its text: what a live ticket needs. */

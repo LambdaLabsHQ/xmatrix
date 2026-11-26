@@ -438,6 +438,8 @@ export type PageProgramStep =
 const NORN_PROGRAM_NAME = /^\p{L}[\p{L}\p{N}_-]{0,39}$/u;
 /** A Norn Space library module name: an uppercase ASCII letter followed by letters, digits, or `_`. */
 const NORN_LIBRARY_NAME = /^[A-Z][A-Za-z0-9_]{0,39}$/u;
+/** A Norn fact block type name: `Type` or `Module.Type`. */
+const NORN_FACT_TYPE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,39}(?:\.[A-Za-z_][A-Za-z0-9_]{0,39})?$/u;
 /** An edition token written between `norn` and `run`/`lib`, as in `norn 1 run <name>` or `norn 1 lib <Name>`. */
 const NORN_EDITION = /^\d+(?:\.\d+)*$/u;
 const SUPPORTED_NORN_EDITIONS = new Set(["1"]);
@@ -451,7 +453,7 @@ export function isSupportedNornEdition(edition: string): boolean {
 function parseNornNamedBlock(
   info: unknown,
   spec: {
-    keyword: "run" | "lib";
+    keyword: "run" | "lib" | "facts";
     defaultName?: string;
     namePattern: RegExp;
     badNameProblem: (tag: string) => string;
@@ -494,6 +496,26 @@ export function nornLibBlock(info: unknown): { name: string; edition?: string; p
     badNameProblem: (tag) => `\`${tag}\` names no library: a library name starts with an uppercase letter followed by letters, digits, or _ (at most 40 characters), as in \`norn 1 lib Review\`.`,
     unsupportedEditionProblem: (tag, edition) => `\`${tag}\` uses Norn edition ${edition}, which this host does not support yet (supported: edition 1).`,
   });
+}
+
+/**
+ * What a fenced block's info string makes of it as a Page fact block
+ * (`norn 1 facts <Type>`): declares a typed value held for this Page.
+ * Returns null for anything that is not a `norn <edition> facts` or `norn facts` block.
+ */
+export function nornFactsBlock(info: unknown): { typeName: string; edition?: string; problem?: string } | null {
+  const parsed = parseNornNamedBlock(info, {
+    keyword: "facts",
+    namePattern: NORN_FACT_TYPE_NAME,
+    badNameProblem: (tag) => `\`${tag}\` names no fact type: name one declared type, as in \`norn 1 facts Products.Site\`.`,
+    unsupportedEditionProblem: (tag, edition) => `\`${tag}\` uses Norn edition ${edition}, which this host does not support yet (supported: edition 1).`,
+  });
+  if (!parsed) return null;
+  return {
+    typeName: parsed.name,
+    ...(parsed.edition === undefined ? {} : { edition: parsed.edition }),
+    ...(parsed.problem === undefined ? {} : { problem: parsed.problem }),
+  };
 }
 
 /**
