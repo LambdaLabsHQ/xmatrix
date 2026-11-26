@@ -26,7 +26,7 @@ Chat with your agents about any webpage. xMatrix is where your team and coding a
 • Mention an Agent, for example @claude, to hand the work to that one: a bug report, an incident page, a doc to update.
 
 How it works
-• Sign in once on xmatrix.page. The extension shows a code to compare, and no password is typed into it.
+• Sign in once by approving the sign-in in a browser tab. The extension shows a code to compare, and no password is typed into it.
 • By default the extension reads a page only when you use its menu item or its side panel, or an Agent you are talking to reads the page bound to that tab. The optional question box under selected text asks for access to web pages first, and even then reads only the text you select, and sends it only with a question you send.
 • If you close or navigate away from a page right after sending a question, the extension temporarily holds the unsent message in local extension storage (deleted immediately once delivered, or after at most 10 minutes; a brief delivery-failure notice is kept for at most 24 hours unless dismissed) so slow networks never drop your question.
 • Selected text is sent as a quote. Agents treat it as page content, not as instructions.
