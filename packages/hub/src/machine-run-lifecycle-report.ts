@@ -110,13 +110,17 @@ export async function machineRunLifecycleReport(
       (Array.isArray(value.changedRunIds) && value.changedRunIds.length > 0))) {
     await publishChannelInvocationsChanged(env, text(input.channelId, "channelId", 300));
   }
-  // A turn that ended without answering the Norn request it took: the request's program is told.
-  if (value.nornRequestAbandoned === true) await wakeAgentLaunchCoordinator(env, text(input.channelId, "channelId", 300), ["norn"]);
+  // A turn that ended without answering the Norn request it took, or a Run that stopped/exited
+  // while holding an open Norn request: wake the Channel's Norn coordinator immediately.
+  const runEnded = value.reused !== true && (input.eventType === "machine_run_exited" || input.eventType === "machine_stop_result" ||
+    (input.eventType === "machine_run_snapshot" && Array.isArray(value.changedRunIds) && value.changedRunIds.length > 0));
+  if (value.nornRequestAbandoned === true || runEnded) {
+    await wakeAgentLaunchCoordinator(env, text(input.channelId, "channelId", 300), ["norn"]);
+  }
   // An exit or stop result records whether the Instance rests, and a snapshot
   // reconciles the ones that ended unreported: the Channel's lists learn how
   // its Agents stand from this push, never by reading again.
-  if (value.reused !== true && (input.eventType === "machine_run_exited" || input.eventType === "machine_stop_result" ||
-      (input.eventType === "machine_run_snapshot" && Array.isArray(value.changedRunIds) && value.changedRunIds.length > 0))) {
+  if (runEnded) {
     const runIds = [...(Array.isArray(value.changedRunIds) ? value.changedRunIds.map(String) : []),
       ...(typeof payload.runId === "string" ? [payload.runId] : [])];
     await publishChannelPresenceChanged(env, text(input.channelId, "channelId", 300),

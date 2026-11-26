@@ -494,3 +494,51 @@ integration("outside-event obligations persist, page boundedly, recover through 
     const openReqs = await sql("SELECT request_id FROM data.norn_requests WHERE program_id='prog-a' AND settled_at IS NULL");
     assert.deepEqual(openReqs, [], "open requests are cancelled when the program stops");
   }));
+
+integration("a Run killed mid-turn settles its Norn request Broke without respawning; an unexpected crash mid-turn hands on once", () =>
+  conversation("norn_killed_vs_crashed_run", async ({ sql, message, programs, scope, execution, instance, due, inTransaction }) => {
+    // 1. Intentional stop (/kill) while execution is still 'running': must become abandoned immediately
+    // and settle Broke WITHOUT respawning a replacement Agent.
+    await message("killed-prog", 1, "user", "owner");
+    await programs.start({ ...scope("killed-prog"), authorKind: "user", authorId: "owner", authorityUserId: "owner",
+      source, ledger: nornStartLedger }, nornStep());
+    const [killedDelivery] = (await programs.channelWork(scope())).deliveries;
+    await instance("channel:10");
+    await execution("exec-killed", "channel:10", killedDelivery.deliveryMessageId, "running");
+    await programs.delivered({ ...scope("killed-prog"), ledgerRequestId: killedDelivery.requestId, epoch: 0 });
+    assert.equal(await due(), null, "live running execution holds the request");
+
+    // Fence/stop that Run (simulating /kill @agent): execution row remains 'running', Run moves to 'stopping' + stopRequest.
+    await inTransaction(tx => fenceChannelRunsForStop(tx, {
+      spaceId: "space", channelId: "channel", actorUserId: "owner", sourceMessageId: "kill-msg",
+      at: new Date().toISOString(), scope: { kind: "run", runId: "channel:10#1" },
+    }));
+    assert.equal(await due(), true, "stopping a Run with a still-running execution immediately marks its request abandoned");
+    assert.deepEqual((await programs.channelWork(scope())).passes, ["killed-prog"]);
+    const afterKill = await programs.advance(scope("killed-prog"), nornStep());
+    assert.equal(afterKill.status, "completed", "intentionally killed Run settles Broke immediately instead of handing on");
+    const [killedReport] = (await programs.channelWork(scope())).reports;
+    assert.equal(killedReport.ended.result.value, "The Agent's work on this request ended without an answer");
+    await programs.reported(scope("killed-prog"));
+    await programs.released({ ...scope("killed-prog"), ledgerRequestId: killedDelivery.requestId });
+
+    // 2. Unexpected Run crash (status='exited', NO stopRequest) while execution is still 'running':
+    // must become abandoned immediately AND hand on once (brokeOff=true -> epoch 1).
+    await message("crashed-prog", 2, "user", "owner");
+    await programs.start({ ...scope("crashed-prog"), authorKind: "user", authorId: "owner", authorityUserId: "owner",
+      source, ledger: nornStartLedger }, nornStep());
+    const [crashedDelivery] = (await programs.channelWork(scope())).deliveries;
+    await instance("channel:11");
+    await execution("exec-crashed", "channel:11", crashedDelivery.deliveryMessageId, "running");
+    await programs.delivered({ ...scope("crashed-prog"), ledgerRequestId: crashedDelivery.requestId, epoch: 0 });
+    assert.equal(await due(), null);
+
+    await sql("UPDATE data.runs SET status='exited' WHERE run_id='channel:11#1'");
+    assert.equal(await due(), true, "unexpectedly exited Run with a still-running execution marks its request abandoned");
+    assert.deepEqual((await programs.channelWork(scope())).passes, ["crashed-prog"]);
+    const afterCrash = await programs.advance(scope("crashed-prog"), nornStep());
+    assert.equal(afterCrash.status, "running", "unexpected crash hands the request on once to a new Instance");
+    const [handedOn] = (await programs.channelWork(scope())).deliveries;
+    assert.deepEqual([handedOn.requestId, handedOn.epoch, handedOn.handedOn], [crashedDelivery.requestId, 1, true]);
+  }));
+
