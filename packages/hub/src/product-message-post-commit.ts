@@ -27,7 +27,7 @@ import { recordAgentLaunchStage } from "./postgres-observability";
 import { dispatchRegistrationLaunchesAfterMessage, markFirstMessageSummoned, messageAskAction, wakeRestingInstances } from "./registration-launch-dispatch";
 import { recordAgentLaunchFirstReply } from "./runtime";
 import { ControlError, lostBeforeCommit } from "@xmatrix/db";
-import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake";
+import { AgentLaunchHandoverUnavailable, wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { pageReferencesIn } from "@xmatrix/protocol";
 import { firstMessageSummonId, PostgresPageRepository, XMATRIX_SYSTEM_AUTHOR_ID } from "@xmatrix/db";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
@@ -463,8 +463,12 @@ export async function dispatchProductMessagePostCommit(
     );
   }
   if (interaction.stop) {
-    tasks.push(dispatchProductAgentInterventionAfterAuthorityMessage(input).then((result) => {
+    tasks.push(dispatchProductAgentInterventionAfterAuthorityMessage(input).then(async (result) => {
       refusals.push(...result?.refusals ?? []);
+      // Stopped/fenced Runs immediately abandon any open Norn requests they held; reconcile now.
+      await wakeAgentLaunchCoordinator(input.env, input.channelId, ["norn"]).catch((error) => {
+        logPostCommitFailure("Norn wake after agent stop failed", input, error);
+      });
     }).catch((error) => {
       logPostCommitFailure("Product agent intervention orchestration failed", input, error);
     }));

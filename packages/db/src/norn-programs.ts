@@ -107,8 +107,9 @@ const NORN_REQUEST_HELD_BY_PERSON_SQL = `(r.holder_user_id IS NOT NULL AND EXIST
  */
 const NORN_REQUEST_HELD_BY_HOST_SQL = `(starts_with(r.holder,'app:') AND (r.host_due_at IS NULL OR r.host_due_at>clock_timestamp()))`;
 const NORN_REQUEST_WORKED_SQL = `(${NORN_REQUEST_HELD_BY_PERSON_SQL} OR ${NORN_REQUEST_HELD_BY_HOST_SQL} OR EXISTS (SELECT 1 FROM data.agent_message_executions execution
+        JOIN data.runs run ON run.run_id=execution.run_id
       WHERE execution.channel_id=r.channel_id AND execution.source_message_id=r.delivery_message_id
-        AND execution.state IN ('accepted','running'))
+        AND execution.state IN ('accepted','running') AND run.status IN ('starting','running'))
     -- A turn that was interrupted (a newer message arrived) has not ended the work: its Instance goes on in its
     -- next turn and may still answer. Only once that Instance has ended a later turn is the request left behind.
     OR EXISTS (SELECT 1 FROM data.agent_message_executions cut JOIN data.instances going ON going.instance_id=cut.instance_id
@@ -123,9 +124,9 @@ const NORN_REQUEST_WORKED_SQL = `(${NORN_REQUEST_HELD_BY_PERSON_SQL} OR ${NORN_R
         AND quota.state IN ('offered','waiting','dispatching'))
     OR EXISTS (SELECT 1 FROM data.agent_launches launch JOIN data.runs run ON run.run_id=launch.run_id
       WHERE launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id
-        AND (launch.state IN ('prepared','queued','admitted','spawned') OR (run.status IN ('starting','running')
-          AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions taken
-            WHERE taken.run_id=launch.run_id AND taken.source_message_id=r.delivery_message_id))))
+        AND (launch.state IN ('prepared','queued','admitted') OR (run.status IN ('starting','running')
+          AND (launch.state='spawned' OR NOT EXISTS (SELECT 1 FROM data.agent_message_executions taken
+            WHERE taken.run_id=launch.run_id AND taken.source_message_id=r.delivery_message_id)))))
     OR (r.instance_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions taken
         WHERE taken.instance_id=r.instance_id AND taken.source_message_id=r.delivery_message_id)
       AND EXISTS (SELECT 1 FROM data.instances held WHERE held.instance_id=r.instance_id AND ${instanceTakesMessages("held")})))`;
@@ -177,9 +178,24 @@ const NORN_REQUEST_UNRELEASED_SQL = `(r.settled_at IS NOT NULL AND r.delivered_a
 /** A request a person held that has ended: its card still says it waits on them. */
 const NORN_REQUEST_UNCLOSED_SQL = "(r.settled_at IS NOT NULL AND r.holder_user_id IS NOT NULL AND r.released_at IS NULL)";
 const NORN_REQUEST_ABANDONED_SQL = `(r.delivered_at IS NOT NULL AND r.settled_at IS NULL AND NOT ${NORN_REQUEST_WORKED_SQL})`;
-/** No turn on request `r` ended in order or was cut short by a newer message: whatever took it failed, or nothing took it. */
+/**
+ * No turn on request `r` ended in order, was cut short by a newer message, or
+ * was intentionally stopped (`/kill`, `/kill all`, or Stop button): whatever
+ * took it failed/crashed unexpectedly, or nothing took it.
+ */
 const NORN_REQUEST_BROKE_OFF_SQL = `(NOT EXISTS (SELECT 1 FROM data.agent_message_executions ended
-    WHERE ended.channel_id=r.channel_id AND ended.source_message_id=r.delivery_message_id AND ended.state NOT IN ('failed','unknown')))`;
+    WHERE ended.channel_id=r.channel_id AND ended.source_message_id=r.delivery_message_id
+      AND ended.state IN ('completed','interrupted'))
+  AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions stopped_exec
+      JOIN data.runs stopped_run ON stopped_run.run_id=stopped_exec.run_id
+    WHERE stopped_exec.channel_id=r.channel_id AND stopped_exec.source_message_id=r.delivery_message_id
+      AND (stopped_run.metadata_json->'stopRequest' IS NOT NULL
+        OR stopped_run.metadata_json->'executionCancellation' IS NOT NULL))
+  AND NOT EXISTS (SELECT 1 FROM data.agent_launches stopped_launch
+      JOIN data.runs stopped_run ON stopped_run.run_id=stopped_launch.run_id
+    WHERE stopped_launch.channel_id=r.channel_id AND stopped_launch.trigger_id=r.delivery_message_id
+      AND (stopped_run.metadata_json->'stopRequest' IS NOT NULL
+        OR stopped_run.metadata_json->'executionCancellation' IS NOT NULL)))`;
 /**
  * Why the ledger's evidence holds a holding that was given up on: the host
  * handed the request to a new Instance because the work on it broke off.
