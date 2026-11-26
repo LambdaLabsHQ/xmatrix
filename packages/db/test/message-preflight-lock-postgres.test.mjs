@@ -76,7 +76,7 @@ integration("message append preflight retains its blocker; append recovers pre-C
       await assert.rejects(repository.append(input), error => {
         assert.equal(error.code, "55P03", "diagnostics preserve the original lock rejection");
         const [evidence] = databaseFailureEvidence(error);
-        assert.equal(evidence.queryName, "message_append_preflight_v4");
+        assert.equal(evidence.queryName, "message_append_preflight_v5");
         assert.equal(evidence.lockWait?.status, unavailable ? "unavailable" : "sampled");
         if (!unavailable) {
           assert.equal(evidence.lockWait.waiter.owner, "op:message.append", "a waiter names its operation");

@@ -1,6 +1,6 @@
 import { MessageAuthorityError } from "./message-authority-error.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
-import { lockChannelLifecycle, requireChannelCapability } from "./channel-capability-policy.js";
+import { lockChannelLifecycles, requireChannelCapability } from "./channel-capability-policy.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
 
@@ -16,9 +16,7 @@ export class AgentChannelAccessError extends MessageAuthorityError {
  * lock also prevents a starting Run from upgrading a shared Channel lock. */
 export async function lockAgentRunChannels(tx: DatabaseTransaction, sourceChannelId: string,
   targetChannelId: string): Promise<void> {
-  for (const channelId of [...new Set([sourceChannelId, targetChannelId])].sort()) {
-    await lockChannelLifecycle(tx, { channelId, capability: "runtime_new_work" });
-  }
+  await lockChannelLifecycles(tx, { channelIds: [sourceChannelId, targetChannelId], capability: "runtime_new_work" });
 }
 
 /** Typed broader capability: an exact active Run may collaborate only where

@@ -4,11 +4,13 @@ import { authorizeDingTalkEffect, finishDingTalkEffect, type DingTalkEffectAutho
 import { lockAgentRunChannels, requireAgentChannelAccess } from "./agent-channel-access.js";
 import type { QueryResultRow } from "pg";
 import { resolveMessageAgentTargets } from "./message-agent-targets.js";
-import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from "./channel-stop-fence.js";
-import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait.js";
+import { channelStopScope, fenceChannelRunsForStop } from "./channel-stop-fence.js";
+import { declaredWaitStandsSql, messageIsSpeech, messageSpeechSql } from "./message-attention-wait.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
+import { registrationAccess } from "./agent-registration-rows.js";
+import { registrationResourcesWithinOwnerScope } from "./registration-repository-authority.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections, messageSummons } from "./message-invocation-selections.js";
-import { ONBOARDING_MESSAGE_KIND, type AgentRegistrationKey, type ChannelMemberPresence, type MessageCommitReceipt } from "@xmatrix/protocol";
+import { ONBOARDING_MESSAGE_KIND, parseRegistrationResourceLimits, validateRegistrationAdmission, type AgentRegistrationKey, type ChannelMemberPresence, type MessageCommitReceipt } from "@xmatrix/protocol";
 import { readChannelInstances, type AgentInstanceRecord } from "./channel-agent-presence.js";
 import { ACTIVE_RUN_STATUS_SQL, connectorReceiptAnswersCommandSql, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
@@ -167,7 +169,15 @@ interface PreparedAppendContextRow extends QueryResultRow {
   channel_authorized: boolean;
 }
 
-interface AppendPreflightRow extends QueryResultRow {
+interface AppendPreflightTail extends QueryResultRow {
+  duplicate_exists: boolean;
+  reservation_channel_id: string | null;
+  reservation_sequence: string | number | null;
+  reservation_state: "reserved" | "committed" | null;
+  reservation_fact_digest: string | null;
+}
+
+interface AppendPreflightRow extends AppendPreflightTail {
   command_kind: string | null;
   request_digest: string | null;
   result_json: Record<string, unknown> | null;
@@ -175,7 +185,26 @@ interface AppendPreflightRow extends QueryResultRow {
   channel_mode: string | null;
   channel_metadata_json: Record<string, unknown> | null;
   channel_authorized: boolean | null;
-  duplicate_exists: boolean;
+}
+
+interface AppendAgentProbeRow extends QueryResultRow {
+  command_kind: string | null;
+  request_digest: string | null;
+  result_json: Record<string, unknown> | null;
+  run_channel_id: string | null;
+}
+
+interface AppendAgentAuthorizeRow extends AppendPreflightTail {
+  run_json: AppendRunRow | null;
+  binding_json: Record<string, unknown> | null;
+  members_json: Array<{ user_id: string; role: string }> | null;
+  access_json: Record<string, unknown> | null;
+  actor_channel_authorized: boolean;
+  target_agent_authorized: boolean;
+  target_owner_authorized: boolean;
+  source_agent_authorized: boolean;
+  source_owner_authorized: boolean;
+  origin_message_id: string | null;
 }
 
 interface AppendCommittedFactsRow extends QueryResultRow {
@@ -727,42 +756,101 @@ export async function expireAppAuthoredMessages(transaction: DatabaseTransaction
   spaceId: string; appId: string; cutoff: string; now: string; limit: number;
 }): Promise<number> {
   const rows = await transaction.query<QueryResultRow>({
-    name: "message_app_retention_due_v1",
-    text: `SELECT m.channel_id,m.message_id,m.entity_version,m.timeline_sequence,c.mode AS channel_mode
-      FROM data.messages m JOIN data.channels c ON c.space_id=m.space_id AND c.channel_id=m.channel_id
-      WHERE m.space_id=$1 AND m.author_kind='app' AND m.author_id=$2 AND m.deleted_at IS NULL
-        AND m.created_at <= $3::timestamptz
-      ORDER BY m.created_at,m.message_id LIMIT $4 FOR UPDATE OF m SKIP LOCKED`,
-    values: [input.spaceId, input.appId, input.cutoff, input.limit], maxRows: input.limit,
+    name: "message_app_retention_delete_batch_v1",
+    text: `WITH due AS MATERIALIZED (
+        SELECT m.channel_id,m.message_id,m.entity_version,m.entity_version+1 AS next_version,
+          m.timeline_sequence,c.mode AS channel_mode
+        FROM data.messages m JOIN data.channels c ON c.space_id=m.space_id AND c.channel_id=m.channel_id
+        WHERE m.space_id=$1 AND m.author_kind='app' AND m.author_id=$2 AND m.deleted_at IS NULL
+          AND m.created_at <= $3::timestamptz
+        ORDER BY m.created_at,m.message_id LIMIT $4 FOR UPDATE OF m SKIP LOCKED
+      ), deleted AS MATERIALIZED (
+        UPDATE data.messages m SET deleted_at = $5, entity_version = due.next_version,
+          invocation_input_version = due.next_version, updated_at = $5,
+          content_hash = $6, payload_kind = 'redacted', payload_ref = $7,
+          archive_source_json = NULL, field_presence_base64 = NULL,
+          payload_bundle_base64 = NULL, legacy_body = NULL, body_hash = NULL,
+          sender_snapshot_digest = NULL, record_digest = NULL, record_encoded_bytes = NULL,
+          preview_json = NULL
+        FROM due
+        WHERE m.space_id = $1 AND m.channel_id = due.channel_id
+          AND m.message_id = due.message_id AND m.entity_version = due.entity_version
+        RETURNING due.channel_id,due.message_id,due.next_version AS entity_version,
+          due.timeline_sequence,due.channel_mode
+      ), normalized_outbox AS (
+        UPDATE data.outbox o SET aggregate_sequence = 1
+        FROM deleted d
+        WHERE o.outbox_id = 'message:' || $1 || ':' || d.message_id || ':1'
+          AND o.space_id = $1 AND o.topic = 'message'
+          AND o.aggregate_kind = 'message' AND o.aggregate_id = d.message_id
+          AND o.aggregate_sequence = d.timeline_sequence AND o.aggregate_sequence <> 1
+          AND o.payload_json @> '{"entityVersion":1}'::jsonb
+          AND o.payload_json->>'messageId' = d.message_id
+          AND o.payload_json->>'channelId' = d.channel_id
+          AND o.payload_json->>'sequence' = d.timeline_sequence::text
+      )
+      SELECT channel_id,message_id,entity_version,timeline_sequence,channel_mode FROM deleted`,
+    values: [input.spaceId, input.appId, input.cutoff, input.limit, input.now,
+      REDACTED_CONTENT_HASH, `redacted:${REDACTED_CONTENT_HASH}`],
+    maxRows: input.limit,
   });
-  for (const row of rows) {
+  if (!rows.length) return 0;
+  const items = rows.map((row) => {
     const channelId = String(row.channel_id), messageId = String(row.message_id);
-    const entityVersion = Number(row.entity_version) + 1;
-    await transaction.query({
-      name: "message_app_retention_delete_v1",
-      text: `UPDATE data.messages SET deleted_at = $4, entity_version = $5, invocation_input_version = $5, updated_at = $4,
-        content_hash = $6, payload_kind = 'redacted', payload_ref = $7,
-        archive_source_json = NULL, field_presence_base64 = NULL,
-        payload_bundle_base64 = NULL, legacy_body = NULL, body_hash = NULL,
-        sender_snapshot_digest = NULL, record_digest = NULL, record_encoded_bytes = NULL,
-        preview_json = NULL
-        WHERE space_id = $1 AND channel_id = $2 AND message_id = $3 AND entity_version = $8`,
-      values: [input.spaceId, channelId, messageId, input.now, entityVersion, REDACTED_CONTENT_HASH,
-        `redacted:${REDACTED_CONTENT_HASH}`, Number(row.entity_version)],
-      maxRows: 0,
-    });
-    const result = {
-      messageId, channelId, spaceId: input.spaceId,
-      visibilityScopeId: channelVisibilityScope({ mode: String(row.channel_mode), channelId, spaceId: input.spaceId }),
-      sequence: Number(row.timeline_sequence), entityVersion, committedAt: input.now, deletedAt: input.now,
+    const entityVersion = Number(row.entity_version);
+    return {
+      channel_id: channelId,
+      message_id: messageId,
+      entity_version: entityVersion,
+      command_id: `retention:${messageId}`.slice(0, 200),
+      result_json: {
+        messageId, channelId, spaceId: input.spaceId,
+        visibilityScopeId: channelVisibilityScope({ mode: String(row.channel_mode), channelId, spaceId: input.spaceId }),
+        sequence: Number(row.timeline_sequence), entityVersion, committedAt: input.now, deletedAt: input.now,
+      },
     };
-    await finalizeMutation(transaction, {
-      spaceId: input.spaceId, channelId, messageId, commandId: `retention:${messageId}`.slice(0, 200),
-      commandKind: "message-delete", requestDigest: REDACTED_CONTENT_HASH, entityVersion,
-      mutationKind: "delete", mutation: { redacted: true, retention: input.appId },
-      principal: { kind: "system", id: "xmatrix" }, result, now: input.now,
-    });
-  }
+  });
+  await transaction.query({
+    name: "message_app_retention_finalize_batch_v1",
+    text: `WITH items AS MATERIALIZED (
+        SELECT * FROM jsonb_to_recordset($2::jsonb) AS item(
+          channel_id text,message_id text,entity_version bigint,
+          command_id text,result_json jsonb
+        )
+      ), ledger AS (
+        INSERT INTO data.message_mutations
+          (space_id,channel_id,message_id,entity_version,mutation_kind,mutation_json,
+           actor_kind,actor_id,occurred_at)
+        SELECT $1,item.channel_id,item.message_id,item.entity_version,'delete',$3::jsonb,
+          'system','xmatrix',$4
+        FROM items item
+      ), channel_deltas AS (
+        SELECT channel_id,COUNT(*)::bigint AS delta FROM items GROUP BY channel_id
+      ), counters AS (
+        INSERT INTO data.channel_content_counters
+          (space_id,channel_id,content_revision,updated_at)
+        SELECT $1,cd.channel_id,cd.delta,$4 FROM channel_deltas cd
+        ON CONFLICT (space_id,channel_id) DO UPDATE SET
+          content_revision = data.channel_content_counters.content_revision + EXCLUDED.content_revision,
+          updated_at = EXCLUDED.updated_at
+      ), outbox_rows AS (
+        INSERT INTO data.outbox
+          (outbox_id,space_id,topic,aggregate_kind,aggregate_id,aggregate_sequence,
+           payload_json,status,attempts,available_at,lease_until,created_at,updated_at)
+        SELECT 'message:'||$1||':'||item.message_id||':'||item.entity_version,
+          $1,'message','message',item.message_id,item.entity_version,
+          item.result_json,'pending',0,$4,NULL,$4,$4
+        FROM items item
+      )
+      INSERT INTO data.idempotency_keys
+        (space_id,idempotency_key,command_kind,request_digest,result_json,
+         commit_sequence,created_at,expires_at)
+      SELECT $1,item.command_id,'message-delete',$5,item.result_json,NULL,$4,$6
+      FROM items item`,
+    values: [input.spaceId, JSON.stringify(items), JSON.stringify({ redacted: true, retention: input.appId }),
+      input.now, REDACTED_CONTENT_HASH, new Date(Date.parse(input.now) + IDEMPOTENCY_TTL_MS).toISOString()],
+    maxRows: 0,
+  });
   return rows.length;
 }
 
@@ -828,46 +916,85 @@ async function messageLiveRouting(
   channelId: string,
   attention: readonly { subject_id: string; kind: string }[],
 ): Promise<MessageLiveRouting> {
-  const recipientUserIds = await liveRecipientUserIds(transaction, spaceId, channelId);
+  // Read live recipients, active Run owners, and notified attention summaries in
+  // one statement so every append delivers immediately without three tail round trips.
+  const row = (await transaction.query<QueryResultRow & {
+    recipient_count: string | number;
+    recipient_user_ids: string[] | null;
+    instance_owner_user_ids: string[] | null;
+    attention_summaries: Array<{
+      subject_id: string; unread_count: string | number; message_id: string; kind: string;
+      timeline_sequence: string | number; created_at: Date | string; kinds: string[];
+    }> | null;
+  }>({
+    name: "message_live_routing_v1",
+    text: `WITH recipients AS MATERIALIZED (
+        SELECT recipient.user_id, COUNT(*) OVER () AS recipient_count FROM (
+          SELECT DISTINCT m.user_id FROM data.space_members m JOIN data.channels c
+            ON c.space_id = m.space_id
+          WHERE c.space_id = $1 AND c.channel_id = $2
+            AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
+              principalKindSql: "'user'", principalIdSql: "m.user_id" })}
+        ) recipient ORDER BY recipient.user_id LIMIT 10000
+      ), owners AS (
+        SELECT DISTINCT r.owner_user_id FROM data.runs r
+        WHERE r.channel_id = $2 AND r.status IN (${ACTIVE_RUN_STATUS_SQL})
+        ORDER BY r.owner_user_id LIMIT 513
+      ), summaries AS (
+        SELECT subject.subject_id,COUNT(*) AS unread_count,
+          (ARRAY_AGG(a.message_id ORDER BY a.timeline_sequence DESC))[1] AS message_id,
+          (ARRAY_AGG(a.kind ORDER BY a.timeline_sequence DESC))[1] AS kind,
+          MAX(a.timeline_sequence) AS timeline_sequence,
+          (ARRAY_AGG(a.created_at ORDER BY a.timeline_sequence DESC))[1] AS created_at,
+          ARRAY_AGG(DISTINCT a.kind) AS kinds
+        FROM unnest($3::text[]) subject(subject_id)
+        JOIN recipients rec ON rec.user_id = substr(subject.subject_id, 6)
+        JOIN data.message_attention a ON a.space_id=$1 AND a.channel_id=$2 AND a.subject_id=subject.subject_id
+        WHERE (${declaredWaitStandsSql("a")} OR a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
+          WHERE cursor_row.space_id=$1 AND cursor_row.channel_id=$2 AND cursor_row.subject_id=subject.subject_id), 0))
+        GROUP BY subject.subject_id
+      )
+      SELECT
+        COALESCE((SELECT MAX(recipient_count) FROM recipients), 0) AS recipient_count,
+        COALESCE((SELECT jsonb_agg(user_id ORDER BY user_id) FROM recipients), '[]'::jsonb) AS recipient_user_ids,
+        COALESCE((SELECT jsonb_agg(owner_user_id ORDER BY owner_user_id) FROM owners), '[]'::jsonb) AS instance_owner_user_ids,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'subject_id', s.subject_id, 'unread_count', s.unread_count, 'message_id', s.message_id,
+          'kind', s.kind, 'timeline_sequence', s.timeline_sequence,
+          'created_at', s.created_at, 'kinds', s.kinds
+        )) FROM summaries s), '[]'::jsonb) AS attention_summaries`,
+    values: [spaceId, channelId, attention.map((item) => item.subject_id)],
+    maxRows: 1,
+  }))[0];
+  if (Number(row?.recipient_count ?? 0) > 10_000) throw new MessageAuthorityError(
+    "live_recipient_limit_exceeded", 503, "Live recipients exceed 10000",
+  );
+  const recipientUserIds = Array.isArray(row?.recipient_user_ids)
+    ? row.recipient_user_ids.map((id) => String(id)) : [];
+  const instanceOwnerUserIds = Array.isArray(row?.instance_owner_user_ids)
+    ? row.instance_owner_user_ids.map((id) => String(id)) : [];
+  if (instanceOwnerUserIds.length > 512) throw new MessageAuthorityError(
+    "live_recipient_limit_exceeded", 503, "Active Run owners exceed 512",
+  );
   const recipientSet = new Set(recipientUserIds);
   const notifications = new Map<string, Record<string, unknown>>();
-  const notified = attention.filter(row => recipientSet.has(row.subject_id.slice("user:".length)));
-  // A mention notification carries the recipient's unread attention summary
-  // (everything after their acknowledged cursor), exactly as a later catalog
-  // read would report it; without it the client cannot badge the Channel.
-  const summaries = new Map((notified.length ? await transaction.query<QueryResultRow & {
-    subject_id: string; unread_count: string | number; message_id: string; kind: string;
-    timeline_sequence: string | number; created_at: Date | string; kinds: string[];
-  }>({
-    name: "message_live_routing_attention_summary_v3",
-    text: `SELECT subject.subject_id,COUNT(*) AS unread_count,
-        (ARRAY_AGG(a.message_id ORDER BY a.timeline_sequence DESC))[1] AS message_id,
-        (ARRAY_AGG(a.kind ORDER BY a.timeline_sequence DESC))[1] AS kind,
-        MAX(a.timeline_sequence) AS timeline_sequence,
-        (ARRAY_AGG(a.created_at ORDER BY a.timeline_sequence DESC))[1] AS created_at,
-        ARRAY_AGG(DISTINCT a.kind) AS kinds
-      FROM unnest($3::text[]) subject(subject_id)
-      JOIN data.message_attention a ON a.space_id=$1 AND a.channel_id=$2 AND a.subject_id=subject.subject_id
-      WHERE (${declaredWaitStandsSql("a")} OR a.timeline_sequence>COALESCE((SELECT acknowledged_sequence FROM data.delivery_cursors cursor_row
-        WHERE cursor_row.space_id=$1 AND cursor_row.channel_id=$2 AND cursor_row.subject_id=subject.subject_id), 0))
-      GROUP BY subject.subject_id`,
-    values: [spaceId, channelId, notified.map(row => row.subject_id)], maxRows: notified.length,
-  }) : []).map(row => {
-    const at = row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at);
-    return [row.subject_id, { channelId, unreadAttentionCount: Number(row.unread_count), lastAttentionAt: at,
-      lastMessageId: row.message_id, lastMessageSequence: Number(row.timeline_sequence),
-      primaryTriggerKind: row.kind,
-      triggerKinds: ["broadcast", "mention", "reply"].filter(kind => row.kinds.includes(kind)), updatedAt: at }];
+  const notified = attention.filter((item) => recipientSet.has(item.subject_id.slice("user:".length)));
+  const summaries = new Map((Array.isArray(row?.attention_summaries) ? row.attention_summaries : []).map((summary) => {
+    const at = iso(summary.created_at) ?? String(summary.created_at);
+    return [summary.subject_id, { channelId, unreadAttentionCount: Number(summary.unread_count), lastAttentionAt: at,
+      lastMessageId: summary.message_id, lastMessageSequence: Number(summary.timeline_sequence),
+      primaryTriggerKind: summary.kind,
+      triggerKinds: ["broadcast", "mention", "reply"].filter((kind) => summary.kinds.includes(kind)), updatedAt: at }];
   }));
-  for (const row of notified) {
-    const attentionSummary = summaries.get(row.subject_id);
-    notifications.set(row.subject_id.slice("user:".length), { userId: row.subject_id.slice("user:".length),
-      notification: { reason: row.kind, ...(attentionSummary ? { attention: attentionSummary } : {}) } });
+  for (const item of notified) {
+    const attentionSummary = summaries.get(item.subject_id);
+    notifications.set(item.subject_id.slice("user:".length), { userId: item.subject_id.slice("user:".length),
+      notification: { reason: item.kind, ...(attentionSummary ? { attention: attentionSummary } : {}) } });
   }
   return {
     recipientUserIds,
     recipientNotifications: [...notifications.values()],
-    instanceOwnerUserIds: await liveInstanceOwnerUserIds(transaction, channelId),
+    instanceOwnerUserIds,
   };
 }
 
@@ -1531,9 +1658,13 @@ export class PostgresMessageRepository {
         channelId: string; messageId: string; ownerUserId: string; requesterInstanceId?: string;
       } | undefined;
       let runOwnerUserId: string | undefined;
+      let sequenceReservation: {
+        channel_id: string | null; sequence: string | number | null;
+        state: "reserved" | "committed" | null; fact_digest: string | null;
+      };
       if (!input.runProof) {
         const preflight = (await transaction.query<AppendPreflightRow>({
-          name: "message_append_preflight_v4",
+          name: "message_append_preflight_v5",
           text: `WITH message_input AS (
               SELECT $1::text AS space_id,$3::text AS channel_id,
                 $4::text AS principal_kind,$5::text AS principal_id
@@ -1541,7 +1672,11 @@ export class PostgresMessageRepository {
               SELECT command_kind,request_digest,result_json FROM data.idempotency_keys
               WHERE space_id=$1 AND idempotency_key=$2 LIMIT 1
             ), ${channelCapabilityCte({ capability: "message_append",
-              inputCte: "message_input" })} SELECT
+              inputCte: "message_input" })}, reservation AS (
+              SELECT channel_id,sequence,state,fact_digest
+              FROM data.message_sequence_reservations
+              WHERE NOT EXISTS (SELECT 1 FROM replay) AND space_id=$1 AND command_id=$2 LIMIT 1
+            ) SELECT
               (SELECT command_kind FROM replay) AS command_kind,
               (SELECT request_digest FROM replay) AS request_digest,
               (SELECT result_json FROM replay) AS result_json,
@@ -1554,7 +1689,11 @@ export class PostgresMessageRepository {
                   AND message.space_id=$1
                   AND (message.message_id=$6 OR
                     (message.channel_id=$3 AND message.timeline_sequence=$7))
-                LIMIT 1) AS duplicate_exists`,
+                LIMIT 1) AS duplicate_exists,
+              (SELECT channel_id FROM reservation) AS reservation_channel_id,
+              (SELECT sequence FROM reservation) AS reservation_sequence,
+              (SELECT state FROM reservation) AS reservation_state,
+              (SELECT fact_digest FROM reservation) AS reservation_fact_digest`,
           values: [spaceId, commandId, channelId, principal.kind, principal.id,
             messageId, sequence], maxRows: 1,
         }))[0]!;
@@ -1576,54 +1715,198 @@ export class PostgresMessageRepository {
         if (preflight.duplicate_exists) throw new MessageAuthorityError(
           "message_exists", 409, "Message already exists",
         );
+        sequenceReservation = {
+          channel_id: preflight.reservation_channel_id,
+          sequence: preflight.reservation_sequence,
+          state: preflight.reservation_state,
+          fact_digest: preflight.reservation_fact_digest,
+        };
         authorizedPrincipal = principal;
       } else {
-        const replays = await transaction.query<QueryResultRow & {
-          command_kind: string; request_digest: string; result_json: Record<string, unknown>;
-        }>({
-          name: "message_append_idempotency_read_v1",
-          text: `SELECT command_kind, request_digest, result_json FROM data.idempotency_keys
-            WHERE space_id = $1 AND idempotency_key = $2 LIMIT 1`,
-          values: [spaceId, commandId], maxRows: 1,
-        });
-        if (replays[0]) {
-          if (replays[0].command_kind !== "message-append" ||
-              replays[0].request_digest !== requestDigest) {
+        if (principal.kind !== "agent") throw new MessageAuthorityError(
+          "invalid_run_proof", 403, "Only an Agent may present an Agent Run proof",
+        );
+        const proof = {
+          runId: bounded(input.runProof.runId, "runProof.runId"),
+          executionKey: bounded(input.runProof.executionKey, "runProof.executionKey"),
+          instanceId: bounded(input.runProof.instanceId, "runProof.instanceId"),
+        };
+        // Unlocked discovery precedes the Channel lock so a waiting append never
+        // holds a Run share lock ahead of a concurrent Channel stop (HUB-77).
+        const probe = (await transaction.query<AppendAgentProbeRow>({
+          name: "message_append_agent_probe_v1",
+          text: `WITH replay AS MATERIALIZED (
+              SELECT command_kind,request_digest,result_json FROM data.idempotency_keys
+              WHERE space_id=$1 AND idempotency_key=$2 LIMIT 1
+            ), run_probe AS (
+              SELECT r.channel_id FROM data.runs r JOIN data.instances i ON i.run_id=r.run_id
+              WHERE NOT EXISTS (SELECT 1 FROM replay) AND r.run_id=$3 AND i.instance_id=$4 LIMIT 1
+            ) SELECT
+              (SELECT command_kind FROM replay) AS command_kind,
+              (SELECT request_digest FROM replay) AS request_digest,
+              (SELECT result_json FROM replay) AS result_json,
+              (SELECT channel_id FROM run_probe) AS run_channel_id`,
+          values: [spaceId, commandId, proof.runId, proof.instanceId], maxRows: 1,
+        }))[0];
+        if (probe?.command_kind !== null && probe?.command_kind !== undefined) {
+          if (probe.command_kind !== "message-append" || probe.request_digest !== requestDigest) {
             throw new MessageAuthorityError("idempotency_conflict", 409, "Command id was reused");
           }
-          return replays[0].result_json;
+          return probe.result_json!;
         }
-        const authorized = await effectiveAppendPrincipal(transaction, {
-          spaceId, channelId, principal, runProof: input.runProof,
-        }, "message_append");
-        authorizedPrincipal = authorized.principal;
-        runOwnerUserId = authorized.runOwnerUserId;
-        origin = authorized.agentRunIdentity?.origin;
-        await messageChannelCapability(transaction, {
-          spaceId, channelId, principal: authorizedPrincipal,
-        }, "message_append");
-        const duplicates = await transaction.query({
-          name: "message_append_identity_conflict_v1",
-          text: `SELECT message_id FROM data.messages
-            WHERE space_id = $1 AND (message_id = $2 OR (channel_id = $3 AND timeline_sequence = $4))
-            LIMIT 1`,
-          values: [spaceId, messageId, channelId, sequence], maxRows: 1,
+        if (!probe?.run_channel_id) throw new MessageAuthorityError(
+          "agent_run_forbidden", 403, "Message requires its exact active Agent Run",
+        );
+        await lockAgentRunChannels(transaction, probe.run_channel_id, channelId);
+        const auth = (await transaction.query<AppendAgentAuthorizeRow>({
+          name: "message_append_agent_authorize_v1",
+          text: `WITH run_row AS MATERIALIZED (
+              SELECT r.run_id,r.owner_user_id,r.channel_id,r.status AS run_status,
+                r.metadata_json,i.status AS instance_status,i.channel_id AS instance_channel_id,
+                i.channel_instance_id,i.presentation_json
+              FROM data.runs r JOIN data.instances i ON i.run_id=r.run_id
+              WHERE r.run_id=$3 AND i.instance_id=$4 LIMIT 1 FOR SHARE OF r,i
+            ), binding AS MATERIALIZED (
+              SELECT b.space_id,b.owner_user_id,b.machine_id,b.harness,b.actor_user_id,
+                b.allocation_id,b.authorization_digest,b.grant_revision,b.grant_execution_revision,
+                b.policy_revision,b.policy_execution_revision,b.requested_json
+              FROM run_row rr
+              JOIN data.run_agent_registrations b ON b.run_id=rr.run_id AND b.owner_user_id=rr.owner_user_id
+              JOIN data.channels c ON c.channel_id=rr.channel_id AND c.space_id=b.space_id
+              WHERE rr.channel_id=$5 LIMIT 1 FOR SHARE OF b
+            ), members AS MATERIALIZED (
+              SELECT m.user_id,m.role FROM data.space_members m
+              WHERE EXISTS (SELECT 1 FROM binding)
+                AND m.space_id=(SELECT space_id FROM binding)
+                AND m.user_id IN ((SELECT owner_user_id FROM binding),(SELECT actor_user_id FROM binding))
+              ORDER BY m.user_id FOR SHARE OF m
+            ), access_row AS MATERIALIZED (
+              SELECT a.grant_state,a.grant_revision,a.grant_execution_revision,a.grant_limits,
+                a.policy_state,a.policy_revision,a.policy_execution_revision,a.policy_limits
+              FROM binding b JOIN data.space_agent_registration_access a
+                ON a.space_id=b.space_id AND a.owner_user_id=b.owner_user_id
+                AND a.machine_id=b.machine_id AND a.harness=b.harness
+              LIMIT 1 FOR SHARE OF a
+            ), reservation AS (
+              SELECT channel_id,sequence,state,fact_digest
+              FROM data.message_sequence_reservations
+              WHERE space_id=$1 AND command_id=$2 LIMIT 1
+            ), origin_exec AS (
+              SELECT source_message_id FROM data.agent_message_executions
+              WHERE $5<>$6 AND run_id=$3 AND channel_id=$5 AND state IN ('accepted','running')
+              ORDER BY source_sequence DESC LIMIT 1
+            ) SELECT
+              (SELECT row_to_json(rr) FROM run_row rr) AS run_json,
+              (SELECT row_to_json(b) FROM binding b) AS binding_json,
+              (SELECT COALESCE(jsonb_agg(jsonb_build_object('user_id',m.user_id,'role',m.role)),'[]'::jsonb) FROM members m) AS members_json,
+              (SELECT row_to_json(a) FROM access_row a) AS access_json,
+              EXISTS (SELECT 1 FROM binding b JOIN data.channels c ON c.space_id=b.space_id AND c.channel_id=$5
+                WHERE ${channelCapabilityPredicate({ capability: "runtime_continue", channelAlias: "c",
+                  principalKindSql: "'user'", principalIdSql: "b.actor_user_id" })}) AS actor_channel_authorized,
+              EXISTS (SELECT 1 FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$6
+                AND ${channelCapabilityPredicate({ capability: "message_append", channelAlias: "c",
+                  principalKindSql: "'agent'", principalIdSql: "$4" })}) AS target_agent_authorized,
+              EXISTS (SELECT 1 FROM run_row rr JOIN data.channels c ON c.space_id=$1 AND c.channel_id=$6
+                WHERE ${channelCapabilityPredicate({ capability: "message_append", channelAlias: "c",
+                  principalKindSql: "'user'", principalIdSql: "rr.owner_user_id" })}) AS target_owner_authorized,
+              EXISTS (SELECT 1 FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$5
+                AND ${channelCapabilityPredicate({ capability: "message_active_command", channelAlias: "c",
+                  principalKindSql: "'agent'", principalIdSql: "$4" })}) AS source_agent_authorized,
+              EXISTS (SELECT 1 FROM run_row rr JOIN data.channels c ON c.space_id=$1 AND c.channel_id=$5
+                WHERE ${channelCapabilityPredicate({ capability: "message_active_command", channelAlias: "c",
+                  principalKindSql: "'user'", principalIdSql: "rr.owner_user_id" })}) AS source_owner_authorized,
+              EXISTS (SELECT 1 FROM data.messages message
+                WHERE message.space_id=$1 AND (message.message_id=$7 OR
+                  (message.channel_id=$6 AND message.timeline_sequence=$8)) LIMIT 1) AS duplicate_exists,
+              (SELECT channel_id FROM reservation) AS reservation_channel_id,
+              (SELECT sequence FROM reservation) AS reservation_sequence,
+              (SELECT state FROM reservation) AS reservation_state,
+              (SELECT fact_digest FROM reservation) AS reservation_fact_digest,
+              (SELECT source_message_id FROM origin_exec) AS origin_message_id`,
+          values: [spaceId, commandId, proof.runId, proof.instanceId, probe.run_channel_id,
+            channelId, messageId, sequence], maxRows: 1,
+        }))[0];
+        const run = auth?.run_json;
+        if (run?.channel_id !== probe.run_channel_id) throw new MessageAuthorityError(
+          "agent_run_forbidden", 403, "Agent Run Channel changed",
+        );
+        const metadata = run.metadata_json ?? {};
+        if (proof.instanceId !== principal.id ||
+            metadata.executionKey !== proof.executionKey || run.instance_channel_id !== run.channel_id ||
+            !["starting", "running"].includes(run.run_status) ||
+            metadata.instanceDeletion !== undefined || metadata.instanceHandoff !== undefined) {
+          throw new MessageAuthorityError(
+            "agent_run_forbidden", 403, "Message requires its exact active Agent Run",
+          );
+        }
+        const binding = auth?.binding_json;
+        if (!binding) throw new MessageAuthorityError(
+          "registration_run_admission_missing", 403, "Registration no longer authorizes this Run",
+        );
+        if (!auth.actor_channel_authorized) throw new MessageAuthorityError(
+          "channel_not_found", 404, "Registration no longer authorizes this Run",
+        );
+        if (!auth.access_json) throw new MessageAuthorityError(
+          "registration_not_granted", 403, "Registration no longer authorizes this Run",
+        );
+        const key = {
+          spaceId: String(binding.space_id), ownerUserId: String(binding.owner_user_id),
+          machineId: String(binding.machine_id), harness: String(binding.harness),
+        };
+        const actorUserId = String(binding.actor_user_id);
+        const members = Array.isArray(auth.members_json) ? auth.members_json : [];
+        const decision = validateRegistrationAdmission({
+          key, ...registrationAccess(auth.access_json),
+          ownerIsMember: members.some((member) => member.user_id === key.ownerUserId),
+          callerMayLaunch: members.some((member) => member.user_id === actorUserId &&
+            (["owner", "admin", "member"].includes(String(member.role)) ||
+              (member.role === "participant" && actorUserId === key.ownerUserId))),
+          requested: registrationResourcesWithinOwnerScope(parseRegistrationResourceLimits(binding.requested_json)),
+          phase: run.run_status === "starting" ? "admission" : "continuation",
+          fence: {
+            key,
+            grantRevision: Number(binding.grant_revision),
+            grantExecutionRevision: Number(binding.grant_execution_revision),
+            policyRevision: Number(binding.policy_revision),
+            policyExecutionRevision: Number(binding.policy_execution_revision),
+          },
         });
-        if (duplicates[0]) throw new MessageAuthorityError(
+        if (!decision.allowed) throw new MessageAuthorityError(
+          `registration_${decision.reason}`, 403, "Registration no longer authorizes this Run",
+        );
+        const channelInstanceId = Number(run.channel_instance_id);
+        if (!Number.isSafeInteger(channelInstanceId) || channelInstanceId < 1) {
+          throw new MessageAuthorityError(
+            "agent_run_identity_invalid", 503, "Agent Run Instance identity is unavailable", true,
+          );
+        }
+        if (run.channel_id !== channelId) {
+          if (key.spaceId !== spaceId || metadata.executionCancellation !== undefined) {
+            throw new MessageAuthorityError("agent_run_forbidden", 403, "agent_run_forbidden");
+          }
+          if (!auth.source_agent_authorized || !auth.source_owner_authorized ||
+              !auth.target_agent_authorized || !auth.target_owner_authorized) {
+            throw new MessageAuthorityError("channel_not_found", 404, "channel_not_found");
+          }
+          origin = {
+            channelId: run.channel_id, runId: proof.runId,
+            ...(auth.origin_message_id ? { messageId: auth.origin_message_id } : {}),
+          };
+        }
+        requireAuthorizedChannel(auth.target_agent_authorized, messageCapabilityError);
+        if (auth.duplicate_exists) throw new MessageAuthorityError(
           "message_exists", 409, "Message already exists",
         );
+        sequenceReservation = {
+          channel_id: auth.reservation_channel_id,
+          sequence: auth.reservation_sequence,
+          state: auth.reservation_state,
+          fact_digest: auth.reservation_fact_digest,
+        };
+        authorizedPrincipal = principal;
+        runOwnerUserId = bounded(run.owner_user_id, "run.ownerUserId");
       }
-      const sequenceReservation = (await transaction.query<QueryResultRow & {
-        channel_id: string; sequence: string | number; state: "reserved" | "committed";
-        fact_digest: string | null;
-      }>({
-        name: "message_sequence_reservation_verify_v1",
-        text: `SELECT channel_id,sequence,state,fact_digest
-          FROM data.message_sequence_reservations
-          WHERE space_id=$1 AND command_id=$2 LIMIT 1`,
-        values: [spaceId, commandId], maxRows: 1,
-      }))[0];
-      if (!sequenceReservation || sequenceReservation.channel_id !== channelId ||
+      if (!sequenceReservation.channel_id || sequenceReservation.channel_id !== channelId ||
           Number(sequenceReservation.sequence) !== sequence ||
           (sequenceReservation.state === "committed" &&
             sequenceReservation.fact_digest !== recordDigest)) {
@@ -1641,6 +1924,7 @@ export class PostgresMessageRepository {
         await authorizeMessageInvocationSelections(transaction, { spaceId, channelId,
           principal: authorizedPrincipal, body: input.attentionBody ?? "", bodyHash,
           revision: 1, selections: input.invocationSelections });
+      const preAuthorizedTargets = new Set<string>();
       if (input.attentionBody !== undefined) {
         if (typeof input.attentionBody !== "string") throw new MessageAuthorityError(
           "invalid_command", 400, "attentionBody is invalid",
@@ -1651,6 +1935,7 @@ export class PostgresMessageRepository {
           spaceId, channelId, body: attentionBody,
           senderSubjectId: `${senderKind}:${senderId}`,
         });
+        for (const subjectId of targets.keys()) preAuthorizedTargets.add(subjectId);
         agentTargets = await resolveMessageAgentTargets(transaction, { spaceId, channelId, messageId, body: attentionBody });
         if (!agentTargets) throw new MessageAuthorityError("invocation_target_limit_exceeded", 400,
           "Existing-instance addresses exceed the message count or storage bound");
@@ -1698,8 +1983,8 @@ export class PostgresMessageRepository {
           "attention_target_limit_exceeded", 400, "Attention targets exceed 1000",
         );
       }
-      const subjectIds = [...targets.keys()];
-      if (subjectIds.length > 0) {
+      const uncheckedSubjectIds = [...targets.keys()].filter((subjectId) => !preAuthorizedTargets.has(subjectId));
+      if (uncheckedSubjectIds.length > 0) {
         const valid = await transaction.query<QueryResultRow & { subject_id: string }>({
           name: "message_attention_authorize_v3",
           text: `SELECT requested.subject_id FROM data.channels c
@@ -1708,9 +1993,9 @@ export class PostgresMessageRepository {
               AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c",
                 principalKindSql: "split_part(requested.subject_id, ':', 1)",
                 principalIdSql: "substr(requested.subject_id, CASE WHEN split_part(requested.subject_id, ':', 1)='user' THEN 6 ELSE 7 END)" })}`,
-          values: [spaceId, channelId, subjectIds], maxRows: subjectIds.length,
+          values: [spaceId, channelId, uncheckedSubjectIds], maxRows: uncheckedSubjectIds.length,
         });
-        if (new Set(valid.map((row) => row.subject_id)).size !== subjectIds.length) {
+        if (new Set(valid.map((row) => row.subject_id)).size !== uncheckedSubjectIds.length) {
           throw new MessageAuthorityError(
             "invalid_attention_target", 400, "Attention target cannot read this Channel",
           );
@@ -1733,6 +2018,23 @@ export class PostgresMessageRepository {
         await fenceChannelRunsForStop(transaction, { spaceId, channelId, scope: stopScope,
           actorUserId: stopActorUserId, sourceMessageId: messageId, at: sentAt });
       }
+      // The launch request is kept only on a message that summons someone, so a
+      // plain message never looks addressed (message-asks RECEIVER_SQL).
+      const launch = input.launch === true && (invocationSelections !== undefined ||
+        messageSummons(input.attentionBody ?? ""));
+      const agentInvocationTargetsJson = agentTargets.length || invocationSelections || launch
+        ? JSON.stringify({
+            entityVersion: 1, bodyHash, targets: agentTargets,
+            ...(invocationSelections ? { selections: invocationSelections } : {}),
+            ...(launch ? { launch: true } : {}),
+          })
+        : null;
+      // Only a message someone wrote speaks for its sender. A card or notice the Hub writes
+      // under a person's identity, or an Agent's activity entry, answers nothing and moves nobody on.
+      const spoke = messageIsSpeech(senderKind, messageKind);
+      const attentionEntries = [...targets].map(([subjectId, kind]) => ({
+        subject_id: subjectId, kind, ...(waitsOn.has(subjectId) ? { waits: true } : {}),
+      }));
       // timeline_sequence is scoped to one Channel, while search_rank_sequence is
       // unique across every message in a Space. Deriving the latter from the
       // former makes the first (or second) message in every new Channel collide.
@@ -1741,10 +2043,10 @@ export class PostgresMessageRepository {
       // A preflight that waited on a concurrent writer keeps its old statement
       // snapshot. The insert itself must arbitrate the durable message identity.
       const committedFacts = (await transaction.query<AppendCommittedFactsRow>({
-        name: "message_append_commit_facts_v5",
+        name: "message_append_commit_facts_v6",
         text: `WITH search_rank AS MATERIALIZED (
             SELECT 'pg:'||lpad(nextval('data.search_rank_sequence_v1')::text,20,'0') AS value
-          ), message_row AS (
+          ), message_row AS MATERIALIZED (
             INSERT INTO data.messages
               (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,
                author_id,message_kind,content_hash,payload_kind,payload_ref,archive_source_json,
@@ -1753,10 +2055,11 @@ export class PostgresMessageRepository {
                field_presence_base64,payload_bundle_base64,legacy_body,body_hash,
                sender_snapshot_digest,record_digest,record_encoded_bytes,source_family_sequence,
                created_at,invocation_input_version,agent_final_reply_json,
-               origin_channel_id,origin_message_id,origin_run_id,preview_json)
+               origin_channel_id,origin_message_id,origin_run_id,preview_json,
+               agent_invocation_targets_json)
             SELECT $1,$2,$3,$4,1,$5,$6,$7,$8,'hot-inline',$3,NULL,'[]','[]',$9::jsonb,
               $10,NULL,NULL,NULL,$10,search_rank.value,$11,$12,$13,$14,NULL,$8,$15,$16,$17,
-              NULL,$10,1,$21::jsonb,$22,$23,$24,$25::jsonb FROM search_rank
+              NULL,$10,1,$21::jsonb,$22,$23,$24,$25::jsonb,$26::jsonb FROM search_rank
             ON CONFLICT (space_id,message_id) DO NOTHING
             RETURNING message_id,channel_id
           ), mutation_row AS (
@@ -1767,9 +2070,54 @@ export class PostgresMessageRepository {
             FROM message_row RETURNING message_id
           ), counter_row AS (
             INSERT INTO data.channel_content_counters
-              (space_id,channel_id,content_revision,updated_at) VALUES ($1,$2,0,$10)
+              (space_id,channel_id,content_revision,updated_at)
+            SELECT $1,$2,0,$10 FROM message_row
             ON CONFLICT (space_id,channel_id) DO UPDATE SET updated_at=EXCLUDED.updated_at
             RETURNING content_revision
+          ), attachment_rows AS (
+            INSERT INTO data.message_attachment_refs
+              (space_id,attachment_id,message_id,channel_id,owner_user_id,object_key,
+               content_hash,encoded_bytes,mime_type,name,presentation_residual_json,
+               version,created_at,updated_at)
+            SELECT $1,row.attachment_id,$3,$2,$27::text,row.object_key,row.content_hash,
+              row.encoded_bytes,row.mime_type,row.name,row.presentation_residual_json,1,$10,$10
+            FROM message_row CROSS JOIN jsonb_to_recordset($28::jsonb) AS row(
+              attachment_id text,object_key text,content_hash text,encoded_bytes bigint,
+              mime_type text,name text,presentation_residual_json jsonb)
+          ), attention_inserted AS (
+            INSERT INTO data.message_attention
+              (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response)
+            SELECT $1,incoming.subject_id,$2,$3,incoming.kind,$4,$10,
+              CASE WHEN (incoming.waits OR $30::boolean) AND incoming.kind='mention' THEN TRUE END
+            FROM message_row CROSS JOIN jsonb_to_recordset($29::jsonb) AS incoming(
+              subject_id text,kind text,waits boolean)
+            ON CONFLICT DO NOTHING RETURNING subject_id
+          ), attention_cleared AS (
+            UPDATE data.message_attention a SET awaiting_response=FALSE
+            WHERE $31::boolean AND EXISTS (SELECT 1 FROM message_row)
+              AND a.space_id=$1 AND a.channel_id=$2 AND a.awaiting_response
+              AND ((a.subject_id=$32 AND a.message_id<>$3) OR EXISTS (
+                SELECT 1 FROM data.messages m
+                WHERE m.space_id=a.space_id AND m.channel_id=a.channel_id AND m.message_id=a.message_id
+                  AND m.author_kind=$5 AND m.author_id=$6
+                  AND EXISTS (SELECT 1 FROM data.messages other
+                    WHERE other.space_id=a.space_id AND other.channel_id=a.channel_id
+                      AND other.timeline_sequence>a.timeline_sequence AND other.timeline_sequence<$4
+                      AND other.deleted_at IS NULL AND ${messageSpeechSql("other")}
+                      AND NOT (other.author_kind=$5 AND other.author_id=$6))))
+            RETURNING a.subject_id
+          ), attention_revised AS (
+            SELECT DISTINCT subject_id FROM (
+              SELECT subject_id FROM attention_inserted
+              UNION ALL SELECT subject_id FROM attention_cleared
+            ) subjects
+          ), attention_revisions AS (
+            INSERT INTO data.message_attention_revisions
+              (space_id,subject_id,channel_id,revision,updated_at)
+            SELECT $1,subject_id,$2,1,$10 FROM attention_revised
+            ON CONFLICT (space_id,subject_id,channel_id) DO UPDATE SET
+              revision=data.message_attention_revisions.revision+1,
+              updated_at=EXCLUDED.updated_at
           ) SELECT search_rank.value AS search_rank,counter_row.content_revision,
               message_row.channel_id
             FROM search_rank CROSS JOIN counter_row CROSS JOIN message_row`,
@@ -1783,87 +2131,21 @@ export class PostgresMessageRepository {
           JSON.stringify({ recordDigest, sequence }), authorizedPrincipal.kind,
           authorizedPrincipal.id, finalReply === null ? null : JSON.stringify(finalReply),
           origin?.channelId ?? null, origin?.messageId ?? null, origin?.runId ?? null,
-          storedMessagePreview(input.prepared.preview)],
+          storedMessagePreview(input.prepared.preview), agentInvocationTargetsJson,
+          attachmentOwnerUserId, JSON.stringify(attachmentRows), JSON.stringify(attentionEntries),
+          input.awaitsResponse === true, spoke, `${senderKind}:${senderId}`],
         maxRows: 1,
       }))[0];
       if (!committedFacts?.channel_id) throw new MessageAuthorityError(
         "message_exists", 409, "Message already exists",
       );
       const searchRank = bounded(committedFacts.search_rank, "searchRank");
-      // The launch request is kept only on a message that summons someone, so a
-      // plain message never looks addressed (message-asks RECEIVER_SQL).
-      const launch = input.launch === true && (invocationSelections !== undefined ||
-        messageSummons(input.attentionBody ?? ""));
-      if (agentTargets.length || invocationSelections || launch) {
-        const written = await transaction.query({ name: "message_agent_targets_commit_v1",
-          text: `UPDATE data.messages SET agent_invocation_targets_json=$4::jsonb
-            WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 AND entity_version=1 RETURNING message_id`,
-          values: [spaceId, channelId, messageId, JSON.stringify({ entityVersion: 1, bodyHash, targets: agentTargets,
-            ...(invocationSelections ? { selections: invocationSelections } : {}),
-            ...(launch ? { launch: true } : {}) })], maxRows: 1 });
-        if (written.length !== 1) throw new MessageAuthorityError("message_targets_commit_failed", 500,
-          "The original message targets could not be recorded");
-      }
-      if (attachmentRows.length > 0) await transaction.query({
-          name: "message_append_attachment_batch_v2",
-          text: `INSERT INTO data.message_attachment_refs
-            (space_id, attachment_id, message_id, channel_id, owner_user_id, object_key,
-             content_hash, encoded_bytes, mime_type, name, presentation_residual_json,
-             version, created_at, updated_at)
-            SELECT $2,row.attachment_id,$3,$4,$5,row.object_key,row.content_hash,
-              row.encoded_bytes,row.mime_type,row.name,row.presentation_residual_json,1,$6,$6
-            FROM jsonb_to_recordset($1::jsonb) AS row(
-              attachment_id text,object_key text,content_hash text,encoded_bytes bigint,
-              mime_type text,name text,presentation_residual_json jsonb)`,
-          values: [JSON.stringify(attachmentRows), spaceId, messageId, channelId,
-            attachmentOwnerUserId, sentAt], maxRows: 0,
-        });
-      if (targets.size > 0) await transaction.query({
-        name: "message_append_attention_batch_v5",
-        text: `WITH incoming AS MATERIALIZED (
-            SELECT * FROM jsonb_to_recordset($1::jsonb) AS value(subject_id text,kind text,waits boolean)
-          ), attention_rows AS (
-            INSERT INTO data.message_attention
-              (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response)
-            SELECT $2,incoming.subject_id,$3,$4,incoming.kind,$5,$6,
-              CASE WHEN (incoming.waits OR $7::boolean) AND incoming.kind='mention' THEN TRUE END FROM incoming
-            ON CONFLICT DO NOTHING RETURNING subject_id
-          ) INSERT INTO data.message_attention_revisions
-            (space_id,subject_id,channel_id,revision,updated_at)
-          SELECT $2,incoming.subject_id,$3,1,$6 FROM incoming
-          WHERE EXISTS (SELECT 1 FROM attention_rows WHERE
-            attention_rows.subject_id=incoming.subject_id)
-          ON CONFLICT (space_id,subject_id,channel_id) DO UPDATE SET
-            revision=data.message_attention_revisions.revision+1,
-            updated_at=EXCLUDED.updated_at`,
-        values: [JSON.stringify([...targets].map(([subjectId, kind]) => ({
-          subject_id: subjectId, kind, ...(waitsOn.has(subjectId) ? { waits: true } : {}),
-        }))), spaceId, channelId, messageId, sequence, sentAt, input.awaitsResponse === true],
-        maxRows: 0,
-      });
-      // Only a message someone wrote speaks for its sender. A card or notice the Hub writes
-      // under a person's identity, or an Agent's activity entry, answers nothing and moves nobody on.
-      const spoke = messageIsSpeech(senderKind, messageKind);
-      // The sender has responded: no mention in this conversation still waits on them.
-      if (spoke) await transaction.query({
-        name: "message_append_attention_respond_v2",
-        text: `WITH responded AS (
-            UPDATE data.message_attention SET awaiting_response=FALSE
-            WHERE space_id=$1 AND subject_id=$2 AND channel_id=$3 AND awaiting_response
-              AND message_id<>$5 RETURNING 1
-          ) INSERT INTO data.message_attention_revisions
-            (space_id,subject_id,channel_id,revision,updated_at)
-          SELECT $1,$2,$3,1,$4 WHERE EXISTS (SELECT 1 FROM responded)
-          ON CONFLICT (space_id,subject_id,channel_id) DO UPDATE SET
-            revision=data.message_attention_revisions.revision+1,
-            updated_at=EXCLUDED.updated_at`,
-        values: [spaceId, `${senderKind}:${senderId}`, channelId, sentAt, messageId], maxRows: 0,
-      });
-      // The sender went on after someone else spoke: the waits it declared before that are over.
-      if (spoke) await releaseDeclaredWaits(transaction, {
-        spaceId, channelId, authorKind: senderKind, authorIds: [senderId], at: sentAt, movedOnAt: sequence });
+      const hasUserAttention = [...targets.entries()].some(([subjectId, kind]) =>
+        subjectId.startsWith("user:") && (kind === "mention" || kind === "reply" || kind === "broadcast"));
       if (input.certifyMessageAsk === true && senderKind === "user" && messageKind === "xmatrix.message.text" &&
-          authorizedPrincipal.kind === "user" && authorizedPrincipal.id === senderId && typeof input.attentionBody === "string") {
+          authorizedPrincipal.kind === "user" && authorizedPrincipal.id === senderId &&
+          typeof input.attentionBody === "string" && agentInvocationTargetsJson === null && !hasUserAttention &&
+          (Boolean(input.attentionBody.trim()) || attachmentViews.length > 0)) {
         await recordMessageAskAtAppend(transaction, { spaceId, channelId, messageId, actorUserId: senderId, body: input.attentionBody });
       }
       const result = {

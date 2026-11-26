@@ -138,8 +138,9 @@ function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = 
               query.name === "message_append_identity_conflict_v1" ||
               query.name === "message_append_attention_respond_v2" ||
               query.name === "message_attention_release_waits_v2" ||
-              query.name === "channel_lifecycle_lock_runtime_new_work_v1") return [];
-          if (query.name === "message_append_commit_facts_v5") return [{
+              query.name === "channel_lifecycle_lock_runtime_new_work_v1" ||
+              query.name === "channel_lifecycle_lock_runtime_new_work_v2") return [];
+          if (query.name === "message_append_commit_facts_v6") return [{
             search_rank: "pg:00000000000000000001", content_revision: 0, channel_id: commitChannelId,
           }];
           if (query.name === "message_append_publish_unmetered_v4") return [{
@@ -149,9 +150,10 @@ function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = 
             result_json: JSON.parse(query.values[4]),
           }];
           // Who the message reaches, read in the append's own transaction.
-          if (query.name === "message_live_routing_recipients_v4") return [{ user_id: "owner-1", recipient_count: 1 }];
-          if (query.name === "message_live_routing_instance_owners_v1") return [{ owner_user_id: "owner-1" }];
-          if (query.name === "message_live_routing_attention_summary_v3") return [];
+          if (query.name === "message_live_routing_v1") return [{
+            recipient_count: 1, recipient_user_ids: ["owner-1"],
+            instance_owner_user_ids: ["owner-1"], attention_summaries: [],
+          }];
           if (query.name === "run_registration_authority_mode_v3" ||
               query.name === "run_registration_access_binding_v3") return [];
           throw new Error(`unexpected query ${query.name}`);
@@ -162,7 +164,31 @@ function agentAppendDatabase({ calls = [], sequenceChannelId, commitChannelId = 
 }
 
 /** An open channel-1 and the Codex sender: what every Agent append reads besides its Run. */
-function agentChannelRows(query) {
+function agentChannelRows(query, { run = provenRunRow(), channelId = "channel-1", originMessageId = null } = {}) {
+  if (query.name === "message_append_agent_probe_v1") return [{
+    command_kind: null, request_digest: null, result_json: null, run_channel_id: run.channel_id,
+  }];
+  if (query.name === "message_append_agent_authorize_v1") {
+    const resources = { workspaces: [], models: [], capabilities: [] };
+    return [{
+      run_json: run,
+      binding_json: {
+        space_id: "space-1", owner_user_id: run.owner_user_id, machine_id: "machine-1", harness: "codex",
+        actor_user_id: run.owner_user_id, allocation_id: "allocation:run-1", authorization_digest: "a".repeat(64),
+        grant_revision: 1, grant_execution_revision: 1, policy_revision: 1, policy_execution_revision: 1,
+        requested_json: resources,
+      },
+      members_json: [{ user_id: run.owner_user_id, role: "owner" }],
+      access_json: {
+        grant_state: "active", grant_revision: 1, grant_execution_revision: 1, grant_limits: resources,
+        policy_state: "enabled", policy_revision: 1, policy_execution_revision: 1, policy_limits: resources,
+      },
+      actor_channel_authorized: true, target_agent_authorized: true, target_owner_authorized: true,
+      source_agent_authorized: true, source_owner_authorized: true, duplicate_exists: false,
+      reservation_channel_id: channelId, reservation_sequence: 1, reservation_state: "reserved",
+      reservation_fact_digest: null, origin_message_id: originMessageId,
+    }];
+  }
   if (query.name?.startsWith("channel_capability_message_")) return [openChannelRow("channel-1")];
   if (query.name === "message_sender_agent_identity_v3") return [CODEX_SENDER_IDENTITY];
   return null;
@@ -173,9 +199,11 @@ function openAppendRows(channelId) {
   return (query) => {
     if (query.name?.startsWith("channel_capability_message_")) return [openChannelRow(channelId)];
     if (query.name === "message_attention_candidates_v5") return [{ candidates: [] }];
-    if (query.name === "message_append_preflight_v4") return [{
+    if (query.name === "message_append_preflight_v5") return [{
       command_kind: null, request_digest: null, result_json: null, channel_id: channelId,
       channel_mode: "open", channel_metadata_json: {}, channel_authorized: true, duplicate_exists: false,
+      reservation_channel_id: channelId, reservation_sequence: 1, reservation_state: "reserved",
+      reservation_fact_digest: null,
     }];
     return null;
   };
@@ -465,12 +493,13 @@ test("PostgreSQL ACK accepts omitted sequence and binds a message-id target in i
 });
 
 function crossChannelAppendDatabase(calls) {
+  const run = {
+    owner_user_id: "owner-1", channel_id: "channel-home",
+    run_status: "running", instance_status: "busy", instance_channel_id: "channel-home",
+    channel_instance_id: "3", metadata_json: { executionKey: "execution-1" },
+  };
   return agentAppendDatabase({ calls, sequenceChannelId: "channel-away", rows: (query) => {
-    if (query.name === "message_append_run_proof_v3") return [{
-      owner_user_id: "owner-1", channel_id: "channel-home",
-      run_status: "running", instance_status: "busy", instance_channel_id: "channel-home",
-      channel_instance_id: "3", metadata_json: { executionKey: "execution-1" },
-    }];
+    if (query.name === "message_append_run_proof_v3") return [run];
     if (query.name === "agent_channel_registered_run_access_v2") return [{
       owner_user_id: "owner-1", channel_id: "channel-home", status: "running",
       metadata_json: { executionKey: "execution-1" }, instance_channel_id: "channel-home",
@@ -484,7 +513,7 @@ function crossChannelAppendDatabase(calls) {
       instance_id: "instance-1", name: "claude", runtime: "claude",
       owner_user_id: "owner-1", owner_email: "owner@example.test", metadata_json: {}, version: 1,
     }];
-    return null;
+    return agentChannelRows(query, { run, channelId: "channel-away", originMessageId: "asked-1" });
   } });
 }
 
@@ -503,7 +532,7 @@ test("an Agent message written outside its own Channel is committed as a link to
   assert.equal(result.senderSnapshot.originChannelId, "channel-home");
   assert.equal(result.senderSnapshot.originMessageId, "asked-1");
   assert.equal(result.senderSnapshot.instanceLabel, "claude:3");
-  const insert = calls.find((query) => query.name === "message_append_commit_facts_v5");
+  const insert = calls.find((query) => query.name === "message_append_commit_facts_v6");
   assert.deepEqual(insert.values.slice(21, 24), ["channel-home", "asked-1", "run-1"]);
 });
 
