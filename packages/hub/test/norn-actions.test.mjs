@@ -54,7 +54,8 @@ test("the app's permission, a refusal and a bad input each end the prepare at on
   assert.deepEqual(admitted.reply, { tag: "Answered", value: { type: "variant", name: "Prepared", args: [{ type: "string", value: "request:prepare" }] } });
   assert.match(admitted.say, /admitted by the app's Read and write permission/u);
   const blocked = await fixture({ staged: { status: "blocked", reason: "post is denied by this app permission" } }).deliver("prepare");
-  assert.deepEqual(blocked.reply, { tag: "Refused", reason: "post is denied by this app permission" });
+  assert.deepEqual(blocked.reply, { tag: "Revoked" });
+  assert.match(blocked.say, /blocked; post is denied by this app permission/u);
   const failed = await fixture({ staged: { status: "failed", reason: "write a nonempty post" } }).deliver("prepare");
   assert.deepEqual(failed.reply, { tag: "Broke", reason: "write a nonempty post" });
   const unknown = fixture({ known: false });
@@ -75,8 +76,9 @@ test("perform takes the one claim on what was approved and hands it to the durab
   assert.equal(twice.calls.some(call => call[0] === "queue"), false, "what cannot be claimed is never queued");
 
   const lost = fixture({ claim: new AppControlError("action_request_forbidden", 403, "private") });
-  assert.deepEqual((await lost.deliver("perform", { preparedRef: "rprepare" })).reply,
-    { tag: "Refused", reason: "Current access no longer permits this approval; a Space admin must review it." });
+  const lostOutcome = await lost.deliver("perform", { preparedRef: "rprepare" });
+  assert.deepEqual(lostOutcome.reply, { tag: "Revoked" });
+  assert.match(lostOutcome.say, /revoked; Current access no longer permits this approval; a Space admin must review it\./u);
   // A failure that says nothing about authority is not an answer: the delivery is tried again.
   await assert.rejects(fixture({ claim: new Error("connection reset") }).deliver("perform", { preparedRef: "rprepare" }), /connection reset/u);
   assert.deepEqual((await fixture().deliver("perform")).reply, { tag: "Broke", reason: "What was prepared is not known to this host" });

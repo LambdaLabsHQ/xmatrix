@@ -447,9 +447,18 @@ export async function changeMembership(env: SpacesEnv, change: MembershipChange,
     ? mutation.spaceId
     : await repository.resolveChannelSpaceId({ requestId, channelId: mutation.channelId });
   const result = await repository.mutateMembership(mutation);
+  const stoppedProgramChannels = Array.isArray(result.stoppedProgramChannels)
+    ? result.stoppedProgramChannels.filter((id): id is string => typeof id === "string")
+    : [];
+  const { stoppedProgramChannels: _internal, ...publicResult } = result;
   await publishCatalogChanges(env, dependencies, repository, requestId, [spaceId]);
   await wakeAffectedChannels(env, dependencies, database, spaceId);
-  return result;
+  if (stoppedProgramChannels.length && env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL) {
+    for (const channelId of stoppedProgramChannels) {
+      await wakeAgentLaunchCoordinator(env as Pick<Env, "RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL">, channelId, ["norn"]);
+    }
+  }
+  return publicResult;
 }
 
 /** Immutable metadata history is visible only to the Channel's current readers. */

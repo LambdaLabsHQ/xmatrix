@@ -182,9 +182,13 @@ const NORN_REQUEST_BROKE_OFF_SQL = `(NOT EXISTS (SELECT 1 FROM data.agent_messag
  */
 /** Why a program whose block left its Page stopped: what its ledger ends with, and what lets the block bring it back. */
 export const NORN_REMOVED_FROM_PAGE = "Removed from its page";
+/** Why a program whose author left the Space stopped: ends the entire program and cancels open requests. */
+export const NORN_AUTHORITY_LEFT_SPACE = "The program's author left the Space";
 export const NORN_HANDED_ON_REASON = "The work broke off, and the request was handed to a new Instance";
 /** Why a question an Agent asked with a command stopped: the Agent called it off. */
 const NORN_QUESTION_CALLED_OFF = "Called off by the Agent that asked";
+/** Whether program `p`'s authority user is still a member of its Space. */
+const NORN_AUTHORITY_PRESENT_SQL = `EXISTS (SELECT 1 FROM data.space_members m WHERE m.space_id=p.space_id AND m.user_id=p.authority_user_id)`;
 
 /**
  * When a Channel's programs next need a pass, a delivery or a report; NULL
@@ -192,7 +196,7 @@ const NORN_QUESTION_CALLED_OFF = "Called off by the Agent that asked";
  * selects, so a due time always has work behind it.
  */
 export const NORN_CHANNEL_DUE_SQL = `LEAST(
-    (SELECT MIN(CASE WHEN p.stop_reason IS NOT NULL THEN p.updated_at ELSE p.next_due_at END)
+    (SELECT MIN(CASE WHEN p.stop_reason IS NOT NULL OR NOT ${NORN_AUTHORITY_PRESENT_SQL} THEN p.updated_at ELSE p.next_due_at END)
       FROM data.norn_programs p WHERE p.channel_id=$1 AND p.state='running'),
     (SELECT MIN(p.updated_at) FROM data.norn_programs p
       WHERE p.channel_id=$1 AND p.state<>'running' AND p.reported_at IS NULL),
@@ -245,15 +249,19 @@ export class PostgresNornProgramRepository {
 
   private async pass<T>(tx: DatabaseTransaction, program: QueryResultRow, step: NornStep<T>): Promise<T> {
     const scope = [this.placement.spaceId, String(program.program_id)];
-    const rows = await tx.query<QueryResultRow>({ name: "norn_request_index_v2", text: `SELECT r.request_id,r.request_ref,r.epoch,
+    const rows = await tx.query<QueryResultRow>({ name: "norn_request_index_v3", text: `SELECT r.request_id,r.request_ref,r.epoch,
         r.holder,r.delivery_message_id,r.delivered_at,r.settled_at,${NORN_REQUEST_ABANDONED_SQL} AS abandoned,
         ${NORN_REQUEST_BROKE_OFF_SQL} AS broke_off,
-        floor(extract(epoch from clock_timestamp())*1000)::text AS now_millis
+        floor(extract(epoch from clock_timestamp())*1000)::text AS now_millis,
+        EXISTS (SELECT 1 FROM data.space_members m WHERE m.space_id=$1 AND m.user_id=$3) AS authority_present
       FROM (SELECT 1) one LEFT JOIN data.norn_requests r ON r.space_id=$1 AND r.program_id=$2
-      ORDER BY r.created_at,r.request_id LIMIT 10000`, values: scope, maxRows: 10_000 });
+      ORDER BY r.created_at,r.request_id LIMIT 10000`, values: [...scope, String(program.authority_user_id)], maxRows: 10_000 });
+    const stopReason = program.stop_reason !== null
+      ? String(program.stop_reason)
+      : rows[0]?.authority_present === false ? NORN_AUTHORITY_LEFT_SPACE : null;
     const { write, result } = step({ spaceId: this.placement.spaceId, channelId: String(program.channel_id),
       programId: String(program.program_id), source: String(program.source), ledger: program.ledger_json,
-      nowMs: Number(rows[0]!.now_millis), stopReason: program.stop_reason === null ? null : String(program.stop_reason),
+      nowMs: Number(rows[0]!.now_millis), stopReason,
       requests: rows.filter(row => row.request_id !== null).map(requestRow) });
     if (!write) return result;
     if ("retryAtMs" in write) {
@@ -470,8 +478,9 @@ export class PostgresNornProgramRepository {
       holder: typeof row.holder === "string" ? row.holder : null, requestRef: typeof row.request_ref === "string" ? row.request_ref : null });
     return this.transaction(input.requestId, "channel-work", async tx => {
       const values = [input.channelId];
-      const passes = await tx.query<QueryResultRow>({ name: "norn_channel_passes_v1", text: `SELECT p.program_id
+      const passes = await tx.query<QueryResultRow>({ name: "norn_channel_passes_v2", text: `SELECT p.program_id
         FROM data.norn_programs p WHERE p.channel_id=$1 AND p.state='running' AND (p.stop_reason IS NOT NULL
+          OR NOT ${NORN_AUTHORITY_PRESENT_SQL}
           OR p.next_due_at<=clock_timestamp() OR EXISTS (SELECT 1 FROM data.norn_requests r
             WHERE r.space_id=p.space_id AND r.program_id=p.program_id AND ${NORN_REQUEST_ABANDONED_SQL}))
         ORDER BY p.created_at,p.program_id LIMIT 200`, values, maxRows: 200 });

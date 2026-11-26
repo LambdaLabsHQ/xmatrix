@@ -273,7 +273,7 @@ export async function settleNornAppRequest(env: Env, input: { channelId: string;
   const reply: Reply = "admitted" in outcome ? nornPreparedReply({ id: held.ledgerRequestId } as LedgerRequest)
     : "done" in outcome ? nornActionAnswer(outcome.done)
     : "declined" in outcome ? { tag: "Refused", reason: outcome.declined }
-    : "blocked" in outcome ? { tag: "Refused", reason: outcome.blocked } : { tag: "Broke", reason: outcome.failed };
+    : "blocked" in outcome ? { tag: "Revoked" } : { tag: "Broke", reason: outcome.failed };
   await programs.advance({ requestId, channelId: input.channelId, programId: held.programId },
     nornStep({ requestId: held.ledgerRequestId, epoch: held.epoch, reply }));
   // What the answer opened, or the program's end, is the coordinator's to deliver.

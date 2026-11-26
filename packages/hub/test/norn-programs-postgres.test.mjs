@@ -482,4 +482,15 @@ integration("outside-event obligations persist, page boundedly, recover through 
     await programs.settleEventDelivery({ ...scope("prog-c"), eventId: "evt-1" });
     assert.equal((await programs.channelWork(scope())).deliveries.filter(d => d.programId === "prog-c").length, 0);
     assert.equal((await programs.channelWork(scope())).eventDeliveries.length, 0);
+
+    // Layer 2: when a program's author leaves the Space, the entire running program becomes due and stops, cancelling open requests.
+    await sql("DELETE FROM data.space_members WHERE space_id='space' AND user_id='owner'");
+    assert.equal(await due(), true, "a program whose author left the Space becomes due to stop");
+    const afterLeave = await programs.channelWork(scope());
+    assert.ok(afterLeave.passes.includes("prog-a"));
+    await programs.advance(scope("prog-a"), nornStep());
+    const stopped = await sql("SELECT state, ledger_json->'ended'->>'error' AS ended_error FROM data.norn_programs WHERE program_id='prog-a'");
+    assert.deepEqual([stopped[0].state, stopped[0].ended_error], ["failed", "The program's author left the Space"]);
+    const openReqs = await sql("SELECT request_id FROM data.norn_requests WHERE program_id='prog-a' AND settled_at IS NULL");
+    assert.deepEqual(openReqs, [], "open requests are cancelled when the program stops");
   }));
