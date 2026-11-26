@@ -13,6 +13,38 @@ export const SENTRY_PUBLIC_INTEGRATION_SCOPES = [
   "event:read", "event:write", "org:read", "project:read",
 ] as const;
 
+// Expanded Public Integration scope sets when Project: Read & Write (or Admin) and Team: Read
+// are enabled so Spaces can create projects and fetch DSNs through the Sentry connector.
+export const SENTRY_PUBLIC_INTEGRATION_PROJECT_WRITE_SCOPES = [
+  "event:read", "event:write", "org:read", "project:read", "project:write", "team:read",
+] as const;
+
+export const SENTRY_PUBLIC_INTEGRATION_PROJECT_ADMIN_SCOPES = [
+  "event:read", "event:write", "org:read", "project:admin", "project:read", "project:write", "team:read",
+] as const;
+
+export const SENTRY_PUBLIC_INTEGRATION_ALLOWED_SCOPE_SETS = [
+  SENTRY_PUBLIC_INTEGRATION_SCOPES,
+  SENTRY_PUBLIC_INTEGRATION_PROJECT_WRITE_SCOPES,
+  SENTRY_PUBLIC_INTEGRATION_PROJECT_ADMIN_SCOPES,
+] as const;
+
+/** Canonical space-separated scope string when `value` matches an allowed Sentry Public Integration scope set. */
+export function normalizeSentryPublicIntegrationScopes(value: unknown): string | undefined {
+  const list = typeof value === "string"
+    ? value.split(" ").filter(Boolean)
+    : Array.isArray(value) && value.every((item): item is string => typeof item === "string")
+      ? value : undefined;
+  if (!list) return undefined;
+  const sorted = [...list].sort();
+  for (const allowed of SENTRY_PUBLIC_INTEGRATION_ALLOWED_SCOPE_SETS) {
+    if (sorted.length === allowed.length && sorted.every((scope, index) => scope === allowed[index])) {
+      return allowed.join(" ");
+    }
+  }
+  return undefined;
+}
+
 export interface AppConnectorProviderManifest {
   id: AppConnectorProviderId;
   name: string;
