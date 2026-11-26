@@ -11,8 +11,8 @@ const urls={};
 try {
   for(const [side,port,shard] of [['source','25541','shard-0'],['target','25542','shard-1']]) {
     const data=directory+'/'+side,admin='dt_cross_'+side,runtime=admin+'_runtime',socket=directory;
-    run('initdb',['-D',data,'-U',admin,'-A','trust','--no-locale','-E','UTF8']);
-    writeFileSync(data+'/postgresql.auto.conf',"max_prepared_transactions = 256\n");
+    run('initdb',['-D',data,'-U',admin,'-A','trust','--no-locale','-E','UTF8','--no-sync']);
+    writeFileSync(data+'/postgresql.auto.conf',"max_prepared_transactions = 256\nfsync = off\nsynchronous_commit = off\nfull_page_writes = off\n");
     run('pg_ctl',['-D',data,'-l',directory+'/'+side+'.log','-o',`-k ${socket} -p ${port} -h ''`,'-w','start']);started.push(data);
     run('createdb',['-h',socket,'-p',port,'-U',admin,admin]);
     run('psql',['-h',socket,'-p',port,'-U',admin,'-d',admin,'-v','ON_ERROR_STOP=1','-c',`CREATE ROLE ${runtime} LOGIN`]);
