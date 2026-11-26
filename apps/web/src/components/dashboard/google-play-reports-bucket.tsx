@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CloudDownload, ExternalLink, Loader2 } from "lucide-react";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
@@ -18,13 +18,14 @@ const PLAY_CONSOLE_URL = "https://play.google.com/console/developers";
  * open Chrome Play Console tab via the xMatrix Chrome extension (plain bucket ID
  * only, never Google cookies), with manual paste always available.
  */
-export function GooglePlayReportsBucket({ credentials }: { credentials: CredentialStoreInput }) {
+export function GooglePlayReportsBucket({ credentials, autoSync = false }: { credentials: CredentialStoreInput; autoSync?: boolean }) {
   const { view, save, stored } = useCredentialStore(credentials);
   const [detecting, setDetecting] = useState(false);
   const [editingBucket, setEditingBucket] = useState(false);
   const [editingSa, setEditingSa] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [notice, setNotice] = useState<{ tone: "settled" | "attention"; text: string; link?: { href: string; label: string } } | null>(null);
+  const autoSyncedRef = useRef(false);
 
   const bucketField = credentials.connector.credentials?.find((field) => field.id === "reportsBucket");
   const saField = credentials.connector.credentials?.find((field) => field.id === "reportsServiceAccount");
@@ -40,6 +41,30 @@ export function GooglePlayReportsBucket({ credentials }: { credentials: Credenti
     setEditingBucket(false);
     setNotice({ tone: "settled", text: `Saved ${bucket} for @googleplay:store_reports.` });
   }
+
+  // Right after one-click Connect with Google Play Console, silently pull a single open
+  // Play Console bucket from the Chrome extension so the user doesn't have to click again.
+  useEffect(() => {
+    if (!autoSync || autoSyncedRef.current || !view.isSuccess || savedBucket) return;
+    autoSyncedRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await requestPlayConsoleBucket();
+        if (cancelled || result.status !== "found") return;
+        if (result.buckets.length === 1) {
+          await save.mutateAsync({ fields: { reportsBucket: result.buckets[0]! } });
+          if (!cancelled) setNotice({ tone: "settled", text: `Synced ${result.buckets[0]!} from your Play Console tab.` });
+        } else if (result.buckets.length > 1) {
+          setCandidates(result.buckets);
+          setNotice({ tone: "settled", text: `Found ${result.buckets.length} Play Console buckets. Choose one to save.` });
+        }
+      } catch {
+        // Stay quiet on passive post-connect detection; the manual Sync button remains available.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [autoSync, savedBucket, view.isSuccess, save]);
 
   async function syncFromChrome() {
     setDetecting(true);

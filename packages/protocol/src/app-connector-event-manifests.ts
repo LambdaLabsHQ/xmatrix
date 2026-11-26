@@ -312,6 +312,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false" } },
       credentials: [
         ...OAUTH_TOKEN_CREDENTIALS,
+        { id: "oauthScopes", label: "Granted scopes", managed: true,
+          description: "Confirmed by Google at consent; reconnect an older grant once Cloud Storage bulk-report access is enabled." },
         { id: "reportsBucket", label: "Reports Cloud Storage bucket (optional)", plain: true,
           description: "Optional for store_reports: sync in one click from Play Console → Download reports using the xMatrix Chrome extension, or paste from Copy Cloud Storage URI (pubsite_prod_rev_… or gs://pubsite_prod_rev_…). Passing bucket= once also saves it here." },
         { id: "reportsServiceAccount", label: "Reports service account JSON (optional)",

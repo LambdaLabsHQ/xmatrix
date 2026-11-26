@@ -10,6 +10,7 @@ import { statementParser } from "./support/google-read-grant.mjs";
 const company = { CONNECTOR_GOOGLE_CLIENT_ID: "fixture-client.apps.googleusercontent.com", CONNECTOR_GOOGLE_CLIENT_SECRET: "fixture-secret" };
 const scope = "https://www.googleapis.com/auth/androidpublisher";
 const reporting = "https://www.googleapis.com/auth/playdeveloperreporting";
+const storage = "https://www.googleapis.com/auth/devstorage.read_only";
 const credentials = { oauthToken: "play-access" };
 const statement = statementParser("googleplay", ACTIONS);
 const command = (action, operation, request = {}) => `@googleplay:${action}:${operation} ${JSON.stringify(request)}`;
@@ -18,17 +19,41 @@ const track = { path: { packageName: "sh.xmatrix.app", editId: "edit-1", track: 
   body: { track: "internal", releases: [{ status: "completed", versionCodes: ["42"] }] } };
 const digestOf = summary => summary.match(/digest ([a-f0-9]{64})/u)[1];
 
-test("Google Play keeps its own grant for exactly its two scopes on the company Google client", async () => {
+test("Google Play keeps its own grant for its scopes on the company Google client and supports incremental storage scope", async () => {
   const client = oauthClient(company, "googleplay");
   assert.equal(client.clientId, company.CONNECTOR_GOOGLE_CLIENT_ID);
   assert.deepEqual(getAppConnectorProvider("googleplay").oauth.scopes, ["openid", "https://www.googleapis.com/auth/userinfo.email", scope, reporting]);
   assert.deepEqual(getAppConnectorProvider("googleplay").credentials.filter(field => !field.managed && field.required), []);
   const accepted = { access_token: "a", refresh_token: "r", token_type: "Bearer", expires_in: 3600, scope: `${scope} ${reporting}` };
-  assert.equal((await fetched([{ body: accepted }], () => exchangeOAuthGrant(client, "code", "https://hub.test/cb"))).result.fields.oauthToken, "a");
-  for (const wrong of [scope, `${scope} ${reporting} https://www.googleapis.com/auth/cloud-platform`, "https://www.googleapis.com/auth/cloud-platform"]) {
+  const exchanged = await fetched([{ body: accepted }], () => exchangeOAuthGrant(client, "code", "https://hub.test/cb"));
+  assert.equal(exchanged.result.fields.oauthToken, "a");
+  assert.equal(exchanged.result.fields.oauthScopes, `${scope} ${reporting}`);
+  for (const wrong of [scope, `${scope} ${reporting} ${storage}`, `${scope} ${reporting} https://www.googleapis.com/auth/cloud-platform`, "https://www.googleapis.com/auth/cloud-platform"]) {
     await fetched([{ body: { ...accepted, scope: wrong } }], () => assert.rejects(exchangeOAuthGrant(client, "code", "https://hub.test/cb"), /Google Play Console OAuth grant/u));
   }
   await assert.rejects(refreshOAuthFields(company, "googleplay", { oauthToken: "a" }), /complete expiring grant/u);
+
+  // Once Google approves devstorage.read_only, enabling CONNECTOR_GOOGLEPLAY_STORAGE_SCOPE=1 requests all three scopes on new connects
+  // while keeping existing two-scope grants refreshable.
+  const withStorage = { ...company, CONNECTOR_GOOGLEPLAY_STORAGE_SCOPE: "1" };
+  const storageClient = oauthClient(withStorage, "googleplay");
+  assert.deepEqual(storageClient.manifest.oauth.scopes, ["openid", "https://www.googleapis.com/auth/userinfo.email", scope, reporting, storage]);
+  const authUrl = await oauthAuthorizeUrl(storageClient, { spaceId: "space-1", userId: "user-1", redirectUri: "https://hub.test/cb" });
+  assert.match(new URL(authUrl).searchParams.get("scope"), /devstorage\.read_only/u);
+  const full = { ...accepted, scope: `${scope} ${reporting} ${storage}` };
+  const fullExchanged = await fetched([{ body: full }], () => exchangeOAuthGrant(storageClient, "code", "https://hub.test/cb"));
+  assert.equal(fullExchanged.result.fields.oauthScopes, `${scope} ${reporting} ${storage}`);
+  // New connect when storage scope is enabled refuses grants missing devstorage.read_only.
+  await fetched([{ body: accepted }], () => assert.rejects(exchangeOAuthGrant(storageClient, "code", "https://hub.test/cb"), /Google Play Console OAuth grant/u));
+  // Refresh keeps legacy two-scope grants working even when storage scope is enabled on the Hub.
+  const refreshedLegacy = await fetched([{ body: { access_token: "a2", token_type: "Bearer", expires_in: 3600, scope: `${scope} ${reporting}` } }],
+    () => refreshOAuthFields(withStorage, "googleplay", { oauthToken: "a", oauthRefreshToken: "r", oauthExpiresAt: "1" }));
+  assert.equal(refreshedLegacy.result.oauthToken, "a2");
+  assert.equal(refreshedLegacy.result.oauthScopes, `${scope} ${reporting}`);
+  // Refresh also keeps three-scope grants working even if the flag is off.
+  const refreshedFull = await fetched([{ body: { access_token: "a3", token_type: "Bearer", expires_in: 3600, scope: `${scope} ${reporting} ${storage}` } }],
+    () => refreshOAuthFields(company, "googleplay", { oauthToken: "a", oauthRefreshToken: "r", oauthExpiresAt: "1" }));
+  assert.equal(refreshedFull.result.oauthScopes, `${scope} ${reporting} ${storage}`);
 });
 
 test("Check and list_apps read every app the sign-in can see; nobody types a package to connect", async () => {

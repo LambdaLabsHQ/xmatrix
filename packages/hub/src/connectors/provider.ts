@@ -68,6 +68,8 @@ export interface ConnectorActionContext {
   authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;
+  /** True when this Hub requests Google Play's Cloud Storage read scope (`devstorage.read_only`) on OAuth connect. */
+  googlePlayStorageScope?: boolean;
   /** The relay this provider's calls go through, when the deployment configures one. */
   egress?: ProviderEgress;
   /** Meters the operator-paid upstream calls (Composio) this action makes, to its Space. */

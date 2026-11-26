@@ -33,6 +33,7 @@ import { X_ACTIONS } from "./actions/x";
 import { gmailPreview } from "./actions/gmail";
 import { mailSnapshotLinks } from "./mail-snapshot-link";
 import { commandFiles, commandMailAttachments } from "./gmail-attachments";
+import { googlePlayStorageScopeEnabled } from "./oauth";
 import { providerEgress } from "./provider-egress";
 import type { XExecutingUpload, XUploadOutcome } from "@xmatrix/db";
 
@@ -506,7 +507,8 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const mailAttachments = providerId === "gmail" ? commandMailAttachments(actionId, input) : undefined;
   const files = providerId === "googleplay" && ["api_plan", "api_write"].includes(actionId) ? commandFiles(input) : undefined;
   const egress = providerEgress(input.env, providerId);
-  return { credentials, ...(egress ? { egress } : {}), caller, authorizeWrite, usage, ...(appReviewSetup ? {appReviewSetup}:{}), ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(mailAttachments ? { mailAttachments } : {}), ...(files ? { commandFiles: files } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+  const googlePlayStorageScope = providerId === "googleplay" && actionId === "store_reports" && googlePlayStorageScopeEnabled(input.env);
+  return { credentials, ...(googlePlayStorageScope ? { googlePlayStorageScope: true } : {}), ...(egress ? { egress } : {}), caller, authorizeWrite, usage, ...(appReviewSetup ? {appReviewSetup}:{}), ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(mailAttachments ? { mailAttachments } : {}), ...(files ? { commandFiles: files } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}), ...(stripe ? { stripe } : {}) };
 }
