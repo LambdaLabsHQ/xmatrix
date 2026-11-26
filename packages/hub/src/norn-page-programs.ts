@@ -9,7 +9,6 @@ import {
 } from "./norn-host";
 import { nornFlow } from "./norn-plan";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import { openConversation } from "./system-conversation";
@@ -27,7 +26,6 @@ import { text, variant } from "./vendor/norn/runtime/value";
 
 function database(env: Env) {
   return createPostgresAuthorityDatabase(env, { applicationName: "xmatrix-norn-page-programs",
-    connectTimeoutMs: POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS,
     statementTimeoutMs: 5_000, transactionTimeoutMs: 15_000, lockTimeoutMs: 2_000 });
 }
 
