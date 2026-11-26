@@ -515,6 +515,22 @@ export function nornRunBlock(info: unknown): { name: string; edition?: string; p
   });
 }
 
+/** A single branch (`Std.each` / `forEach(~per=...)` or `spawn(~key=...)`) of a Page program. */
+export interface PageProgramBranchStatus {
+  /** Stable branch key (e.g. `each:<id>` or `spawn:<key>`). */
+  key: string;
+  /** Human-readable branch label (partition key or linked Page title). */
+  label: string;
+  /** Ledger scope path of the branch. */
+  scope: string;
+  /** Dedicated conversation where this branch's requests run. */
+  channelId: string;
+  /** Current state derived from this branch's open and settled requests. */
+  state: "running" | "waiting" | "completed" | "failed";
+  /** Requests opened inside this branch, oldest first. */
+  requests: PageProgramRequest[];
+}
+
 /** How one `norn run` block of a Page stands (docs/architecture/norn-host.md). */
 export interface PageProgramStatus {
   /** The block's name: what follows `norn run`, or `main` (`nornRunBlock`). */
@@ -530,4 +546,6 @@ export interface PageProgramStatus {
   requests: PageProgramRequest[];
   /** What it does from here on, beginning with what it waits for now. Empty once it has ended. */
   next: PageProgramStep[];
+  /** Per-branch isolated conversations and status for programs that fan out via `each` / `forEach(~per)` / `spawn(~key)`. */
+  branches?: PageProgramBranchStatus[];
 }

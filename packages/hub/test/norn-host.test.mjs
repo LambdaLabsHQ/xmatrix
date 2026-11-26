@@ -771,3 +771,81 @@ test("guardRunningNornBlocks refuses silently removing or breaking running progr
     [],
   );
 });
+
+test("page program branches (Std.each and keyed spawn) route requests to isolated deterministic branch conversations", async () => {
+  const { nornBranchConversationId } = await import("../src/norn-branches.ts");
+  const { hold, holdKind } = await import("../src/vendor/norn/runtime/ledger.ts");
+  const { text } = await import("../src/vendor/norn/runtime/value.ts");
+
+  // 1. Keyed spawn branches on a Page program get distinct branch conversations.
+  const spawnSource = `let a = spawn(~key="alpha", () => ask(@codex, "Task A")->wait)
+let b = spawn(~key="beta", () => ask(@codex, "Task B")->wait)
+ignore(a->wait)
+b->wait`;
+  const spawnState = {
+    spaceId: "space", channelId: "ch-prog", programId: "prog-spawn",
+    pageId: "page-1", pageName: "ops",
+    source: spawnSource, nowMs: 1_000, stopReason: null,
+    ledger: nornStartLedger(1_000), requests: [],
+  };
+  const s1 = nornStep()(structuredClone(spawnState));
+  assert.equal(s1.result.status, "running");
+  assert.equal(s1.write.requests.length, 2);
+  const reqA = s1.write.requests.find(r => s1.write.ledger.requests[r.requestId].text === "Task A");
+  const reqB = s1.write.requests.find(r => s1.write.ledger.requests[r.requestId].text === "Task B");
+  assert.equal(reqA.channelId, nornBranchConversationId("page-1", "ops", "spawn:alpha"));
+  assert.equal(reqB.channelId, nornBranchConversationId("page-1", "ops", "spawn:beta"));
+  assert.notEqual(reqA.channelId, reqB.channelId);
+  assert.notEqual(reqA.channelId, "ch-prog");
+  assert.equal(s1.result.branches.length, 2);
+  assert.ok(s1.result.wakeChannels.includes(reqA.channelId));
+  assert.ok(s1.result.wakeChannels.includes(reqB.channelId));
+
+  // 2. Std.each over Holds routes each held partition to its own branch conversation, and retracting one wakes only that branch.
+  const libSource = `pub type site = { name: string }`;
+  const eachSource = `open Std
+needs Products
+let sites = Holds.kind("page", "Products.site")
+each(sites, site => {
+  switch site->Holds.sample {
+  | Some(s) =>
+    ignore(ask(@codex, "Check " ++ s.name)->wait)
+    ()
+  | None => ()
+  }
+})`;
+  const eachLedger = nornStartLedger(2_000);
+  const kind = holdKind("page", "Products.site");
+  hold(eachLedger, kind, "page-a", { type: "record", fields: { name: text("Alpha") } }, 2_000);
+  hold(eachLedger, kind, "page-b", { type: "record", fields: { name: text("Beta") } }, 2_000);
+  const eachState = {
+    spaceId: "space", channelId: "ch-each", programId: "prog-each",
+    pageId: "page-ops", pageName: "users",
+    source: eachSource, nowMs: 2_000, stopReason: null,
+    ledger: eachLedger, requests: [],
+  };
+  const e1 = nornStep(undefined, undefined, { libraries: { Products: libSource } })(structuredClone(eachState));
+  assert.equal(e1.result.status, "running");
+  assert.equal(e1.write.requests.length, 2);
+  const alphaReq = e1.write.requests.find(r => e1.write.ledger.requests[r.requestId].text === "Check Alpha");
+  const betaReq = e1.write.requests.find(r => e1.write.ledger.requests[r.requestId].text === "Check Beta");
+  assert.equal(alphaReq.channelId, nornBranchConversationId("page-ops", "users", "each:page-a"));
+  assert.equal(betaReq.channelId, nornBranchConversationId("page-ops", "users", "each:page-b"));
+  assert.notEqual(alphaReq.channelId, betaReq.channelId);
+
+  // Retract page-b: page-b's open request is Cancelled and its branch channel is woken; page-a stays untouched.
+  const nextLedger = structuredClone(e1.write.ledger);
+  hold(nextLedger, kind, "page-b", null, 3_000);
+  const e2 = nornStep()({
+    ...eachState,
+    nowMs: 3_000,
+    ledger: nextLedger,
+    requests: e1.write.requests.map(r => ({
+      ...r, deliveryMessageId: `norn:${r.requestRef}:0`, delivered: true, abandoned: false, brokeOff: false,
+    })),
+  });
+  assert.equal(e2.write.ledger.requests[alphaReq.requestId].reply, null);
+  assert.equal(e2.write.ledger.requests[betaReq.requestId].reply?.tag, "Cancelled");
+  assert.ok(e2.result.wakeChannels.includes(betaReq.channelId));
+  assert.ok(!e2.result.wakeChannels.includes(alphaReq.channelId));
+});

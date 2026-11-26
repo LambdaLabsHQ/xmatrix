@@ -32,6 +32,7 @@ async function sync(program) {
     },
     // The sync's own collaborators: the ids it derives are its inputs joined, so a new run's id shows its number.
     "./deterministic-id": { deterministicConversationId: async (...parts) => parts.join(":") },
+    "./norn-branches": { ensureAndWakeNornBranches: async () => {} },
     "./norn-host": hostMod, "./vendor/norn/runtime/value": valueMod, "./norn-plan": { nornFlow: () => [] },
     "./product-message-append": { dispatchProductMessageAppend: async () => new Response(null, { status: 200 }) },
     "./system-conversation": { openConversation: async () => {} },

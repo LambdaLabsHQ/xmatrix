@@ -5,6 +5,7 @@ import { markCardAnswered } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
 import { installProgramActionOutcome, type ProgramActionOutcome } from "./connectors/connector-commands";
 import { deliverNornAppRequest, withdrawNornAppRequests } from "./norn-actions";
+import { ensureAndWakeNornBranches } from "./norn-branches";
 import { agentHolder, appRequest, checkNornProgram, instanceHolder, nornActionAnswer, nornAnswerBody, nornAsking, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody,
   nornPreparedReply, nornProgramIn, nornQuestionSource, nornRequestCard, nornStartLedger, nornStep, personHolder, referencedLibraryNames, selectReferencedLibraries, type NornPassResult, type NornQuestion,
   type NornRequestCard } from "./norn-host";
@@ -128,6 +129,27 @@ export async function startNornProgram(input: ProductMessagePostCommitInput): Pr
   return {};
 }
 
+/** Ensures any newly opened branch conversations exist and wakes all affected coordinators. */
+async function syncStepBranches(
+  env: Env,
+  spaceId: string,
+  meta: { pageId?: string | null; pageName?: string | null; programChannelId?: string; authorityUserId: string },
+  result: NornPassResult | undefined,
+  extraWakeChannels: readonly string[] = [],
+): Promise<void> {
+  const wakeChannels = [...new Set([...extraWakeChannels, ...(result?.wakeChannels ?? [])])];
+  if (!result?.branches?.length && !wakeChannels.length) return;
+  await ensureAndWakeNornBranches(env, {
+    spaceId,
+    pageId: meta.pageId,
+    pageName: meta.pageName,
+    programChannelId: meta.programChannelId,
+    authorityUserId: meta.authorityUserId,
+    branches: result?.branches,
+    wakeChannels,
+  });
+}
+
 /**
  * The Channel's programs, brought up to date: a pass for each one that was
  * stopped, has a deadline due or a request nobody works on any more; then
@@ -148,10 +170,13 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
       continue;
     }
     try {
-      await programs.deliverEvent(scope, nornStep(undefined, {
+      const stepResult = await programs.deliverEvent(scope, nornStep(undefined, {
         id: owed.eventId, streams: payload.streams, what: payload.what,
         ...(payload.cloudEvent ? { cloudEvent: payload.cloudEvent } : {}),
       }));
+      await syncStepBranches(env, programs.spaceId, {
+        pageId: owed.pageId, pageName: owed.pageName, programChannelId: channelId, authorityUserId: owed.authorityUserId,
+      }, stepResult);
     } catch (error) {
       const delayMs = Math.min(60_000, 1_000 * (2 ** Math.min(owed.attempts, 6)));
       await programs.rescheduleEventDelivery({ ...scope, delayMs }).catch(() => undefined);
@@ -161,8 +186,9 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
       });
     }
   }
-  for (const programId of initialWork.passes) {
-    await programs.advance({ requestId, channelId, programId }, nornStep());
+  for (const meta of initialWork.passMeta) {
+    const stepResult = await programs.advance({ requestId, channelId, programId: meta.programId }, nornStep());
+    await syncStepBranches(env, programs.spaceId, meta, stepResult);
   }
   const work = await programs.channelWork({ requestId, channelId });
   if (work.eventDeliveries.length > 0) moreEventDeliveries = true;
@@ -182,7 +208,8 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
         await programs.delivered({ ...scope, ledgerRequestId: delivery.requestId, epoch: delivery.epoch, hostDueInMs: outcome.held.dueInMs });
       } else {
         // It ended where it was staged: the program reads how in its next pass, which may open what follows.
-        await programs.advance(scope, nornStep({ requestId: delivery.requestId, epoch: delivery.epoch, reply: outcome.reply }));
+        const stepResult = await programs.advance(scope, nornStep({ requestId: delivery.requestId, epoch: delivery.epoch, reply: outcome.reply }));
+        await syncStepBranches(env, programs.spaceId, delivery, stepResult);
         undeliverable = true;
       }
       continue;
@@ -191,8 +218,9 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
       const people = await peopleNamed(programs, { requestId, channelId }, delivery.holder);
       const scope = { requestId, channelId, programId: delivery.programId };
       if (people.length !== 1) {
-        await programs.advance(scope, nornStep({ requestId: delivery.requestId, epoch: delivery.epoch, reply: { tag: "Broke",
+        const stepResult = await programs.advance(scope, nornStep({ requestId: delivery.requestId, epoch: delivery.epoch, reply: { tag: "Broke",
           reason: people.length ? `More than one person here is named ${delivery.holder}` : `Nobody named ${delivery.holder} can read this conversation` } }));
+        await syncStepBranches(env, programs.spaceId, delivery, stepResult);
         undeliverable = true;
         continue;
       }
@@ -208,8 +236,9 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
     // A request delegated to an Instance by its address goes to that Instance, if it is still here to take it;
     // without it, the delegation fails, and the request goes back to whoever delegated it.
     if (instanceHolder(delivery.holder) && !delivery.addressed) {
-      await programs.advance({ requestId, channelId, programId: delivery.programId }, nornStep({ requestId: delivery.requestId,
+      const stepResult = await programs.advance({ requestId, channelId, programId: delivery.programId }, nornStep({ requestId: delivery.requestId,
         epoch: delivery.epoch, reply: { tag: "Broke", reason: `${delivery.holder} no longer takes messages in this conversation` } }));
+      await syncStepBranches(env, programs.spaceId, delivery, stepResult);
       undeliverable = true;
       continue;
     }
@@ -287,10 +316,10 @@ export async function settleNornAppRequest(env: Env, input: { channelId: string;
     : "done" in outcome ? nornActionAnswer(outcome.done)
     : "declined" in outcome ? { tag: "Refused", reason: outcome.declined }
     : "blocked" in outcome ? { tag: "Revoked" } : { tag: "Broke", reason: outcome.failed };
-  await programs.advance({ requestId, channelId: input.channelId, programId: held.programId },
+  const stepResult = await programs.advance({ requestId, channelId: input.channelId, programId: held.programId },
     nornStep({ requestId: held.ledgerRequestId, epoch: held.epoch, reply }));
   // What the answer opened, or the program's end, is the coordinator's to deliver.
-  await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  await syncStepBranches(env, programs.spaceId, held, stepResult, [input.channelId]);
 }
 
 // The durable executor tells a program how the action it performed ended. The connector's files do not import the
@@ -347,7 +376,7 @@ export async function answerNornRequest(env: Env, input: { channelId: string; ru
         error: error instanceof Error ? error.message : String(error) });
     });
     // What the answer opened, or the program's end, is the coordinator's to deliver.
-    await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+    await syncStepBranches(env, programs.spaceId, held, result, [input.channelId]);
   }
   return result;
 }
@@ -372,7 +401,7 @@ export async function answerNornRequestAsPerson(env: Env, input: { channelId: st
   if (result.returnedTo) await closeCard(env, { channelId: input.channelId, messageId: held.deliveryMessageId, userId: input.userId,
     text: `Given back to ${result.returnedTo.slice(1)}: ${input.text}` });
   // The card is closed and what the answer opened is delivered by the coordinator.
-  if (!result.refusal) await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  if (!result.refusal) await syncStepBranches(env, programs.spaceId, held, result, [input.channelId]);
   return result;
 }
 
@@ -399,7 +428,8 @@ export async function delegateNornRequest(env: Env, input: { channelId: string; 
   const held = input.delegator.kind === "person"
     ? await programs.personRequest({ requestId, requestRef: input.requestRef, userId: input.delegator.userId })
       .then(row => row && row.channelId === input.channelId ? { programId: row.programId, requestId: row.ledgerRequestId, epoch: row.epoch,
-        cardMessageId: row.deliveryMessageId } : undefined)
+        cardMessageId: row.deliveryMessageId, programChannelId: row.programChannelId, pageId: row.pageId, pageName: row.pageName,
+        authorityUserId: row.authorityUserId } : undefined)
     : await programs.heldRequest({ requestId, channelId: input.channelId, requestRef: input.requestRef, runId: input.delegator.runId,
       instanceId: input.delegator.instanceId });
   if (!held) return undefined;
@@ -426,7 +456,7 @@ export async function delegateNornRequest(env: Env, input: { channelId: string; 
   // the request as a new holding by the coordinator.
   if (input.delegator.kind === "person" && "cardMessageId" in held) await closeCard(env, { channelId: input.channelId,
     messageId: held.cardMessageId, userId: input.delegator.userId, text: `${NORN_DELEGATED_NOTE}${to.slice(1)}${input.reason ? `: ${input.reason}` : ""}` });
-  await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  await syncStepBranches(env, programs.spaceId, held, result, [input.channelId]);
   return result;
 }
 
@@ -446,7 +476,7 @@ export async function reclaimNornRequest(env: Env, input: { channelId: string; r
   if (!result || result.refusal) return result;
   if (delegated.delegate) await closeCard(env, { channelId: input.channelId, messageId: delegated.delegate.cardMessageId,
     userId: delegated.delegate.userId, text: "Taken back by the one who delegated it to you." });
-  await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  await syncStepBranches(env, programs.spaceId, delegated, result, [input.channelId]);
   return result;
 }
 

@@ -220,6 +220,17 @@ alone: the message marks where it begins (`metadata.nornAnswerFrom`), and a
 person reading the conversation is shown only what comes before it, the
 summon and the request's reference drawn as the request.
 
+For a Page program that fans out into named branches (`Std.each`,
+`forEach(~per=...)`, or `spawn(~key=...)`), each branch gets its own
+deterministic conversation (`norn-page-branch`, keyed by `(pageId, programName,
+branchKey)`), linked to the program's Page and—when the partition key is a
+readable Space Page ID—to that target Page as well. Requests opened inside a
+branch are stored with that branch's `channel_id` in `data.norn_requests` so
+each branch runs with isolated Agent instances and conversation history, while
+the parent program's ledger stays the single source of truth. `GET
+/api/spaces/:space/pages/:page/programs` exposes per-branch status (`branches`)
+alongside the program's overall status.
+
 The delivery message may start a Run for the program's authority and nobody
 else (`NORN_DELIVERY_SOURCE_SQL`, used by the launch source rule and by the
 Run's initial message source), so the Run's first turn is tied to it.
