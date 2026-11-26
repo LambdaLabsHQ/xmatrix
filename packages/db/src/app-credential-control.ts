@@ -1,7 +1,7 @@
 import type { QueryResultRow } from "pg";
 import { requireCredentialAdmin as requireSpaceAdmin } from "./app-credential-admin.js";
 import { resourcePages } from "./resource-pages.js";
-import { SENTRY_PUBLIC_INTEGRATION_SCOPES, utf8ByteLength } from "@xmatrix/protocol";
+import { normalizeSentryPublicIntegrationScopes, utf8ByteLength } from "@xmatrix/protocol";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { AppControlError, SLACK_WORKSPACE_HELD_SQL, SLACK_WORKSPACE_OWNED_SQL, SLACK_WORKSPACE_TAKEN } from "./app-control.js";
@@ -250,7 +250,7 @@ export class PostgresAppCredentialRepository {
         !/^[1-9][0-9]{0,31}$/u.test(input.fields.oauthOrganizationId ?? "") ||
         !/^[a-z0-9][a-z0-9_-]{0,99}$/u.test(input.fields.oauthOrganization ?? "") ||
         !/^[a-z0-9][a-z0-9_-]{0,99}$/u.test(input.fields.oauthAppSlug ?? "") ||
-        input.fields.oauthScopes !== SENTRY_PUBLIC_INTEGRATION_SCOPES.join(" ") ||
+        normalizeSentryPublicIntegrationScopes(input.fields.oauthScopes) !== input.fields.oauthScopes ||
         !/^[1-9][0-9]{0,15}$/u.test(input.fields.oauthExpiresAt ?? "") ||
         !Number.isSafeInteger(Number(input.fields.oauthExpiresAt))))) {
       throw new AppControlError("invalid_app_request", 400, "Invalid verified installation");

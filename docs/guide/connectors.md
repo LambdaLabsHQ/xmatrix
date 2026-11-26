@@ -80,7 +80,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | --- | --- | --- | --- |
 | GitLab | `gitlab` | Merge requests, pushes, pipelines, issues, comments, releases | `read_issue`, `read_merge_request`, `comment`, `merge`, `retry_pipeline` |
 | Bitbucket | `bitbucket` | Pull requests, comments, pushes, builds | `read_pull_request`, `comment` |
-| Sentry | `sentry` | New issues, regressions, resolved, assigned, ignored, alerts, comments | `read_issue`, `list_issues`, `resolve`, `unresolve`, `ignore` |
+| Sentry | `sentry` | New issues, regressions, resolved, assigned, ignored, alerts, comments | `read_issue`, `list_issues`, `list_projects`, `get_dsn`, `create_project`, `resolve`, `unresolve`, `ignore` |
 | Linear | `linear` | Issues, comments, projects | `read_issue`, `comment`, `create_issue` |
 | Jira | `jira` | Issues, comments | `read_issue`, `comment`, `transition` |
 | PagerDuty | `pagerduty` | Triggered, acknowledged, resolved, updates | `read_incident`, `acknowledge`, `resolve`, `note` |

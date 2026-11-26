@@ -2,14 +2,17 @@ import { providerJson, providerUrl, ProviderRequestError } from "../http";
 import type { ConnectorAction } from "../provider";
 import { taskContextExcerpt } from "./task-context";
 import { sentryEventMetadata, sentryExceptionMechanism, sentryIssueMetadata } from "./sentry-event-metadata";
-import { isSentryInstallationGrant, sentryOrganization, validateSentryInstallationCredentials,
-  verifySentryInstallation } from "../sentry-installation";
+import { isSentryInstallationGrant, sentryInstallationHasScope, sentryOrganization,
+  validateSentryInstallationCredentials, verifySentryInstallation } from "../sentry-installation";
 
 const SHORT_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,60}$/u;
 const GROUP_ID = /^[1-9][0-9]{0,31}$/u;
 const PROJECT_SLUG = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
+const PLATFORM_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/u;
+const PROJECT_NAME = /^[^\p{Cc}]{1,64}$/u;
 const SEARCH = /^[^\p{Cc}]{1,300}$/u;
 const LIST_LIMIT = 25;
+const PROJECT_LIST_LIMIT = 50;
 
 function api(credentials: Readonly<Record<string, string>>, path: string): URL {
   if (isSentryInstallationGrant(credentials)) validateSentryInstallationCredentials(credentials);
@@ -229,9 +232,214 @@ function statusAction(status: "resolved" | "unresolved" | "ignored", verb: strin
   };
 }
 
+/** Public Sentry ingest DSN only: never exports `dsn.secret`, credentials, queries, or arbitrary URLs. */
+function validPublicDsn(value: unknown, allowHttp: boolean): string | undefined {
+  if (typeof value !== "string" || value.length > 512 || /[\s\p{Cc}]/u.test(value)) return undefined;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" && !(allowHttp && parsed.protocol === "http:")) return undefined;
+    if (!/^[a-f0-9]{16,128}$/iu.test(parsed.username) || parsed.password) return undefined;
+    if (!/^\/[1-9][0-9]{0,31}$/u.test(parsed.pathname) || parsed.search || parsed.hash) return undefined;
+    return parsed.href;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reads the first active public ingest DSN for a project; never exports private/secret DSNs. */
+async function readProjectPublicDsn(
+  credentials: Readonly<Record<string, string>>,
+  projectSlug: string,
+): Promise<{ dsn: string; label?: string }> {
+  const organization = encodeURIComponent(sentryOrganization(credentials));
+  const keys = (await providerJson(
+    api(credentials, `api/0/projects/${organization}/${encodeURIComponent(projectSlug)}/keys/`),
+    { headers: headers(credentials) },
+  )).items;
+  if (!Array.isArray(keys)) throw new ProviderRequestError(502, "Sentry did not return project client keys");
+  const allowHttp = !credentials.oauthToken && Boolean(credentials.baseUrl?.startsWith("http://"));
+  for (const key of keys) {
+    if (!key || typeof key !== "object" || Array.isArray(key)) continue;
+    const rec = key as Record<string, unknown>;
+    if (rec.isActive === false) continue;
+    const dsnObj = rec.dsn && typeof rec.dsn === "object" && !Array.isArray(rec.dsn)
+      ? rec.dsn as Record<string, unknown> : undefined;
+    const publicDsn = validPublicDsn(dsnObj?.public, allowHttp);
+    if (!publicDsn) continue;
+    const label = typeof rec.label === "string" && PROJECT_NAME.test(rec.label.trim()) ? rec.label.trim() : undefined;
+    return { dsn: publicDsn, ...(label ? { label } : {}) };
+  }
+  throw new ProviderRequestError(502, `Sentry did not return an active public DSN for project ${projectSlug}`);
+}
+
+const LIST_PROJECTS: ConnectorAction = {
+  effect: "read",
+  requires: ["authToken|oauthToken", "organization|oauthOrganization"],
+  parse(statement) {
+    return statement.target.trim() === "*" && !statement.text.trim()
+      ? {}
+      : "use * to list projects: @sentry:list_projects:*";
+  },
+  async execute({ credentials }) {
+    const organization = encodeURIComponent(sentryOrganization(credentials));
+    const projects = (await providerJson(api(credentials, `api/0/organizations/${organization}/projects/`), {
+      headers: headers(credentials),
+    })).items;
+    if (!Array.isArray(projects)) throw new ProviderRequestError(502, "Sentry did not return a project list");
+    const shown = projects.slice(0, PROJECT_LIST_LIMIT);
+    const lines: string[] = [];
+    for (const item of shown) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const rec = item as Record<string, unknown>;
+      const slug = typeof rec.slug === "string" ? rec.slug.trim().toLowerCase() : "";
+      const name = typeof rec.name === "string" ? rec.name.replace(/\s+/gu, " ").trim() : "";
+      if (!PROJECT_SLUG.test(slug) || !name) continue;
+      const platform = typeof rec.platform === "string" && PLATFORM_SLUG.test(rec.platform.trim())
+        ? rec.platform.trim() : undefined;
+      lines.push([slug, name.slice(0, 80), platform].filter(Boolean).join(" · "));
+    }
+    if (lines.length !== shown.length) {
+      throw new ProviderRequestError(502, `Sentry returned ${shown.length - lines.length} unreadable project(s) of ${shown.length}`);
+    }
+    if (!lines.length) return { summary: "No Sentry projects exist in this organization." };
+    return {
+      summary: [
+        `Sentry projects in ${sentryOrganization(credentials)}${projects.length > PROJECT_LIST_LIMIT ? ` (first ${PROJECT_LIST_LIMIT} of ${projects.length})` : ""}:`,
+        ...lines.map(line => `- ${line}`),
+      ].join("\n"),
+    };
+  },
+};
+
+const GET_DSN: ConnectorAction = {
+  effect: "read",
+  requires: ["authToken|oauthToken", "organization|oauthOrganization"],
+  parse(statement) {
+    const project = statement.target.trim().toLowerCase();
+    return PROJECT_SLUG.test(project) && !statement.text.trim()
+      ? { project }
+      : "name one project slug: @sentry:get_dsn:agent-router";
+  },
+  async execute({ credentials }, input) {
+    const { dsn, label } = await readProjectPublicDsn(credentials, input.project!);
+    return {
+      summary: `Sentry public DSN for ${input.project}${label ? ` (${label})` : ""}: ${dsn}`,
+    };
+  },
+};
+
+/** Parses optional `platform=<slug>`, `team=<slug>`, and `name=<value>` tokens for `create_project`. */
+function parseCreateProjectArgs(text: string): { platform?: string; team?: string; name?: string } | string {
+  const usage = "use @sentry:create_project:<slug> [platform=<slug>] [team=<slug>] [name=<display name>]";
+  const trimmed = text.trim();
+  if (!trimmed) return {};
+  const result: { platform?: string; team?: string; name?: string } = {};
+  const pattern = /(platform|team|name)=(?:"([^"]+)"|'([^']+)'|(\S+))/gu;
+  let consumed = 0;
+  for (const match of trimmed.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    if (trimmed.slice(consumed, start).trim()) return usage;
+    consumed = start + match[0].length;
+    const key = match[1] as "platform" | "team" | "name";
+    const rawValue = (match[2] ?? match[3] ?? match[4] ?? "").trim();
+    if (result[key] !== undefined || !rawValue) return usage;
+    if (key === "platform") {
+      const normalized = rawValue.toLowerCase();
+      if (!PLATFORM_SLUG.test(normalized)) return usage;
+      result.platform = normalized;
+    } else if (key === "team") {
+      const normalized = rawValue.toLowerCase();
+      if (!PROJECT_SLUG.test(normalized)) return usage;
+      result.team = normalized;
+    } else {
+      if (!PROJECT_NAME.test(rawValue)) return usage;
+      result.name = rawValue;
+    }
+  }
+  if (trimmed.slice(consumed).trim()) return usage;
+  return result;
+}
+
+const CREATE_PROJECT: ConnectorAction = {
+  effect: "write",
+  requires: ["authToken|oauthToken", "organization|oauthOrganization"],
+  parse(statement) {
+    const project = statement.target.trim().toLowerCase();
+    if (!PROJECT_SLUG.test(project)) {
+      return "name a valid project slug: @sentry:create_project:agent-router [platform=rust] [team=<slug>]";
+    }
+    const parsed = parseCreateProjectArgs(statement.text);
+    if (typeof parsed === "string") return parsed;
+    return { project, ...parsed };
+  },
+  async execute({ credentials }, input) {
+    if (isSentryInstallationGrant(credentials) &&
+        (!sentryInstallationHasScope(credentials, "project:write") ||
+          (!input.team && !sentryInstallationHasScope(credentials, "team:read")))) {
+      throw new ProviderRequestError(403,
+        "Sentry Public Integration needs Project: Read & Write (project:write) and Team: Read (team:read) to create projects; update the integration permissions in Sentry and reconnect.");
+    }
+    const orgSlug = sentryOrganization(credentials);
+    const organization = encodeURIComponent(orgSlug);
+    let team = input.team;
+    if (!team) {
+      const teams = (await providerJson(api(credentials, `api/0/organizations/${organization}/teams/`), {
+        headers: headers(credentials),
+      })).items;
+      if (!Array.isArray(teams)) throw new ProviderRequestError(502, "Sentry did not return organization teams");
+      const slugs = teams
+        .map(item => (item && typeof item === "object" && !Array.isArray(item) && typeof (item as Record<string, unknown>).slug === "string")
+          ? ((item as Record<string, unknown>).slug as string).trim().toLowerCase() : "")
+        .filter(slug => PROJECT_SLUG.test(slug));
+      if (slugs.length === 0) {
+        throw new ProviderRequestError(400, `No Sentry team found in ${orgSlug}; specify team=<slug>.`);
+      }
+      if (slugs.length > 1) {
+        throw new ProviderRequestError(400,
+          `Organization ${orgSlug} has multiple Sentry teams; specify team=<slug> (available: ${slugs.slice(0, 10).join(", ")}).`);
+      }
+      team = slugs[0]!;
+    }
+    let created: Record<string, unknown>;
+    try {
+      created = await providerJson(api(credentials, `api/0/teams/${organization}/${encodeURIComponent(team)}/projects/`), {
+        method: "POST",
+        headers: headers(credentials),
+        json: {
+          name: input.name || input.project!,
+          slug: input.project!,
+          ...(input.platform ? { platform: input.platform } : {}),
+        },
+      });
+    } catch (error) {
+      if (error instanceof ProviderRequestError && error.status === 409) {
+        throw new ProviderRequestError(409,
+          `Sentry project \`${input.project}\` already exists in ${orgSlug}; run \`@sentry:get_dsn:${input.project}\` to read its DSN.`);
+      }
+      throw error;
+    }
+    const createdSlug = typeof created.slug === "string" ? created.slug.trim().toLowerCase() : "";
+    if (!PROJECT_SLUG.test(createdSlug) || createdSlug !== input.project) {
+      throw new ProviderRequestError(502, "Sentry did not confirm the created project slug");
+    }
+    const createdName = typeof created.name === "string" && created.name.trim() ? created.name.trim() : input.name || createdSlug;
+    const { dsn } = await readProjectPublicDsn(credentials, createdSlug);
+    return {
+      summary: [
+        `Created Sentry project \`${createdSlug}\` (${createdName}, team \`${team}\`${input.platform ? `, platform \`${input.platform}\`` : ""}) in ${orgSlug}.`,
+        `Public DSN: ${dsn}`,
+        `Organization-level Sentry webhook events cover \`${createdSlug}\` automatically.`,
+      ].join("\n"),
+    };
+  },
+};
+
 export const SENTRY_ACTIONS: Record<string, ConnectorAction> = {
   read_issue: READ_ISSUE,
   list_issues: LIST_ISSUES,
+  list_projects: LIST_PROJECTS,
+  get_dsn: GET_DSN,
+  create_project: CREATE_PROJECT,
   resolve: statusAction("resolved", "resolve"),
   unresolve: statusAction("unresolved", "unresolve"),
   ignore: statusAction("ignored", "ignore"),
