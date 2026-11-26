@@ -271,17 +271,17 @@ export function summarizeProgramBranches(
 }
 
 const BRANCH_DOT_CLASS: Record<PageProgramBranchStatus["state"], string> = {
-  running: "size-2 shrink-0 rounded-full bg-emerald-500 animate-pulse",
-  waiting: "size-2 shrink-0 rounded-full bg-amber-500",
-  completed: "size-2 shrink-0 rounded-full bg-emerald-600",
+  running: "size-2 shrink-0 rounded-full bg-foreground animate-pulse",
+  waiting: "size-2 shrink-0 rounded-full bg-primary",
+  completed: "size-2 shrink-0 rounded-full bg-muted-foreground/50",
   failed: "size-2 shrink-0 rounded-full bg-destructive",
 };
 
 const BRANCH_NOTE_CLASS: Record<PageProgramBranchStatus["state"], string> = {
-  running: "ml-auto max-w-[32%] shrink-0 truncate rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400",
-  waiting: "ml-auto max-w-[32%] shrink-0 truncate rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-400",
-  completed: "ml-auto max-w-[32%] shrink-0 truncate rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400",
-  failed: "ml-auto max-w-[32%] shrink-0 truncate rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-destructive",
+  running: "ml-auto max-w-[32%] shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] app-status-chip",
+  waiting: "ml-auto max-w-[32%] shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] app-status-chip app-status-chip-attention",
+  completed: "ml-auto max-w-[32%] shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] app-status-chip app-status-chip-secondary",
+  failed: "ml-auto max-w-[32%] shrink-0 truncate rounded-full px-2 py-0.5 text-[11px] app-status-chip app-status-chip-alert",
 };
 
 /** Draws a generic clickable Program → Branch Tree below a program's flow. */

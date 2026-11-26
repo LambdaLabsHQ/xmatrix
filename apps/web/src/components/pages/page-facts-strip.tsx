@@ -212,8 +212,8 @@ export function PageFactsStrip({ doc, canEdit, onFocusFact }: PageFactsStripProp
               <span className="font-mono font-semibold text-foreground">{fact.typeName}</span>
               <span
                 className={fact.role === "observed"
-                  ? "ml-auto rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400"
-                  : "ml-auto rounded-full bg-foreground/[0.07] px-2 py-0.5 text-[11px] text-muted-foreground"}
+                  ? "ml-auto rounded-full px-2 py-0.5 text-[11px] app-status-chip app-status-chip-secondary"
+                  : "ml-auto rounded-full px-2 py-0.5 text-[11px] app-status-chip"}
                 data-role={fact.role}
               >
                 {fact.role === "observed" ? "observed" : editable ? "edit" : "declared"}
