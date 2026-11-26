@@ -3,7 +3,11 @@ import type {
   SharedHumanWorkerCommand,
   SharedHumanWorkerEvent,
 } from "./human-shared-socket-worker";
-import { BaseHumanSocketTransport, type HumanSocketTransport } from "./worker-socket-transport";
+import {
+  BaseHumanSocketTransport,
+  type BaseHumanSocketTransportOptions,
+  type HumanSocketTransport,
+} from "./worker-socket-transport";
 
 export interface SharedHumanWorkerPortLike {
   postMessage(command: SharedHumanWorkerCommand): void;
@@ -80,7 +84,7 @@ class SharedWorkerSocketTransport extends BaseHumanSocketTransport {
   private pageHideListener: (() => void) | undefined;
   private workerReady = false;
 
-  constructor(private readonly url: string, private readonly options: {
+  constructor(url: string, private readonly options: BaseHumanSocketTransportOptions & {
     createSharedWorker: () => SharedHumanWorkerLike;
     fallbackOpener: (url: string) => HumanSocketTransport;
     userId: string;
@@ -88,15 +92,11 @@ class SharedWorkerSocketTransport extends BaseHumanSocketTransport {
     clientRole: SharedClientRole;
     workerScriptUrl?: string;
     probeScript?: (url: string) => Promise<boolean>;
-    startupTimeoutMs?: number;
-    onUnavailable: () => void;
   }) {
-    super();
+    super(url, options);
   }
 
-  send(data: Parameters<WebSocket["send"]>[0]): void {
-    const text = this.assertTextSend(data);
-    if (text === null) return;
+  protected sendText(text: string): void {
     if (this.fallback) this.fallback.send(text);
     else this.post({ type: "send", data: text });
   }
@@ -227,23 +227,19 @@ class SharedWorkerSocketTransport extends BaseHumanSocketTransport {
         if (this.fallback === transport) this.closed(event.code, event.reason, event.wasClean);
       });
       transport.addEventListener("error", () => {
-        if (this.fallback === transport) this.events.dispatchEvent(new Event("error"));
+        if (this.fallback === transport) this.dispatchError();
       });
     } catch {
-      this.closed(1006, "", false);
+      this.failClosed();
     }
   }
 
-  protected closed(code: number, reason: string, wasClean: boolean): void {
-    if (this.readyState === 3) return;
-    this.readyState = 3;
-    this.clearStartup();
+  protected cleanupOnClose(): void {
     this.detachPageHide();
     this.releasePort();
     this.fallback = undefined;
     this.fallbackUnsubscribePackets?.();
     this.fallbackUnsubscribePackets = undefined;
-    this.finishClosed(code, reason, wasClean);
   }
 
   private post(command: SharedHumanWorkerCommand): void {

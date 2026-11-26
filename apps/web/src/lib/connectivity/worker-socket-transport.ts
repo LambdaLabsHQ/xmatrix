@@ -26,6 +26,11 @@ export function createWorkerSocketOpener(options: {
   });
 }
 
+export interface BaseHumanSocketTransportOptions {
+  startupTimeoutMs?: number;
+  onUnavailable: () => void;
+}
+
 export abstract class BaseHumanSocketTransport implements HumanSocketTransport {
   readyState = 0;
   protected readonly events = new EventTarget();
@@ -33,7 +38,14 @@ export abstract class BaseHumanSocketTransport implements HumanSocketTransport {
   protected startTimer: ReturnType<typeof setTimeout> | undefined;
   protected startupTimer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor() {
+  protected readonly url: string;
+  protected readonly onUnavailable: () => void;
+  protected readonly startupTimeoutMs: number;
+
+  constructor(url: string, baseOptions: BaseHumanSocketTransportOptions) {
+    this.url = url;
+    this.onUnavailable = baseOptions.onUnavailable;
+    this.startupTimeoutMs = baseOptions.startupTimeoutMs ?? 3_000;
     // Match native WebSocket: callers can attach listeners before any event.
     this.startTimer = setTimeout(() => {
       this.startTimer = undefined;
@@ -41,11 +53,11 @@ export abstract class BaseHumanSocketTransport implements HumanSocketTransport {
     }, 0);
   }
 
-  abstract send(data: Parameters<WebSocket["send"]>[0]): void;
   abstract close(code?: number, reason?: string): void;
   abstract dispose(code?: number): void;
   protected abstract start(): void;
-  protected abstract closed(code: number, reason: string, wasClean: boolean): void;
+  protected abstract sendText(text: string): void;
+  protected abstract cleanupOnClose(): void;
 
   addEventListener<K extends keyof WebSocketEventMap>(
     type: K,
@@ -60,11 +72,11 @@ export abstract class BaseHumanSocketTransport implements HumanSocketTransport {
     return () => { this.listeners.delete(listener); };
   }
 
-  protected assertTextSend(data: Parameters<WebSocket["send"]>[0]): string | null {
+  send(data: Parameters<WebSocket["send"]>[0]): void {
     if (this.readyState === 0) throw new DOMException("Socket is still connecting", "InvalidStateError");
-    if (this.readyState !== 1) return null;
+    if (this.readyState !== 1) return;
     if (typeof data !== "string") throw new TypeError("The Human socket sends text frames only");
-    return data;
+    this.sendText(data);
   }
 
   protected dispatchWorkerEvent(
@@ -94,13 +106,25 @@ export abstract class BaseHumanSocketTransport implements HumanSocketTransport {
     }
   }
 
+  protected dispatchError(): void {
+    this.events.dispatchEvent(new Event("error"));
+  }
+
+  protected failClosed(): void {
+    this.closed(1006, "", false);
+  }
+
   protected opened(): void {
     if (this.readyState !== 0) return;
     this.readyState = 1;
     this.events.dispatchEvent(new Event("open"));
   }
 
-  protected finishClosed(code: number, reason: string, wasClean: boolean): void {
+  protected closed(code: number, reason: string, wasClean: boolean): void {
+    if (this.readyState === 3) return;
+    this.readyState = 3;
+    this.clearStartup();
+    this.cleanupOnClose();
     this.events.dispatchEvent(new CloseEvent("close", { code, reason, wasClean }));
     this.listeners.clear();
   }
@@ -127,18 +151,14 @@ class WorkerSocketTransport extends BaseHumanSocketTransport {
   private workerConnected = false;
   private readonly packets = createHumanFramePackets({ deliver: (frames) => this.deliver(frames) });
 
-  constructor(private readonly url: string, private readonly options: {
+  constructor(url: string, private readonly options: BaseHumanSocketTransportOptions & {
     createWorker?: () => HumanSocketWorker;
     openNative?: (url: string) => SocketTransport;
-    startupTimeoutMs?: number;
-    onUnavailable: () => void;
   }) {
-    super();
+    super(url, options);
   }
 
-  send(data: Parameters<WebSocket["send"]>[0]): void {
-    const text = this.assertTextSend(data);
-    if (text === null) return;
+  protected sendText(text: string): void {
     if (this.worker) this.post({ type: "send", data: text });
     else this.native?.send(text);
   }
@@ -227,21 +247,17 @@ class WorkerSocketTransport extends BaseHumanSocketTransport {
       socket.addEventListener("error", () => {
         if (this.native !== socket) return;
         this.packets.flush();
-        this.events.dispatchEvent(new Event("error"));
+        this.dispatchError();
       });
     } catch {
-      this.closed(1006, "", false);
+      this.failClosed();
     }
   }
 
-  protected closed(code: number, reason: string, wasClean: boolean): void {
-    if (this.readyState === 3) return;
-    this.readyState = 3;
+  protected cleanupOnClose(): void {
     this.packets.dispose();
-    this.clearStartup();
     this.releaseWorker();
     this.native = undefined;
-    this.finishClosed(code, reason, wasClean);
   }
 
   private post(command: HumanWorkerCommand): void {
