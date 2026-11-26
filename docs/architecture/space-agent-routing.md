@@ -360,8 +360,14 @@ the Agents page keeps showing the open pool rather than
 the scope that Run actually ran. A signed-out candidate returns to unnamed `@auto` once a
 newer harness inventory check reports `signed_in` or a Run on that registration
 replies; a billing refusal holds without a time-based 1-hour
-expiry and clears only when a Run on that registration (or on the refused scope)
-replies successfully (`clearRegistrationAccountHold`). The Agents page shows an account
+expiry. It clears when a Run on that registration (or on the refused scope)
+replies successfully (`clearRegistrationAccountHold`), or, for an account-level
+hold, when a newer provider reading says the account covers requests again
+(`quotaAccount.allowed: true`, such as a prepaid balance read after a top-up):
+that reading replaces the hold in `upsertRegistrationQuotaObservation`. A reading
+that still refuses, or says nothing about the account, leaves it. Opening the
+Agents page and `xmatrix agent list` (`?quota=refresh`) ask the daemons for such a
+reading, at most once a minute per daemon, and so does a summon. The Agents page shows an account
 billing hold as the provider refusing requests (`quota.account.allowed: false`), never as
 a used-up window. Cursor refusals held at account level before the scoped form existed
 were rewritten to the `API`-scope hold by contract migration 0274. Stopping the read of a
