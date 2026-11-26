@@ -15,7 +15,7 @@ test("target resolution bounds both count and stored bytes without truncating id
   let queries = 0;
   const tx = { query: async query => {
     queries += 1;
-    return JSON.parse(query.values[2]).map(request => ({ address: request.address,
+    return query.values[2].map(ordinal => ({ ordinal, display_name: "Alpha", harness: "alpha",
       instance_id: "i".repeat(450), run_id: "r".repeat(450) }));
   } };
   const body = Array.from({ length: 1001 }, (_, index) => `@Alpha:${index + 1}`).join(" ");

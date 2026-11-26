@@ -28,6 +28,7 @@ import {
   agentModelEntry,
   agentUsageLimitFromError,
   isAccountBillingRefusalError,
+  isHarnessCredentialRefusalError,
   isScopedBillingRefusalError,
   boundAgentTurnFailureDetail,
   safeAgentFailureDetail,
@@ -822,7 +823,13 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         console.error("Signed-out harness could not be read for the turn-failure notice", error);
         return undefined;
       }) : undefined;
-    if (message.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON && this.dependencies.recordSignedOutTurn) {
+    // A plain failed turn whose provider refused the program's own credential
+    // (DeepSeek's missing or rejected API key) is shown as the program wrote
+    // it, and routing reads it as a signed-out turn: `@auto` takes the next
+    // Agent until this one replies or its machine next reports it ready.
+    const credentialRefused = message.reason === AGENT_TURN_FAILURE_LIFECYCLE_REASON &&
+      isHarnessCredentialRefusalError(message.detail);
+    if ((message.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON || credentialRefused) && this.dependencies.recordSignedOutTurn) {
       await this.dependencies.recordSignedOutTurn(session).catch((error: unknown) => {
         console.error("Signed-out turn timestamp could not be recorded", error);
       });

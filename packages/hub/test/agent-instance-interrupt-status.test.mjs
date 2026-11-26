@@ -86,7 +86,7 @@ test("a visible stop command reaches live Agents only as non-interrupting contex
   assert.equal(frame.interruptRequested, undefined);
 });
 
-test("an ordinary Agent peer reply is queued without cancelling the active turn", () => {
+test("an ordinary Agent peer reply joins the active turn without cancelling it, as a person's does", () => {
   const { delivery, frame } = deliverToOne(attachment("online", "running"), {
     messageId: "peer-message-1",
     sequence: 2,
@@ -99,9 +99,10 @@ test("an ordinary Agent peer reply is queued without cancelling the active turn"
       email: "peer@example.test",
     },
   });
-  assert.deepEqual(delivery, { matched: 1, delivered: 1, interrupted: 0 });
+  assert.deepEqual(delivery, { matched: 1, delivered: 1, interrupted: 1 });
   assert.equal(frame.deliveryIntent, undefined);
-  assert.equal(frame.interruptRequested, undefined);
+  assert.equal(frame.interruptRequested, true);
+  assert.equal(frame.steerAllowed, true);
 });
 
 test("scheduled Automation interrupts only its exact live instance target", () => {
@@ -161,7 +162,7 @@ test("the authoring Instance never receives its own message back, its siblings s
         },
         sentAt: new Date().toISOString(),
       }),
-      { matched: 1, delivered: 1, interrupted: 0 },
+      { matched: 1, delivered: 1, interrupted: 1 },
     );
     assert.equal(author.sent.length, 0);
     assert.equal(sibling.sent.at(-1).message.messageId, `own-${identityId}`);

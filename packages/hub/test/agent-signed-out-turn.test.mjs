@@ -11,8 +11,8 @@ const session = {
   run: { instanceId: "instance-1", channelId: "channel", channelInstanceId: "1" },
   presentation: {},
 };
-const failed = (reason) => ({ type: "agent_lifecycle", channelId: "channel", layer: "application", status: "failed",
-  reason, detail: "Failed to authenticate: OAuth session expired and could not be refreshed" });
+const failed = (reason, detail = "Failed to authenticate: OAuth session expired and could not be refreshed") => ({
+  type: "agent_lifecycle", channelId: "channel", layer: "application", status: "failed", reason, detail });
 const signedOut = { harness: "claude", program: "Claude Code", machineId: "machine:mac", machineName: "mac-mini" };
 const summon = { sourceMessageId: "message-1", sourceMention: "@claude fix the build" };
 
@@ -33,7 +33,7 @@ test("a turn refused as signed out posts its sign-in, with the summon to send ag
 
 test("any other turn failure reads nothing; an unreadable registration still posts the failure", async () => {
   const other = recordingAgentInstancePort({ signedOutTurn: async () => ({ signedOut }) });
-  await other.port.execute(session, failed("turn_failed"));
+  await other.port.execute(session, failed("turn_failed", "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"));
   assert.deepEqual(other.commands.map(command => command.family), ["append-message"]);
 
   const unreadable = recordingAgentInstancePort({ signedOutTurn: async () => { throw new Error("offline"); } });
@@ -70,4 +70,23 @@ test("a Run that never answered its `@auto` summon hands the message to the next
     { signedOut, unanswered: false });
   assert.deepEqual(calls.map(call => call[0]), ["read"]);
   assert.equal(await signedOutTurn({}, run, dependencies(undefined, undefined)), undefined);
+});
+
+test("a plain failed turn whose provider refused its API key keeps its own words and is recorded for routing", async () => {
+  // DeepSeek Harness has no sign-in xMatrix runs: its card is the provider's text, never "sign in here".
+  for (const detail of [
+    "DeepSeek Harness ACP turn failed: Internal error: turn failed: Authentication Fails, Your api key: ****U6ZA is invalid (request_id: x) | code=-32603",
+    "DeepSeek Harness ACP turn failed: Internal error: turn failed: llm-deepseek: no API key for provider route \"deepseek-official\"; store DEEPSEEK_API_KEY",
+  ]) {
+    const { port, commands } = recordingAgentInstancePort({ signedOutTurn: async () => ({ signedOut }),
+      recordSignedOutTurn: async () => true });
+    await port.execute(session, failed("turn_failed", detail));
+    assert.deepEqual(commands.map(command => command.family), ["signed-out-turn-recorded", "append-message"], detail);
+    assert.equal(commands[1].input.residual.appMetadata.kind, undefined);
+    assert.ok(commands[1].input.body.includes(detail.slice(0, 80)), "the provider's words are shown unaltered");
+  }
+  // A used-up balance stays a usage limit, never a refused credential.
+  const balance = recordingAgentInstancePort({ signedOutTurn: async () => ({ signedOut }), recordSignedOutTurn: async () => true });
+  await balance.port.execute(session, failed("turn_failed", "DeepSeek Harness ACP turn failed: Insufficient Balance"));
+  assert.equal(balance.commands.some(command => command.family === "signed-out-turn-recorded"), false);
 });
