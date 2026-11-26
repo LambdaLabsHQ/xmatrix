@@ -318,7 +318,7 @@ const GET_DSN: ConnectorAction = {
     const project = statement.target.trim().toLowerCase();
     return PROJECT_SLUG.test(project) && !statement.text.trim()
       ? { project }
-      : "name one project slug: @sentry:get_dsn:agent-router";
+      : "name one project slug: @sentry:get_dsn:billing-api";
   },
   async execute({ credentials }, input) {
     const { dsn, label } = await readProjectPublicDsn(credentials, input.project!);
@@ -366,7 +366,7 @@ const CREATE_PROJECT: ConnectorAction = {
   parse(statement) {
     const project = statement.target.trim().toLowerCase();
     if (!PROJECT_SLUG.test(project)) {
-      return "name a valid project slug: @sentry:create_project:agent-router [platform=rust] [team=<slug>]";
+      return "name a valid project slug: @sentry:create_project:billing-api [platform=rust] [team=<slug>]";
     }
     const parsed = parseCreateProjectArgs(statement.text);
     if (typeof parsed === "string") return parsed;
