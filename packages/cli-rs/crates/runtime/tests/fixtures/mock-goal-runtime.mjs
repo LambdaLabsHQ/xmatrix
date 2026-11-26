@@ -247,13 +247,16 @@ function handleCodexInterruptWithoutCompletion(message) {
 }
 
 // `turn/steer` joins the running turn: the turn answers the steered input and
-// completes. In the rejecting mode Codex refuses it, as when its turn ended.
+// completes. In the rejecting mode Codex refuses it, as when its turn ended,
+// and the turn's completion follows.
 // Everything else behaves as the interrupt fixture.
 function handleCodexSteer(message) {
   if (message.method !== "turn/steer") return handleCodexInterruptWithoutCompletion(message);
   const { threadId, expectedTurnId, input } = message.params;
   if (provider === "codex-steer-rejected") {
     send({ jsonrpc: "2.0", id: message.id, error: { code: -32600, message: "no active turn" } });
+    // Its turn had just ended: the completion follows the refusal.
+    sendCodexTurnCompleted(threadId, expectedTurnId);
     return;
   }
   response(message, { turnId: expectedTurnId });

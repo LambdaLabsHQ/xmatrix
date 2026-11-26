@@ -227,6 +227,27 @@ fn event_requests_active_turn_interrupt_with_replay(
     own_identity_id: Option<&str>,
     interrupt_history_replay: bool,
 ) -> bool {
+    // A message Hub lets join the turn does not cancel it, whoever wrote it: a
+    // runtime that cannot join it, or whose join failed, holds it for the next
+    // turn. Only an @-address to this Instance (or a switch) cancels.
+    !event_steer_allowed(event, interrupt_history_replay)
+        && event_reaches_active_turn_with_replay(
+            event,
+            bound_channel_id,
+            own_identity_id,
+            interrupt_history_replay,
+        )
+}
+
+/// Whether a delivery is work for the turn running here at all: a switch, the
+/// co-written page's own request, or a channel message Hub marked as reaching
+/// the turn that this instance did not write.
+fn event_reaches_active_turn_with_replay(
+    event: &agent_instance_connection::AgentInstanceConnectionEvent,
+    bound_channel_id: Option<&str>,
+    own_identity_id: Option<&str>,
+    interrupt_history_replay: bool,
+) -> bool {
     let (message, replayed, hub_verdict) = match event {
         agent_instance_connection::AgentInstanceConnectionEvent::Server(
             protocol::AgentInstanceServerMessage::AgentModelSwitchRequested { .. }
@@ -259,6 +280,41 @@ fn event_requests_active_turn_interrupt_with_replay(
         ) if interrupt_history_replay => (message, true, *interrupt_requested),
         _ => return false,
     };
+    event_reaches_active_turn(message, replayed, hub_verdict, bound_channel_id, own_identity_id)
+}
+
+/// Whether Hub lets this delivery join the running turn instead of cancelling it.
+fn event_steer_allowed(
+    event: &agent_instance_connection::AgentInstanceConnectionEvent,
+    interrupt_history_replay: bool,
+) -> bool {
+    match event {
+        agent_instance_connection::AgentInstanceConnectionEvent::Server(
+            protocol::AgentInstanceServerMessage::ChannelMessageReceived {
+                steer_allowed: Some(true),
+                interrupt_requested: Some(true),
+                ..
+            },
+        ) => true,
+        agent_instance_connection::AgentInstanceConnectionEvent::Server(
+            protocol::AgentInstanceServerMessage::ChannelHistoryReplay {
+                steer_allowed: Some(true),
+                ..
+            },
+        ) => interrupt_history_replay,
+        _ => false,
+    }
+}
+
+/// Whether a channel delivery is work for the turn running here at all: in its
+/// Channel, not this instance's own, and Hub's verdict says it reaches the turn.
+fn event_reaches_active_turn(
+    message: &protocol::ChannelMessage,
+    replayed: bool,
+    hub_verdict: Option<bool>,
+    bound_channel_id: Option<&str>,
+    own_identity_id: Option<&str>,
+) -> bool {
     if bound_channel_id.is_some_and(|bound| bound != message.channel_id) {
         return false;
     }
@@ -273,33 +329,18 @@ fn event_requests_active_turn_interrupt_with_replay(
     hub_verdict.unwrap_or(!(replayed && message.from.kind == "agent"))
 }
 
-/// The message an interrupting delivery may join to the running turn instead
-/// of cancelling it: Hub allowed it (`steer_allowed`, a Human message that does
-/// not @-address this Instance) and it would interrupt. A slash command keeps
-/// its own turn. `None` leaves the interrupt as it is.
+/// The message a delivery may join to the running turn instead of cancelling
+/// it: Hub allowed it (`steer_allowed`, any message that does not @-address
+/// this Instance, whoever wrote it) and it reaches the turn. A slash command
+/// keeps its own turn. `None` leaves the delivery to the interrupt rule.
 fn active_turn_steer_message(
     event: &agent_instance_connection::AgentInstanceConnectionEvent,
     bound_channel_id: Option<&str>,
     agent: &protocol::SerializedAgent,
     interrupt_history_replay: bool,
 ) -> Option<InboundChannelMessage> {
-    let steer_allowed = match event {
-        agent_instance_connection::AgentInstanceConnectionEvent::Server(
-            protocol::AgentInstanceServerMessage::ChannelMessageReceived {
-                steer_allowed: Some(true),
-                ..
-            },
-        ) => true,
-        agent_instance_connection::AgentInstanceConnectionEvent::Server(
-            protocol::AgentInstanceServerMessage::ChannelHistoryReplay {
-                steer_allowed: Some(true),
-                ..
-            },
-        ) => interrupt_history_replay,
-        _ => false,
-    };
-    if !steer_allowed
-        || !event_requests_active_turn_interrupt_with_replay(
+    if !event_steer_allowed(event, interrupt_history_replay)
+        || !event_reaches_active_turn_with_replay(
             event,
             bound_channel_id,
             Some(agent.id.as_str()),

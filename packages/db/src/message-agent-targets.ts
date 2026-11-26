@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { existingInstanceMentionScanner, filterOperationalMentions, sha256Hex,
+import { addressesInstance, existingInstanceMentionScanner, filterOperationalMentions, sha256Hex,
   type SerializedAgentMessageTarget , utf8ByteLength } from "@xmatrix/protocol";
 import type { DatabaseTransaction } from "./contracts.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
@@ -17,27 +17,29 @@ export async function resolveMessageAgentTargets(tx: DatabaseTransaction, input:
   const unique = [...new Map(matches.map(match => [match.address, match])).values()];
   if (unique.length > 1_000) return undefined;
   if (!unique.length) return [];
-  // An Instance is addressed by its Space registration's display name or
-  // harness, or by its own id. Its actor id is the Instance itself.
-  const rows = await tx.query<QueryResultRow>({ name: "message_agent_target_resolve_v5", text: `SELECT
-      request.address,instance.instance_id,instance.run_id
-    FROM jsonb_to_recordset($3::jsonb) AS request(address text,name text,ordinal text)
-    JOIN data.channels channel ON channel.space_id=$1 AND channel.channel_id=$2
-    JOIN data.instances instance ON instance.channel_id=channel.channel_id AND instance.channel_instance_id::text=request.ordinal
+  // The ordinal is unique in the Channel; whether the name before it is one
+  // the Instance answers to (its registration's display name, its harness or
+  // its own id) is the shared addressing rule's call, the same one live
+  // delivery makes.
+  const rows = await tx.query<QueryResultRow>({ name: "message_agent_target_resolve_v6", text: `SELECT
+      instance.channel_instance_id::text AS ordinal,instance.instance_id,instance.run_id,
+      registration.display_name,registration.harness
+    FROM data.channels channel
+    JOIN data.instances instance ON instance.channel_id=channel.channel_id
+      AND instance.channel_instance_id::text=ANY($3::text[])
     JOIN data.runs run ON run.run_id=instance.run_id AND run.channel_id=channel.channel_id
     JOIN data.run_agent_registrations binding ON binding.run_id=run.run_id AND binding.space_id=channel.space_id
     JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
       AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
       AND registration.harness=binding.harness
-      AND (instance.instance_id=request.name OR lower(registration.display_name)=lower(request.name)
-        OR registration.harness=lower(request.name))
-    WHERE ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "channel",
+    WHERE channel.space_id=$1 AND channel.channel_id=$2 AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "channel",
         principalKindSql: "'agent'", principalIdSql: "instance.instance_id" })}
-    LIMIT 2001`, values: [input.spaceId, input.channelId, JSON.stringify(unique)], maxRows: 2001 });
+    LIMIT 2001`, values: [input.spaceId, input.channelId, [...new Set(unique.map(mention => mention.ordinal))]], maxRows: 2001 });
   // Ambiguous or missing names/ordinals remain visibly unresolved; they never
   // grant an Instance identity to a report that happens to use the same name.
   const targets = await Promise.all(unique.map(async mention => {
-    const candidates = rows.filter(row => row.address === mention.address);
+    const candidates = rows.filter(row => row.ordinal === mention.ordinal && addressesInstance(mention.address, {
+      names: [row.display_name, row.harness, row.instance_id], ordinal: row.ordinal }));
     const row = candidates.length === 1 && rows.length < 2001 ? candidates[0] : undefined;
     const id = await sha256Hex(JSON.stringify([input.spaceId, input.messageId, mention.address]));
     return { id,

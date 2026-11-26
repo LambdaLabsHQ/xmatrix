@@ -404,14 +404,6 @@ export class AgentInstanceRuntimeTransport {
       return { matched: 0, delivered: 0, interrupted: 0 };
     }
     const channelId = message.channelId;
-    const profilesByName = new Map<string, Set<string>>();
-    for (const [, session] of this.sockets.entries()) {
-      if (session.run.channelId !== channelId) continue;
-      const name = session.principal.agentName.trim().toLowerCase();
-      const ids = profilesByName.get(name) ?? new Set<string>();
-      ids.add(session.principal.agentId);
-      profilesByName.set(name, ids);
-    }
     const relay = crossChannelReplyRelay(input.metadata);
     // A relayed answer is work for the Instance that asked. While it is live the
     // others in its Channel only see it as context; once it is gone the answer
@@ -442,15 +434,14 @@ export class AgentInstanceRuntimeTransport {
       // The receiving runtime is the only reliable authority on whether a turn
       // is active. Presence/runtime-state publication is best-effort and can
       // lag or be lost across a reconnect, so steering deliveries carry the
-      // interrupt hint even when the projection says idle. Ordinary Agent peer
-      // replies stay as work but queue behind the active turn; otherwise the
-      // first Agent to answer cancels every slower participant.
+      // interrupt hint even when the projection says idle. An ordinary
+      // message joins the active turn and only an @-address cancels it,
+      // whether a person or an Agent wrote it.
       // The message is framed once for every audience and travels nested; only
       // the transport facts an Instance needs are added around it.
       const recipient = {
         agentName: session.principal.agentName,
         instanceId: session.run.instanceId,
-        nameIsAmbiguous: (profilesByName.get(session.principal.agentName.trim().toLowerCase())?.size ?? 0) > 1,
         agentId: session.principal.agentId,
         channelInstanceId: session.run.channelInstanceId,
       };

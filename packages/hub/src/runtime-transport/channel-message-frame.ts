@@ -21,6 +21,8 @@ import {
   scanMentionAddresses,
   filterOperationalMentions,
   existingInstanceMentionScanner,
+  addressesInstance,
+  type AddressableInstance,
   messagePublicationEvidence,
   parseAutoLaunchMentions,
   MENTION_BROADCAST_NAMES,
@@ -62,6 +64,19 @@ export function channelMessageDeliveryIntent(
   return isAgentContextMessage(message.metadata) ? "context" : "work";
 }
 
+/** The live Instance a delivery is framed for. */
+type AgentDeliveryRecipient = {
+  agentName: string;
+  agentId?: string;
+  instanceId?: string;
+  channelInstanceId?: string;
+};
+
+/** The names a live Instance answers to, for the shared addressing rule. */
+function addressable(recipient: AgentDeliveryRecipient): AddressableInstance {
+  return { names: [recipient.agentName, recipient.agentId], ordinal: recipient.channelInstanceId };
+}
+
 /**
  * Resolve a committed message for one exact live Agent Instance.
  *
@@ -70,10 +85,12 @@ export function channelMessageDeliveryIntent(
  * for the exact live `@agent:N` address it contains. This keeps a fresh
  * `@auto repo:<owner/repo>` summon from interrupting unrelated existing Agents,
  * and makes an Automation that mentions its own live ordinal actionable.
+ * Who wrote the message never matters: a person's and an Agent's are the same
+ * delivery.
  */
 export function agentChannelMessageDeliveryIntent(
   message: ChannelMessage,
-  recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
+  recipient: AgentDeliveryRecipient,
 ): "work" | "context" {
   const target = connectorMessageWakeTarget(message);
   if (message.from.kind === "app" || target) {
@@ -108,75 +125,49 @@ export function agentChannelMessageDeliveryIntent(
       (metadata as Record<string, unknown>).xmatrixProvenance !== "scheduled_automation")) {
     return "work";
   }
-  const ordinal = recipient.channelInstanceId?.trim();
-  const agentName = recipient.agentName.trim();
-  if (!ordinal || !agentName) return "context";
-  const tokens = mentionAddressTokens([...(recipient.nameIsAmbiguous ? [] : [`${agentName}:${ordinal}`]),
-    ...(recipient.agentId ? [`${recipient.agentId}:${ordinal}`] : [])]);
-  return filterOperationalMentions(message.body, scanMentionAddresses(message.body, tokens)).length > 0 ? "work" : "context";
+  return addressesInstance(message.body, addressable(recipient)) ? "work" : "context";
 }
 
 /**
- * Whether one live delivery may cancel the recipient's active provider turn.
+ * Whether one live delivery reaches the recipient's active provider turn.
  *
- * Human input is steering and keeps the historical immediate-interrupt
- * behaviour. An Agent's ordinary Channel reply is different: cancelling every
- * peer that is still producing its answer makes a multi-Agent summon converge
- * on whichever provider finishes first. Peer replies remain work deliveries,
- * but wait behind the active turn. An exact `@agent:N` address is deliberate
- * steering, so it may still interrupt that one Instance.
+ * Every work delivery does, whoever wrote it: whether it joins that turn or
+ * cancels it is `agentChannelMessageMaySteer`'s call, and a runtime that
+ * cannot join a turn holds a joinable message for the next one.
  */
 export function agentChannelMessageRequestsInterrupt(
   message: ChannelMessage,
-  recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
+  recipient: AgentDeliveryRecipient,
 ): boolean {
-  if (agentChannelMessageDeliveryIntent(message, recipient) === "context") return false;
-  if (message.from.kind === "app") return false;
-  if (message.from.kind !== "agent") return true;
-
-  const ordinal = recipient.channelInstanceId?.trim();
-  const agentName = recipient.agentName.trim();
-  if (!ordinal || !agentName) return false;
-  const tokens = mentionAddressTokens([...(recipient.nameIsAmbiguous ? [] : [`${agentName}:${ordinal}`]),
-    ...(recipient.agentId ? [`${recipient.agentId}:${ordinal}`] : [])]);
-  return filterOperationalMentions(message.body, scanMentionAddresses(message.body, tokens)).length > 0;
+  return message.from.kind !== "app" && agentChannelMessageDeliveryIntent(message, recipient) === "work";
 }
 
 /**
- * Whether an interrupting delivery may instead be steered into the turn the
- * recipient is running.
+ * Whether a delivery that reaches the active turn joins it instead of
+ * cancelling it.
  *
- * A Human's ordinary message steers: it joins the active turn at the next tool
- * boundary, so work already in flight is kept. Only a Human message that
+ * An ordinary message steers: it joins the active turn at the next tool
+ * boundary, so work already in flight is kept. Only a message that
  * @-addresses this Instance (its name, `name:N`, its Profile ID, or a broadcast
- * name) cancels the turn outright. An Agent only ever interrupts by exact
- * `@agent:N` address, which is deliberate, so its deliveries never steer. A
- * runtime that cannot steer treats the delivery as the interrupt it carries.
+ * name) cancels the turn outright. The rule is the same for a person's message
+ * and an Agent's.
  */
 export function agentChannelMessageMaySteer(
   message: ChannelMessage,
-  recipient: { agentName: string; agentId?: string; instanceId?: string; channelInstanceId?: string; nameIsAmbiguous?: boolean },
+  recipient: AgentDeliveryRecipient,
 ): boolean {
   if (!agentChannelMessageRequestsInterrupt(message, recipient)) return false;
-  if (message.from.kind === "agent") return false;
-  return !humanMessageAddressesRecipient(message.body, recipient);
+  return !messageAddressesRecipient(message.body, recipient);
 }
 
-function humanMessageAddressesRecipient(
-  body: string,
-  recipient: { agentName: string; agentId?: string; channelInstanceId?: string },
-): boolean {
-  const ordinal = recipient.channelInstanceId?.trim();
+function messageAddressesRecipient(body: string, recipient: AgentDeliveryRecipient): boolean {
+  if (addressesInstance(body, addressable(recipient))) return true;
   const names = [recipient.agentName?.trim() ?? "", recipient.agentId?.trim() ?? ""].filter(Boolean);
-  const exact = ordinal ? names.map((name) => `${name}:${ordinal}`) : [];
-  const tokens = mentionAddressTokens([...exact, ...names, ...MENTION_BROADCAST_NAMES]);
-  const exactTokens = new Set(mentionAddressTokens(exact));
-  return filterOperationalMentions(body, scanMentionAddresses(body, tokens)).some((match) => {
-    if (exactTokens.has(match.token)) return true;
+  const tokens = mentionAddressTokens([...names, ...MENTION_BROADCAST_NAMES]);
+  return filterOperationalMentions(body, scanMentionAddresses(body, tokens)).some((match) =>
     // `@claude:2` is matched by the bare name too; it addresses another
-    // Instance, which the longer exact token would otherwise have caught.
-    return !/^[:：]\d/u.test(body.slice(match.start + 1 + match.token.length));
-  });
+    // Instance, which the exact check above would otherwise have caught.
+    !/^[:：]\d/u.test(body.slice(match.start + 1 + match.token.length)));
 }
 
 export type ChannelMessageFrameInput = {
