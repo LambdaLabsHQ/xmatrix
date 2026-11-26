@@ -3,7 +3,8 @@ import { sha256Hex } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { githubRepositoryDelegated } from "./app-connectors";
 import { findAppConnection } from "./apps";
-import { isNornStream, nornStep, type NornStream } from "./norn-host";
+import { ensureAndWakeNornBranches } from "./norn-branches";
+import { isNornStream, nornStep, type NornPassResult, type NornStream } from "./norn-host";
 import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import type { Env } from "./types";
@@ -138,10 +139,11 @@ export async function occurNornEvent(env: Env, input: {
         }
         for (const { program, payload } of eligible) {
           const requestId = `norn-event:${id}:${program.programId}`;
+          let stepResult: NornPassResult | undefined;
           try {
             const repository = new PostgresNornProgramRepository(shard.database,
               await postgresMessageRoute(env, program.channelId, requestId, { database: shard.database }));
-            await repository.deliverEvent(
+            stepResult = await repository.deliverEvent(
               { requestId, channelId: program.channelId, programId: program.programId, eventId: id },
               nornStep(undefined, { id, streams: payload.streams, what: payload.what,
                 ...(payload.cloudEvent ? { cloudEvent: payload.cloudEvent } : {}) }),
@@ -153,12 +155,27 @@ export async function occurNornEvent(env: Env, input: {
               error: error instanceof Error ? error.message : String(error),
             });
           }
-          await wakeAgentLaunchCoordinator(env, program.channelId, ["norn"]).catch((error: unknown) => {
+          const wakeChannels = [...new Set([program.channelId, ...(stepResult?.wakeChannels ?? [])])];
+          try {
+            if (stepResult?.branches?.length || wakeChannels.length > 1) {
+              await ensureAndWakeNornBranches(env, {
+                spaceId: program.spaceId,
+                pageId: program.pageId,
+                pageName: program.pageName,
+                programChannelId: program.channelId,
+                authorityUserId: program.authorityUserId,
+                branches: stepResult?.branches,
+                wakeChannels,
+              });
+            } else {
+              await wakeAgentLaunchCoordinator(env, program.channelId, ["norn"]);
+            }
+          } catch (error) {
             console.warn("Norn outside-event coordinator wake failed", {
               channelId: program.channelId, programId: program.programId,
               error: error instanceof Error ? error.message : String(error),
             });
-          });
+          }
         }
       }
       if (programs.length < WAITING_PAGE_LIMIT) break;
