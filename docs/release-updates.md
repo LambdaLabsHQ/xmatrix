@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: an Agent found by its full path starts even when it is not on PATH
+
+On Windows the machine finds many Agents by their full install path: the Store
+Codex under `WindowsApps`, DeepSeek Harness in its installer folder, npm's
+`claude.cmd`, and Qoder and Antigravity in their tool folders. The daemon's
+start check looked only on the Run's PATH, so it refused these as "not
+installed where xMatrix starts Agents" while the file was there. Two of this
+week's five active external users lost six starts to it. The check now accepts
+a full path that exists, and still refuses a removed one by name. CLI only.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a new account records where it came from
 
 Daniel asked how a burst of seven new accounts found xMatrix, and nothing said.

@@ -2162,6 +2162,13 @@ fn harness_launcher_preflight(
             .launcher_names
             .iter()
             .any(|name| xmatrix_cli_agent::launcher_stem(name) == stem);
+    // Inventory records where it found the launcher, often a full path that
+    // is not on the Run's PATH (the Windows Store Codex, an installer's own
+    // folder): that file is what the Run starts, so judge it, not PATH.
+    let runtime_path = std::path::Path::new(runtime);
+    if runtime_path.is_absolute() && runtime_path.is_file() {
+        return Ok(());
+    }
     if !own_launcher
         || crate::runtime_daemon_harness_inventory::resolve_launcher_on(preset, profile_path)
             .is_some()
@@ -2900,6 +2907,28 @@ mod harness_launcher_preflight_tests {
         }
         harness_launcher_preflight(Some(&preset.id), &preset.runtime, Some(&profile))
             .expect("launcher on the Run's PATH");
+
+        // A launcher inventory found by full path starts even off the PATH;
+        // the same full path once removed is refused by name.
+        let elsewhere = std::env::temp_dir()
+            .join(format!("xmatrix-preflight-off-path-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let full = elsewhere.join(format!("{}{suffix}", preset.runtime));
+        std::fs::write(&full, b"fixture").unwrap();
+        let empty = std::env::temp_dir()
+            .join(format!("xmatrix-preflight-empty-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&empty).unwrap();
+        let empty_profile = empty.to_string_lossy().into_owned();
+        let full_runtime = full.to_string_lossy().into_owned();
+        harness_launcher_preflight(Some(&preset.id), &full_runtime, Some(&empty_profile))
+            .expect("full launcher path off the Run's PATH");
+        std::fs::remove_file(&full).unwrap();
+        let gone = harness_launcher_preflight(Some(&preset.id), &full_runtime, Some(&empty_profile))
+            .expect_err("removed launcher")
+            .to_string();
+        assert!(gone.starts_with(HARNESS_MISSING), "{gone}");
+        std::fs::remove_dir_all(elsewhere).unwrap();
+        std::fs::remove_dir_all(empty).unwrap();
 
         // A registration's own command, or no preset, is not judged.
         harness_launcher_preflight(Some(&preset.id), "my-wrapper-xyz", Some(&profile)).unwrap();
