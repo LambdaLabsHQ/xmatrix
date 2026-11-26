@@ -345,6 +345,11 @@ fabricated quota windows, so a hold keeps its own expiry instead of a
 window's max age. Unnamed `@auto` routing, however, excludes candidates whose harness
 is reported uninstalled, signed out (by daemon inventory `login === "signed_out"`
 or an unrecovered runtime `harness_signed_out` / `turnSignedOutAt` refusal), or
+whose last turn's provider refused the program's own credential even when the host
+reported it as a plain `turn_failed` (DeepSeek Harness's "Your api key … is invalid"
+or "no API key for provider route": Hub records `turnSignedOutAt` from the error
+text, `isHarnessCredentialRefusalError`, and leaves the failure card as the
+provider wrote it), or
 under an account-level billing/payment refusal (such as insufficient balance).
 When a payment-method refusal applies to one model's quota scope (such as Cursor's
 `API` pool refusing `"Add a payment method to continue"` while `Auto` stays
