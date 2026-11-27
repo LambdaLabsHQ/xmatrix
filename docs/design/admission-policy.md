@@ -81,7 +81,9 @@ For a Run that asks to use a saved `ask` secret:
 - **`AlsoAsk(p)` in this version does not change whom the card waits on.** It
   waits on the Run's owner and any Space admin answers it, as now **[code]**
   (`requestCardAppend`); the settings-card Page records the same limit for
-  every card (84661dda 未完成 2). Nothing here sends a request to an Agent.
+  every card (84661dda 未完成 2). Nothing here sends a request to an Agent,
+  whoever `p` is. The `adopt` control says so beside the text, so nobody
+  adopts a policy believing that `AlsoAsk(@alice)` reaches Alice alone.
 - An approval is still one Run's. Nothing widens how long it lasts.
 
 ## Norn: admission becomes a standard capability
@@ -110,7 +112,8 @@ What is added, and nothing else:
 
    A declared type is needed: records are nominal, so a library function that
    reads `req.target` with no type in sight is refused ("no record type has
-   it") **[run]**.
+   it") **[run]**. `Admission` is a reserved module name, as `Events`,
+   `Actions` and `Holds` are: no Page's library shadows it.
 2. **The evaluator takes that record as a value.** Today it builds its own from
    a ledger request. Passing a value means no host ever writes a request's
    fields into source text.
@@ -139,9 +142,14 @@ of:
 
 - the program is running, not stopped, and on a Page;
 - the request is open and nobody delegated it;
-- **this Run** is working on that request's delivery message: its launch was
-  triggered by it (`agent_launches.trigger_id`), or it has an execution of it
-  in state `accepted` or `running` (`agent_message_executions`) **[code]**;
+- **this Run** is working on that request's delivery message now: it has an
+  execution of it in state `accepted` or `running`
+  (`agent_message_executions`) **[code]**. A Run that has reported no
+  execution at all yet is taken by what triggered its launch
+  (`agent_launches.trigger_id`), which covers only the moment before its first
+  report. The trigger alone is not enough: it stays true for the Run's whole
+  life, so a Run that finished the delivery's turn and was then woken by a
+  chat message would still read as the program's work;
 - exactly one program qualifies. Otherwise `work` is `None`.
 
 `digest` lets a policy choose. One that compares it admits a program only
@@ -164,11 +172,20 @@ the program has. The policy's author decides per secret.
   already has a home an Agent can edit.
 - **An Agent asks with `xmatrix settings ask admission:<page id>/<library>`.**
   The Hub defines that command, so no CLI release is needed **[code]**
-  (`cli-commands-settings.ts`). The card is satisfied when the adopted digest
-  is the Page's, and the registry wakes the Instance that asked.
-- **What is adopted**: the text and its SHA-256, in
-  `data.space_admission_policies`, one row a Space, with who adopted it and
-  when. The Hub evaluates that row and never the Page.
+  (`cli-commands-settings.ts`). The registry wakes the Instance that asked
+  once the card is satisfied.
+- **Satisfied is the state, not a click after the card**: the adopted digest
+  is the Page's. A text adopted before the card was posted satisfies it at
+  once, as an already-open secret satisfies `secret-access` **[code]**
+  (`settings-domain-secret.ts`). What the card asks for is that the Page's
+  text be the adopted one, and it is.
+- **The Page is in the reader's Space**, or the address names nothing. The
+  text is given only to a reader who may adopt it; other members and Agent
+  Runs get the state without it.
+- **What is adopted**: `data.space_admission_policies`, one row a Space:
+  `page_id`, `library_name`, `source_text`, `source_sha256`,
+  `adopted_by_user_id`, `adopted_at`. The Hub evaluates that row and never
+  the Page.
 - **What can be adopted**: a library that exports `admit` of the type above,
   has no effect, and names no other library than `Admission`. So one text is
   everything that was read.
@@ -176,8 +193,11 @@ the program has. The policy's author decides per secret.
   request also reads that its adopter is still an owner or admin of the
   Space; the one that writes an approval reads it again. A policy whose
   adopter lost that role, or whose text no longer checks, is no policy.
-- Withdrawing clears the row. Settings › Secrets shows the adopted policy,
-  its Page and who adopted it, with Withdraw.
+- **No card is needed.** Settings › Secrets shows the adopted policy, its Page
+  and who adopted it, with Adopt and Withdraw, through the same domain write.
+  It is also where the address's `href` leads, for a client without the
+  control and for an admin who edited the Page themselves. Withdrawing
+  clears the row.
 - Adopting and withdrawing are audited where secret reads are
   (`data.secret_grant_audit`).
 
@@ -189,7 +209,9 @@ uncached transaction, evaluates, and then:
 
 - `Allow`: writes the approval, re-reading the policy's digest, its adopter's
   role and the Run's liveness in that transaction, and answers `readable`.
-- `Deny(why)`: answers `403 secret_request_refused` with `why`.
+- `Deny(why)`: answers `403 secret_request_refused` with `why`. A `why` that
+  contains either phrase the CLI waits on (below) is replaced by a fixed
+  sentence, so no policy text can leave an old CLI polling for ten minutes.
 - otherwise: posts the card.
 
 The CLI is unchanged **[code]** (`request_secret_and_wait`). It posts the
@@ -250,12 +272,15 @@ secrets number dozens a day, so nothing is cached.
   loses the role leaves no policy, in the same transaction as the read; an
   approval names the adopter and is audited; a withdrawn policy approves
   nothing; `work` is `Some` only for a Run executing the delivery, and `None`
-  for a Run the same Instance got from a chat message, for a delegated
+  for a Run the same Instance got from a chat message, for the same Run woken
+  by a chat message after it finished the delivery's turn, for a delegated
   request, for a request the Instance asked, for a stopped program, and in a
   branch conversation it is the Page program's; the Space move and deletion
   carry the row.
 - **Hub**: each answer through the route; a refusal's text carries neither
-  phrase the CLI waits on; an Agent token cannot adopt; a digest that changed
+  phrase the CLI waits on, also when the policy's own `why` contains one; a
+  Page of another Space adopts nothing; a reader who cannot adopt is not given
+  the text; an Agent token cannot adopt; a digest that changed
   between showing and answering adopts nothing; a second Page with the same
   library name changes nothing.
 - **Live**: on the beta Hub, a Page program whose Run asks for a harmless `ask`
@@ -263,10 +288,10 @@ secrets number dozens a day, so nothing is cached.
   by hand elsewhere still gets the card. Then the database patrol's next
   round.
 
-## Open for review
+## Review
 
-1. Is it right that `AlsoAsk(p)` leaves whom the card waits on unchanged in
-   this version?
-2. The interface's field names (`what`, `target`, `place`, `owner`, `work`),
-   and whether `what` belongs there before a second kind exists.
-3. One policy a Space, exported as `admit`.
+Reviewed by antigravity:8 against the source and the Pages (2026-11-27). Its
+three answers are in the text above: `AlsoAsk` may leave the card's waiting
+unchanged if the control says so; the field names stand and `what` stays, so
+a second kind breaks no adopted policy; one policy a Space, exported as
+`admit`.
