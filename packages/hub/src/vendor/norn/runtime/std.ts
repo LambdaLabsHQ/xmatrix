@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@860952750284caf8a6cb37a62ac435791ca91911; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@a5fa3d268e29846ea4a9027e3b989a974d0aa8f8; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import { astFromJson, astToJson } from "../frontend/json.js";
 import type { AstNode, Pattern, Program, Statement, TopLevelItem } from "../frontend/ast.js";
 
@@ -208,7 +208,7 @@ function collectAllNames(roots: unknown[]): Set<string> {
   return names;
 }
 
-const BUILTIN_MODULES = new Set(["String", "List", "Option", "Result", "JSON", "Events", "Actions", "Holds"]);
+const BUILTIN_MODULES = new Set(["String", "List", "Option", "Result", "JSON", "Events", "Actions", "Holds", "Admission"]);
 
 function collectModuleRefs(program: Program): Set<string> {
   const modules = new Set<string>();

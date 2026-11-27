@@ -13,6 +13,8 @@ Compact reference for authoring and reviewing Norn programs on xMatrix Pages and
 
 - `Actions`: a connected app does one thing by itself, in two requests of the host. `Actions.action(app, name)` names it (checked against the app's manifest; input `{target, text}` as the Channel command writes it, answer `{summary, url}`); `Actions.prepare(action, input, ~by=?)` freezes it and has it admitted under the app's permission (Ask first: a Space admin answers it in Pending approvals); `Actions.perform(prepared, ~by=?)` runs it once, with no Agent. Requests are made where the program runs, never inside `List.map`.
 
+- `Admission`: what the Hub hands a Space's admission policy (`docs/design/admission-policy.md`). A policy is a Space library that exports `admit: (Admission.request) => Allow | Deny(why) | AlsoAsk(participant)` and has no effect. `Admission.request` is `{ what, target, place, owner, work: option<{ program, digest }> }`: for a secret that asks first, `what` is `"secret.use"`, `target` the alias, `place` the Channel, `work.program` `<page id>/<block name>` of the Page program whose delivery the asking Run executes. `Allow` spares the card, `Deny` refuses, `AlsoAsk` posts the card. Only a Space admin adopts it, in person: `xmatrix settings ask admission:<page id>/<Library>`.
+
 ## Built-in Application Libraries
 - `GitHub`:
   - `GitHub.issueOpened(repo)` -> `stream<{ number: int, title: string, author: string, url: string }>`

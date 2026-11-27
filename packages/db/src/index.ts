@@ -174,9 +174,12 @@ export {
 export { SecretValueControlError } from "./secret-value-control.js";
 export {
   PostgresSpaceSecretRepository,
+  SECRET_USE_ADMISSION,
   SpaceSecretError,
+  type AdmissionWork,
   type RunSecretCaller,
   type RunSecretView,
+  type SpaceAdmissionPolicy,
 } from "./space-secret-control.js";
 export {
   PostgresRuntimeRepository,
