@@ -114,7 +114,9 @@ export async function secretAdmission(secrets: PostgresSpaceSecretRepository, ru
   try {
     return await admitSecretUse(secrets, run, secretRef);
   } catch (error) {
-    if (error instanceof SpaceSecretError && error.status >= 400 && error.status < 500) throw error;
+    // Told by what the error says, not by its class: an answer of the store carries a 4xx status wherever it was built.
+    const status = (error as { status?: unknown } | null)?.status;
+    if (typeof status === "number" && status >= 400 && status < 500) throw error;
     console.warn("Admission policy could not be consulted; the request gets its card", { spaceId: run.spaceId,
       error: error instanceof Error ? error.message : String(error) });
     return "card";
