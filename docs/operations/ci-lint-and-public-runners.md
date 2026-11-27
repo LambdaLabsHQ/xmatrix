@@ -287,8 +287,12 @@ locks and logs are excluded. Restore and save use identical payload paths.
 The `kache-Windows-test-v2-` namespace starts this payload format with a cold
 build; it does not restore the old live-root archives. Main refreshes the
 cache, and a PR seeds it when no cache for its lockfile was restored, including
-when it only found a different lockfile's fallback. Existing pruning retains
-one entry per ref and lockfile and removes closed PR caches. These caches save
+when it only found a different lockfile's fallback. Actions cache pruning
+(`scripts/prune-actions-caches.mjs`, triggered after `CI`, `Public Snapshot CI`,
+`CLI Release Cache`, `Production Release Request`, and `CodeQL`) retains one
+newest entry per ref and cache family across lockfile changes and rolling CodeQL
+CLI versions for commit-keyed caches, preserves exact-match lockfile caches
+until three days without access, and removes closed PR caches. These caches save
 compilation work; the required native suite still runs on the selected content.
 
 Windows handoff coverage follows the daemon's monitor retries under a five-second
