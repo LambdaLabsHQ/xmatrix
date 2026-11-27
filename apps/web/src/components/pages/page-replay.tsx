@@ -225,11 +225,15 @@ export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, 
     const typing = typed > 0 && typed < parts.total && at;
     if (typing) {
       if (!caret.current) {
+        // Styled once where it is made: the caret and the author's name on a flag above it.
         caret.current = document.createElement("span");
-        caret.current.className = "page-replay-caret";
         caret.current.setAttribute("aria-hidden", "true");
-        caret.current.append(document.createElement("span"));
-        caret.current.firstElementChild!.className = "page-replay-flag";
+        Object.assign(caret.current.style, { position: "relative", display: "inline-block", width: "2px", height: "1.2em",
+          margin: "0 1px", verticalAlign: "-0.2em" });
+        const flag = document.createElement("span");
+        Object.assign(flag.style, { position: "absolute", bottom: "100%", left: "0", padding: "3px 6px",
+          borderRadius: "4px 4px 4px 0", color: "#fff", fontSize: "11px", fontWeight: "600", lineHeight: "1", whiteSpace: "nowrap" });
+        caret.current.append(flag);
       }
       caret.current.style.backgroundColor = color;
       const flag = caret.current.firstElementChild as HTMLElement;

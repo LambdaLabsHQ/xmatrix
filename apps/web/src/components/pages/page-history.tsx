@@ -6,6 +6,7 @@ import { ArrowLeft, ChevronDown, Pause, Play } from "lucide-react";
 import { pageAuthorColor, pageAuthorLabel, type PageAuthor } from "@xmatrix/protocol";
 import { markdownToPageDoc, pageDocDiff, type PageDocDiff } from "@xmatrix/protocol/page-document";
 import { Button } from "@/components/ui/button";
+import { actionClass } from "@/components/ui/action-tone";
 import { Switch } from "@/components/ui/switch";
 import { statusInkClass } from "@/components/ui/status-tone";
 import { useAuth } from "@/lib/auth-context";
@@ -411,7 +412,7 @@ function PageRewindTrack({ history }: { history: PageHistoryState }) {
     <div className="mx-4 mr-auto flex items-center gap-3" data-testid="page-rewind">
       <button type="button" aria-label={replay ? (replay.paused ? "Resume" : "Pause") : "Replay what changed"}
         onClick={() => history.setReplay(replay ? { ...replay, paused: !replay.paused } : { step: 0, pos: 0, clock: "" })}
-        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+        className={cn(actionClass({ variant: "primary", size: "icon" }), "shrink-0 rounded-full")}>
         {replay && !replay.paused ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
       </button>
       <span className="font-mono text-sm tabular-nums">
