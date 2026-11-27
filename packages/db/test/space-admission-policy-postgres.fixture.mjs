@@ -42,3 +42,9 @@ export async function programFixture() {
       await f.close();
     } };
 }
+
+/** Runs `work` in a program fixture and removes it afterwards, whatever `work` did. */
+export async function withProgram(work) {
+  const f = await programFixture();
+  try { await work(f); } finally { await f.close(); }
+}
