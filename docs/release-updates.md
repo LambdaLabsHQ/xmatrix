@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: a page replays what changed while its reader was away
+
+A page that changed since its reader last opened it now offers **Replay while you were away** beside History. Replay opens History and plays the page from the version the reader last saw to now, in place: each version is drawn as History draws it, the words it took out are struck and fold away, and its new words are typed by a caret in its author's colour that carries their name. An upright timeline beside the page runs from the last visit at the bottom to now at the top; its playhead climbs as each version plays and each version lights up as it is reached, while a clock above the page runs from the time of the last visit to the time of the newest version. The play button pauses and resumes it. When every version has played, History shows what changed since the last visit, as before. Every moving part is drawn from one clock. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: an Agent found by its full path starts even when it is not on PATH
 
 On Windows the machine finds many Agents by their full install path: the Store

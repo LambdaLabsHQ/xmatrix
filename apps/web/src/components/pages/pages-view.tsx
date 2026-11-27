@@ -11,7 +11,7 @@ import {
   type FaceOf, type ChannelSnapshot, type LiveChannel, type PageAuthor, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
-  Check, ChevronLeft, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share, Trash2, Undo2, X,
+  Check, ChevronLeft, Clock, Files, FileText, History, Lock, MessageSquare, Play, Plus, Share, Trash2, Undo2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAnimationActivity } from "@/components/ui/decoration-animation";
@@ -45,7 +45,8 @@ import { PageMargin, PageOffscreenCard, type MarginWriter, type OffscreenEntry }
 import type { PageSessionChanges } from "./page-session-changes";
 import { PageSessionChangesList, PageUndoNotice, useSessionChanges } from "./page-session-changes-panel";
 import { PagePhoneDock } from "./page-phone-dock";
-import { PageHistoryBar, PageHistoryDocument, PageHistoryRail, usePageHistory } from "./page-history";
+import { PageHistoryBar, PageHistoryDocument, PageHistoryRail, PageRewindColumn, usePageHistory } from "./page-history";
+import { PageReplayStage } from "./page-replay";
 import { usePageVisit } from "./page-visit";
 import type { SuggestionsReport } from "./page-suggestions";
 import { usePageSuggestions } from "./use-page-suggestions";
@@ -1213,6 +1214,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     window.addEventListener("keydown", leave);
     return () => window.removeEventListener("keydown", leave);
   }, [mode]);
+  // The versions a replay plays, oldest first: kept as one array so the replay reads them once.
+  const replayTicks = useMemo(() => [...history.news].sort((a, b) => a.revision - b.revision), [history.news]);
   if (!spaceId) return <div className="p-6 text-sm text-muted-foreground">Choose a Space to see its pages.</div>;
   if (canMigrate && tree.data && (!page || reviewing === spaceId)) {
     return (
@@ -1649,6 +1652,12 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             <History /> History
             {visit.fresh && <span className="page-new-dot" data-testid="page-history-new" />}
           </Button>
+          {visit.fresh && (
+            <Button variant="secondary" size="sm" data-testid="page-replay" onClick={() => {
+              openHistory();
+              history.setReplay({ step: 0, pos: 0, clock: "" });
+            }}><Play /> Replay while you were away</Button>
+          )}
           <Button variant="ghost" size="sm" aria-expanded={dialog === "share"} onClick={(event) => {
             setShareAnchor(event.currentTarget);
             setDialog((open) => (open === "share" ? null : "share"));
@@ -1733,10 +1742,18 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                 // The same column and the same margin as the page, so the text stands where it stood.
                 <div className="flex gap-6">
                   <div className="relative min-w-0 max-w-3xl flex-1 page-byline-room">
-                    {!roomy && historyRail}
-                    <PageHistoryDocument history={history} references={references} mediaUrl={mediaUrl} />
+                    {!roomy && !history.replay && historyRail}
+                    {history.replay && spaceId && page && history.revisions.find((r) => r.revision === history.since) ? (
+                      <PageReplayStage spaceId={spaceId} pageId={page.pageId} token={token}
+                        since={history.revisions.find((r) => r.revision === history.since)!}
+                        ticks={replayTicks} paused={Boolean(history.replay.paused)} references={references} mediaUrl={mediaUrl}
+                        onProgress={(progress) => history.setReplay({ ...progress, paused: history.replay?.paused })} onDone={() => { history.setReplay(null); history.choose("since"); }} />
+                    ) : <PageHistoryDocument history={history} references={references} mediaUrl={mediaUrl} />}
                   </div>
-                  {roomy && (
+                  {roomy && history.replay && (
+                    <aside className="w-80 shrink-0 pt-12"><PageRewindColumn history={history} /></aside>
+                  )}
+                  {roomy && !history.replay && (
                     // The versions stay beside the text as it scrolls, and a long list scrolls on its own.
                     <aside className="w-80 shrink-0">
                       <div className="sticky top-4 max-h-[calc(100dvh-8rem)] overflow-y-auto">{historyRail}</div>
