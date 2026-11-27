@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@860952750284caf8a6cb37a62ac435791ca91911; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@a5fa3d268e29846ea4a9027e3b989a974d0aa8f8; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -593,11 +593,19 @@ export type AdmissionDecision =
   | { decision: "AlsoAsk"; participant: string };
 
 /**
- * Evaluates a pure Norn admission policy program (returning a function
- * `requestInfo => Allow | Deny(string) | AlsoAsk(participant)`) against a
- * request record before dispatching it.
+ * Evaluates an admission policy (spec §10.1): a program whose value is a pure
+ * function `asked => Allow | Deny(string) | AlsoAsk(participant)`.
+ *
+ * `asked` is what the host is about to admit. A host that admits something of
+ * its own (the use of a secret, an action) passes the record as a value, an
+ * `Admission.request`; nothing of it is ever written into source text. Given a
+ * ledger request, the policy is handed that request's own fields, for a host
+ * that admits a program's requests before it dispatches them.
+ *
+ * It throws when the policy is not a function, performs an effect, fails, or
+ * answers anything else: the host then admits as it would with no policy.
  */
-export function evaluateAdmissionPolicy(policyCode: Code, request: LedgerRequest, now: number): AdmissionDecision {
+export function evaluateAdmissionPolicy(policyCode: Code, asked: LedgerRequest | Value, now: number): AdmissionDecision {
   const machine = start(policyCode, now);
   advance(policyCode, machine, 100_000);
   if (machine.control.kind !== "done") {
@@ -607,16 +615,17 @@ export function evaluateAdmissionPolicy(policyCode: Code, request: LedgerRequest
   if (fn.type !== "closure" && fn.type !== "builtin") {
     throw new Error("Admission policy must evaluate to a function");
   }
-  const reqVal: Value = {
+  // A value says what it is; a ledger request has a verb and no type.
+  const reqVal: Value = !("verb" in asked) && typeof asked.type === "string" ? asked : {
     type: "record",
     fields: {
-      id: text(request.id),
-      verb: text(request.verb),
-      holder: text(request.holder),
-      text: text(request.text),
-      about: request.about != null ? variant("Some", text(request.about)) : variant("None"),
-      context: request.context != null ? variant("Some", text(request.context)) : variant("None"),
-      openedBy: text(request.openedBy ?? "program"),
+      id: text(asked.id),
+      verb: text(asked.verb),
+      holder: text(asked.holder),
+      text: text(asked.text),
+      about: asked.about != null ? variant("Some", text(asked.about)) : variant("None"),
+      context: asked.context != null ? variant("Some", text(asked.context)) : variant("None"),
+      openedBy: text(asked.openedBy ?? "program"),
     },
   };
   const verdict = runPure(policyCode, fn, reqVal, machine, now);

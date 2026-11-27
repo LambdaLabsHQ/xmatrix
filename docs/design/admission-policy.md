@@ -1,8 +1,11 @@
 # Admission policy for secrets that ask first
 
-Status: proposed (2026-11-27), second draft. Nothing is implemented. The
-first draft proposed a gate that could wait on people and Agents; it broke
-four recorded decisions and is withdrawn (see "Recorded decisions").
+Status: implemented in the Hub and on the settings card (2026-11-27): the
+policy, its adoption through the settings registry, the request route and
+the `adopt` control. The row in Settings › Secrets is not built yet; its
+routes are (`/api/spaces/:spaceId/admission-policy`). A first draft proposed
+a gate that could wait on people and Agents; it broke four recorded decisions
+and was withdrawn (see "Recorded decisions").
 
 Each fact is marked: **[code]** read in the source, **[run]** shown by running
 the checker or evaluator, **[page]** recorded on a Page, **[assumed]** not
