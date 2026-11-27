@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@95e9b165b4dc8f2657474f5b3341e26dc88ed6c0; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@860952750284caf8a6cb37a62ac435791ca91911; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -1213,15 +1213,11 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
       }
       reached.add(childReq.id);
       if (childReq.reply === null) {
-        const prevMachine = activeMachine;
-        const childMachine = startClosure(code, args[0], [], prevMachine, now);
-        scopeStack.push(childReq.spawnScope ?? `spawn:${childReq.id}`);
-        spawnOwnerStack.push(childReq.id);
-        activeMachine = childMachine;
-        const childOutcome = driveMachine(childMachine);
-        activeMachine = prevMachine;
-        spawnOwnerStack.pop();
-        scopeStack.pop();
+        const childMachine = startClosure(code, args[0], [], activeMachine, now);
+        const childOutcome = driveMachine(childMachine, {
+          scope: childReq.spawnScope ?? `spawn:${childReq.id}`,
+          spawnOwner: childReq.id,
+        });
         if (childOutcome.kind === "done") {
           childReq.reply = { tag: "Answered", value: childOutcome.value };
           childReq.settledAt = now;
@@ -1549,13 +1545,8 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
 
         const stillOpenRounds: typeof activeRounds = [];
         for (const round of activeRounds) {
-          const prevMachine = activeMachine;
-          const childMachine = startClosure(code, effect.callback, [round.value], prevMachine, now);
-          scopeStack.push(`${displayKey}/round:${round.roundKey}`);
-          activeMachine = childMachine;
-          const outcome = driveMachine(childMachine);
-          activeMachine = prevMachine;
-          scopeStack.pop();
+          const childMachine = startClosure(code, effect.callback, [round.value], activeMachine, now);
+          const outcome = driveMachine(childMachine, { scope: `${displayKey}/round:${round.roundKey}` });
           if (outcome.kind === "done") {
             const isFailureOutcome = outcome.value.type === "variant" &&
               (["NoReply", "Cancelled", "Revoked"].includes(outcome.value.name) ||
@@ -2113,45 +2104,70 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
     return { tag: "Broke", reason: show(outcome) };
   };
 
-  /** Runs a child (`spawn`) machine to completion, failure, or suspension against the shared ledger. */
-  const driveMachine = (target: Machine): { kind: "done"; value: Value } | { kind: "failed"; outcome: Value | null; error: string | null } | { kind: "waiting" } => {
-    let childBudget = Math.ceil((options.steps ?? 5_000_000) / 10_000);
-    for (;;) {
-      advance(code, target, 10_000);
-      const control = target.control;
-      if (control.kind === "done") return { kind: "done", value: control.value };
-      if (control.kind === "error") return { kind: "failed", outcome: null, error: control.message };
-      if (control.kind === "failed") return { kind: "failed", outcome: control.outcome, error: null };
-      if (control.kind === "report") {
-        const key = identity("report", control.outcome);
-        if (!ledger.entries[key]) log.push({ kind: "handlerFailed", reply: control.outcome });
-        resume(target, unit, entry(key, () => ({ at: now, value: control.outcome as unknown as Json })).at); continue;
-      }
-      if (control.kind !== "effect") {
-        if (--childBudget <= 0) return { kind: "failed", outcome: null, error: "The spawned task computed for too long without waiting or finishing" };
-        continue;
-      }
-      let resumption: { value: Value; at: number } | null;
-      try { resumption = answer(control.effect); } catch (error) {
-        if (!(error instanceof ProgramError)) throw error;
-        return { kind: "failed", outcome: null, error: error.message };
-      }
-      if (!resumption) {
-        if (pass.status === "waiting") {
-          const owner = currentSpawnOwner();
-          for (const source of target.frames.flatMap(frame => frame.kind === "forEach" ? hostStreams(frame.stream) : [])) {
-            childListening.push({ owner, source });
-          }
-          for (const waited of pass.waiting?.targets ?? []) {
-            if (waited.kind === "stream") childListening.push({ owner, source: waited.source });
-          }
+  /** Runs a child (`spawn` or `~each=Together` round) machine to completion, failure, or suspension against the shared ledger. */
+  const driveMachine = (
+    target: Machine,
+    context: { scope?: string; spawnOwner?: string } = {},
+  ): { kind: "done"; value: Value } | { kind: "failed"; outcome: Value | null; error: string | null } | { kind: "waiting" } => {
+    const prevMachine = activeMachine;
+    const savedScopeDepth = scopeStack.length;
+    const savedLoopDepth = activeLoopStack.length;
+    const savedDeadlineDepth = deadlineStack.length;
+    const savedSpawnOwnerDepth = spawnOwnerStack.length;
+    const savedWaiting = pass.waiting;
+    const savedLastWaitEvaluated = lastWaitEvaluated;
+    if (context.scope !== undefined) scopeStack.push(context.scope);
+    if (context.spawnOwner !== undefined) spawnOwnerStack.push(context.spawnOwner);
+    activeMachine = target;
+    pass.waiting = null;
+    lastWaitEvaluated = false;
+    try {
+      let childBudget = Math.ceil((options.steps ?? 5_000_000) / 10_000);
+      for (;;) {
+        advance(code, target, 10_000);
+        const control = target.control;
+        if (control.kind === "done") return { kind: "done", value: control.value };
+        if (control.kind === "error") return { kind: "failed", outcome: null, error: control.message };
+        if (control.kind === "failed") return { kind: "failed", outcome: control.outcome, error: null };
+        if (control.kind === "report") {
+          const key = identity("report", control.outcome);
+          if (!ledger.entries[key]) log.push({ kind: "handlerFailed", reply: control.outcome });
+          resume(target, unit, entry(key, () => ({ at: now, value: control.outcome as unknown as Json })).at); continue;
         }
-        return { kind: "waiting" };
+        if (control.kind !== "effect") {
+          if (--childBudget <= 0) return { kind: "failed", outcome: null, error: "The spawned task computed for too long without waiting or finishing" };
+          continue;
+        }
+        let resumption: { value: Value; at: number } | null;
+        try { resumption = answer(control.effect); } catch (error) {
+          if (!(error instanceof ProgramError)) throw error;
+          return { kind: "failed", outcome: null, error: error.message };
+        }
+        if (!resumption) {
+          if (pass.status === "waiting") {
+            const owner = currentSpawnOwner();
+            for (const source of target.frames.flatMap(frame => frame.kind === "forEach" ? hostStreams(frame.stream) : [])) {
+              childListening.push({ owner, source });
+            }
+            for (const waited of (pass.waiting as Waiting | null)?.targets ?? []) {
+              if (waited.kind === "stream") childListening.push({ owner, source: waited.source });
+            }
+          }
+          return { kind: "waiting" };
+        }
+        const { name, args } = control.effect;
+        const mapped = !lastWaitEvaluated && (name === "wait" || name === "waitUntil") ? through(args[0], resumption.value, name) : null;
+        if (mapped) resumeThrough(target, mapped.value, mapped.steps, resumption.at);
+        else resume(target, resumption.value, resumption.at);
       }
-      const { name, args } = control.effect;
-      const mapped = !lastWaitEvaluated && (name === "wait" || name === "waitUntil") ? through(args[0], resumption.value, name) : null;
-      if (mapped) resumeThrough(target, mapped.value, mapped.steps, resumption.at);
-      else resume(target, resumption.value, resumption.at);
+    } finally {
+      activeMachine = prevMachine;
+      scopeStack.length = savedScopeDepth;
+      activeLoopStack.length = savedLoopDepth;
+      deadlineStack.length = savedDeadlineDepth;
+      spawnOwnerStack.length = savedSpawnOwnerDepth;
+      pass.waiting = savedWaiting;
+      lastWaitEvaluated = savedLastWaitEvaluated;
     }
   };
 
