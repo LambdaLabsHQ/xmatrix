@@ -110,7 +110,7 @@ function envValue(env: Env, name: string): string {
   return trimmedConnectorEnv(env, name);
 }
 
-export function oauthClient(env: Env, providerId: string): OAuthClient | undefined {
+export function oauthClient(env: Env, providerId: string, options?: { storageScope?: boolean }): OAuthClient | undefined {
   // Public Integration installs have their own UUID exchange and Human confirmation.
   // Never offer the legacy user-OAuth button for a configured Public Integration.
   if (providerId === "sentry" && (envValue(env, "CONNECTOR_SENTRY_APP_UUID") || envValue(env, "CONNECTOR_SENTRY_APP_SLUG"))) {
@@ -125,7 +125,7 @@ export function oauthClient(env: Env, providerId: string): OAuthClient | undefin
   const clientSecret = envValue(env, manifest.oauth.flow === "composio" ? "CONNECTOR_COMPOSIO_API_KEY" : `${prefix}_CLIENT_SECRET`);
   if (!clientId || !clientSecret) return undefined;
   if (manifest.oauth.flow === "stripe-app" && !stripeAppSecretsReady(env)) return undefined;
-  const effectiveManifest = providerId === "googleplay" && googlePlayStorageScopeEnabled(env)
+  const effectiveManifest = providerId === "googleplay" && (googlePlayStorageScopeEnabled(env) || options?.storageScope === true)
     && !manifest.oauth.scopes.includes(GOOGLE_PLAY_STORAGE_SCOPE)
     ? { ...manifest, oauth: { ...manifest.oauth, scopes: [...manifest.oauth.scopes, GOOGLE_PLAY_STORAGE_SCOPE] } }
     : manifest;
@@ -147,6 +147,8 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
   desktop?: boolean;
   /** Started on the beta Web, which the callback returns to. */
   beta?: boolean;
+  /** Explicitly opt into Google Play's incremental Cloud Storage read scope for staged/review testing. */
+  storageScope?: boolean;
   connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<string> {
   const { oauth } = client.manifest;
   const claims = { providerId: client.manifest.id, spaceId: input.spaceId, userId: input.userId,
@@ -156,6 +158,7 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
     ...(client.manifest.id === "x" && input.accountId ? { accountId: input.accountId } : {}),
     ...(input.desktop ? { d: 1 } : {}),
     ...(input.beta ? { b: 1 } : {}),
+    ...(client.manifest.id === "googleplay" && input.storageScope ? { ss: 1 } : {}),
     ...(["discord", "stripe"].includes(client.manifest.id) ? { authorizationStartedAt: input.now ?? Date.now() } : {}) };
   const state = await signOAuthState(claims, client.clientSecret);
   /* A state the provider silently refuses before consent is a connect nobody can finish. */
@@ -212,7 +215,10 @@ export async function verifyOAuthState(env: Env, state: string):
       (typeof claims.accountId !== "string" || !/^[1-9][0-9]{0,19}$/u.test(claims.accountId))) return undefined;
   if (client.manifest.id === "stripe" && (!Number.isSafeInteger(claims.authorizationStartedAt) || Number(claims.authorizationStartedAt) > Date.now() ||
       Number(claims.authorizationStartedAt) < Date.now() - STATE_TTL_MS)) return undefined;
-  return { client, spaceId: claims.spaceId, userId: claims.userId, ...(claims.d === 1 ? { desktop: true } : {}), ...(claims.b === 1 ? { beta: true } : {}), ...(["discord", "x", "stripe"].includes(client.manifest.id) ? { connectionSnapshot: snapshot } : {}), ...(client.manifest.id === "stripe" ? { authorizationStartedAt: Number(claims.authorizationStartedAt) } : {}) };
+  const effectiveClient = client.manifest.id === "googleplay" && claims.ss === 1
+    ? (oauthClient(env, providerId, { storageScope: true }) ?? client)
+    : client;
+  return { client: effectiveClient, spaceId: claims.spaceId, userId: claims.userId, ...(claims.d === 1 ? { desktop: true } : {}), ...(claims.b === 1 ? { beta: true } : {}), ...(["discord", "x", "stripe"].includes(client.manifest.id) ? { connectionSnapshot: snapshot } : {}), ...(client.manifest.id === "stripe" ? { authorizationStartedAt: Number(claims.authorizationStartedAt) } : {}) };
 }
 
 async function tokenRequest(client: OAuthClient, grant: Record<string, string>, meter?: UpstreamMeter): Promise<Record<string, unknown>> {
