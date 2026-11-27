@@ -77,7 +77,7 @@ export {
 } from "./channel-activity.js";
 export type {
   ChannelActivity, QuestionnaireState,
-  CommandResult, CommandResultNote,
+  CommandResult, CommandResultInterrupt, CommandResultNote,
 } from "./channel-activity.js";
 export {
   GITHUB_PULL_REQUEST_FACT_METADATA_KEY, githubPullRequestFactOf,

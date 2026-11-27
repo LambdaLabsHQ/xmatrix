@@ -3184,6 +3184,20 @@ fn command_result_lines(result: Option<&serde_json::Value>) -> Vec<String> {
             lines.push(note.replace('\n', " "));
         }
     }
+    for interrupt in result
+        .get("interrupts")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(name) = text(interrupt, "agentName") {
+            let target = match text(interrupt, "channelInstanceId") {
+                Some(ordinal) => format!("@{name}:{ordinal}"),
+                None => format!("@{name}"),
+            };
+            lines.push(format!("Interrupted {target}"));
+        }
+    }
     lines
 }
 

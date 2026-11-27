@@ -431,55 +431,52 @@ test("agent reference stage keeps offline instances without offering a bare ment
   );
 });
 
-test("in-conversation @ completion includes sleeping and interrupted instances while excluding wake_failed and stopped", () => {
-  const channel = openChannel({
-    memberPresence: {
-      "channel-1:1": {
-        registration: FIXTURE_AGENT_REGISTRATION,
-        kind: "agent",
-        label: "codex",
-        instances: [{
-          id: "channel-1:1", channelInstanceId: "1", label: "codex:1", status: "offline", rest: "sleeping",
-          connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z",
-        }],
-      },
-      "channel-1:2": {
-        registration: FIXTURE_AGENT_REGISTRATION,
-        kind: "agent",
-        label: "cursor",
-        instances: [{
-          id: "channel-1:2", channelInstanceId: "2", label: "cursor:2", status: "offline", rest: "interrupted",
-          connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z",
-        }],
-      },
-      "channel-1:3": {
-        registration: FIXTURE_AGENT_REGISTRATION,
-        kind: "agent",
-        label: "claude",
-        instances: [{
-          id: "channel-1:3", channelInstanceId: "3", label: "claude:3", status: "offline", rest: "wake_failed",
-          connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z",
-        }],
-      },
-      "channel-1:4": {
-        registration: FIXTURE_AGENT_REGISTRATION,
-        kind: "agent",
-        label: "gemini",
-        instances: [{
-          id: "channel-1:4", channelInstanceId: "4", label: "gemini:4", status: "offline",
-          connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z",
-        }],
-      },
-    },
-  });
+function instancePresenceEntry(ordinal, label, status, rest) {
+  const id = `channel-1:${ordinal}`;
+  return [id, {
+    registration: FIXTURE_AGENT_REGISTRATION,
+    kind: "agent",
+    label,
+    instances: [{
+      id, channelInstanceId: String(ordinal), label: `${label}:${ordinal}`, status,
+      ...(rest ? { rest } : {}),
+      connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z",
+    }],
+  }];
+}
+
+function inConversationSection(entries) {
+  const channel = openChannel({ memberPresence: Object.fromEntries(entries) });
   const completion = resolveMentionCompletion("@", 1, channel);
-  const inConversation = groupedMentionCandidates(completion.candidates, { limitPerKind: 10 })
+  return groupedMentionCandidates(completion.candidates, { limitPerKind: 10 })
     .find((section) => section.kind === "instance");
+}
+
+test("in-conversation @ completion includes sleeping and interrupted instances while excluding wake_failed and stopped", () => {
+  const inConversation = inConversationSection([
+    instancePresenceEntry(1, "codex", "offline", "sleeping"),
+    instancePresenceEntry(2, "cursor", "offline", "interrupted"),
+    instancePresenceEntry(3, "claude", "offline", "wake_failed"),
+    instancePresenceEntry(4, "gemini", "offline"),
+  ]);
   assert.ok(inConversation, "expected In this conversation section");
   assert.deepEqual(
     inConversation.candidates.map((candidate) => candidate.mention),
     ["codex:1", "cursor:2"],
   );
+  assert.equal(inConversation.candidates[0].description, undefined, "resting instances do not advertise an interrupt");
+});
+
+test("busy in-conversation @ completion advertises that mentioning it interrupts its current turn", () => {
+  const inConversation = inConversationSection([
+    instancePresenceEntry(1, "codex", "busy"),
+    instancePresenceEntry(2, "claude", "idle"),
+  ]);
+  assert.ok(inConversation);
+  const busy = inConversation.candidates.find((c) => c.mention === "codex:1");
+  const idle = inConversation.candidates.find((c) => c.mention === "claude:2");
+  assert.equal(busy?.description, "Interrupts current turn");
+  assert.equal(idle?.description, undefined);
 });
 
 test("handoff successor stage offers the Space's registered harnesses as a new instance", () => {

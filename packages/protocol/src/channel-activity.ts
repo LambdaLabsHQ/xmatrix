@@ -200,6 +200,14 @@ export interface CommandResultNote {
   code?: string;
 }
 
+/** One live Instance whose running turn this message's `@` interrupted. */
+export interface CommandResultInterrupt {
+  instanceId: string;
+  agentName: string;
+  channelInstanceId?: string;
+  at: string;
+}
+
 /**
  * What a command came to, recorded on the message that wrote it rather than
  * posted as another message: the answer belongs to the command, and a reader
@@ -209,6 +217,8 @@ export interface CommandResult {
   /** `/model` and `/effort`: one outcome per statement, in statement order. */
   controls?: import("./agent-control-command.js").AgentControlOutcomeRecord[];
   notes?: CommandResultNote[];
+  /** Live Instances whose running turn this message's `@` interrupted. */
+  interrupts?: CommandResultInterrupt[];
 }
 
 /** The merged result the Hub recorded for this message's command, if any. */
@@ -222,7 +232,7 @@ export function commandResultOf(annotations: unknown): CommandResult | undefined
     result = mergeCommandResult(result,
       typeof annotation.id === "string" ? annotation.id : "", annotation.payload);
   }
-  return result.controls || result.notes?.length ? result : undefined;
+  return result.controls || result.notes?.length || result.interrupts?.length ? result : undefined;
 }
 
 /**
@@ -240,6 +250,15 @@ export function mergeCommandResults(held: CommandResult | undefined, incoming: C
       if (!prior || note.at >= prior.at) notes.set(note.id, note);
     }
     result.notes = [...notes.values()].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  }
+  if (held?.interrupts || incoming.interrupts) {
+    const interrupts = new Map<string, CommandResultInterrupt>();
+    for (const item of [...(held?.interrupts ?? []), ...(incoming.interrupts ?? [])]) {
+      const prior = interrupts.get(item.instanceId);
+      if (!prior || item.at >= prior.at) interrupts.set(item.instanceId, item);
+    }
+    result.interrupts = [...interrupts.values()]
+      .sort((a, b) => a.at.localeCompare(b.at) || a.instanceId.localeCompare(b.instanceId));
   }
   return result;
 }
@@ -260,6 +279,25 @@ export function mergeCommandResult(result: CommandResult | undefined, annotation
     next.notes = [{ id: annotationId, text: note.text, at: note.at, ...(stopOutcome ? { stopOutcome } : {}),
       ...(typeof note.runId === "string" && note.runId && note.runId.length <= 200 ? { runId: note.runId } : {}),
       ...(typeof note.code === "string" && /^[a-z][a-z0-9_]{0,79}$/u.test(note.code) ? { code: note.code } : {}) }];
+  }
+  if (Array.isArray(value.interrupts)) {
+    const interrupts: CommandResultInterrupt[] = [];
+    for (const raw of value.interrupts) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const entry = raw as Record<string, unknown>;
+      const instanceId = typeof entry.instanceId === "string" ? entry.instanceId.trim() : "";
+      const agentName = typeof entry.agentName === "string" ? entry.agentName.trim() : "";
+      const at = typeof entry.at === "string" ? entry.at.trim() : "";
+      const ordinal = typeof entry.channelInstanceId === "string" ? entry.channelInstanceId.trim() : "";
+      if (!instanceId || instanceId.length > 200 || !agentName || agentName.length > 160 || !at) continue;
+      interrupts.push({
+        instanceId,
+        agentName,
+        ...(ordinal && /^[1-9]\d*$/u.test(ordinal) ? { channelInstanceId: ordinal } : {}),
+        at,
+      });
+    }
+    if (interrupts.length) next.interrupts = interrupts;
   }
   return mergeCommandResults(result, next);
 }
