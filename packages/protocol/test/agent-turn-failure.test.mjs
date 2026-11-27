@@ -127,6 +127,7 @@ test("Hub reads a usage limit from the original provider error, never a plain ra
     "{\"codexErrorInfo\":\"usageLimitExceeded\"}",
     "429 insufficient_quota: You exceeded your current quota",
     "Quota exceeded for quota metric 'Generate Content API requests'",
+    "Gemini CLI ACP turn failed: You have exhausted your daily quota on this model. | code=429",
     `${"context ".repeat(200)}You've hit your weekly limit`,
     "DeepSeek Harness ACP turn failed: Internal error: turn failed: Insufficient Balance (request_id: 92cd1934)",
     "402 Insufficient credits. Add more using https://openrouter.ai/settings/credits",
