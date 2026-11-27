@@ -4,16 +4,18 @@ import { expect, test } from "./fixtures";
 // security is exercised separately against the actual PostgreSQL auth handler.
 for (const provider of ["GitHub", "Google"]) {
   // A failed sign-in comes back to the page it started on, minus the provider's own callback leftovers.
+  // A new account landing in the app also says where it came from (`xm_src`, #2144): `direct` with no referrer.
   for (const context of [
     { query: "?next=%2Fapp%3Fview%3Dpages", returnPath: "/app?view=pages", errorPath: "/login?next=%2Fapp%3Fview%3Dpages",
-      newUserPath: "/app?view=pages&new_account=1" },
+      // A new account also carries where it came from (#2144); a page opened directly says `direct`.
+      newUserPath: "/app?view=pages&new_account=1&xm_src=direct" },
     { query: `?next=${encodeURIComponent("/oauth/authorize?client_id=external-ai&state=external-state&scope=xmatrix%3Aread")}`,
       returnPath: "/oauth/authorize?client_id=external-ai&state=external-state&scope=xmatrix%3Aread",
       errorPath: `/login?next=${encodeURIComponent("/oauth/authorize?client_id=external-ai&state=external-state&scope=xmatrix%3Aread")}`,
       // An outside app's signed authorization query is never added to.
       newUserPath: "/oauth/authorize?client_id=external-ai&state=external-state&scope=xmatrix%3Aread" },
     { query: "?next=https%3A%2F%2Funtrusted.example%2Fcallback", returnPath: "/app",
-      errorPath: "/login?next=https%3A%2F%2Funtrusted.example%2Fcallback", newUserPath: "/app?new_account=1" },
+      errorPath: "/login?next=https%3A%2F%2Funtrusted.example%2Fcallback", newUserPath: "/app?new_account=1&xm_src=direct" },
     { query: "?device_code=device-fixture&user_code=ABCD-EFGH&client=cli&state=stale-provider-state&code=stale-code",
       returnPath: "/login?device_code=device-fixture&user_code=ABCD-EFGH&client=cli",
       errorPath: "/login?device_code=device-fixture&user_code=ABCD-EFGH&client=cli",
