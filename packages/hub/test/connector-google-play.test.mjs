@@ -54,6 +54,17 @@ test("Google Play keeps its own grant for its scopes on the company Google clien
   const refreshedFull = await fetched([{ body: { access_token: "a3", token_type: "Bearer", expires_in: 3600, scope: `${scope} ${reporting} ${storage}` } }],
     () => refreshOAuthFields(company, "googleplay", { oauthToken: "a", oauthRefreshToken: "r", oauthExpiresAt: "1" }));
   assert.equal(refreshedFull.result.oauthScopes, `${scope} ${reporting} ${storage}`);
+  // Explicit opt-in storageScope requests devstorage.read_only and preserves it through signed OAuth state
+  // without exposing unverified scopes to default production connects.
+  const optInClient = oauthClient(company, "googleplay", { storageScope: true });
+  assert.deepEqual(optInClient.manifest.oauth.scopes, ["openid", "https://www.googleapis.com/auth/userinfo.email", scope, reporting, storage]);
+  const optInUrl = await oauthAuthorizeUrl(optInClient, { spaceId: "space-1", userId: "user-1", redirectUri: "https://hub.test/cb", storageScope: true });
+  assert.match(new URL(optInUrl).searchParams.get("scope"), /devstorage\.read_only/u);
+  const verifiedOptIn = await verifyOAuthState(company, new URL(optInUrl).searchParams.get("state"));
+  assert.ok(verifiedOptIn);
+  assert.deepEqual(verifiedOptIn.client.manifest.oauth.scopes, ["openid", "https://www.googleapis.com/auth/userinfo.email", scope, reporting, storage]);
+  const optInExchanged = await fetched([{ body: full }], () => exchangeOAuthGrant(verifiedOptIn.client, "code", "https://hub.test/cb"));
+  assert.equal(optInExchanged.result.fields.oauthScopes, `${scope} ${reporting} ${storage}`);
 });
 
 test("Check and list_apps read every app the sign-in can see; nobody types a package to connect", async () => {

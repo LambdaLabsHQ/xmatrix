@@ -156,14 +156,15 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
           200, { "cache-control": "private, no-store" });
       }
     }
-    const client = oauthClient(c.env, providerId);
+    const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+    const storageScope = providerId === "googleplay" && body?.storageScope === true;
+    const client = oauthClient(c.env, providerId, { storageScope });
     if (!client) return c.json({ error: "One-click connect is not configured for this app" }, 404);
     const stripeAuthorizeUrl = providerId === "stripe" ? stripeAuthorizeEndpoint(c.env, spaceId) : undefined;
     if (providerId === "stripe" && !stripeAuthorizeUrl) {
       return c.json({ error: "One-click connect is not configured for this app" }, 404);
     }
     let accountId: string | undefined;
-    const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
     if (client.manifest.id === "x") {
       if (body?.accountId !== undefined) {
         if (typeof body.accountId !== "string" || !/^[1-9][0-9]{0,19}$/u.test(body.accountId)) {
@@ -190,6 +191,7 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
       desktop: body?.returnTo === "desktop",
       // Started on the beta Web: the callback returns there, not to the stable app.
       beta: typeof body?.returnOrigin === "string" && appOrigins(c.env).slice(1).includes(body.returnOrigin),
+      ...(storageScope ? { storageScope: true } : {}),
       ...(stripeAuthorizeUrl ? { authorizeUrl: stripeAuthorizeUrl } : {}),
       redirectUri: oauthRedirectUri(connectorHubOrigin(c.env, c.req.raw)),
       meter: upstreamMeter(c.env, { spaceId, connector: client.manifest.id, action: "connect" }) }) },

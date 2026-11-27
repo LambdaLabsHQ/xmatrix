@@ -1290,6 +1290,8 @@ export function AppsView({
           method: "POST",
           // A shell that takes the grant back says so; the browser then returns to it instead of finishing itself.
           body: { ...(connector.id === "x" && options?.xAccountId ? { accountId: options.xAccountId } : {}),
+            ...(connector.id === "googleplay" && new URLSearchParams(window.location.search).get("playStorageScope") === "1"
+              ? { storageScope: true } : {}),
             ...(getDesktopBridge()?.connectReturn ? { returnTo: "desktop" } : {}),
             // The Hub returns a connect started on the beta Web there; it ignores any other origin.
             returnOrigin: window.location.origin },
