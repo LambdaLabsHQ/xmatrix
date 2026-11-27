@@ -1967,6 +1967,8 @@ export const MessageRow = memo(function MessageRow({
     rejections: contextOnly ? [] : invocationRejections,
     ...(controlInvocations.length ? { controls: controlInvocations } : {}),
     ...(!contextOnly && message.commandNotices ? { notices: message.commandNotices } : {}),
+    ...(!contextOnly && !message.editedAt && message.interruptedInstances?.length
+      ? { interrupts: message.interruptedInstances } : {}),
     continuations: contextOnly || message.editedAt ? [] : continuationInvocations,
     executions: contextOnly || message.editedAt ? [] : messageTargetEvidence?.executions,
     sourceBody: displayBody,
@@ -1980,7 +1982,7 @@ export const MessageRow = memo(function MessageRow({
     ...(!contextOnly && !message.editedAt ? { sentAt: message.sentAt } : {}),
     ...(message.sequence ? { sequence: message.sequence } : {}),
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
-  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, onRunCommand, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
+  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, controlInvocations, message.commandNotices, message.interruptedInstances, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, onRunCommand, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   // Only the Hub writes an App's system fact, so only there does a receipt's text read as one.
   // An App's event that carries its own private result (a new Gmail message the connector read) is drawn as that result.
   const privateEventOwner = message.senderKind === "app" && message.provenance !== "system_fact"

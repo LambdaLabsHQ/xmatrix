@@ -15,15 +15,16 @@ import { channelPresenceInstances } from "@xmatrix/protocol";
 import type {
   ChannelMentionReadState,
   ChannelMentionReadStatus,
+  CommandResultInterrupt,
   FaceOf,
   SerializedAgentLaunch,
   ChannelSnapshot,
   LiveChannel,
 } from "@xmatrix/protocol";
-import { MENTION_BROADCAST_NAMES, agentPresetForLauncher, isAutoHandoffSuccessor, isChannelResidentInstance, isOperationalMentionStart, mentionAddressTokens, nonOperationalMentionRanges, parseAutoLaunchMentions,
-  parseHandoffInstanceMentions, parseHarnessCapabilityMentions, scanMentionAddresses } from "@xmatrix/protocol";
+import { MENTION_BROADCAST_NAMES, addressesInstance, agentPresetForLauncher, isAutoHandoffSuccessor, isChannelResidentInstance, isOperationalMentionStart, mentionAddressTokens, nonOperationalMentionRanges, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions,
+  parseHandoffInstanceMentions, parseHarnessCapabilityMentions, parseRebornInstanceMentions, scanMentionAddresses } from "@xmatrix/protocol";
 
-import type { MentionCandidate } from "./mention-complete";
+import type { MentionCandidate, MentionInstanceTargetScope } from "./mention-complete";
 import { addressedAgentFace, launchFace } from "./mention-invocation-state";
 
 export type MentionReadTarget = {
@@ -315,6 +316,44 @@ export function withWrittenInvocationTargets(index: MentionReadIndex, text: stri
   return { byToken, tokens: mentionAddressTokens([...byToken.keys(), ...ambiguous]) };
 }
 
+export type BusyMentionInstance = {
+  id: string;
+  agentName: string;
+  channelInstanceId?: string;
+};
+
+/** Busy live Instances in this Channel whose active turn an `@` cancels. */
+export function busyMentionInstances(
+  channel: Pick<LiveChannel, "presence"> | null | undefined,
+  instanceTargetScope: MentionInstanceTargetScope = "channel",
+): BusyMentionInstance[] {
+  if (instanceTargetScope === "none") return [];
+  return channelPresenceInstances(channel?.presence)
+    .filter((instance) => instance.status === "busy")
+    .map((instance) => ({
+      id: instance.id,
+      agentName: instance.agentName,
+      ...(instance.channelInstanceId ? { channelInstanceId: instance.channelInstanceId } : {}),
+    }));
+}
+
+/** Recorded turn interrupts on a message that match this rendered mention chip. */
+export function mentionInterruptMatches(
+  text: string,
+  target: Pick<MentionReadTarget, "subjectId" | "kind" | "unresolved">,
+  interrupts: readonly CommandResultInterrupt[] | undefined,
+): CommandResultInterrupt[] {
+  if (!interrupts?.length || target.kind !== "agent") return [];
+  const hasOrdinal = /[:：][1-9]\d*(?:$|[\s\]}),.;!?])/u.test(text);
+  return interrupts.filter((entry) => {
+    if (addressesInstance(text, { names: [entry.agentName, entry.instanceId], ordinal: entry.channelInstanceId })) {
+      return true;
+    }
+    if (hasOrdinal || target.unresolved) return false;
+    return target.subjectId === entry.instanceId || target.subjectId === `agent:${entry.instanceId}`;
+  });
+}
+
 export type ComposerMentionSpan = {
   start: number;
   end: number;
@@ -322,6 +361,8 @@ export type ComposerMentionSpan = {
   kind: "user" | "agent" | "summon" | "reference";
   invalid?: boolean;
   self?: boolean;
+  /** Sending this draft as written interrupts a currently busy Instance's turn. */
+  interrupt?: boolean;
   /** The face the sent chip leads with, drawn over the `@`: a member's, or the harness a summon names. `@auto` has none yet. */
   face?: FaceOf;
 };
@@ -335,9 +376,11 @@ export type ComposerMentionSpan = {
  * appears.
  */
 export function composerMentionSpans(text: string, index: MentionReadIndex | null,
-  currentUserIdentityId?: string): ComposerMentionSpan[] {
+  currentUserIdentityId?: string, busyInstances: readonly BusyMentionInstance[] = []): ComposerMentionSpan[] {
   if (!/[@＠]/u.test(text)) return [];
-  const handoffs: ComposerMentionSpan[] = parseHandoffInstanceMentions(text).map(mention => {
+  const handoffMentions = parseHandoffInstanceMentions(text);
+  const autoLaunchMentions = parseAutoLaunchMentions(text);
+  const handoffs: ComposerMentionSpan[] = handoffMentions.map(mention => {
     const harness = mention.tags.harness ?? (!mention.conditionFirst && !isAutoHandoffSuccessor(mention.successorName)
       ? agentPresetForLauncher(mention.successorName)?.id : undefined);
     return {
@@ -348,7 +391,7 @@ export function composerMentionSpans(text: string, index: MentionReadIndex | nul
   });
   const spans: ComposerMentionSpan[] = [
     ...handoffs,
-    ...parseAutoLaunchMentions(text)
+    ...autoLaunchMentions
       .filter(mention => !handoffs.some(span => mention.start >= span.start && mention.start < span.end))
       .map(mention => ({
         start: mention.start, end: mention.end, kind: "summon" as const,
@@ -356,15 +399,33 @@ export function composerMentionSpans(text: string, index: MentionReadIndex | nul
         ...(mention.tags.harness ? { face: { kind: "agent" as const, name: mention.tags.harness, harness: mention.tags.harness } } : {}),
       })),
   ];
+  const canInterrupt = busyInstances.length > 0 &&
+    autoLaunchMentions.length === 0 &&
+    handoffMentions.length === 0 &&
+    parseRebornInstanceMentions(text).length === 0 &&
+    !parseAgentStopInvocation(text) &&
+    parseAgentControlInvocations(text).length === 0;
+  const ranges = nonOperationalMentionRanges(text);
   const written = withWrittenInvocationTargets(index ?? { tokens: [], byToken: new Map() }, text);
   if (written.tokens.length) {
-    const ranges = nonOperationalMentionRanges(text);
     for (const match of scanMentionAddresses(text, written.tokens)) {
       const target = written.byToken.get(match.token);
       if (!target || !isOperationalMentionStart(match.start, ranges)) continue;
       if (spans.some(span => span.start < match.end && match.start < span.end)) continue;
+      const address = text.slice(match.start, match.end);
+      const interrupt = canInterrupt && target.kind === "agent" && busyInstances.some((instance) =>
+        addressesInstance(address, { names: [instance.agentName, instance.id], ordinal: instance.channelInstanceId }));
       spans.push({ start: match.start, end: match.end, kind: target.kind, face: target.face,
-        ...(currentUserIdentityId && target.subjectId === currentUserIdentityId ? { self: true } : {}) });
+        ...(currentUserIdentityId && target.subjectId === currentUserIdentityId ? { self: true } : {}),
+        ...(interrupt ? { interrupt: true } : {}) });
+    }
+  }
+  if (canInterrupt) {
+    const broadcastTokens = mentionAddressTokens(MENTION_BROADCAST_NAMES);
+    for (const match of scanMentionAddresses(text, broadcastTokens)) {
+      if (!isOperationalMentionStart(match.start, ranges)) continue;
+      if (spans.some(span => span.start < match.end && match.start < span.end)) continue;
+      spans.push({ start: match.start, end: match.end, kind: "agent", interrupt: true });
     }
   }
   return spans.sort((left, right) => left.start - right.start);

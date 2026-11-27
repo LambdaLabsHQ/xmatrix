@@ -18,7 +18,7 @@ import {
 } from "./composer-editor-text";
 import { MentionChipFace } from "./mention-chip-face";
 import { composerBlocks } from "./composer-blocks";
-import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
+import { composerMentionSpans, type BusyMentionInstance, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
 
 /**
  * The composer's text field, as the rest of the composer reads it: the draft
@@ -59,6 +59,8 @@ export interface ComposerEditorProps {
   hint?: string;
   /** The Channel's member index; the same one the timeline resolves chips with. */
   mentionIndex: MentionReadIndex | null;
+  /** Live busy Instances in this Channel, so addressing one warns that it interrupts the turn. */
+  busyInstances?: readonly BusyMentionInstance[];
   currentUserIdentityId?: string;
   /** Picked channel and page references, drawn like the chips they send as. */
   references?: ReadonlyArray<{ start: number; end: number; text: string }>;
@@ -314,7 +316,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
   // Anything the chips are drawn from: redraw them.
   useLayoutEffect(() => {
     viewRef.current?.setProps({});
-  }, [props.disabled, props.ariaLabel, props.className, props.mentionIndex, props.currentUserIdentityId,
+  }, [props.disabled, props.ariaLabel, props.className, props.mentionIndex, props.busyInstances, props.currentUserIdentityId,
     props.references, props.quoteIsHere]);
 
   return <div ref={hostRef} className="composer-field-host relative min-w-0 flex-1">
@@ -461,7 +463,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
   return (state: EditorState): DecorationSet => {
     const props = propsRef.current!;
     const text = composerTextOf(state.doc);
-    const inputs = [props.mentionIndex, props.currentUserIdentityId, props.references];
+    const inputs = [props.mentionIndex, props.busyInstances, props.currentUserIdentityId, props.references];
     if (cache && cache.text === text && inputs.every((input, index) => input === cache!.inputs[index])) return cache.set;
     const decorations: Decoration[] = [];
     const seen = new Map<string, number>();
@@ -506,9 +508,26 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
           if (element) portals.remove(element);
         } }));
       }
+      const tailClass = [
+        chip,
+        face ? "app-composer-chip-tail" : "",
+        span.interrupt ? "app-composer-chip-has-interrupt" : "",
+      ].filter(Boolean).join(" ");
       decorations.push(Decoration.inline(from, to, {
-        nodeName: "span", class: face ? `${chip} app-composer-chip-tail` : chip, ...data,
+        nodeName: "span", class: tailClass, ...data,
       }));
+      if (span.interrupt) {
+        const key = `interrupt\u0000${written}\u0000${count}\u0000${chip}`;
+        decorations.push(Decoration.widget(to, () => {
+          const badge = document.createElement("span");
+          badge.className = `${chip} app-composer-chip-interrupt`;
+          badge.contentEditable = "false";
+          badge.setAttribute("data-interrupt", "true");
+          badge.setAttribute("aria-hidden", "true");
+          badge.textContent = "· Interrupt";
+          return badge;
+        }, { key, side: -1, ignoreSelection: true }));
+      }
     }
     const set = DecorationSet.create(state.doc, decorations);
     cache = { text, inputs, set };
@@ -518,7 +537,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
 
 function draftSpans(text: string, props: ComposerEditorProps): readonly ComposerMentionSpan[] {
   if (!text) return NO_SPANS;
-  const mentions = composerMentionSpans(text, props.mentionIndex, props.currentUserIdentityId);
+  const mentions = composerMentionSpans(text, props.mentionIndex, props.currentUserIdentityId, props.busyInstances);
   const picked = (props.references ?? []).filter((reference) => text.slice(reference.start, reference.end) === reference.text &&
     !mentions.some((span) => span.start < reference.end && reference.start < span.end))
     .map(({ start, end }): ComposerMentionSpan => ({ start, end, kind: "reference" }));
@@ -531,6 +550,7 @@ function chipData(span: ComposerMentionSpan): Record<string, string> {
     "data-start": String(span.start),
     "data-kind": span.kind,
     ...(span.invalid ? { "data-invalid": "true" } : {}),
+    ...(span.interrupt ? { "data-interrupt": "true" } : {}),
   };
 }
 

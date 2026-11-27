@@ -20,10 +20,11 @@ import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, 
 import { Check } from "lucide-react";
 
 import type { CommandNotice } from "./command-notices";
-import { parseAgentStopInvocation, type AgentControlInvocation, type ChannelMentionReadStatus, type ConnectorInvocation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop } from "@xmatrix/protocol";
+import { parseAgentStopInvocation, type AgentControlInvocation, type ChannelMentionReadStatus, type CommandResultInterrupt, type ConnectorInvocation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop } from "@xmatrix/protocol";
 import { MentionChipFace } from "./mention-chip-face";
 import {
   mentionChipLabel,
+  mentionInterruptMatches,
   mentionReadResolution,
   splitMentionSegments,
   withInvocationMentionTargets,
@@ -64,6 +65,8 @@ export type MentionReadMessageScope = {
   controls?: readonly AgentControlInvocation[];
   /** Hub receipts for this message's command, drawn on it instead of as rows. */
   notices?: readonly CommandNotice[];
+  /** Live Instances whose running turn this message's `@` interrupted. */
+  interrupts?: readonly CommandResultInterrupt[];
   continuations?: readonly import("@xmatrix/protocol").SerializedAgentContinuation[];
   executions?: readonly import("@xmatrix/protocol").SerializedAgentMessageExecution[];
   sourceBody?: string;
@@ -216,11 +219,12 @@ export const MentionRichText = memo(function MentionRichText({ text, rawMarkdown
       ...(stop ? { stop } : {}),
       ...(scope?.controls ? { controls: scope.controls } : {}),
       ...(scope?.notices ? { notices: scope.notices } : {}),
+      ...(scope?.interrupts?.length ? { interrupts: scope.interrupts } : {}),
       launchStatusUnavailable: scope?.launchStatusUnavailable,
       mentions: run => splitMentionSegments(run, index ? index(run) : null),
     }, allowed);
   }, [text, allowed, base, scope?.continuations, scope?.rejections, scope?.launches,
-    scope?.stops, scope?.stopReceiptsLoaded, scope?.controls, scope?.notices, scope?.sourceBody, scope?.launchStatusUnavailable]);
+    scope?.stops, scope?.stopReceiptsLoaded, scope?.controls, scope?.notices, scope?.interrupts, scope?.sourceBody, scope?.launchStatusUnavailable]);
   if (!operational) return <PageReferenceRichText text={text} />;
   return <>{segments.map((segment, index) =>
     <InteractionSegmentView key={index} segment={segment} scope={scope} starting={starting} />)}</>;
@@ -291,6 +295,24 @@ function InteractionSegmentView({ segment, scope, starting }: {
         notes={scope?.notices?.filter(notice => !notice.controlOutcomes && notice.body)} />;
     case "mention.v1":
       return <MentionReadChip target={segment.target} text={segment.text} token={segment.token} />;
+    case "interrupt.v1": {
+      const names = segment.interrupts
+        .map((entry) => entry.channelInstanceId ? `@${entry.agentName}:${entry.channelInstanceId}` : `@${entry.agentName}`)
+        .join(", ");
+      return (
+        <span
+          className="app-mention-chip"
+          data-interrupted="true"
+          title={`${segment.text} · Interrupted ${names}`}
+        >
+          <span className="app-mention-chip-label">{segment.text}</span>
+          <span className="app-mention-invocation-status app-mention-chip-interrupt-status">
+            <span aria-hidden="true">·</span>
+            <span>Interrupted</span>
+          </span>
+        </span>
+      );
+    }
     default:
       // A contract this client does not know stays the text it was written as.
       return <PageReferenceRichText text={(segment as { text: string }).text} />;
@@ -356,6 +378,8 @@ export function MentionReadChip({
     channelScope.currentUserIdentityId === target.subjectId
   );
   const label = mentionChipLabel(text, target.label, token);
+  const interrupted = mentionInterruptMatches(text, target, messageScope?.interrupts);
+  const wasInterrupted = interrupted.length > 0;
   // The existing unread receipt is the delivery indicator; it only adds why
   // this one will not be read until the machine comes back.
   const machineOffline = resolution.state === "unread" &&
@@ -377,7 +401,8 @@ export function MentionReadChip({
         mentionsViewer && "app-mention-chip-self"
       )}
       data-read-state={resolution.state}
-      title={`${label} · ${stateCopy}`}
+      {...(wasInterrupted ? { "data-interrupted": "true" } : {})}
+      title={wasInterrupted ? `${label} · Interrupted · ${stateCopy}` : `${label} · ${stateCopy}`}
     >
       <span className="app-mention-chip-avatar">
         <span className="app-mention-chip-avatar-face" aria-hidden="true">
@@ -406,6 +431,9 @@ export function MentionReadChip({
               className="app-mention-chip-receipt-popover"
             >
               <span className="app-mention-chip-receipt-name">@{label}</span>
+              {wasInterrupted && (
+                <span className="app-mention-chip-receipt-interrupt">Interrupted current turn</span>
+              )}
               <span className="app-mention-chip-receipt-state" data-read-state={resolution.state}>
                 {stateCopy}
               </span>
@@ -414,6 +442,12 @@ export function MentionReadChip({
         </span>
       </span>
       <span className="app-mention-chip-label">@{label}</span>
+      {wasInterrupted && (
+        <span className="app-mention-invocation-status app-mention-chip-interrupt-status">
+          <span aria-hidden="true">·</span>
+          <span>Interrupted</span>
+        </span>
+      )}
     </span>
   );
 }

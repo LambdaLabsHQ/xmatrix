@@ -1,12 +1,13 @@
-import { COMMAND_RESULT_ANNOTATION_NAMESPACE, type AgentControlOutcomeRecord, type CommandResultNote } from "@xmatrix/protocol";
+import { COMMAND_RESULT_ANNOTATION_NAMESPACE, type AgentControlOutcomeRecord, type CommandResultInterrupt, type CommandResultNote } from "@xmatrix/protocol";
 import { publishChannelMessageCommandResult } from "./channel-live-judgment";
 import { postgresMessageSystemAnnotation } from "./postgres-message-authority";
 import type { Env } from "./types";
 
-/** What one recording says: every statement's outcome, or one note. */
+/** What one recording says: every statement's outcome, one note, or interrupted live Instances. */
 export type CommandResultEntry =
   | { controls: readonly AgentControlOutcomeRecord[] }
-  | { note: Omit<CommandResultNote, "id" | "at"> };
+  | { note: Omit<CommandResultNote, "id" | "at"> }
+  | { interrupts: readonly Omit<CommandResultInterrupt, "at">[] };
 
 export interface CommandResultDependencies {
   annotate?: typeof postgresMessageSystemAnnotation;
@@ -24,9 +25,12 @@ export async function recordCommandResult(env: Env, input: {
   channelId: string; messageId: string; key: string; entry: CommandResultEntry;
 }, dependencies: CommandResultDependencies = {}): Promise<void> {
   const annotationId = `${COMMAND_RESULT_ANNOTATION_NAMESPACE}:${input.messageId}:${input.key}`.slice(0, 200);
+  const at = new Date().toISOString();
   const payload: Record<string, unknown> = "controls" in input.entry
     ? { controls: input.entry.controls }
-    : { note: { ...input.entry.note, at: new Date().toISOString() } };
+    : "interrupts" in input.entry
+      ? { interrupts: input.entry.interrupts.map((item) => ({ ...item, at })) }
+      : { note: { ...input.entry.note, at } };
   const annotation = await (dependencies.annotate ?? postgresMessageSystemAnnotation)(env, {
     channelId: input.channelId, messageId: input.messageId,
     namespace: COMMAND_RESULT_ANNOTATION_NAMESPACE, annotationId, payload,

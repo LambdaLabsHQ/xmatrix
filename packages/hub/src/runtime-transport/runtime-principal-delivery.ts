@@ -154,6 +154,8 @@ export async function deliverToAudience(input: {
   audience: RuntimeAudience;
   /** The request one cell receives for its share. */
   request: (share: RuntimeCellShare) => Request;
+  /** Optional observer for a cell's succeeded response (e.g. live interrupt receipts). */
+  onResponse?: (share: RuntimeCellShare, response: Response) => void | Promise<void>;
   label: string;
   self?: RuntimeLiveDeliverySelf;
   /** The publishing cell already served its own sockets. */
@@ -200,7 +202,7 @@ async function deliverToCell(
   let url = "https://relay-runtime/unknown";
   const local = input.self?.cellName === cellName;
   try {
-    await publishWithLiveDeliveryRetry(async () => {
+    const response = await publishWithLiveDeliveryRetry(async () => {
       // A cell's own share is served in process; every other attempt is a subrequest.
       if (!local) {
         if (input.budget.remaining <= 0) throw new RuntimeDeliveryOverBudget();
@@ -221,6 +223,7 @@ async function deliverToCell(
       }
       return response;
     });
+    if (input.onResponse) await input.onResponse(share, response);
     return undefined;
   } catch (error) {
     if (error instanceof RuntimeDeliveryOverBudget && attempts === 0) return "over_budget";
