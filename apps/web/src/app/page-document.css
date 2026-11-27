@@ -1096,6 +1096,27 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 /* A cell rewritten past recognition holds its old words over its new ones, each whole. */
 .page-document [data-change="replaced"] > del { display: block; }
 .page-document [data-change="replaced"] > ins { text-decoration: none; }
+/* Replay: the caret that types a version's new words, with its author's name on a flag above it. */
+.page-replay-caret {
+  position: relative;
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  margin: 0 1px;
+  vertical-align: -0.2em;
+}
+.page-replay-flag {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  padding: 3px 6px;
+  border-radius: 4px 4px 4px 0;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
 /* New to this reader since their last visit: on History's button, and on what is new in History's list. */
 .page-new-dot {
   flex: none;
