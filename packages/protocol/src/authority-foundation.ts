@@ -264,6 +264,7 @@ export const HUB_ROUTES = {
   space_secrets: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/secrets`,
   space_secret: (spaceId: string, secretRef: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/secrets/${encodeURIComponent(secretRef)}`,
+  space_admission_policy: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/admission-policy`,
   secret_requests: "/api/secret-requests",
   secret_request_fulfill: "/api/secret-requests/fulfill",
   secret_request_status: "/api/secret-requests/status",
@@ -511,6 +512,7 @@ export const WEB_PROXY_ROUTES = {
   daemon_execution_report: "/api/xmatrix/daemon/executions/report",
   space_secrets: (spaceId: string, secretRef?: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/secrets${
     secretRef ? `/${encodeURIComponent(secretRef)}` : ""}`,
+  space_admission_policy: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/admission-policy`,
   secret_request_fulfill: "/api/secret-requests/fulfill",
   secret_request_status: "/api/secret-requests/status",
   channel_settings_card: (channelId: string, messageId: string) =>

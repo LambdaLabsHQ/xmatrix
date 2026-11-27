@@ -1,9 +1,9 @@
 # Admission policy for secrets that ask first
 
 Status: implemented in the Hub and on the settings card (2026-11-27): the
-policy, its adoption through the settings registry, the request route and
-the `adopt` control. The row in Settings › Secrets is not built yet; its
-routes are (`/api/spaces/:spaceId/admission-policy`). A first draft proposed
+policy, its adoption through the settings registry, the request route, the
+`adopt` control and the row in Settings › Secrets
+(`/api/spaces/:spaceId/admission-policy`). A first draft proposed
 a gate that could wait on people and Agents; it broke four recorded decisions
 and was withdrawn (see "Recorded decisions").
 
@@ -197,7 +197,9 @@ the program has. The policy's author decides per secret.
   Space; the one that writes an approval reads it again. A policy whose
   adopter lost that role, or whose text no longer checks, is no policy.
 - **No card is needed.** Settings › Secrets shows the adopted policy, its Page
-  and who adopted it, with Adopt and Withdraw, through the same domain write.
+  and when it was adopted. An admin withdraws it there, and adopts the Page's
+  text where it changed since, through the same domain write. A first policy
+  is proposed on a card.
   It is also where the address's `href` leads, for a client without the
   control and for an admin who edited the Page themselves. Withdrawing
   clears the row.
