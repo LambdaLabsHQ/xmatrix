@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -10,9 +11,11 @@ import { BrandMark } from "@/components/shared/brand-mark";
 import { isShortCell, SHORT_CELL_CLASS } from "@/components/pages/page-table-cells";
 import { getXMatrixHubUrl } from "@/lib/xmatrix";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
-import { loadPublicPage as load } from "@/lib/pages/public-page";
+import { loadPublicPage } from "@/lib/pages/public-page";
 import { PublicPageFaces, PublicPageRefresh } from "./public-page-live";
 import { PublicPageOutline } from "./public-page-outline";
+
+const load = cache(loadPublicPage);
 
 /**
  * A published page for anyone, signed in or not:
