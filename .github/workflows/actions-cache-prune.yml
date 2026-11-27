@@ -6,7 +6,7 @@ name: Actions cache prune
 # restore.
 on:
   workflow_run:
-    workflows: [CI, Public Snapshot CI]
+    workflows: [CI, Public Snapshot CI, CLI Release Cache, Production Release Request, CodeQL]
     types: [completed]
   schedule:
     - cron: "17 */6 * * *"

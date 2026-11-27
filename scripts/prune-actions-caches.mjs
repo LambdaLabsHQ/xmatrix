@@ -3,20 +3,28 @@
 // deleting entries no run will restore again, so eviction never takes one a
 // run still needs.
 //
-// CI saves compile caches under `<family>-<commit sha>` and restores the
-// newest entry of a family by prefix, so on each ref only the newest entry of
-// a family can ever be restored. A closed pull request's ref is never
-// restored from again, and an entry nobody touched for days has been
-// superseded.
+// CI saves compile caches under `<family>-<commit sha>` or
+// `<family>-<lockfile sha256>-<commit sha>` and restores the newest entry of a
+// family by prefix, so on each ref only the newest entry of a family needs to
+// survive across commits and lockfile updates. Exact-match caches without a
+// commit SHA retain their hash until three days without access, and a closed
+// pull request's ref is never restored from again.
 import process from "node:process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const STALE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 
-/** Pure: the family a cache key belongs to: the key without its commit SHA. */
+/**
+ * Pure: the family a cache key belongs to. Strips the trailing commit SHA, any
+ * immediately preceding 64-hex content/lockfile hash on commit-keyed caches,
+ * and the rolling CodeQL CLI version in `codeql-trap-<n>-<semver>-<lang>-<sha>`.
+ * Exact-match caches without a commit SHA keep their hash untouched.
+ */
 export function cacheFamily(key) {
-  return key.replace(/-[0-9a-f]{40}$/u, "");
+  return key
+    .replace(/-(?:[0-9a-f]{64}-)?[0-9a-f]{40}$/u, "")
+    .replace(/^(codeql-trap-\d+)-\d+\.\d+\.\d+-/u, "$1-");
 }
 
 /**
