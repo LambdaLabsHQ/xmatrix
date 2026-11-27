@@ -583,7 +583,7 @@ export function SettingsView({
               ))
             )}
           </ToolDetailSection>
-          {token && space ? <div className="mt-10"><AdmissionPolicyRow spaceId={space.id} token={token} userId={user.id} /></div> : null}
+          {token && space ? <div className="mt-10"><AdmissionPolicyRow key={space.id} spaceId={space.id} token={token} userId={user.id} /></div> : null}
         </div>
       ) },
     // A deployment that meters nothing serves no Space billing, so it has no Billing section.

@@ -32,7 +32,9 @@ export function AdmissionPolicyRow({ spaceId, token, userId }: { spaceId: string
     onSettled: () => { setConfirming(false); return queryClient.invalidateQueries({ queryKey: key }); },
   });
   const view = read.data;
-  const error = userErrorMessage(change.error ?? read.error, "Couldn't load secrets");
+  // Both words are from the shared list of what a client reports as failed; the list has none for a policy alone.
+  const error = change.error ? userErrorMessage(change.error, "Couldn't change these secrets")
+    : userErrorMessage(read.error, "Couldn't load secrets");
   const standing = view?.policy ? admissionPolicyStanding(view) : undefined;
   return (
     <ToolDetailSection title="Admission policy">
@@ -74,6 +76,7 @@ export function AdmissionPolicyRow({ spaceId, token, userId }: { spaceId: string
           {standing.adoptable && view.setting ? (
             <>
               <pre className={TEXT} data-admission-page-text="">{standing.adoptable}</pre>
+              {view.setting.description ? <p className="max-w-[60ch] text-[12px] text-muted-foreground">{view.setting.description}</p> : null}
               <div>
                 <button type="button" disabled={change.isPending} className={actionClass({ variant: "primary", size: "sm" })}
                   onClick={() => change.mutate({ address: view.setting!.address, value: standing.adoptable! })}>Adopt the Page&apos;s text</button>
