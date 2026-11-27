@@ -591,11 +591,16 @@ test("a page is loaded once the catalog has answered, even when it is empty", ()
   assert.equal(pageFromCache(cacheOf(undefined), ["key"]).loaded, false);
 });
 
-test("catalog revisions discard unopened speculative pages without crossing Space identity", async () => {
+function createRefreshTestContext() {
   const { QueryClient } = require("@tanstack/react-query");
   const { observeSpaceCatalogRevision, refreshSpaceCatalogForEvent } = require("./channel-catalog-refresh.ts");
   const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
   const prefix = ["xmatrix", "hub", "user", "channels", "space"];
+  return { client, prefix, countsKey: [...prefix, "catalog-counts"], observeSpaceCatalogRevision, refreshSpaceCatalogForEvent };
+}
+
+test("catalog revisions discard unopened speculative pages without crossing Space identity", async () => {
+  const { client, prefix, countsKey, observeSpaceCatalogRevision, refreshSpaceCatalogForEvent } = createRefreshTestContext();
   const speculative = [...prefix, "child-prefetch", "tree", "all", "parent", ""];
   const other = ["xmatrix", "hub", "other-user", "channels", "space", "child-prefetch", "tree", "all", "parent", ""];
   const page = { pages: [{ catalogRevision: 3, rows: [] }], pageParams: [null] };
@@ -603,12 +608,12 @@ test("catalog revisions discard unopened speculative pages without crossing Spac
     client.setQueryData(speculative, page);
     client.setQueryData(other, page);
     observeSpaceCatalogRevision({ client, spaceId: "space", prefix,
-      countsKey: [...prefix, "catalog-counts"], revision: 4 });
+      countsKey, revision: 4 });
     assert.equal(client.getQueryData(speculative), undefined);
     assert.deepEqual(client.getQueryData(other), page);
     client.setQueryData(speculative, page);
     refreshSpaceCatalogForEvent({ client, spaceId: "space", prefix,
-      countsKey: [...prefix, "catalog-counts"], detail: { kind: "structure" },
+      countsKey, detail: { kind: "structure" },
       hasChannel: () => true, resolveChannel: () => {} });
     assert.equal(client.getQueryData(speculative), undefined);
     assert.deepEqual(client.getQueryData(other), page);
@@ -619,19 +624,16 @@ test("catalog revisions discard unopened speculative pages without crossing Spac
 // content and automation commits advance too. A newer one from a read said
 // "the catalog changed" and re-read every cached list, in waves.
 test("a read with a newer Space head re-reads no other list; only a change notice does", async () => {
-  const { QueryClient } = require("@tanstack/react-query");
-  const { observeSpaceCatalogRevision } = require("./channel-catalog-refresh.ts");
-  const client = new QueryClient({ defaultOptions: { queries: { gcTime: Infinity } } });
-  const prefix = ["xmatrix", "hub", "user", "channels", "space"];
+  const { client, prefix, countsKey, observeSpaceCatalogRevision } = createRefreshTestContext();
   const listA = [...prefix, "catalog", "flat", "all", null, ""];
   const listB = [...prefix, "catalog", "flat", "unread", null, ""];
   const page = (catalogRevision) => ({ pages: [{ catalogRevision, rows: [] }], pageParams: [null] });
   const invalidated = (key) => client.getQueryState(key)?.isInvalidated === true;
   const read = (key, revision) => observeSpaceCatalogRevision({ client, spaceId: "space", prefix,
-    countsKey: [...prefix, "catalog-counts"], revision, sourceQueryKey: key,
+    countsKey, revision, sourceQueryKey: key,
     sourceQueryHash: client.getQueryCache().find({ queryKey: key, exact: true }).queryHash });
   const notice = (revision) => observeSpaceCatalogRevision({ client, spaceId: "space", prefix,
-    countsKey: [...prefix, "catalog-counts"], revision });
+    countsKey, revision });
   try {
     client.setQueryData(listA, page(5));
     client.setQueryData(listB, page(5));
@@ -647,5 +649,54 @@ test("a read with a newer Space head re-reads no other list; only a change notic
     client.setQueryData(listB, page(7));
     read(listB, 7);
     assert.equal(invalidated(listB), false, "once");
+  } finally { client.clear(); }
+});
+
+test("catalog changes drop ephemeral search queries instead of refetching closed searches in the background", async () => {
+  const { client, prefix, countsKey, observeSpaceCatalogRevision, refreshSpaceCatalogForEvent } = createRefreshTestContext();
+  const flatKey = [...prefix, "catalog", "flat", "all", null, ""];
+  const searchKey = [...prefix, "catalog", "search", "all", null, "deploy"];
+  const page = (catalogRevision, rows = []) => ({ pages: [{ catalogRevision, rows }], pageParams: [null] });
+  const channelRow = { channel: { id: "ch-1", spaceId: "space", name: "deploy-log" }, ownActivityAt: "2026-11-27T00:00:00Z" };
+  let searchFetches = 0;
+  const seedSearch = (revision, rows = [channelRow]) => {
+    client.setQueryDefaults(searchKey, {
+      queryFn: async () => { searchFetches += 1; return page(revision + 1, rows); },
+    });
+    client.setQueryData(searchKey, page(revision, rows));
+  };
+  try {
+    client.setQueryData(flatKey, page(5));
+    seedSearch(5);
+    observeSpaceCatalogRevision({ client, spaceId: "space", prefix, countsKey, revision: 6 });
+    assert.equal(client.getQueryData(searchKey), undefined, "revision notice drops cached search query");
+    assert.equal(client.getQueryState(flatKey)?.isInvalidated, true, "flat list still invalidates");
+
+    seedSearch(5);
+    observeSpaceCatalogRevision({
+      client, spaceId: "space", prefix, countsKey, revision: 5,
+      sourceQueryKey: searchKey,
+      sourceQueryHash: client.getQueryCache().find({ queryKey: searchKey, exact: true }).queryHash,
+    });
+    assert.equal(client.getQueryData(searchKey), undefined, "stale search read is dropped rather than refetched");
+
+    seedSearch(6);
+    refreshSpaceCatalogForEvent({
+      client, spaceId: "space", prefix, countsKey,
+      detail: { kind: "presence", channelId: "ch-1" },
+      hasChannel: () => true, resolveChannel: () => {},
+    });
+    assert.equal(client.getQueryData(searchKey), undefined, "presence change drops matching search query");
+
+    seedSearch(6);
+    refreshSpaceCatalogForEvent({
+      client, spaceId: "space", prefix, countsKey,
+      detail: { kind: "structure" },
+      hasChannel: () => true, resolveChannel: () => {},
+    });
+    assert.equal(client.getQueryData(searchKey), undefined, "structural change drops cached search query");
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(searchFetches, 0, "no background refetch ran for closed search queries");
   } finally { client.clear(); }
 });

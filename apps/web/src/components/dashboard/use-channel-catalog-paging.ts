@@ -221,6 +221,7 @@ function catalogOptions(input: {
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.nextCursor,
     staleTime: 15_000,
+    ...(input.query.view === "search" ? { gcTime: 60_000 } : {}),
     // A row is the same row wherever it stands in the list (shareCatalogRows).
     structuralSharing: (held, next) => shareCatalogRows(
       held as InfiniteData<ChannelSnapshotCatalogPage, string | null> | undefined,

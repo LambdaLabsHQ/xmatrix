@@ -183,6 +183,10 @@ function watermarkMap(client: QueryClient): Map<string, number> {
   return watermarks;
 }
 
+function isSearchCatalogQuery(queryKey: QueryKey): boolean {
+  return queryKey[5] === "catalog" && queryKey[6] === "search";
+}
+
 function queryCatalogRevision(data: unknown): number {
   const pages = (data as InfiniteData<ChannelSnapshotCatalogPage, unknown> | undefined)?.pages;
   if (!Array.isArray(pages) || pages.length === 0) return 0;
@@ -227,22 +231,28 @@ export function observeSpaceCatalogRevision(input: {
     }
     if ((stale.get(input.sourceQueryHash) ?? 0) < current) {
       stale.set(input.sourceQueryHash, current);
-      void input.client.invalidateQueries({
-        queryKey: input.sourceQueryKey, exact: true, refetchType: "all",
-      });
+      if (isSearchCatalogQuery(input.sourceQueryKey)) {
+        input.client.removeQueries({ queryKey: input.sourceQueryKey, exact: true });
+      } else {
+        void input.client.invalidateQueries({
+          queryKey: input.sourceQueryKey, exact: true, refetchType: "all",
+        });
+      }
     }
     return false;
   }
   if (input.revision <= current) return false;
   watermarks.set(input.spaceId, input.revision);
-  // Speculation is never a visible/authoritative index. Drop it on a newer
-  // catalog revision rather than refetching every unopened branch.
+  // Speculation and per-keystroke search pages are never persistent sidebar
+  // indexes. Drop them on a newer catalog revision instead of background-
+  // refetching every closed search query and resetting its cache GC timer.
   input.client.removeQueries({ queryKey: input.prefix,
-    predicate: (query) => query.queryKey[5] === "child-prefetch" &&
+    predicate: (query) => (query.queryKey[5] === "child-prefetch" || isSearchCatalogQuery(query.queryKey)) &&
       queryCatalogRevision(query.state.data) < input.revision });
   void input.client.invalidateQueries({
     queryKey: input.prefix,
     predicate: (query) => query.queryKey[5] === "catalog" &&
+      query.queryKey[6] !== "search" &&
       query.queryKey.length === 10 &&
       queryCatalogRevision(query.state.data) < input.revision,
     refetchType: "all",
@@ -304,19 +314,27 @@ export function refreshSpaceCatalogForEvent(input: {
       return rowsFromData(data).some((row) => row.channel.id === channelId);
     });
     for (const query of affected) {
-      void client.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: "all" });
+      if (isSearchCatalogQuery(query.queryKey)) {
+        client.removeQueries({ queryKey: query.queryKey, exact: true });
+      } else {
+        void client.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: "all" });
+      }
     }
     void client.invalidateQueries({ queryKey: countsKey, exact: true });
     input.resolveChannel(spaceId, channelId, true);
     return;
   }
 
-  // Flat and expanded child pages are fetched imperatively, so they have no
-  // active QueryObserver. Structural changes must refresh those cached indexes
-  // too, otherwise new channels remain absent from their rows.
+  // Flat and intake pages are fetched imperatively, so they have no active
+  // QueryObserver; structural changes refresh them in place. Ephemeral search
+  // queries are dropped so closed searches never refetch in the background.
+  client.removeQueries({ queryKey: prefix,
+    predicate: (query) => isSearchCatalogQuery(query.queryKey) });
   void client.invalidateQueries({
     queryKey: prefix,
-    predicate: (query) => query.queryKey[5] === "catalog" && query.queryKey.length === 10,
+    predicate: (query) => query.queryKey[5] === "catalog" &&
+      query.queryKey[6] !== "search" &&
+      query.queryKey.length === 10,
     refetchType: "all",
   });
   void client.invalidateQueries({
