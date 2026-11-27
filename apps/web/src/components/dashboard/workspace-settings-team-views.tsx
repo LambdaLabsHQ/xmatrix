@@ -29,6 +29,7 @@ import {
 } from "./workspace-shell-helpers";
 
 import type { SpaceJoinRequest } from "@/components/dashboard/space-join-requests";
+import { AdmissionPolicyRow } from "@/components/dashboard/admission-policy-row";
 import { HumanProfileSummary } from "@/components/dashboard/human-profile-summary";
 import {
   canInviteToSpace,
@@ -582,6 +583,7 @@ export function SettingsView({
               ))
             )}
           </ToolDetailSection>
+          {token && space ? <div className="mt-10"><AdmissionPolicyRow spaceId={space.id} token={token} userId={user.id} /></div> : null}
         </div>
       ) },
     // A deployment that meters nothing serves no Space billing, so it has no Billing section.
