@@ -302,6 +302,9 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
                 centerConstraint.constant += correction
             }
         }
+        guard #available(iOS 26.0, *) else {
+            return true
+        }
         let deviceRadius = cornerReader.effectiveRadius(corner: .bottomLeft)
         guard deviceRadius > 1 else { return false }
         // The dock's ends are half circles. Left alone, the system platter
@@ -527,7 +530,9 @@ private final class DisplayCornerReader: UIView {
         backgroundColor = .clear
         isAccessibilityElement = false
         accessibilityElementsHidden = true
-        cornerConfiguration = .corners(radius: .containerConcentric())
+        if #available(iOS 26.0, *) {
+            cornerConfiguration = .corners(radius: .containerConcentric())
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -546,6 +551,7 @@ private final class DisplayCornerReader: UIView {
 
     private func reportRadius() {
         guard window != nil else { return }
+        guard #available(iOS 26.0, *) else { return }
         let radius = effectiveRadius(corner: .bottomLeft)
         // 0 means "not resolved yet" as often as "square corners"; a square
         // display needs no report, since the web floor already applies.
