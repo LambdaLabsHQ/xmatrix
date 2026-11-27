@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown } from "lucide-react";
+import { ArrowLeft, ChevronDown, Pause, Play } from "lucide-react";
 import { pageAuthorColor, pageAuthorLabel, type PageAuthor } from "@xmatrix/protocol";
 import { markdownToPageDoc, pageDocDiff, type PageDocDiff } from "@xmatrix/protocol/page-document";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { renderPageDiff, renderPageDocument } from "./page-document-render";
 import type { PageMediaUrl } from "./page-media";
 import type { PageReferenceTargets } from "./page-reference-chips";
+import type { ReplayProgress } from "./page-replay";
 
 /**
  * A page's history (pages-live-document.md §4.2, §7): the other of the page's two states. The page is always
@@ -55,6 +56,9 @@ export interface PageHistoryState {
   error: string | null;
   /** Where the version is drawn, and the way to one of its changed sections. */
   host: RefObject<HTMLDivElement | null>;
+  /** The replay from the reader's last visit, while it plays (page-replay.tsx). */
+  replay: ReplayProgress | null;
+  setReplay: (progress: ReplayProgress | null) => void;
   jump: (index: number) => void;
 }
 
@@ -77,12 +81,14 @@ export function usePageHistory({ open, spaceId, pageId, token, headRevision, sin
   const [picked, setPicked] = useState<Choice | null>(null);
   const [marked, setMarked] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [replay, setReplay] = useState<ReplayProgress | null>(null);
   // Each time History opens it starts from what is new.
   useEffect(() => {
     if (open) return;
     setPicked(null);
     setMarked(true);
     setError(null);
+    setReplay(null);
   }, [open]);
   const choice: Choice | null = picked ?? (news.length ? "since" : revisions[0]?.revision ?? null);
   const version = typeof choice === "number" ? revisions.find((revision) => revision.revision === choice) ?? null : null;
@@ -118,7 +124,7 @@ export function usePageHistory({ open, spaceId, pageId, token, headRevision, sin
     };
   return {
     revisions, news, since, choice, choose: setPicked, version, shown, failed: read.failed || history.isError, marked,
-    mark: setMarked, restore, error, host,
+    mark: setMarked, restore, error, host, replay, setReplay,
     jump: (index) => host.current?.children[index]?.scrollIntoView({ block: "center", behavior: "smooth" }),
   };
 }
@@ -385,7 +391,8 @@ export function PageHistoryBar({ history, canEdit, onClose }: {
   return (
     <>
       <Button variant="ghost" size="sm" onClick={onClose} className="-ml-2"><ArrowLeft /> Back to the page</Button>
-      <span className="mr-auto text-sm font-semibold">Version history</span>
+      <span className="text-sm font-semibold">Version history</span>
+      <PageRewindTrack history={history} />
       {history.error && <span role="alert" className={cn("text-xs", statusInkClass("alert"))}>{history.error}</span>}
       {canEdit && history.restore && (
         <Button size="sm" onClick={() => void history.restore!()}>
@@ -393,5 +400,65 @@ export function PageHistoryBar({ history, canEdit, onClose }: {
         </Button>
       )}
     </>
+  );
+}
+
+/** The replay's play button, which pauses it while it plays, and the clock it keeps. */
+function PageRewindTrack({ history }: { history: PageHistoryState }) {
+  const { replay } = history;
+  if (!history.news.length) return <span className="mr-auto" />;
+  return (
+    <div className="mx-4 mr-auto flex items-center gap-3" data-testid="page-rewind">
+      <button type="button" aria-label={replay ? (replay.paused ? "Resume" : "Pause") : "Replay what changed"}
+        onClick={() => history.setReplay(replay ? { ...replay, paused: !replay.paused } : { step: 0, pos: 0, clock: "" })}
+        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+        {replay && !replay.paused ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
+      </button>
+      <span className="font-mono text-sm tabular-nums">
+        {replay ? replay.clock : history.news.length === 1 ? "1 change while you were away" : `${history.news.length} changes while you were away`}
+      </span>
+    </div>
+  );
+}
+
+/** The replay's timeline, upright beside the page: the reader's last visit at the bottom and now at the top.
+    The playhead climbs as each version plays, and each version lights up as the playhead reaches it. */
+export function PageRewindColumn({ history }: { history: PageHistoryState }) {
+  const ticks = useMemo(() => [...history.news].sort((a, b) => a.revision - b.revision), [history.news]);
+  const since = history.revisions.find((revision) => revision.revision === history.since);
+  const step = history.replay?.step ?? 0;
+  const all = since ? [since, ...ticks] : ticks;
+  const slot = (index: number) => (all.length <= 1 ? 0 : (index / (all.length - 1)) * 100);
+  const head = history.replay?.pos ?? 0;
+  return (
+    <div className="relative ml-2 h-[34rem] select-none" data-testid="page-rewind-column">
+      <div className="absolute bottom-0 left-[7px] top-0 w-0.5 rounded bg-border" />
+      <div className="absolute bottom-0 left-[7px] w-0.5 rounded bg-foreground"
+        style={{ height: `${head}%` }} />
+      <div className="absolute left-[8px] size-3.5 -translate-x-1/2 translate-y-1/2 rounded-full border-2 border-foreground bg-background"
+        style={{ bottom: `${head}%` }} />
+      {all.map((revision, index) => {
+        const unit = all.length > 1 ? 100 / (all.length - 1) : 100;
+        // Lights as the playhead arrives: 0 a little below its slot, 1 at it. Drawn from the playhead, never on a timer.
+        const lit = Math.max(0, Math.min(1, (head - slot(index)) / (unit * 0.2) + 1));
+        const now = index === step || (index === 0 && step === 0);
+        const author = revision.authors[0]!;
+        const color = pageAuthorColor(author);
+        return (
+          <div key={revision.revision} className="absolute left-0 right-0 flex items-start gap-3"
+            style={{ bottom: `${slot(index)}%`, transform: "translateY(50%)" }}>
+            <span className="mt-1 size-4 shrink-0 rounded-full border-2 border-background"
+              style={{ backgroundColor: color, transform: `scale(${1 + 0.35 * lit * (now ? 1 : 0)})`, opacity: 0.35 + 0.65 * lit,
+                boxShadow: now && lit > 0.5 ? `0 0 0 4px ${color}33` : undefined }} />
+            <div className={cn("min-w-0 rounded-md px-2 py-1", now && lit > 0.5 && "bg-accent")} style={{ opacity: 0.35 + 0.65 * lit }}>
+              <div className="flex items-baseline gap-2 text-sm">
+                <span className="font-semibold tabular-nums">{versionTime(revision.createdAt)}</span>
+                <span className="text-xs" style={{ color }}>{index === 0 ? "As you left it" : pageAuthorLabel(author)}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
