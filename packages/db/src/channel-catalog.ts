@@ -378,7 +378,10 @@ const AUTHORIZED_CHANNEL_PREDICATE = channelCapabilityPredicate({
  * targets, and leaving the CTE unmaterialized lets PostgreSQL reach those rows
  * by the Channel primary key.
  */
-function authorizedChannelsCte(materialized: "MATERIALIZED" | "NOT MATERIALIZED"): string {
+function authorizedChannelsCte(
+  materialized: "MATERIALIZED" | "NOT MATERIALIZED",
+  channelFilterSql = "",
+): string {
   return `authorized_channels AS ${materialized} (
   SELECT c.channel_id,c.space_id,c.name,c.mode,
     c.metadata_json,c.version,c.created_at,c.updated_at,LOWER(c.name) AS name_key_search,
@@ -388,8 +391,16 @@ function authorizedChannelsCte(materialized: "MATERIALIZED" | "NOT MATERIALIZED"
   JOIN data.spaces s ON s.space_id=c.space_id
   CROSS JOIN catalog_input input
   CROSS JOIN principal_context context
-  WHERE c.space_id=input.space_id AND context.authorized AND ${AUTHORIZED_CHANNEL_PREDICATE}
+  WHERE c.space_id=input.space_id ${channelFilterSql} AND context.authorized AND ${AUTHORIZED_CHANNEL_PREDICATE}
 )`;
+}
+
+function pageChannelFilterSql(view: ChannelCatalogPageView): string {
+  if (view === "intake") return "AND c.metadata_json->>'intakeOf' IS NOT NULL";
+  if (view === "flat") {
+    return "AND (c.metadata_json->>'intakeOf' IS NULL OR c.metadata_json->>'intakeOf'=input.principal_id)";
+  }
+  return "AND (input.search_query='' OR LOWER(c.name) LIKE '%'||input.search_query||'%')";
 }
 
 const AUTHORIZED_CHANNELS_CTE = authorizedChannelsCte("MATERIALIZED");
@@ -466,14 +477,7 @@ const UNREAD_MESSAGE_EXISTS_SQL = `EXISTS (SELECT 1 FROM data.messages message
         AND message.message_kind NOT IN (${NOT_FOR_READING_KINDS}) AND ${notNornAskSql("message")})`;
 
 function catalogIndexCtes(filter: ChannelCatalogPageFilter): string {
-  const hasUnread = filter === "unread" ? UNREAD_MESSAGE_EXISTS_SQL : "FALSE";
-  const attentionCount = filter === "all" ? "0" : `CASE WHEN EXISTS (
-      SELECT 1 FROM data.message_attention attention
-      WHERE attention.space_id=channel.space_id AND attention.channel_id=channel.channel_id
-        AND attention.subject_id=input.principal_kind||':'||input.principal_id
-        AND (${declaredWaitStandsSql("attention")} OR attention.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
-    ) THEN 1 ELSE 0 END`;
-  return `, pins AS MATERIALIZED (
+  const pinsCte = `, pins AS MATERIALIZED (
     SELECT pin_value.channel_id,pin_value.ordinality::int AS pin_rank
     FROM data.user_space_channel_view_preferences preference
     CROSS JOIN catalog_input input
@@ -481,8 +485,25 @@ function catalogIndexCtes(filter: ChannelCatalogPageFilter): string {
       WITH ORDINALITY AS pin_value(channel_id, ordinality)
     WHERE input.principal_kind='user' AND preference.space_id=input.space_id
       AND preference.user_id=input.principal_id
-  ), catalog_index AS MATERIALIZED (
-    SELECT channel.*,pin.pin_rank,
+  )`;
+  if (filter === "all") {
+    // View predicates already ran in authorized_channels; avoid a second
+    // full-width materialization and skip delivery_cursors until page_rows.
+    return `${pinsCte}, catalog_index AS (
+    SELECT channel.channel_id,channel.activity_at,channel.name_key_search,pin.pin_rank
+    FROM authorized_channels channel
+    LEFT JOIN pins pin ON pin.channel_id=channel.channel_id
+  )`;
+  }
+  const hasUnread = UNREAD_MESSAGE_EXISTS_SQL;
+  const attentionCount = `CASE WHEN EXISTS (
+      SELECT 1 FROM data.message_attention attention
+      WHERE attention.space_id=channel.space_id AND attention.channel_id=channel.channel_id
+        AND attention.subject_id=input.principal_kind||':'||input.principal_id
+        AND (${declaredWaitStandsSql("attention")} OR attention.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0))
+    ) THEN 1 ELSE 0 END`;
+  return `${pinsCte}, catalog_index AS MATERIALIZED (
+    SELECT channel.channel_id,channel.activity_at,channel.name_key_search,pin.pin_rank,
       ${hasUnread} AS has_unread,
       ${attentionCount} AS attention_count
     FROM authorized_channels channel
@@ -511,21 +532,16 @@ function viewSql(view: ChannelCatalogPageView, filter: ChannelCatalogPageFilter)
   sortGroup: string;
 } {
   const matching = filterSql(filter);
-  // Intake (open-project-governance.md §3) is its own list; only the
-  // participant who started one sees it among their conversations.
-  const ownIntake = `(v.metadata_json->>'intakeOf' IS NULL OR
-    v.metadata_json->>'intakeOf'=(SELECT principal_id FROM catalog_input))`;
   if (view === "intake") return {
-    selection: `v.metadata_json->>'intakeOf' IS NOT NULL AND ${matching}`,
+    selection: matching,
     sortGroup: "0",
   };
   if (view === "flat") return {
-    selection: `${ownIntake} AND ${matching}`,
+    selection: matching,
     sortGroup: "CASE WHEN v.pin_rank IS NULL THEN 1 ELSE 0 END",
   };
   return {
-    selection: `((SELECT search_query FROM catalog_input)='' OR
-      v.name_key_search LIKE '%'||(SELECT search_query FROM catalog_input)||'%')`,
+    selection: "TRUE",
     sortGroup: `CASE WHEN v.name_key_search=(SELECT search_query FROM catalog_input) THEN 0
       WHEN v.name_key_search LIKE (SELECT search_query FROM catalog_input)||'%' THEN 1 ELSE 2 END`,
   };
@@ -601,14 +617,14 @@ export class PostgresChannelCatalogRepository {
           AND channel_id>(SELECT cursor_channel_id FROM catalog_input))
       )` : "";
       const envelopes = input.countsOnly ? [] : await transaction.query<CatalogPageEnvelope>({
-        name: `channel_catalog_page_${input.view}_${input.filter}_v15`,
+        name: `channel_catalog_page_${input.view}_${input.filter}_v16`,
         text: `WITH RECURSIVE catalog_input AS (
           SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
             $4::text AS search_query,
             $5::integer AS cursor_sort_group,$6::integer AS cursor_pin_rank,
             $7::timestamptz AS cursor_activity_at,$8::text AS cursor_channel_id,
             $9::integer AS page_limit
-        ), ${PRINCIPAL_CONTEXT_CTE}, ${AUTHORIZED_CHANNELS_CTE}
+        ), ${PRINCIPAL_CONTEXT_CTE}, ${authorizedChannelsCte("MATERIALIZED", pageChannelFilterSql(input.view))}
         ${catalogIndexCtes(input.filter)}, candidates AS (
           SELECT v.channel_id,v.activity_at,v.pin_rank,
             ${selected.sortGroup} AS sort_group,COALESCE(v.pin_rank,2147483647) AS pin_sort
