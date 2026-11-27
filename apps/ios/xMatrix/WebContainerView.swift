@@ -732,6 +732,7 @@ struct WebContainerView: UIViewRepresentable {
         // detached WKFileUploadPanel popover. When the composer's morphed glass
         // menu armed a one-shot source, open Photos, Camera, or Files directly
         // and hand disk-backed file URLs straight back to `<input type="file">`.
+        @available(iOS 18.4, *)
         func webView(
             _ webView: WKWebView,
             runOpenPanelWith parameters: WKOpenPanelParameters,
