@@ -1014,24 +1014,32 @@ integration("the attention read answers what every resolved Channel row carries,
   }
 });
 
+async function withRecordedCatalog(run) {
+  await seed();
+  const client = new Client({ connectionString });
+  await client.connect();
+  const recording = recordedStatements(createAuthorityDatabase({ connectionString, shardId: "shard-0" }));
+  try {
+    return await run({ client, recording, repository: new PostgresChannelCatalogRepository(recording) });
+  } finally {
+    await client.query("RESET ALL").catch(() => {});
+    await client.end();
+  }
+}
+
 // Production nested-looped every readable Channel against an aggregate of the
 // principal's attention (both estimated at a handful of rows): a Space of
 // 2,920 Channels compared 2.7 million pairs, a 2.1 s count. Whichever join the
 // planner picks, the count probes each Channel's attention by index instead.
 integration("catalog counts probe each Channel's attention instead of joining an aggregate of it", async () => {
-  await seed();
-  const client = new Client({ connectionString });
-  await client.connect();
-  const database = createAuthorityDatabase({ connectionString, shardId: "shard-0" });
-  const recording = recordedStatements(database);
-  try {
+  await withRecordedCatalog(async ({ client, recording, repository }) => {
     await client.query(`INSERT INTO data.message_attention
       (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response)
       SELECT 'space-catalog','user:user-1','root-'||LPAD(c::text,2,'0'),
         'attended-'||c||'-'||s,'mention',s,$1,FALSE
       FROM generate_series(0,54) c, generate_series(1,3) s`, [now]);
     await client.query("ANALYZE data.message_attention");
-    const page = await new PostgresChannelCatalogRepository(recording).page({ requestId: "counts-plan",
+    const page = await repository.page({ requestId: "counts-plan",
       spaceId: "space-catalog", principal: { kind: "user", id: "user-1" },
       view: "flat", filter: "all", countsOnly: true });
     // The seed already holds a mention in one more Channel.
@@ -1045,5 +1053,45 @@ integration("catalog counts probe each Channel's attention instead of joining an
         total + (node["Rows Removed by Join Filter"] ?? 0), 0);
       assert.ok(compared <= 60, `${planner}: counting 60 Channels discarded ${compared} joined rows`);
     }
-  } finally { await client.query("RESET ALL"); await client.end(); }
+  });
+});
+
+integration("catalog page pushes search filters before authorization and skips delivery_cursors for filter=all candidates", async () => {
+  await withRecordedCatalog(async ({ client, recording, repository }) => {
+    await client.query(`INSERT INTO data.delivery_cursors
+      (space_id,subject_id,channel_id,acknowledged_sequence,version,updated_at)
+      SELECT 'space-catalog','user:user-1','root-'||LPAD(c::text,2,'0'),1,1,$1
+      FROM generate_series(0,54) c`, [now]);
+    await client.query("ANALYZE data.channels, data.delivery_cursors, data.channel_access");
+    const search = await repository.page({
+      requestId: "search-plan", spaceId: "space-catalog",
+      principal: { kind: "user", id: "user-1" },
+      view: "search", filter: "all", query: "root 40", includeCounts: false,
+    });
+    assert.deepEqual(search.rows.map((row) => row.channel.id), ["root-40"]);
+    const flat = await repository.page({
+      requestId: "flat-plan", spaceId: "space-catalog",
+      principal: { kind: "user", id: "user-1" },
+      view: "flat", filter: "all", limit: 5, includeCounts: false,
+    });
+    assert.equal(flat.rows.length, 5);
+    const searchStmt = recording.statements.find((query) => query.name === "channel_catalog_page_search_all_v16");
+    const flatStmt = recording.statements.find((query) => query.name === "channel_catalog_page_flat_all_v16");
+    assert.ok(searchStmt, "expected channel_catalog_page_search_all_v16");
+    assert.ok(flatStmt, "expected channel_catalog_page_flat_all_v16");
+    const searchPlan = (await client.query(`EXPLAIN (ANALYZE, FORMAT JSON) ${searchStmt.text}`, searchStmt.values))
+      .rows[0]["QUERY PLAN"][0].Plan;
+    const flatPlan = (await client.query(`EXPLAIN (ANALYZE, FORMAT JSON) ${flatStmt.text}`, flatStmt.values))
+      .rows[0]["QUERY PLAN"][0].Plan;
+    const cursorScans = (plan) => [...planNodes(plan)].filter((node) => node["Relation Name"] === "delivery_cursors");
+    const searchCursorLoops = cursorScans(searchPlan).reduce((sum, node) => sum + (node["Actual Loops"] ?? 0), 0);
+    const flatCursorLoops = cursorScans(flatPlan).reduce((sum, node) => sum + (node["Actual Loops"] ?? 0), 0);
+    assert.equal(cursorScans(searchPlan).length, 1, "search filter=all touches delivery_cursors only in page_rows");
+    assert.equal(searchCursorLoops, 1, "search filter=all probes delivery_cursors only for matched page rows");
+    assert.equal(cursorScans(flatPlan).length, 1, "flat filter=all touches delivery_cursors only in page_rows");
+    assert.ok(flatCursorLoops <= 6, `flat limit=5 probed delivery_cursors ${flatCursorLoops} times instead of <=6`);
+    const authorizedCte = [...planNodes(searchPlan)].find((node) => node["Subplan Name"] === "CTE authorized_channels");
+    assert.ok(authorizedCte, "expected materialized authorized_channels CTE");
+    assert.equal(authorizedCte["Actual Rows"], 1, "search pushes name predicate into authorized_channels");
+  });
 });
