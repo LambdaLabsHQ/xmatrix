@@ -59,6 +59,32 @@ test("the package is an extension Chrome loads, with the app built into it", asy
   const askPage = fs.readFileSync(path.join(out, "app/ask.html"), "utf8");
   assert.match(askPage, /<html\s+id="xmatrix-ask-box"/u);
   assert.match(askPage, /#xmatrix-ask-box\s+\.xmatrix-app\s+\.app-composer\s*\{[^}]*position:\s*relative\s*!important/su);
+
+  // Chrome Manifest V3 forbids remotely hosted code (Blue Argon): extension pages keep self-only script/frame CSP
+  // and no shipped JS or HTML artifact may reference Google's remote Picker loaders or load remote scripts/code.
+  const csp = manifest.content_security_policy?.extension_pages ?? "";
+  assert.match(csp, /\bscript-src 'self'/u);
+  assert.match(csp, /\bframe-src 'self'(?:;|$)/u);
+  assert.doesNotMatch(csp, /docs\.google\.com|apis\.google\.com/u);
+
+  const remoteCodePatterns = [
+    ["Google Picker API URL", /https?:\/\/apis\.google\.com\/js\//u],
+    ["Google Identity Services script URL", /https?:\/\/accounts\.google\.com\/gsi\/client/u],
+    ["gapi.load call", /\bgapi\.load\s*\(/u],
+    ["document.createElement(\"script\")", /\bdocument\.createElement\s*\(\s*["'`]script["'`]\s*\)/u],
+    ["remote script .src assignment", /\.src\s*=\s*["'`]https?:[^"'`]*(?:\.m?js\b|\/gsi\/|apis\.google\.com)/iu],
+    ["remote HTML <script src>", /<script[^>]+src\s*=\s*["'`]https?:/iu],
+    ["remote dynamic import()", /\bimport\s*\(\s*["'`]https?:/u],
+    ["remote importScripts()", /\bimportScripts\s*\(\s*["'`]https?:/u],
+    ["eval() call", /\beval\s*\(/u],
+    ["new Function() call", /\bnew\s+Function\s*\(/u],
+  ];
+  for (const file of shipped.filter((name) => /\.(?:js|mjs|html)$/u.test(name))) {
+    const content = fs.readFileSync(path.join(out, file), "utf8");
+    for (const [label, pattern] of remoteCodePatterns) {
+      assert.doesNotMatch(content, pattern, `${file} must not contain ${label}`);
+    }
+  }
 });
 
 // The question box a page frames is only as wide as the box: its stylesheet is the App's as a desktop window applies it.

@@ -75,6 +75,16 @@ const REPLACED = new Map([
   ["@/lib/xmatrix-proxy", path.join(appSource, "hub-proxy.ts")],
 ]);
 
+const GOOGLE_DOC_FILE_SELECTION = path.join(webSource, "components", "dashboard", "google-doc-file-selection.tsx");
+const EXTENSION_GOOGLE_DOC_FILE_SELECTION = path.join(appSource, "google-doc-file-selection.tsx");
+const GOOGLE_DOC_PICKER = path.join(webSource, "lib", "google-doc-picker.ts");
+
+function resolveWebImport(specifier, resolveDir) {
+  return specifier.startsWith("@/")
+    ? path.join(webSource, specifier.slice(2))
+    : path.resolve(resolveDir, specifier);
+}
+
 const WORKER_URL = /new URL\((["'])\.\/([\w.-]+\.worker)\.ts\1,\s*import\.meta\.url\)/gu;
 
 /** Workers the app starts by file (`new URL("./x.worker.ts", import.meta.url)`): each is built beside the app. */
@@ -126,6 +136,26 @@ function appPlugin(routes, release) {
       build.onResolve({ filter: /^(?:next\/(?:navigation|link|image|dynamic)|@\/lib\/xmatrix-proxy)$/ }, (args) => ({
         path: REPLACED.get(args.path),
       }));
+      // Chrome Manifest V3 forbids remotely hosted scripts (Blue Argon). Replace Google Picker's
+      // component with a Web-tab link and fail the build if anything pulls in google-doc-picker.ts.
+      build.onResolve({ filter: /(?:^|\/)google-doc-file-selection(?:\.tsx)?$/ }, (args) => {
+        const resolved = resolveWebImport(args.path, args.resolveDir);
+        if (resolved === GOOGLE_DOC_FILE_SELECTION || `${resolved}.tsx` === GOOGLE_DOC_FILE_SELECTION) {
+          return { path: EXTENSION_GOOGLE_DOC_FILE_SELECTION };
+        }
+        return undefined;
+      });
+      build.onResolve({ filter: /(?:^|\/)google-doc-picker(?:\.ts)?$/ }, (args) => {
+        const resolved = resolveWebImport(args.path, args.resolveDir);
+        if (resolved === GOOGLE_DOC_PICKER || `${resolved}.ts` === GOOGLE_DOC_PICKER) {
+          return {
+            errors: [{
+              text: "The extension cannot bundle google-doc-picker.ts: Chrome MV3 forbids remotely hosted scripts.",
+            }],
+          };
+        }
+        return undefined;
+      });
       // Anything else of Next would bring its router and server runtime into the page.
       build.onResolve({ filter: /^next(?:\/|$)/ }, (args) => ({
         errors: [{ text: `The extension's app cannot bundle ${args.path}: give it a module in apps/web/src/extension-app.` }],
