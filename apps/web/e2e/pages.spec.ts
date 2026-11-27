@@ -1229,6 +1229,33 @@ test("a page opens as it is now, and History shows first what changed since its 
   await expect(browser.getByTestId("page-history-new")).toHaveCount(0);
 });
 
+test("Replay plays the page from its reader's last visit to now, can pause, and ends on what changed", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const editor = await openChangedPage(browser);
+  await expect(editor).toContainText("Shipped this week");
+  await browser.getByTestId("page-replay").click();
+  const stage = browser.getByTestId("page-replay-stage");
+  // It starts from the version the reader last saw, drawn as the page draws it.
+  await expect(stage).toContainText("As you left it");
+  await expect(stage.locator(".page-document")).toContainText("Planned for next week, after review");
+  // The upright timeline runs from the last visit, at the bottom, to the change since.
+  const column = browser.getByTestId("page-rewind-column");
+  await expect(column).toContainText("As you left it");
+  await expect(column).toContainText("claude:1");
+  // Each version is played by its author: the version's badge names claude:1.
+  await expect(stage).toContainText("claude:1", { timeout: 10_000 });
+  const control = browser.getByTestId("page-rewind").getByRole("button");
+  await control.click();
+  await expect(stage).toContainText("Paused");
+  await expect(control).toHaveAttribute("aria-label", "Resume");
+  await control.click();
+  await expect(stage).not.toContainText("Paused");
+  // When it has played every version it ends on History's view of what changed since the last visit.
+  await expect(stage).toHaveCount(0, { timeout: 30_000 });
+  const version = browser.getByTestId("page-version");
+  await expect(version.locator('[data-change="added"]')).toHaveText(["The second region is next", "Risks", "Late reviews"]);
+});
+
 test("what changes while its reader watches is read, and coming back to the page's tab what it became meanwhile is new", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
