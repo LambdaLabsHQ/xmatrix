@@ -99,12 +99,15 @@ switch, a stop that fenced no Run, or a refused reborn or handoff, it records th
 answer as a system annotation (`xmatrix.command-result`) on the message that
 wrote the command: `controls` holds one outcome per statement, in order, and
 each `note` holds one fact in the Hub's words (a stop note that settles the stop
-carries `stopOutcome`). Messages carry the merged `commandResult`, and a
-`channel_message_interactions_updated` event applies a new annotation to every
-client that holds the message. Because it is not a message, the answer neither
-previews in the conversation list, counts as unread, nor wakes an Agent.
-`xmatrix channel history` prints it under the command as `[result]` lines, so
-an Agent reads what a person sees.
+carries `stopOutcome`). When a message's `@` delivery cancels a busy live
+Instance's running turn (`interruptRequested && !steerAllowed`), the Hub records
+those Instances in `interrupts` on the same annotation so the sent mention chip
+shows `Interrupted` live and on reload without creating another message. Messages
+carry the merged `commandResult`, and a `channel_message_interactions_updated`
+event applies a new annotation to every client that holds the message. Because it
+is not a message, the answer neither previews in the conversation list, counts as
+unread, nor wakes an Agent. `xmatrix channel history` prints it under the command
+as `[result]` lines, so an Agent reads what a person sees.
 
 A model or effort switch is decided against the Hub's own record of the
 addressed Instance before and after its Runtime is asked

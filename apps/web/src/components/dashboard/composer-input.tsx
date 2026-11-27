@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import { stripEmptyPasteSentinel } from "./composer-caret";
 import { ComposerEditor, type ComposerField, type ComposerKeyEvent } from "./composer-editor";
 import { channelMentionCandidates } from "./mention-complete";
-import { buildMentionReadIndex } from "./mention-read-state";
+import { buildMentionReadIndex, busyMentionInstances } from "./mention-read-state";
 
 export type ComposerInputAuthorityProps = ComposerContextFields & {
   /** Picked channel and page references in the draft, highlighted as the chips they send as. */
@@ -164,6 +164,10 @@ function ComposerInputSurface({
   const mentionIndex = useMemo(() => hasMention ? buildMentionReadIndex(
     channelMentionCandidates(channel, localContext, [], space, instanceTargetScope)) : null,
   [hasMention, channel, localContext, space, instanceTargetScope]);
+  const busyInstances = useMemo(
+    () => (hasMention ? busyMentionInstances(channel, instanceTargetScope) : []),
+    [hasMention, channel, instanceTargetScope],
+  );
   const completion = useComposerCompletion({
     draft,
     onDraftChange,
@@ -419,7 +423,7 @@ function ComposerInputSurface({
               "composer-textarea flex-1 resize-none border-0 bg-transparent shadow-none outline-none transition-[background-color,border-color,box-shadow,opacity] duration-200 focus-visible:ring-0",
               compact ? "min-h-0 p-0 text-sm" : "min-h-9 px-0 py-1.5 text-sm sm:min-h-11 sm:py-2 sm:text-[15px]"
             )}
-            mentionIndex={mentionIndex} currentUserIdentityId={user ? `user:${user.id}` : undefined}
+            mentionIndex={mentionIndex} busyInstances={busyInstances} currentUserIdentityId={user ? `user:${user.id}` : undefined}
             references={referenceRanges}
             quoteIsHere={quoteIsHere}
             renderPicture={renderPicture}

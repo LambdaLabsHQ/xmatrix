@@ -92,6 +92,7 @@ import {
   type ReferenceCandidate,
 } from "./reference-complete";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { statusChipClass, statusInkClass } from "@/components/ui/status-tone";
 import { spaceLaunchTargetsQuery } from "./space-launch-targets-query";
 
 type MentionDynamicLoadState =
@@ -1079,15 +1080,21 @@ export function useComposerCompletion({
                       candidate.profileInvite ? candidate.invocationTarget.harness : null;
                     // A condition naming a harness wears that harness's face.
                     const launchHarness = candidate.launchField === "harness" ? candidate.launchTags?.harness : undefined;
+                    const interruptsBusyInstance =
+                      candidate.kind === "agent" &&
+                      candidate.schemaNodeId === "agent-reference:instance" &&
+                      candidate.status === "busy";
                     // A badge says what the row's name and section do not: live
-                    // presence, or why a condition cannot be chosen. A command
+                    // presence, whether addressing a busy Instance interrupts
+                    // its turn, or why a condition cannot be chosen. A command
                     // row also says which kind of command it is.
                     const badge = isLaunch ? (candidate.unavailable ? "offline" : null)
                       : isAgentCommand
                         ? candidate.action === "agent-model-switch" ? "model"
                           : candidate.action === "agent-effort-switch" ? "effort" : "goal"
                         : isAppCommand ? "action"
-                          : candidate.kind === "agent" && !isSummonableAgent ? candidate.status : null;
+                          : interruptsBusyInstance ? "interrupt"
+                            : candidate.kind === "agent" && !isSummonableAgent ? candidate.status : null;
 
                     const option = (
                       <CompletionOptionButton
@@ -1137,7 +1144,14 @@ export function useComposerCompletion({
                         <span className="flex min-w-0 flex-1 items-baseline gap-2">
                           <span className="min-w-0 shrink-0 truncate font-semibold">{candidate.name}</span>
                           {detail && (
-                            <span className="min-w-0 truncate text-xs text-foreground/50" title={detail}>
+                            <span
+                              className={
+                                interruptsBusyInstance
+                                  ? statusInkClass("attention", "min-w-0 truncate text-xs")
+                                  : "min-w-0 truncate text-xs text-foreground/50"
+                              }
+                              title={detail}
+                            >
                               {detail}
                             </span>
                           )}
@@ -1152,7 +1166,13 @@ export function useComposerCompletion({
                             </span>
                           )}
                           {badge && (
-                            <span className="rounded bg-muted/70 px-1.5 py-0 text-[10px] text-muted-foreground">
+                            <span
+                              className={
+                                interruptsBusyInstance
+                                  ? statusChipClass("attention", "px-1.5 py-0 text-[10px]")
+                                  : "rounded bg-muted/70 px-1.5 py-0 text-[10px] text-muted-foreground"
+                              }
+                            >
                               {badge}
                             </span>
                           )}

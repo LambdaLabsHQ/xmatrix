@@ -7,9 +7,11 @@ require("./typescript-require.cjs").installTypeScriptRequire();
 const {
   applyMemberReadEvent,
   buildMentionReadIndex,
+  busyMentionInstances,
   composerMentionSpans,
   machineOfflineMentionSubjects,
   mentionChipLabel,
+  mentionInterruptMatches,
   mentionReadResolution,
   splitMentionSegments,
   withMemberReadSequence,
@@ -96,6 +98,40 @@ test("ambiguous names stay plain text without falling back to a shorter name", (
     { id: "agent:1", name: "codex", kind: "agent" },
   ]);
   assert.equal(collision.byToken.has("codex"), false);
+});
+
+test("draft mention spans flag busy addressed instances and broadcasts as interrupting, not idle or commands", () => {
+  const busy = [{ id: "ch:1", agentName: "codex", channelInstanceId: "1" }];
+  const index = buildMentionReadIndex([
+    { id: "ch:1", name: "codex", kind: "agent", status: "busy", mention: "codex" },
+  ]);
+  assert.equal(composerMentionSpans("@codex:1 pause", index, undefined, busy)[0]?.interrupt, true);
+  assert.equal(composerMentionSpans("@codex:2 pause", index, undefined, busy)[0]?.interrupt, undefined);
+  assert.equal(composerMentionSpans("@codex fix it", index, undefined, busy)[0]?.interrupt, undefined, "a summon starts a new Agent");
+  assert.equal(composerMentionSpans("@codex:1:stop", index, undefined, busy)[0]?.interrupt, undefined, "stop uses its own control path");
+  assert.equal(composerMentionSpans("@codex:1 /model gpt-5", index, undefined, busy)[0]?.interrupt, undefined);
+  assert.equal(composerMentionSpans("@all stop", index, undefined, busy)[0]?.interrupt, true);
+  assert.equal(composerMentionSpans("@all stop", index, undefined, []).length, 0);
+
+  const channel = decodeChannelSnapshot({
+    id: "ch", memberPresence: {
+      "ch:1": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "codex",
+        instances: [{ id: "ch:1", channelInstanceId: "1", label: "codex:1", status: "busy",
+          connectedAt: "2026-10-01T02:00:00Z", lastSeenAt: "2026-10-01T02:00:00Z" }] },
+      "ch:2": { registration: FIXTURE_AGENT_REGISTRATION, kind: "agent", label: "codex",
+        instances: [{ id: "ch:2", channelInstanceId: "2", label: "codex:2", status: "idle",
+          connectedAt: "2026-10-01T02:00:00Z", lastSeenAt: "2026-10-01T02:00:00Z" }] },
+    },
+  });
+  assert.deepEqual(busyMentionInstances(channel), busy);
+  assert.deepEqual(busyMentionInstances(channel, "none"), []);
+});
+
+test("recorded interrupt facts match only the addressed Instance chip, never a sibling ordinal or human", () => {
+  const interrupts = [{ instanceId: "ch:1", agentName: "codex", channelInstanceId: "1", at: "2026-11-27T16:00:00Z" }];
+  assert.equal(mentionInterruptMatches("@codex:1", { subjectId: "agent:ch:1", kind: "agent" }, interrupts).length, 1);
+  assert.equal(mentionInterruptMatches("@codex:2", { subjectId: "agent:ch:1", kind: "agent" }, interrupts).length, 0);
+  assert.equal(mentionInterruptMatches("@codex:1", { subjectId: "user:u-1", kind: "user" }, interrupts).length, 0);
 });
 
 test("a mention reads as a name and is addressed by a handle", () => {

@@ -258,6 +258,8 @@ export type TimelineItem = {
   reservedSystemAgent?: boolean;
   /** A questionnaire card's state as the Hub settled it: answered or withdrawn. */
   questionnaireState?: QuestionnaireState;
+  /** Live Instances whose running turn this message's `@` interrupted. */
+  interruptedInstances?: readonly import("@xmatrix/protocol").CommandResultInterrupt[];
   /** Hub receipts for the command this message wrote, drawn on that command (command-notices.ts). */
   commandNotices?: CommandNotice[];
   /**
