@@ -1021,6 +1021,8 @@ export function agentUsageLimitFromError(error: string | undefined | null): { re
   const lower = (error ?? "").toLowerCase();
   const limited = ["usage limit", "usage_limit", "usagelimitexceeded", "hit your limit", "hit your session limit",
     "hit your weekly limit", "insufficient_quota", "exceeded your current quota", "quota exceeded",
+    // Gemini CLI on a personal account: "You have exhausted your daily quota on this model."
+    "exhausted your daily quota",
     ...ACCOUNT_BILLING_REFUSAL_PHRASES]
     .some((phrase) => lower.includes(phrase)) || (lower.includes("limit reached") && lower.includes("reset"));
   if (!limited) return undefined;
