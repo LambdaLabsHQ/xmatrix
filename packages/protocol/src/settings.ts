@@ -16,7 +16,7 @@ import { connectorReceiptFixesOf, proposedValue, SETTINGS_REQUEST_KEY, settingAd
  */
 
 /** Where settings live. Each domain is one Hub resolver that owns its addresses. */
-export const SETTING_DOMAINS = ["connector", "secret", "secret-access", "harness"] as const;
+export const SETTING_DOMAINS = ["connector", "secret", "secret-access", "admission", "harness"] as const;
 export type SettingDomain = typeof SETTING_DOMAINS[number];
 
 /**
@@ -29,8 +29,10 @@ export type SettingDomain = typeof SETTING_DOMAINS[number];
  * - `connect`: an OAuth or install flow, completed where the App is managed (`href`).
  * - `grant`: a yes a person gives, such as letting Agents read a secret without asking.
  * - `harness-sign-in`: the Machine owner signs a harness in on that Machine.
+ * - `adopt`: a text a person reads and takes on as it stands (`value`), such as a Space's admission policy.
+ *   The answer is that same text, so what changed in between is not adopted.
  */
-export const SETTING_CONTROLS = ["text", "secret", "sign-in", "connect", "grant", "harness-sign-in"] as const;
+export const SETTING_CONTROLS = ["text", "secret", "sign-in", "connect", "grant", "harness-sign-in", "adopt"] as const;
 export type SettingControl = typeof SETTING_CONTROLS[number];
 
 /** What the domain observes now: absent, present, present and checked, or refused by its check. */
@@ -70,7 +72,7 @@ export interface ParsedSettingAddress {
   domain: SettingDomain;
   /** The address in its canonical form. */
   address: string;
-  /** The domain's own key parts: `[app, field]`, `[alias]`, `[machine, harness]`. */
+  /** The domain's own key parts: `[app, field]`, `[alias]`, `[page, library]`, `[machine, harness]`. */
   parts: string[];
 }
 
@@ -79,12 +81,14 @@ const ADDRESS_FORMS: Record<SettingDomain, RegExp> = {
   connector: /^connector:([a-z0-9-]{1,80})\/([A-Za-z0-9_]{1,80})$/u,
   secret: /^secret:(\S{1,160})$/u,
   "secret-access": /^secret-access:(\S{1,160})$/u,
+  admission: /^admission:([A-Za-z0-9-]{1,80})\/([A-Z][A-Za-z0-9_]{0,39})$/u,
   harness: /^harness:([^\s/]{1,200})\/([a-z0-9_-]{1,64})\/sign-in$/u,
 };
 
 /** The address forms, as a refusal and `--help` name them. */
 export const SETTING_ADDRESS_FORMS = [
   "connector:<app>/<field>", "connector:<app>/connect", "secret:<alias>", "secret-access:<alias>",
+  "admission:<page id>/<library>",
   "harness:<machine>/<harness>/sign-in",
 ] as const;
 

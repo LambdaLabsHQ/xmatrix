@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@860952750284caf8a6cb37a62ac435791ca91911; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@a5fa3d268e29846ea4a9027e3b989a974d0aa8f8; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // SHA-256, FIPS 180-4 §§4.2.2, 5, 6.2:
 // https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
 // Used only for portable code identities; no Node or platform crypto dependency.

@@ -65,6 +65,8 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "space_member_creation_policies",
   "space_members",
   "space_secrets",
+  // The admission policy the Space adopted moves with the secrets it admits.
+  "space_admission_policies",
   "space_storage_usage",
   // A Space's rolled-up activity moves with its messages, which keep their arrival time.
   "admin_activity_days",

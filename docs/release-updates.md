@@ -1,5 +1,22 @@
 # Release Updates
 
+## Unreleased: a Space adopts an admission policy for secrets that ask first
+
+A secret that cannot be `auto` asked a Space admin on a card every time, so
+work that runs with nobody there (a Page program at night) waited ten minutes
+and went without it. A Space can now adopt an admission policy: a Space
+library whose pure `admit` answers `Allow`, `Deny(why)` or
+`AlsoAsk(participant)` from facts the Hub holds (the secret, the Channel, the
+Run's owner, and the Page program whose delivery the Run is executing).
+`Allow` approves that Run with no card, `Deny` refuses at once, and anything
+else posts the card as before. Only a Space admin adopts a policy, in person,
+on a settings card (`xmatrix settings ask admission:<page id>/<Library>`); the
+Hub evaluates the adopted text, never the Page's. A Space that adopts none is
+unchanged, and so is the CLI. Expand migration 0278 adds
+`data.space_admission_policies`. Protocol, DB, Hub and Web, with the vendored
+Norn at `a5fa3d2`. Recovery is a CI-validated beta reverting this change; the
+new table is then unread, and every request gets its card.
+
 ## Unreleased: an Agent that cannot reach its vendor is not shown as signed out
 
 Antigravity on a Laptop with no proxy where Google needs one could not refresh its sign-in, answered `authenticate required`, and then hung on the credential retry. After 20 seconds the launch called that "waits for a sign-in", so the Channel said Antigravity was not signed in and offered a sign-in card that signing in could not satisfy. Now an ACP harness whose auth refusal carries a network error (Node `fetch failed`/`ETIMEDOUT`/`ENOTFOUND`, Go `dial tcp`/`i/o timeout`, …) fails as "could not reach its service: check this machine's network or proxy", in its own words; when the retry hangs, Antigravity and Gemini CLI first check whether `oauth2.googleapis.com` answers at all (through the environment's proxy) before calling it a sign-in. `harness_signed_out_error` no longer reads network failures as signed out unless the vendor itself refused the credential (401, invalid key, not logged in), and the daemon's readiness check treats an unreachable vendor as no answer instead of a harness that cannot take work. CLI only; no schema migration. Recovery is a CI-validated beta reverting this change.

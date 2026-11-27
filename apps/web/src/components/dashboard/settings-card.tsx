@@ -75,6 +75,16 @@ const CONTROLS: Record<SettingControl, (props: ControlProps) => ReactNode> = {
     <button type="button" disabled={busy} className={actionClass({ variant: "primary", size: "sm" })}
       onClick={() => void make(setting.address, "granted").catch(() => undefined)}>Allow</button>
   ),
+  // The person reads the text as it stands and answers with that same text: the Hub adopts nothing that changed since.
+  adopt: ({ setting, busy, make }) => setting.value ? (
+    <>
+      <pre className="max-h-72 basis-full overflow-auto rounded-md border border-border p-2.5 font-mono text-[12px] whitespace-pre-wrap"
+        data-setting-text="">{setting.value}</pre>
+      {setting.description ? <p className="basis-full text-[12px] text-muted-foreground">{setting.description}</p> : null}
+      <button type="button" disabled={busy} className={actionClass({ variant: "primary", size: "sm" })}
+        onClick={() => void make(setting.address, setting.value!).catch(() => undefined)}>Adopt this text</button>
+    </>
+  ) : null,
   "harness-sign-in": ({ setting, refresh, token, userId }) => {
     const [machineId, harness] = parseSettingAddress(setting.address)?.parts ?? [];
     return machineId && harness ? (
@@ -123,6 +133,11 @@ const WAITS_ON: Record<SettingWriter, string> = {
 
 /** Where a setting stands, in the words of its control. */
 function stateWord(setting: CardSetting): string {
+  // An adopted text is its own value: the row says where it stands, not the text again.
+  if (setting.control === "adopt") {
+    return setting.satisfied ? "Adopted" : setting.state === "invalid" ? "Cannot be adopted"
+      : setting.state === "set" ? "Changed since adopted" : "Not adopted";
+  }
   if (setting.satisfied) return setting.value ?? (setting.control === "grant" ? "Allowed" : "Done");
   if (setting.state === "invalid") return "Refused";
   if (setting.state === "verified" || setting.state === "set") return "Asked again";
@@ -136,7 +151,8 @@ function heading(settings: readonly CardSetting[], satisfied: boolean): string {
   if (settings.length !== 1 || !only) return satisfied ? "All set" : `${settings.length} settings needed`;
   if (satisfied) return only.control === "sign-in" || only.control === "connect" ? `${only.scope} is ready` : `${only.label}: done`;
   return only.control === "sign-in" ? `Sign in to ${only.scope}` : only.control === "connect" ? `Connect ${only.scope} again`
-    : only.control === "harness-sign-in" ? only.scope : only.control === "grant" ? only.label : `${only.scope} needs ${only.label}`;
+    : only.control === "harness-sign-in" ? only.scope : only.control === "grant" || only.control === "adopt" ? only.label
+    : `${only.scope} needs ${only.label}`;
 }
 
 /**

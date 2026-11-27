@@ -93,7 +93,7 @@ export function pageSpaceLibraries(body: string): Record<string, string> {
 
 /** Reserved module names provided by the language or host that Space libraries cannot shadow. */
 const RESERVED_NORN_LIBRARY_NAMES = new Set([
-  "Std", "Events", "Actions", "Holds", ...Object.keys(BUILTIN_NORN_LIBRARY_SOURCES),
+  "Std", "Events", "Actions", "Holds", "Admission", ...Object.keys(BUILTIN_NORN_LIBRARY_SOURCES),
 ]);
 
 /** Resolved Space-wide library catalog across all readable Pages in a Space. */

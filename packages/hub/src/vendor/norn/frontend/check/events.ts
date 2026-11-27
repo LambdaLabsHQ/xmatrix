@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@860952750284caf8a6cb37a62ac435791ca91911; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@a5fa3d268e29846ea4a9027e3b989a974d0aa8f8; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * Standard capability interfaces `Events` (CloudEvents 1.0.2) and `Actions`,
  * and static connector manifest validation. Browser-safe.
@@ -34,6 +34,18 @@ external action: (string, string) => action<'i, 'o>
 external prepare: (action<'i, 'o>, 'i, ~by: 'd=?, ~about: 'c=?) => request<prepared<'o>>
 external perform: (prepared<'o>, ~by: 'd=?) => request<'o>
 external read: (action<'i, 'o>, 'i, ~by: 'd=?, ~about: 'c=?) => request<'o>
+`;
+
+/** Canonical `interfaces/admission.norn` definition (embedded for browser safety). */
+export const ADMISSION_INTERFACE_SOURCE = `// Standard Capability Interface: Admission
+type work = { program: string, digest: string }
+type request = {
+  what: string,
+  target: string,
+  place: string,
+  owner: string,
+  work: option<work>,
+}
 `;
 
 export interface ConnectorFieldSpec {

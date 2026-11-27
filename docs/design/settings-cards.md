@@ -20,6 +20,7 @@ A setting is named by an **address** (`packages/protocol/src/settings.ts`):
 | `connector:<app>/connect` | connector | the connection itself (OAuth or install) |
 | `secret:<alias>` | secret | the Space's secrets (`data.space_secrets`) |
 | `secret-access:<alias>` | secret-access | the secret's `access` (`auto` or `ask`) |
+| `admission:<page id>/<library>` | admission | the Space's adopted admission policy (`data.space_admission_policies`); the text comes from that library on that Page |
 | `harness:<machine>/<harness>/sign-in` | harness | the Machine daemon's harness inventory (`login`) |
 
 The address's domain projects it into one `SettingDescriptor` from the domain's
@@ -27,7 +28,7 @@ own authoritative data. The descriptor has dimensions that do not depend on
 each other:
 
 - **control**: how a client asks for it: `text`, `secret`, `sign-in`, `connect`,
-  `grant`, `harness-sign-in`. The client owns each control. A card cannot
+  `grant`, `harness-sign-in`, `adopt`. The client owns each control. A card cannot
   define fields, labels or targets, so it cannot draw a lookalike "paste your
   key here" box.
 - **sensitivity**: `secret` is written once and never read back. `plain` is
@@ -40,6 +41,13 @@ each other:
   card was posted. A click is not enough: a connector field needs a passing
   provider check after the card; a secret must be saved after it; a harness
   must be observed signed in after it.
+
+An `adopt` setting is a text a person takes on as it stands: the Space's
+admission policy (`docs/design/admission-policy.md`). Its `value` is the
+library's text on its Page now, given only to a reader who may adopt it, and
+the answer is that same text, so a library edited since it was shown is not
+adopted. It is satisfied by its state: the adopted text is the Page's, also
+when it was adopted before the card asked.
 
 Some connector fields are never exercised by the connection check, for
 example App Store Connect's web session beside its API key. Such a field names
@@ -57,8 +65,9 @@ settles on Apple's answer and not on the save.
   their order, and writes through a domain. Nothing else knows which domains
   exist.
 - One resolver per domain: `settings-domain-connector.ts`,
-  `settings-domain-secret.ts` (secret and secret-access) and
-  `settings-domain-harness.ts`, wired in `settings-domains.ts`. A resolver
+  `settings-domain-secret.ts` (secret and secret-access),
+  `settings-domain-admission.ts` and `settings-domain-harness.ts`, wired in
+  `settings-domains.ts`. A resolver
   reads and writes through the same functions the Apps page, Settings ›
   Secrets and the harness actions use (`connectors/credential-policy.ts`,
   `PostgresSpaceSecretRepository`, the Machine daemon list).
