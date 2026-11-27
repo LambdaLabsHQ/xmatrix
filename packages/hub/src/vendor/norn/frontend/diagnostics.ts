@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@95e9b165b4dc8f2657474f5b3341e26dc88ed6c0; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@860952750284caf8a6cb37a62ac435791ca91911; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import type { Span } from "./ast.js";
 
 /** What a program that nests deeper than the stack allows is told: the platform's real limit, not a fixed bound. */

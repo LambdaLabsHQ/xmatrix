@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@95e9b165b4dc8f2657474f5b3341e26dc88ed6c0; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@860952750284caf8a6cb37a62ac435791ca91911; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /** All language values have a lossless JSON representation. */
 export type Value =
   | { type: "unit" }

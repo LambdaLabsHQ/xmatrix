@@ -1,6 +1,6 @@
 # Norn snapshot
 
-Source: https://github.com/norn-lang/norn/tree/95e9b165b4dc8f2657474f5b3341e26dc88ed6c0
+Source: https://github.com/norn-lang/norn/tree/860952750284caf8a6cb37a62ac435791ca91911
 
 Apache-2.0; see LICENSE. The parser, the checker, the compiler, the evaluator and
 the request ledger are included. A program stores no state of its own: each pass
