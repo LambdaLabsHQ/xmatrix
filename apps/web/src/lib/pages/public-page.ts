@@ -1,5 +1,5 @@
 import { withRoute, type PublicPage } from "@xmatrix/protocol";
-import { getXMatrixHubUrl } from "@/lib/xmatrix";
+import { getXMatrixHubUrl } from "../xmatrix";
 
 export type PublicPagePresent = { name: string; color: string; kind: "user" | "agent"; activity: string | null };
 
@@ -10,7 +10,9 @@ export type PublicPagePresent = { name: string; color: string; kind: "user" | "a
 export async function loadPublicPage(spaceId: string, pageId: string):
   Promise<{ page: PublicPage; present: PublicPagePresent[] } | null> {
   const route = `/api/public/spaces/${encodeURIComponent(spaceId)}/pages/${encodeURIComponent(pageId)}`;
-  const response = await fetch(withRoute(serverHubUrl(), route), { next: { revalidate: 10 } });
+  // open-next.config.ts uses a read-only static-assets incremental cache; a Next
+  // fetch `revalidate` tries to write back into it and errors on every hit.
+  const response = await fetch(withRoute(serverHubUrl(), route), { cache: "no-store" });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`public page unavailable (${response.status})`);
   return response.json() as Promise<{ page: PublicPage; present: PublicPagePresent[] }>;
