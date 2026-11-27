@@ -313,3 +313,45 @@ test("a used-up Google quota is reported as a quota, never as a missing permissi
   const denied = { status: 403, body: { error: { status: "PERMISSION_DENIED", message: "The caller does not have permission" } } };
   await fetched([denied, denied, denied, denied], () => assert.rejects(ACTIONS.tracks.execute({ credentials }, input), /needs this permission/u));
 });
+
+test("PUT and allowMissing PATCH treat a 404 snapshot as absent and bind its absence in the digest", async () => {
+  const missing = { status: 404, body: { error: { status: "NOT_FOUND", message: "Listing for language 'de-DE' not found." } } };
+  const listing = {
+    path: { packageName: "sh.xmatrix.app", editId: "edit-1", language: "de-DE" },
+    body: { language: "de-DE", title: "xMatrix: Live-Docs & AI Team", shortDescription: "Markdown-Notizen", fullDescription: "Beschreibung" },
+  };
+  const plan = await fetched([missing], () => ACTIONS.api_plan.execute({ credentials }, statement(command("api_plan", "edits.listings.update", listing))));
+  assert.deepEqual(plan.calls.map(call => call.method), ["GET"]);
+  assert.match(plan.result.summary, /Target does not exist yet \(edits\.listings\.get returned 404\); the digest binds its absence\./u);
+  assert.match(plan.result.summary, /"current": null/u);
+  const digest = digestOf(plan.result.summary);
+  const writeInput = statement(command("api_write", "edits.listings.update", { ...listing, digest }));
+  const created = await fetched([missing, { body: listing.body }], () => ACTIONS.api_write.execute({ credentials }, writeInput));
+  assert.deepEqual(created.calls.map(call => `${call.method} ${call.url}`), [
+    `GET ${API}/sh.xmatrix.app/edits/edit-1/listings/de-DE`,
+    `PUT ${API}/sh.xmatrix.app/edits/edit-1/listings/de-DE`,
+  ]);
+  assert.deepEqual(created.calls[1].body, listing.body);
+  // If the listing appears before api_write runs, the absence digest no longer matches and the write is refused.
+  const raced = await fetched([{ body: { language: "de-DE", title: "Existing" } }], () =>
+    assert.rejects(ACTIONS.api_write.execute({ credentials }, writeInput), /resource changed/u));
+  assert.equal(raced.calls.length, 1);
+  // Non-404 errors on PUT snapshot still fail.
+  await fetched([{ status: 403, body: { error: { status: "PERMISSION_DENIED", message: "denied" } } }], () =>
+    assert.rejects(ACTIONS.api_plan.execute({ credentials }, statement(command("api_plan", "edits.listings.update", listing))), /403|denied/u));
+  // PATCH without allowMissing=true and DELETE still reject on 404.
+  await fetched([missing], () =>
+    assert.rejects(ACTIONS.api_plan.execute({ credentials }, statement(command("api_plan", "edits.listings.patch", listing))), /404/u));
+  await fetched([missing], () =>
+    assert.rejects(ACTIONS.api_plan.execute({ credentials }, statement(command("api_plan", "edits.listings.delete", { path: listing.path }))), /404/u));
+  // PATCH with allowMissing=true treats 404 as absent.
+  const sub = {
+    path: { packageName: "sh.xmatrix.app", productId: "pro" },
+    query: { allowMissing: true, updateMask: "listings", "regionsVersion.version": "2025/03" },
+    body: { packageName: "sh.xmatrix.app", productId: "pro", listings: [{ languageCode: "en-US", title: "Pro", description: "Pro plan" }] },
+  };
+  const upsertInput = statement(command("api_plan", "monetization.subscriptions.patch", sub));
+  assert.equal(typeof upsertInput, "object", String(upsertInput));
+  const upsert = await fetched([missing], () => ACTIONS.api_plan.execute({ credentials }, upsertInput));
+  assert.match(upsert.result.summary, /Target does not exist yet \(monetization\.subscriptions\.get returned 404\)/u);
+});

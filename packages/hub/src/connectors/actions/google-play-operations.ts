@@ -93,6 +93,12 @@ function snapshotOf(target: ReturnType<typeof call>): PlayCall | undefined {
   return playRequest(found[0], { path } as PlayInput);
 }
 
+/** PUT and allowMissing=true PATCH operations are upserts whose target may not exist yet (e.g. creating a new localized listing). */
+function allowsMissingSnapshot(target: ReturnType<typeof call>): boolean {
+  return target.operation.method === "PUT"
+    || (target.operation.method === "PATCH" && target.query.some(([name, value]) => name === "allowMissing" && value === "true"));
+}
+
 /** A digest binds the pinned contract, the exact request and the target's current state. */
 async function plan(context: ConnectorActionContext, input: Record<string, string>) {
   const { credentials } = context, attached = await attachedBody(context, input);
@@ -100,7 +106,15 @@ async function plan(context: ConnectorActionContext, input: Record<string, strin
   if (target.operation.method === "GET") reject("Use api_read for a read operation");
   if (target.operation.upload && target.operation.method === "POST" && !target.operation.body) reject("This operation takes file bytes; use api_upload");
   const snapshot = snapshotOf(target);
-  const before = snapshot ? await sendPlay(credentials, snapshot) : null;
+  let before: unknown = null;
+  if (snapshot) {
+    try {
+      before = await sendPlay(credentials, snapshot);
+    } catch (error) {
+      if (!(error instanceof ProviderRequestError && error.status === 404 && allowsMissingSnapshot(target))) throw error;
+      before = null;
+    }
+  }
   const digest = await sha256Hex(canonicalJsonStringify({ specification: PLAY_SHA, operation: target.id, method: target.operation.method,
     path: target.path, query: target.query, body: target.body ?? null, before }));
   return { target, snapshot, before, digest, attached };
@@ -173,8 +187,13 @@ export const GOOGLE_PLAY_OPERATION_ACTIONS: Record<string, ConnectorAction> = {
     effect: "read", requires: ["oauthToken"], parse: parse(["digest"]),
     async execute(context, input) {
       const planned = await plan(context, input);
+      const binding = !planned.snapshot
+        ? "There is no resource to snapshot; a repeated create may duplicate it."
+        : planned.before === null
+          ? `Target does not exist yet (${planned.snapshot.id} returned 404); the digest binds its absence.`
+          : `The digest also binds the current ${planned.snapshot.id} state.`;
       return { summary: `No write performed. ${planned.target.operation.method} ${planned.target.path}\ndigest ${planned.digest}\n` +
-        `Send the same request with this digest to api_write. ${planned.snapshot ? `The digest also binds the current ${planned.snapshot.id} state.` : "There is no resource to snapshot; a repeated create may duplicate it."}\n` +
+        `Send the same request with this digest to api_write. ${binding}\n` +
         playOutput({ request: { operation: planned.target.id, query: planned.target.query,
           body: planned.attached ? { file: planned.attached.file.name, bytes: planned.attached.file.size, sha256: planned.attached.file.hash } : planned.target.body },
           current: planned.before }) };
