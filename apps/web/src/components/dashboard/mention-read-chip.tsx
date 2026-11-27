@@ -33,6 +33,7 @@ import {
   type MentionReadTarget,
 } from "./mention-read-state";
 import { cn } from "@/lib/utils";
+import { statusInkClass } from "@/components/ui/status-tone";
 import { MentionInvocationChip, MentionInvocationRejectionChip, MentionContinuationChip, InvocationPopoverGroup,
   MentionOnlyChip, MentionLaunchHintChip, MentionStopChip, MentionSummonPending, MentionControlChip,
   MentionRefusedLifecycleChip } from "./mention-invocation-chip";
@@ -301,12 +302,12 @@ function InteractionSegmentView({ segment, scope, starting }: {
         .join(", ");
       return (
         <span
-          className="app-mention-chip"
+          className="app-mention-chip bg-[color-mix(in_oklab,var(--m-ink-attention,oklch(0.66_0.13_78))_14%,transparent)]"
           data-interrupted="true"
           title={`${segment.text} · Interrupted ${names}`}
         >
           <span className="app-mention-chip-label">{segment.text}</span>
-          <span className="app-mention-invocation-status app-mention-chip-interrupt-status">
+          <span className={statusInkClass("attention", "app-mention-invocation-status")}>
             <span aria-hidden="true">·</span>
             <span>Interrupted</span>
           </span>
@@ -398,7 +399,8 @@ export function MentionReadChip({
     <span
       className={cn(
         "app-mention-chip",
-        mentionsViewer && "app-mention-chip-self"
+        mentionsViewer && "app-mention-chip-self",
+        wasInterrupted && "bg-[color-mix(in_oklab,var(--m-ink-attention,oklch(0.66_0.13_78))_14%,transparent)]"
       )}
       data-read-state={resolution.state}
       {...(wasInterrupted ? { "data-interrupted": "true" } : {})}
@@ -432,7 +434,7 @@ export function MentionReadChip({
             >
               <span className="app-mention-chip-receipt-name">@{label}</span>
               {wasInterrupted && (
-                <span className="app-mention-chip-receipt-interrupt">Interrupted current turn</span>
+                <span className={statusInkClass("attention", "font-bold")}>Interrupted current turn</span>
               )}
               <span className="app-mention-chip-receipt-state" data-read-state={resolution.state}>
                 {stateCopy}
@@ -443,7 +445,7 @@ export function MentionReadChip({
       </span>
       <span className="app-mention-chip-label">@{label}</span>
       {wasInterrupted && (
-        <span className="app-mention-invocation-status app-mention-chip-interrupt-status">
+        <span className={statusInkClass("attention", "app-mention-invocation-status")}>
           <span aria-hidden="true">·</span>
           <span>Interrupted</span>
         </span>

@@ -7432,27 +7432,6 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   color: var(--muted-foreground);
 }
 
-.xmatrix-app .app-mention-chip[data-interrupted="true"] {
-  background: color-mix(in oklab, oklch(0.66 0.13 78) 14%, transparent);
-}
-
-.xmatrix-app .app-mention-chip-interrupt-status {
-  color: oklch(0.56 0.14 72);
-}
-
-.dark .xmatrix-app .app-mention-chip-interrupt-status {
-  color: oklch(0.78 0.12 78);
-}
-
-.xmatrix-app .app-mention-chip-receipt-interrupt {
-  font-weight: 700;
-  color: oklch(0.56 0.14 72);
-}
-
-.dark .xmatrix-app .app-mention-chip-receipt-interrupt {
-  color: oklch(0.78 0.12 78);
-}
-
 /* Invocation status lives in the addressed phrase, independently of read receipts. */
 /* The chip is inline-flex, so `vertical-align: baseline` aligns the surrounding
    prose against whatever baseline the flex container exposes. With
@@ -7877,26 +7856,6 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   padding-left: 0;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-}
-.xmatrix-app .composer-textarea .app-mention-chip.app-composer-chip-has-interrupt {
-  padding-right: 0;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.xmatrix-app .composer-textarea .app-mention-chip.app-composer-chip-interrupt {
-  padding-left: 0.28em;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  font-size: 0.85em;
-  font-weight: 500;
-  user-select: none;
-  color: oklch(0.56 0.14 72);
-}
-.dark .xmatrix-app .composer-textarea .app-mention-chip.app-composer-chip-interrupt {
-  color: oklch(0.78 0.12 78);
-}
-.xmatrix-app .composer-textarea .app-mention-chip[data-interrupt="true"] {
-  background: color-mix(in oklab, oklch(0.66 0.13 78) 14%, transparent);
 }
 /* What the draft knows before it is sent: a malformed summon. */
 .xmatrix-app .composer-textarea .app-mention-chip[data-invalid="true"] {

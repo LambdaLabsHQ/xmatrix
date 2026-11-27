@@ -480,6 +480,8 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
         continue;
       }
       const chip = span.self ? "app-mention-chip app-mention-chip-self" : "app-mention-chip";
+      const interruptFill = span.interrupt
+        ? "bg-[color-mix(in_oklab,var(--m-ink-attention,oklch(0.66_0.13_78))_14%,transparent)]" : "";
       const face = span.face;
       if (face) {
         // Keyed by everything it draws but where it is, so a chip whose reading
@@ -488,7 +490,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
         const key = `face\u0000${written}\u0000${count}\u0000${JSON.stringify(face)}\u0000${chip}\u0000${JSON.stringify(drawn)}`;
         decorations.push(Decoration.widget(from, () => {
           const lead = document.createElement("span");
-          lead.className = `${chip} app-composer-chip-lead`;
+          lead.className = [chip, "app-composer-chip-lead", interruptFill].filter(Boolean).join(" ");
           lead.contentEditable = "false";
           // The colours the chip's state gives it; the text half alone is the addressable mention.
           for (const [name, value] of Object.entries(data)) {
@@ -511,7 +513,8 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
       const tailClass = [
         chip,
         face ? "app-composer-chip-tail" : "",
-        span.interrupt ? "app-composer-chip-has-interrupt" : "",
+        span.interrupt ? "pr-0 rounded-r-none" : "",
+        interruptFill,
       ].filter(Boolean).join(" ");
       decorations.push(Decoration.inline(from, to, {
         nodeName: "span", class: tailClass, ...data,
@@ -520,7 +523,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
         const key = `interrupt\u0000${written}\u0000${count}\u0000${chip}`;
         decorations.push(Decoration.widget(to, () => {
           const badge = document.createElement("span");
-          badge.className = `${chip} app-composer-chip-interrupt`;
+          badge.className = `${chip} app-composer-chip-interrupt app-ink-attention pl-[0.28em] rounded-l-none text-[0.85em] font-medium select-none ${interruptFill}`;
           badge.contentEditable = "false";
           badge.setAttribute("data-interrupt", "true");
           badge.setAttribute("aria-hidden", "true");

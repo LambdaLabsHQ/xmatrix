@@ -92,6 +92,7 @@ import {
   type ReferenceCandidate,
 } from "./reference-complete";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { statusChipClass, statusInkClass } from "@/components/ui/status-tone";
 import { spaceLaunchTargetsQuery } from "./space-launch-targets-query";
 
 type MentionDynamicLoadState =
@@ -1146,7 +1147,7 @@ export function useComposerCompletion({
                             <span
                               className={
                                 interruptsBusyInstance
-                                  ? "min-w-0 truncate text-xs text-amber-600 dark:text-amber-400"
+                                  ? statusInkClass("attention", "min-w-0 truncate text-xs")
                                   : "min-w-0 truncate text-xs text-foreground/50"
                               }
                               title={detail}
@@ -1168,7 +1169,7 @@ export function useComposerCompletion({
                             <span
                               className={
                                 interruptsBusyInstance
-                                  ? "rounded bg-amber-500/15 px-1.5 py-0 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                                  ? statusChipClass("attention", "px-1.5 py-0 text-[10px]")
                                   : "rounded bg-muted/70 px-1.5 py-0 text-[10px] text-muted-foreground"
                               }
                             >
