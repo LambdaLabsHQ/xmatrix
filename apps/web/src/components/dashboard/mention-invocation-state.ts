@@ -1,4 +1,4 @@
-import { agentPresetForLauncher, cleanRuntimeOperationFailure, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type SerializedAgentLaunch, type SerializedAgentStop,
+import { agentPresetForLauncher, cleanRuntimeOperationFailure, MENTION_BROADCAST_NAMES, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type CommandResultInterrupt, type SerializedAgentLaunch, type SerializedAgentStop,
   type SerializedAgentMessageExecution, type SerializedAgentInvocationRejection, type SerializedAgentContinuation, type AgentLaunchActivity, type AgentStopInvocation,
   type AutoLaunchCondition, type AutoLaunchMention, type AutoLaunchTags, type AgentControlInvocation, type AgentControlOutcomeRecord,
   agentControlHandoffStatement, parseRebornInstanceMentions, parseHandoffInstanceMentions, type FaceOf } from "@xmatrix/protocol";
@@ -558,7 +558,8 @@ export type InteractionSegment<Target = unknown> =
     outcome?: AgentControlOutcomeRecord; notice?: CommandNotice }
   | { presentationRef: "handoff.v1" | "reborn.v1"; text: string; refused: readonly CommandNotice[];
     agentName: string; ordinal: number; successor?: string }
-  | { presentationRef: "mention.v1"; text: string; target: Target; token?: string };
+  | { presentationRef: "mention.v1"; text: string; target: Target; token?: string }
+  | { presentationRef: "interrupt.v1"; text: string; interrupts: readonly CommandResultInterrupt[] };
 
 export interface InteractionRecords<Target> {
   continuations?: readonly SerializedAgentContinuation[];
@@ -570,6 +571,8 @@ export interface InteractionRecords<Target> {
   controls?: readonly AgentControlInvocation[];
   /** Hub receipts for this message's command (command-notices.ts). */
   notices?: readonly CommandNotice[];
+  /** Live Instances whose running turn this message's `@` interrupted. */
+  interrupts?: readonly CommandResultInterrupt[];
   /** Without launch status access, a written handoff stays the prose it was written as. */
   launchStatusUnavailable?: boolean;
   /** Read-state mentions in a run of plain text, from the Channel's member index. */
@@ -693,6 +696,21 @@ export function segmentMessageInteraction<Target>(text: string, records: Interac
           ? { presentationRef: "mention.v1", text: part.text, target: part.target, token: part.token }
           : plain(part.text);
       });
+    });
+  }
+  if (records.interrupts?.length) {
+    const broadcastTokens = mentionAddressTokens(MENTION_BROADCAST_NAMES);
+    segments = refine(segments, (run, offset) => {
+      const out: Segment[] = [];
+      let cursor = 0;
+      for (const match of scanMentionAddresses(run, broadcastTokens)) {
+        if (!allowed(match.start + offset)) continue;
+        if (match.start > cursor) out.push(plain(run.slice(cursor, match.start)));
+        out.push({ presentationRef: "interrupt.v1", text: run.slice(match.start, match.end), interrupts: records.interrupts! });
+        cursor = match.end;
+      }
+      if (cursor < run.length) out.push(plain(run.slice(cursor)));
+      return out;
     });
   }
   // Adjacent text pieces join back, so plain prose renders as one run.

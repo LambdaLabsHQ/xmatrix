@@ -414,6 +414,7 @@ export class AgentInstanceRuntimeTransport {
     let matched = 0;
     let delivered = 0;
     let interrupted = 0;
+    const interruptedInstances: AgentInterruptedInstance[] = [];
     for (const [socket, session] of this.sockets.entries()) {
       if (session.run.channelId !== channelId) continue;
       if (input.deliveryKind !== "update" && deliveryWasAuthoredBy(input.from, session)) continue;
@@ -448,6 +449,8 @@ export class AgentInstanceRuntimeTransport {
       const deliveryIntent = answerIsAnothers ? "context" : agentChannelMessageDeliveryIntent(message, recipient);
       const interruptRequested = !answerIsAnothers && agentChannelMessageRequestsInterrupt(message, recipient);
       const steerAllowed = interruptRequested && agentChannelMessageMaySteer(message, recipient);
+      const cancelsActiveTurn = interruptRequested && !steerAllowed &&
+        (session.run.instanceStatus === "busy" || session.presentation?.runtimeState?.status === "running");
       const outbound: Extract<AgentInstanceServerMessage, { type: "channel_message_received" }> = {
         type: "channel_message_received",
         message,
@@ -461,11 +464,18 @@ export class AgentInstanceRuntimeTransport {
         this.sockets.send(socket, outbound);
         delivered += 1;
         if (interruptRequested) interrupted += 1;
+        if (cancelsActiveTurn) {
+          interruptedInstances.push({
+            instanceId: session.run.instanceId,
+            agentName: session.principal.agentName,
+            ...(session.run.channelInstanceId ? { channelInstanceId: session.run.channelInstanceId } : {}),
+          });
+        }
       } catch {
         // Best-effort live fanout; offline sockets drop without failing the commit path.
       }
     }
-    return { matched, delivered, interrupted };
+    return { matched, delivered, interrupted, ...(interruptedInstances.length ? { interruptedInstances } : {}) };
   }
 
   /**
@@ -1056,10 +1066,17 @@ export type AgentChannelLiveDeliveryInput = {
   appMentions?: unknown[];
 };
 
+export type AgentInterruptedInstance = {
+  instanceId: string;
+  agentName: string;
+  channelInstanceId?: string;
+};
+
 export type AgentChannelLiveDeliveryResult = {
   matched: number;
   delivered: number;
   interrupted: number;
+  interruptedInstances?: AgentInterruptedInstance[];
 };
 
 

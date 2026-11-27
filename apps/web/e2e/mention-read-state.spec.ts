@@ -62,6 +62,18 @@ async function openChannel(page: Page, channel: unknown, history = HISTORY) {
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
 }
 
+async function openInstanceChannel(page: Page, instance: ReturnType<typeof codexInstanceRecord>, message: Record<string, unknown>) {
+  const socket = await routeHumanSocket(page, (frame, reply) => {
+    if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
+  });
+  await openChannel(
+    page,
+    { ...CHANNEL, memberPresence: {}, memberReadSequences: {}, instanceRecords: [instance] },
+    [message],
+  );
+  return socket;
+}
+
 test.use({ viewport: { width: 1512, height: 945 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
 
 test.describe("mention read state", () => {
@@ -69,11 +81,7 @@ test.describe("mention read state", () => {
   // and follows a machine's availability while the message stays mounted.
   test("an Instance mention follows live machine availability", async ({ page }) => {
     const instance = codexInstanceRecord(CHANNEL.id);
-    const socket = await routeHumanSocket(page, (frame, reply) => {
-      if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
-    });
-    await openChannel(page, { ...CHANNEL, memberPresence: {}, memberReadSequences: {}, instanceRecords: [instance] },
-      [{ ...HISTORY[0], body: "@codex:1 please review" }]);
+    const socket = await openInstanceChannel(page, instance, { ...HISTORY[0], body: "@codex:1 please review" });
     const chip = page.locator(".app-message-timeline .app-mention-chip");
     await expect(chip).toHaveCount(1);
     await expect(chip).toContainText("@codex:1");
@@ -86,6 +94,52 @@ test.describe("mention read state", () => {
     socket.send({ type: "instance_records", records: [{ ...instance, revision: { version: 1, sequence: 3 } }] });
     await expect(receipt).toBeVisible();
     await expect(receipt).not.toHaveAttribute("data-machine-offline");
+  });
+
+  test("mentioning a busy Instance hints Interrupt in @ completion and draft, and shows Interrupted after send", async ({ page }) => {
+    const busy = { ...codexInstanceRecord(CHANNEL.id), status: "busy" as const };
+    const socket = await openInstanceChannel(page, busy, {
+      ...HISTORY[0],
+      messageId: "message-interrupt-1",
+      body: "@codex:1 switch direction",
+    });
+
+    const draft = page.locator(".composer-textarea").first();
+    await draft.fill("@");
+    const option = page.getByRole("option", { name: /codex:1/u });
+    await expect(option).toContainText("Interrupts current turn");
+    await expect(option).toContainText("interrupt");
+    await option.click();
+    await expect(draft.locator(".app-composer-chip-interrupt")).toHaveText("· Interrupt");
+
+    // Once the Instance is no longer busy, the draft interrupt hint clears automatically.
+    await expect.poll(socket.connections).toBeGreaterThan(0);
+    socket.send({ type: "instance_records", records: [{ ...busy, status: "idle", revision: { version: 1, sequence: 2 } }] });
+    await expect(draft.locator(".app-composer-chip-interrupt")).toHaveCount(0);
+
+    // Live commandResult interrupt annotation updates the sent message's chip in place.
+    const sentChip = page.locator(".app-message-timeline .app-mention-chip").first();
+    await expect(sentChip).not.toHaveAttribute("data-interrupted", "true");
+    socket.send({
+      type: "observable_event",
+      event: {
+        id: "evt-interrupt-1",
+        type: "channel_message_interactions_updated",
+        channelId: CHANNEL.id,
+        ts: E2E_NOW,
+        metadata: {
+          messageId: "message-interrupt-1",
+          annotationId: "xmatrix.command-result:message-interrupt-1:interrupt",
+          payload: {
+            interrupts: [{ instanceId: busy.id, agentName: "codex", channelInstanceId: "1", at: E2E_NOW }],
+          },
+        },
+      },
+    });
+    await expect(sentChip).toHaveAttribute("data-interrupted", "true");
+    await expect(sentChip).toContainText("Interrupted");
+    await sentChip.getByRole("button", { name: "codex:1: Unread", exact: true }).click();
+    await expect(page.getByTestId("mention-read-receipt")).toContainText("Interrupted current turn");
   });
 
   test("a mention exposes a Feishu-style receipt for a passed cursor and an unread cursor", async ({ page }) => {

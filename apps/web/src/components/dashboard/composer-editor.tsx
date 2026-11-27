@@ -18,7 +18,7 @@ import {
 } from "./composer-editor-text";
 import { MentionChipFace } from "./mention-chip-face";
 import { composerBlocks } from "./composer-blocks";
-import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
+import { composerMentionSpans, type BusyMentionInstance, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
 
 /**
  * The composer's text field, as the rest of the composer reads it: the draft
@@ -59,6 +59,8 @@ export interface ComposerEditorProps {
   hint?: string;
   /** The Channel's member index; the same one the timeline resolves chips with. */
   mentionIndex: MentionReadIndex | null;
+  /** Live busy Instances in this Channel, so addressing one warns that it interrupts the turn. */
+  busyInstances?: readonly BusyMentionInstance[];
   currentUserIdentityId?: string;
   /** Picked channel and page references, drawn like the chips they send as. */
   references?: ReadonlyArray<{ start: number; end: number; text: string }>;
@@ -314,7 +316,7 @@ export function ComposerEditor(props: ComposerEditorProps) {
   // Anything the chips are drawn from: redraw them.
   useLayoutEffect(() => {
     viewRef.current?.setProps({});
-  }, [props.disabled, props.ariaLabel, props.className, props.mentionIndex, props.currentUserIdentityId,
+  }, [props.disabled, props.ariaLabel, props.className, props.mentionIndex, props.busyInstances, props.currentUserIdentityId,
     props.references, props.quoteIsHere]);
 
   return <div ref={hostRef} className="composer-field-host relative min-w-0 flex-1">
@@ -461,7 +463,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
   return (state: EditorState): DecorationSet => {
     const props = propsRef.current!;
     const text = composerTextOf(state.doc);
-    const inputs = [props.mentionIndex, props.currentUserIdentityId, props.references];
+    const inputs = [props.mentionIndex, props.busyInstances, props.currentUserIdentityId, props.references];
     if (cache && cache.text === text && inputs.every((input, index) => input === cache!.inputs[index])) return cache.set;
     const decorations: Decoration[] = [];
     const seen = new Map<string, number>();
@@ -478,6 +480,8 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
         continue;
       }
       const chip = span.self ? "app-mention-chip app-mention-chip-self" : "app-mention-chip";
+      const interruptFill = span.interrupt
+        ? "bg-[color-mix(in_oklab,var(--m-ink-attention,oklch(0.66_0.13_78))_14%,transparent)]" : "";
       const face = span.face;
       if (face) {
         // Keyed by everything it draws but where it is, so a chip whose reading
@@ -486,7 +490,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
         const key = `face\u0000${written}\u0000${count}\u0000${JSON.stringify(face)}\u0000${chip}\u0000${JSON.stringify(drawn)}`;
         decorations.push(Decoration.widget(from, () => {
           const lead = document.createElement("span");
-          lead.className = `${chip} app-composer-chip-lead`;
+          lead.className = [chip, "app-composer-chip-lead", interruptFill].filter(Boolean).join(" ");
           lead.contentEditable = "false";
           // The colours the chip's state gives it; the text half alone is the addressable mention.
           for (const [name, value] of Object.entries(data)) {
@@ -506,9 +510,27 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
           if (element) portals.remove(element);
         } }));
       }
+      const tailClass = [
+        chip,
+        face ? "app-composer-chip-tail" : "",
+        span.interrupt ? "pr-0 rounded-r-none" : "",
+        interruptFill,
+      ].filter(Boolean).join(" ");
       decorations.push(Decoration.inline(from, to, {
-        nodeName: "span", class: face ? `${chip} app-composer-chip-tail` : chip, ...data,
+        nodeName: "span", class: tailClass, ...data,
       }));
+      if (span.interrupt) {
+        const key = `interrupt\u0000${written}\u0000${count}\u0000${chip}`;
+        decorations.push(Decoration.widget(to, () => {
+          const badge = document.createElement("span");
+          badge.className = `${chip} app-composer-chip-interrupt app-ink-attention pl-[0.28em] rounded-l-none text-[0.85em] font-medium select-none ${interruptFill}`;
+          badge.contentEditable = "false";
+          badge.setAttribute("data-interrupt", "true");
+          badge.setAttribute("aria-hidden", "true");
+          badge.textContent = "· Interrupt";
+          return badge;
+        }, { key, side: -1, ignoreSelection: true }));
+      }
     }
     const set = DecorationSet.create(state.doc, decorations);
     cache = { text, inputs, set };
@@ -518,7 +540,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
 
 function draftSpans(text: string, props: ComposerEditorProps): readonly ComposerMentionSpan[] {
   if (!text) return NO_SPANS;
-  const mentions = composerMentionSpans(text, props.mentionIndex, props.currentUserIdentityId);
+  const mentions = composerMentionSpans(text, props.mentionIndex, props.currentUserIdentityId, props.busyInstances);
   const picked = (props.references ?? []).filter((reference) => text.slice(reference.start, reference.end) === reference.text &&
     !mentions.some((span) => span.start < reference.end && reference.start < span.end))
     .map(({ start, end }): ComposerMentionSpan => ({ start, end, kind: "reference" }));
@@ -531,6 +553,7 @@ function chipData(span: ComposerMentionSpan): Record<string, string> {
     "data-start": String(span.start),
     "data-kind": span.kind,
     ...(span.invalid ? { "data-invalid": "true" } : {}),
+    ...(span.interrupt ? { "data-interrupt": "true" } : {}),
   };
 }
 

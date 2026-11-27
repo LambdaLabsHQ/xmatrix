@@ -1122,6 +1122,7 @@ function agentReferenceCandidates(
       ...instanceIdentity,
       mention,
       local: isLocalAgentCandidate(localMachineKeys, member, instance),
+      ...(instance.status === "busy" ? { description: "Interrupts current turn" } : {}),
       completionSuffix: " ",
       schemaNodeId: "agent-reference:instance",
     });

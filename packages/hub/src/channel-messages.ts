@@ -1,5 +1,7 @@
 import { MessageAuthorityError, type MessageLiveRouting } from "@xmatrix/db";
+import type { CommandResultInterrupt } from "@xmatrix/protocol";
 import { armAppResultRetention } from "./connectors/result-retention";
+import { recordCommandResult } from "./command-result";
 import type { AuthorityPrincipal } from "./product-message-command";
 import type { Env } from "./types";
 import { postBillingNotice } from "./billing-notice";
@@ -212,13 +214,14 @@ async function deliverChannelMessage(
   payload: Omit<Record<string, unknown>, "recipientUserIds">,
   routing: LiveRouting,
   self?: RuntimeLiveDeliverySelf,
-): Promise<void> {
+): Promise<Omit<CommandResultInterrupt, "at">[]> {
   const notifications = new Map(routing.recipientNotifications.flatMap((entry) =>
     typeof entry.userId === "string" ? [[entry.userId, entry] as const] : []));
   const audience: RuntimeAudience = {
     humans: routing.recipientUserIds,
     instanceOwners: routing.instanceOwnerUserIds,
   };
+  const interrupted = new Map<string, Omit<CommandResultInterrupt, "at">>();
   await deliverToAudience({
     env, audience, label: "Channel", ...(self ? { self } : {}),
     request: (share) => {
@@ -231,7 +234,26 @@ async function deliverChannelMessage(
         instances: share.instances,
       });
     },
+    onResponse: payload.deliveryKind === "update" ? undefined : async (share, response) => {
+      if (!share.instances) return;
+      const body = await response.json<{ agent?: { interruptedInstances?: unknown } }>().catch(() => null);
+      if (!Array.isArray(body?.agent?.interruptedInstances)) return;
+      for (const item of body.agent.interruptedInstances) {
+        if (!item || typeof item !== "object") continue;
+        const record = item as Record<string, unknown>;
+        const instanceId = typeof record.instanceId === "string" ? record.instanceId.trim() : "";
+        const agentName = typeof record.agentName === "string" ? record.agentName.trim() : "";
+        const ordinal = typeof record.channelInstanceId === "string" ? record.channelInstanceId.trim() : "";
+        if (!instanceId || !agentName || interrupted.has(instanceId)) continue;
+        interrupted.set(instanceId, {
+          instanceId,
+          agentName,
+          ...(ordinal ? { channelInstanceId: ordinal } : {}),
+        });
+      }
+    },
   });
+  return [...interrupted.values()];
 }
 
 /** The live routing the append of `committed` read, when this request made it; a replay has none. */
@@ -332,7 +354,22 @@ export async function publishChannelLiveDelivery(
     // query data. Keep the batch diagnostic independent of foreign error text.
     console.error("Push delivery failed");
   }));
-  await delivered;
+  const interruptedInstances = await delivered;
+  const messageId = typeof payload.messageId === "string" ? payload.messageId.trim() : "";
+  if (interruptedInstances.length > 0 && messageId && payload.deliveryKind !== "update") {
+    try {
+      await recordCommandResult(env, {
+        channelId,
+        messageId,
+        key: "interrupt",
+        entry: { interrupts: interruptedInstances },
+      });
+    } catch (error) {
+      console.warn("Interrupt command result recording failed", {
+        channelId, messageId, error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 export async function publishChannelMemberRead(

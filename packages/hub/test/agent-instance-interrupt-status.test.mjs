@@ -277,3 +277,41 @@ test("Connector receipts queue only for their exact live caller without cancelli
     assert.equal(peer.sent.at(-1).deliveryIntent, "context");
   }
 });
+
+test("an @-address to a busy Instance records it in interruptedInstances; steering or idle does not", () => {
+  const busy = attachment("busy", "running");
+  busy.session.run.channelInstanceId = "2";
+  const idle = attachment("idle", "idle");
+  idle.session.run.channelInstanceId = "3";
+
+  const addressedBusy = deliverToOne(busy, {
+    messageId: "msg-interrupt-busy",
+    sequence: 10,
+    body: "@Agent:2 stop and switch",
+    from: HUMAN_SENDER,
+  });
+  assert.equal(addressedBusy.frame.interruptRequested, true);
+  assert.equal(addressedBusy.frame.steerAllowed, undefined);
+  assert.deepEqual(addressedBusy.delivery.interruptedInstances, [
+    { instanceId: "instance-1", agentName: "Agent", channelInstanceId: "2" },
+  ]);
+
+  const steeredBusy = deliverToOne(busy, {
+    messageId: "msg-steer-busy",
+    sequence: 11,
+    body: "also check the logs",
+    from: HUMAN_SENDER,
+  });
+  assert.equal(steeredBusy.frame.steerAllowed, true);
+  assert.equal(steeredBusy.delivery.interruptedInstances, undefined);
+
+  const addressedIdle = deliverToOne(idle, {
+    messageId: "msg-address-idle",
+    sequence: 12,
+    body: "@Agent:3 please check",
+    from: HUMAN_SENDER,
+  });
+  assert.equal(addressedIdle.frame.interruptRequested, true);
+  assert.equal(addressedIdle.frame.steerAllowed, undefined);
+  assert.equal(addressedIdle.delivery.interruptedInstances, undefined);
+});

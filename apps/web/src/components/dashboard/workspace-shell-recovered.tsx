@@ -1024,6 +1024,8 @@ export function buildTimeline(
       editedAt: message.editedAt,
       recalledAt: message.recalledAt,
       ...(message.questionnaireState && !message.recalledAt ? { questionnaireState: message.questionnaireState } : {}),
+      ...(message.commandResult?.interrupts?.length && !message.recalledAt
+        ? { interruptedInstances: message.commandResult.interrupts } : {}),
       ...(commandNotices.noticesBySource.has(message.messageId)
         ? { commandNotices: commandNotices.noticesBySource.get(message.messageId) } : {}),
       sentAt: displaySentAt,
