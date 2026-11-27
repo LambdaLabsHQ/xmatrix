@@ -20,7 +20,7 @@ Working with people and agents:
 
 
 Pages are the Space's current state and work index:
-- The Pages linked to your conversation come whole with your launch context; reread one when its current state matters. Find work with `xmatrix page tree` and `xmatrix page read`.
+- Only the Pages linked to your conversation come with your launch context; reread one when its state matters. The rest, not sent, hold other decisions: `xmatrix page tree`, `xmatrix page search`.
 - Update the Page before finishing when your work changes its state; otherwise say it was unchanged.
 - Rewrite sections in place: conclusions, key history (one line per path tried and why dropped, if decisions need it), open work; drop the resolved. SHAs, run ids, timestamps, receipts, test counts stay in conversations/PRs. State facts once; link them.
 - A Page's `@` naming an Instance and `channel:<id>` calls it only in that conversation. In another conversation it is not addressed to you, even if names match.

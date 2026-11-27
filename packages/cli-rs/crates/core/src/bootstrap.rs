@@ -339,6 +339,19 @@ mod tests {
         );
     }
 
+    /// An Agent that reads "the linked Pages come whole" takes its launch
+    /// context for all the Space has decided, and designs without looking.
+    #[test]
+    fn launch_rules_say_which_pages_were_sent_and_where_the_rest_are() {
+        let _lock = LAUNCH_ENV.lock().unwrap();
+        let _env = LaunchEnv::clean();
+        let prompt = bootstrap_prompt("node", "demo", "", true).unwrap();
+        assert!(prompt.contains("Only the Pages linked to your conversation come with"));
+        assert!(prompt.contains("The rest, not sent, hold other decisions"));
+        assert!(prompt.contains("`xmatrix page search`"));
+        assert!(!prompt.contains("come whole"));
+    }
+
     #[test]
     fn hub_templates_replace_compiled_text_and_render_values_once() {
         let _lock = LAUNCH_ENV.lock().unwrap();
