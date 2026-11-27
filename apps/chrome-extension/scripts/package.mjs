@@ -48,8 +48,7 @@ export function extensionPagesPolicy(hubOrigin) {
     "form-action 'self'",
     "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
-    // The Docs picker runs in Google's own frame.
-    "frame-src 'self' https://docs.google.com",
+    "frame-src 'self'",
     `img-src 'self' data: blob: ${hub.origin} ${WEB_ORIGIN}`,
     // Direct Internet audio and video previews load only after a reader clicks Preview.
     `media-src 'self' blob: https: ${hub.origin}`,
