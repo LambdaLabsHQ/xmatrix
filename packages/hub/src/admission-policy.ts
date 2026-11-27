@@ -65,8 +65,17 @@ function read(source: string): { library: Library; problems: AdmissionPolicyProb
  * is everything that was read.
  */
 export function admissionPolicyProblems(source: string): AdmissionPolicyProblem[] {
+  return checked(source).problems;
+}
+
+/** The library as read once, with what keeps it from being a policy. */
+function checked(source: string): { library: Library; problems: AdmissionPolicyProblem[] } {
   const { library, problems } = read(source);
-  if (problems.length) return problems;
+  if (problems.length) return { library, problems };
+  return { library, problems: shapeProblems(library) };
+}
+
+function shapeProblems(library: Library): AdmissionPolicyProblem[] {
   const shape = checkSource(SHAPE, { host: HOST, std: null, libraries: { [POLICY]: library } });
   const errors = shape.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length) {
@@ -84,8 +93,8 @@ export function admissionPolicyProblems(source: string): AdmissionPolicyProblem[
  */
 export function admit(source: string, request: AdmissionRequest): AdmissionAnswer {
   try {
-    if (admissionPolicyProblems(source).length) return { answer: "card", why: "the adopted policy no longer checks" };
-    const { library } = read(source);
+    const { library, problems } = checked(source);
+    if (problems.length) return { answer: "card", why: "the adopted policy no longer checks" };
     const entry = checkSource(ENTRY, { host: HOST, std: null, libraries: { [POLICY]: library } });
     if (!entry.ok || !entry.program) return { answer: "card", why: "the adopted policy no longer checks" };
     const code = compile(elaborate(entry.program, entry.reports), { sources: SOURCES, libraries: { [POLICY]: library.program } });

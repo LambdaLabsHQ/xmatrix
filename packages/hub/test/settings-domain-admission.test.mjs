@@ -73,6 +73,18 @@ test("what cannot be adopted says why and offers nothing to adopt", async () => 
   }
 });
 
+test("a built-in module's name is not a policy's library, whatever the Page says", async () => {
+  for (const name of ["Admission", "Events", "Actions", "Holds", "Std"]) {
+    const address = parseSettingAddress(`admission:page-1/${name}`);
+    const domain = admissionSettingsDomain({ adopted: async () => ({ canAdopt: true }), page: async () => page(POLICY, name),
+      adopt: async () => { throw new Error("adopted a reserved name"); }, withdraw: async () => {} });
+    const [described] = await domain.describe(reader, [address]);
+    assert.deepEqual([described.state, described.canWrite, described.value], ["invalid", false, undefined], name);
+    assert.match(described.problem, /built-in module's name/u);
+    await assert.rejects(domain.write(reader, address, POLICY), (error) => error.code === "setting_refused");
+  }
+});
+
 test("a reader who may not adopt is not given the text", async () => {
   const described = await space({ canAdopt: false }).describe();
   assert.deepEqual([described.canWrite, described.value, described.state], [false, undefined, "missing"]);

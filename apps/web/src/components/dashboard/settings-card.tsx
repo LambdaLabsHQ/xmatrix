@@ -242,7 +242,8 @@ export function SettingsCard({ channelId, messageId, sequence, token, userId, ag
                   suggestedBy={asked} token={token} userId={userId} />
               </div>
             ) : null}
-            {!setting.satisfied && !setting.canWrite ? (
+            {/* A setting with a problem waits on nobody's role: what is wrong is said below. */}
+            {!setting.satisfied && !setting.canWrite && !setting.problem ? (
               <p className="mt-2 text-[13px] text-muted-foreground">{WAITS_ON[setting.writer]}</p>
             ) : null}
             {!setting.satisfied && setting.problem ? (

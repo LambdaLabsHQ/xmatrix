@@ -52,6 +52,19 @@ integration("a Run is working for a Page program only while it executes that pro
     const again = await f.execution(f.delivery, "accepted");
     assert.deepEqual(await work(), f.work);
 
+    // A request handed to another Instance is not this Run's, whatever it executes.
+    await f.client.query("UPDATE data.norn_requests SET instance_id=$2 WHERE space_id=$1", [f.ids.space, `${f.ids.channel}:9`]);
+    assert.equal(await work(), undefined);
+    await f.client.query("UPDATE data.norn_requests SET instance_id=$2 WHERE space_id=$1", [f.ids.space, f.ids.instance]);
+    assert.deepEqual(await work(), f.work);
+    await f.client.query("UPDATE data.norn_requests SET instance_id=NULL WHERE space_id=$1", [f.ids.space]);
+
+    // A branch of the program works in a conversation of its own: the request is in the Run's Channel, the
+    // program is in another, and the work is still the Page program's.
+    await f.client.query("UPDATE data.norn_programs SET channel_id=$2 WHERE space_id=$1", [f.ids.space, `${f.ids.channel}:program`]);
+    assert.deepEqual(await work(), f.work);
+    await f.client.query("UPDATE data.norn_programs SET channel_id=$2 WHERE space_id=$1", [f.ids.space, f.ids.channel]);
+
     // A delegated request is its holder's choice, not the program's.
     await f.client.query("UPDATE data.norn_requests SET delegator_user_id=$2 WHERE space_id=$1", [f.ids.space, f.ids.admin]);
     assert.equal(await work(), undefined);

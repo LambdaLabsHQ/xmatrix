@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { programFixture } from "../../db/test/space-admission-policy-postgres.fixture.mjs";
-import { admitSecretUse } from "../src/index-routes-secrets.ts";
+import { admitSecretUse, secretAdmission } from "../src/index-routes-secrets.ts";
 
 const integration = process.env.XMATRIX_TEST_POSTGRES_URL || process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true" ? test : test.skip;
 
@@ -49,5 +49,22 @@ integration("an adopted text that no longer decides leaves every request to its 
     await f.execution(f.delivery, "running");
     assert.equal(await admitSecretUse(f.secret, f.run, "database-read"), "card");
     await assert.rejects(f.secret.runRead(f.run, ["database-read"]), (error) => error.code === "secret_approval_required");
+  } finally { await f.close(); }
+});
+
+integration("what the store says about the Run or the secret stands; only a passing failure falls back to the card", async () => {
+  const f = await programFixture();
+  try {
+    await f.secret.put({ spaceId: f.ids.space, userId: f.ids.admin, secretRef: "database-read", value: "v" });
+    await f.adopt(policy(f.page));
+    await f.execution(f.delivery, "running");
+    // The policy's refusal and a Run that stopped: each is the answer, and no card follows.
+    await f.secret.put({ spaceId: f.ids.space, userId: f.ids.admin, secretRef: "retired-key", value: "v" });
+    await assert.rejects(secretAdmission(f.secret, f.run, "retired-key"), (error) => error.code === "secret_request_refused");
+    await f.client.query("UPDATE data.runs SET status='stopped' WHERE run_id=$1", [f.ids.run]);
+    await assert.rejects(secretAdmission(f.secret, f.run, "database-read"), (error) => error.code === "request_context_unavailable");
+    // A store that cannot be reached is not a refusal.
+    const unreachable = { runAdmission: async () => { throw new Error("connection lost"); } };
+    assert.equal(await secretAdmission(unreachable, f.run, "database-read"), "card");
   } finally { await f.close(); }
 });

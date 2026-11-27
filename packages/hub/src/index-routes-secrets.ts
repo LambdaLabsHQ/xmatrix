@@ -103,6 +103,24 @@ function route(kind: "human" | "agent", handler: (c: Context<{ Bindings: Env }>,
   };
 }
 
+/**
+ * Whether the Space's policy spared this request its card. The policy can
+ * spare the card or refuse outright. A passing failure to consult it is not a
+ * refusal: the card is posted. What the store answers about the Run or the
+ * secret itself (a Run that stopped, a secret that is gone, the policy's own
+ * refusal) stands, and no card is posted for it.
+ */
+export async function secretAdmission(secrets: PostgresSpaceSecretRepository, run: RunSecretCaller, secretRef: string): Promise<"readable" | "card"> {
+  try {
+    return await admitSecretUse(secrets, run, secretRef);
+  } catch (error) {
+    if (error instanceof SpaceSecretError && error.status >= 400 && error.status < 500) throw error;
+    console.warn("Admission policy could not be consulted; the request gets its card", { spaceId: run.spaceId,
+      error: error instanceof Error ? error.message : String(error) });
+    return "card";
+  }
+}
+
 export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
   const spaceSecrets = "/api/spaces/:spaceId/secrets";
   app.get(spaceSecrets, route("human", (c, user) =>
@@ -187,15 +205,8 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
     }
     const current = (await secrets.runList(caller(run))).secrets.find((secret) => secret.secretRef === input.secretRef);
     if (current?.readable) return { readable: true, secretRef: current.secretRef, envName: current.envName };
-    if (current) {
-      // The policy can spare the card or refuse outright. A failure to consult it is not a refusal: the card is posted.
-      const admitted = await admitSecretUse(secrets, caller(run), current.secretRef).catch((error: unknown) => {
-        if (error instanceof SpaceSecretError && error.code === "secret_request_refused") throw error;
-        console.warn("Admission policy could not be consulted; the request gets its card", { spaceId: run.spaceId,
-          error: error instanceof Error ? error.message : String(error) });
-        return "card" as const;
-      });
-      if (admitted === "readable") return { readable: true, secretRef: current.secretRef, envName: current.envName };
+    if (current && await secretAdmission(secrets, caller(run), current.secretRef) === "readable") {
+      return { readable: true, secretRef: current.secretRef, envName: current.envName };
     }
     const card = parseSecretRequestCard({ ...input, envName: current?.envName ?? input.envName,
       agentName: run.agentName, runId: run.runId, channelId: run.channelId });

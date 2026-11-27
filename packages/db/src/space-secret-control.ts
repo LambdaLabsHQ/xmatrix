@@ -52,12 +52,15 @@ const ADMISSION_POLICY_IN_FORCE_SQL = `SELECT p.page_id,p.library_name,p.source_
  * delivery message that is accepted or running. A Run that has reported no
  * execution yet is taken by what triggered its launch; the trigger alone
  * stays true for the Run's whole life, so it counts only until then. A
- * delegated request, a request the Instance itself asked, and a stopped or
- * ad-hoc program never count.
+ * delegated request, a request handed to another Instance, a request the
+ * Instance itself asked, and a stopped or ad-hoc program never count. The
+ * request is found in the Run's own Channel, which for a branch of a Page
+ * program is the branch's conversation, not the program's.
  */
 const ADMISSION_WORK_SQL = `SELECT DISTINCT p.page_id,p.page_name,encode(sha256(convert_to(p.source,'UTF8')),'hex') AS digest
   FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
   WHERE r.space_id=$1 AND r.channel_id=$2 AND r.settled_at IS NULL AND r.delegator_user_id IS NULL
+    AND (r.instance_id IS NULL OR r.instance_id=$4)
     AND p.state='running' AND p.stop_reason IS NULL AND p.page_id IS NOT NULL AND p.page_name IS NOT NULL
     AND (EXISTS (SELECT 1 FROM data.agent_message_executions working WHERE working.run_id=$3
         AND working.channel_id=r.channel_id AND working.source_message_id=r.delivery_message_id
@@ -69,7 +72,7 @@ const ADMISSION_WORK_SQL = `SELECT DISTINCT p.page_id,p.page_name,encode(sha256(
 
 async function admissionWork(tx: DatabaseTransaction, spaceId: string, run: RunSecretCaller): Promise<AdmissionWork | undefined> {
   const rows = await tx.query({ name: "space_secret_admission_work_v1", text: ADMISSION_WORK_SQL,
-    values: [spaceId, run.channelId, run.runId], maxRows: 2 });
+    values: [spaceId, run.channelId, run.runId, run.instanceId], maxRows: 2 });
   // Work for two programs at once names neither.
   return rows.length === 1 ? { program: `${String(rows[0]!.page_id)}/${String(rows[0]!.page_name)}`, digest: String(rows[0]!.digest) }
     : undefined;

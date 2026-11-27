@@ -2,7 +2,7 @@ import { PostgresPageRepository, type SpaceAdmissionPolicy } from "@xmatrix/db";
 import { appViewAddress, sha256Hex, type ParsedSettingAddress, type SettingDescriptor } from "@xmatrix/protocol";
 import { admissionPolicyProblems } from "./admission-policy";
 import { spaceSecretRepository } from "./index-routes-secrets";
-import { nornLibBlocks } from "./norn-host";
+import { nornLibBlocks, RESERVED_NORN_LIBRARY_NAMES } from "./norn-host";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { SettingWriteRefused, type SettingDomainResolver, type SettingsReader } from "./settings-registry";
 
@@ -49,6 +49,10 @@ interface Standing {
 /** A library's text as it stands on a Page now, with what keeps it from being adopted. */
 async function standing(port: AdmissionSettingsPort, reader: SettingsReader, address: ParsedSettingAddress): Promise<Standing> {
   const [pageId, libraryName] = address.parts as [string, string];
+  // The catalog that refuses these names is not consulted here, so the name is refused here.
+  if (RESERVED_NORN_LIBRARY_NAMES.has(libraryName)) {
+    return { pageId, libraryName, problem: `${libraryName} is a built-in module's name; a Page's library takes another` };
+  }
   const page = await port.page(reader, pageId);
   if (!page) return { pageId, libraryName, problem: "That Page is not in this Space, or you cannot read it" };
   const block = nornLibBlocks(page.body).find((candidate) => candidate.name === libraryName);
