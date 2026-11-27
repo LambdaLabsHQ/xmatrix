@@ -1,12 +1,15 @@
-import { ControlError, PostgresSpaceSecretRepository, SpaceSecretError, type RunSecretCaller } from "@xmatrix/db";
-import { HUB_ROUTES, parseSecretAccessRequestCard, parseSecretRequestCard } from "@xmatrix/protocol";
+import { ControlError, PostgresSpaceSecretRepository, SECRET_USE_ADMISSION, SpaceSecretError, type RunSecretCaller } from "@xmatrix/db";
+import { HUB_ROUTES, parseSecretAccessRequestCard, parseSecretRequestCard, parseSettingAddress } from "@xmatrix/protocol";
 import type { Context, Hono } from "hono";
 import type { AgentRunPrincipal, AuthUser } from "./auth";
+import { admit } from "./admission-policy";
 import { markCardAnswered } from "./channel-messages";
 import { readBoundedRequestBody, requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { secretAccessRequestAppend, secretRequestAppend } from "./secret-request-card";
 import { appendHubCard } from "./settings-card";
+import { admissionSettingsDomain } from "./settings-domain-admission";
+import { SettingWriteRefused } from "./settings-registry";
 import type { Env } from "./types";
 
 /**
@@ -19,6 +22,46 @@ import type { Env } from "./types";
  */
 
 const NO_STORE = { "cache-control": "private, no-store" };
+
+/**
+ * A waiting CLI keeps polling while a refusal says either of these
+ * (`secret_request_still_open`). A policy's own words must not hold one there.
+ */
+const CLI_WAITS_ON = ["is not saved", "not configured for this Agent"];
+
+/** Why the Space's policy refuses a secret, in words no waiting CLI takes for "still open". */
+export function admissionRefusal(secretRef: string, why: string): string {
+  const reason = why.trim().slice(0, 500);
+  const said = reason && !CLI_WAITS_ON.some((phrase) => reason.includes(phrase)) ? reason : "its adopted policy refuses this request";
+  const subject = CLI_WAITS_ON.some((phrase) => secretRef.includes(phrase)) ? "this secret" : secretRef;
+  return `This Space refuses ${subject}: ${said}`;
+}
+
+/**
+ * Puts a Run's request for a saved secret that asks first to the Space's
+ * adopted admission policy (docs/design/admission-policy.md). `Allow`
+ * approves that Run with no card; `Deny` refuses; anything else, and a Space
+ * with no policy, leaves the request to its card. Evaluating is pure
+ * computation between two transactions, and the second reads again
+ * everything the answer rested on.
+ */
+export async function admitSecretUse(secrets: PostgresSpaceSecretRepository, run: RunSecretCaller, secretRef: string): Promise<"readable" | "card"> {
+  const { policy, work } = await secrets.runAdmission(run);
+  if (!policy) return "card";
+  const answer = admit(policy.sourceText, { what: SECRET_USE_ADMISSION, target: secretRef, place: run.channelId,
+    owner: run.ownerUserId, ...(work ? { work } : {}) });
+  if (answer.answer === "deny") {
+    throw new SpaceSecretError("secret_request_refused", 403, admissionRefusal(secretRef, answer.reason));
+  }
+  if (answer.answer === "card") {
+    if (!answer.why.startsWith("the policy answers AlsoAsk")) {
+      console.warn("Admission policy decided nothing; the request gets its card", { spaceId: run.spaceId, why: answer.why.slice(0, 300) });
+    }
+    return "card";
+  }
+  const approved = await secrets.runAdmit(run, { secretRef, sourceSha256: policy.sourceSha256, ...(work ? { work } : {}) });
+  return approved.readable ? "readable" : "card";
+}
 
 /** The Space secret store, which checks every caller's role itself. */
 export function spaceSecretRepository(env: Env): PostgresSpaceSecretRepository {
@@ -60,6 +103,26 @@ function route(kind: "human" | "agent", handler: (c: Context<{ Bindings: Env }>,
   };
 }
 
+/**
+ * Whether the Space's policy spared this request its card. The policy can
+ * spare the card or refuse outright. A passing failure to consult it is not a
+ * refusal: the card is posted. What the store answers about the Run or the
+ * secret itself (a Run that stopped, a secret that is gone, the policy's own
+ * refusal) stands, and no card is posted for it.
+ */
+export async function secretAdmission(secrets: PostgresSpaceSecretRepository, run: RunSecretCaller, secretRef: string): Promise<"readable" | "card"> {
+  try {
+    return await admitSecretUse(secrets, run, secretRef);
+  } catch (error) {
+    // Told by what the error says, not by its class: an answer of the store carries a 4xx status wherever it was built.
+    const status = (error as { status?: unknown } | null)?.status;
+    if (typeof status === "number" && status >= 400 && status < 500) throw error;
+    console.warn("Admission policy could not be consulted; the request gets its card", { spaceId: run.spaceId,
+      error: error instanceof Error ? error.message : String(error) });
+    return "card";
+  }
+}
+
 export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
   const spaceSecrets = "/api/spaces/:spaceId/secrets";
   app.get(spaceSecrets, route("human", (c, user) =>
@@ -71,6 +134,32 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
   }));
   app.delete(`${spaceSecrets}/:secretRef`, route("human", (c, user) =>
     spaceSecretRepository(c.env).remove({ spaceId: c.req.param("spaceId")!, userId: user.id, secretRef: c.req.param("secretRef")! })));
+
+  // The Space's admission policy, where a person reads, adopts and withdraws it without a card. Adopting goes
+  // through the same domain a settings card writes through, so one rule says what can be adopted and by whom.
+  const admissionPolicy = "/api/spaces/:spaceId/admission-policy";
+  const admissionReader = (c: Context<{ Bindings: Env }>, user: AuthUser) => ({ env: c.env, spaceId: c.req.param("spaceId")!, userId: user.id });
+  app.get(admissionPolicy, route("human", async (c, user) => {
+    const reader = admissionReader(c, user);
+    const adopted = await spaceSecretRepository(c.env).admissionPolicy({ spaceId: reader.spaceId, userId: user.id });
+    const address = parseSettingAddress(c.req.query("address") ??
+      (adopted.policy ? `admission:${adopted.policy.pageId}/${adopted.policy.libraryName}` : ""));
+    if (!address || address.domain !== "admission") return adopted;
+    const described = await admissionSettingsDomain().describe(reader, [address]);
+    return { ...adopted, ...(typeof described === "string" ? {} : { setting: described[0] }) };
+  }));
+  app.put(admissionPolicy, route("human", async (c, user) => {
+    const input = await body(c);
+    const address = parseSettingAddress(input.address);
+    if (!address || address.domain !== "admission" || typeof input.value !== "string") {
+      throw new SettingWriteRefused("Name the library as admission:<page id>/<library>, with the text you read");
+    }
+    const reader = admissionReader(c, user);
+    await admissionSettingsDomain().write!(reader, address, input.value);
+    return spaceSecretRepository(c.env).admissionPolicy({ spaceId: reader.spaceId, userId: user.id });
+  }));
+  app.delete(admissionPolicy, route("human", (c, user) =>
+    spaceSecretRepository(c.env).withdrawAdmissionPolicy({ spaceId: c.req.param("spaceId")!, userId: user.id })));
 
   // An Agent saves a credential it already holds into its Space, or, naming
   // only `access: ask`, makes a held secret ask first.
@@ -118,6 +207,9 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
     }
     const current = (await secrets.runList(caller(run))).secrets.find((secret) => secret.secretRef === input.secretRef);
     if (current?.readable) return { readable: true, secretRef: current.secretRef, envName: current.envName };
+    if (current && await secretAdmission(secrets, caller(run), current.secretRef) === "readable") {
+      return { readable: true, secretRef: current.secretRef, envName: current.envName };
+    }
     const card = parseSecretRequestCard({ ...input, envName: current?.envName ?? input.envName,
       agentName: run.agentName, runId: run.runId, channelId: run.channelId });
     if (!card || (!current && !card.envName) || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u.test(card.secretRef)) {

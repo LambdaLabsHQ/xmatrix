@@ -20,6 +20,64 @@ const SECRET_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/u;
 const SECRET_METADATA_COLUMNS = `s.space_id,s.secret_ref,s.env_name,s.description,s.access,
   s.created_by_user_id,s.created_at,s.updated_at`;
 
+/** The kind of thing an admission policy is asked about here: a Run asks to use a secret that asks first. */
+export const SECRET_USE_ADMISSION = "secret.use";
+const MAX_ADMISSION_POLICY_BYTES = 16 * 1024;
+const ADMISSION_LIBRARY_NAME = /^[A-Z][A-Za-z0-9_]{0,39}$/u;
+
+/** The policy a Space adopted, as its admins read it (docs/design/admission-policy.md). */
+export interface SpaceAdmissionPolicy {
+  pageId: string; libraryName: string; sourceText: string; sourceSha256: string; adoptedByUserId: string; adoptedAt: string;
+}
+/** The Page program whose open request a Run is working on: `<page id>/<block name>` and the digest of its text. */
+export interface AdmissionWork { program: string; digest: string }
+
+function admissionPolicy(row: QueryResultRow): SpaceAdmissionPolicy {
+  return { pageId: String(row.page_id), libraryName: String(row.library_name), sourceText: String(row.source_text),
+    sourceSha256: String(row.source_sha256), adoptedByUserId: String(row.adopted_by_user_id),
+    adoptedAt: new Date(row.adopted_at as string).toISOString() };
+}
+
+/**
+ * The adopted policy while whoever adopted it is still an owner or admin of
+ * the Space: authority is current, so a policy a former admin adopted is none.
+ */
+const ADMISSION_POLICY_IN_FORCE_SQL = `SELECT p.page_id,p.library_name,p.source_text,p.source_sha256,p.adopted_by_user_id,p.adopted_at
+  FROM data.space_admission_policies p JOIN data.space_members m ON m.space_id=p.space_id AND m.user_id=p.adopted_by_user_id
+  WHERE p.space_id=$1 AND m.role IN ('owner','admin')`;
+
+/**
+ * The Page programs whose open request this Run is working on now. Attributed
+ * by Run, never by Instance: the Run has an execution of the request's
+ * delivery message that is accepted or running. A Run that has reported no
+ * execution yet is taken by what triggered its launch; the trigger alone
+ * stays true for the Run's whole life, so it counts only until then. A
+ * delegated request, a request handed to another Instance, a request the
+ * Instance itself asked, and a stopped or ad-hoc program never count. The
+ * request is found in the Run's own Channel, which for a branch of a Page
+ * program is the branch's conversation, not the program's.
+ */
+const ADMISSION_WORK_SQL = `SELECT DISTINCT p.page_id,p.page_name,encode(sha256(convert_to(p.source,'UTF8')),'hex') AS digest
+  FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
+  WHERE r.space_id=$1 AND r.channel_id=$2 AND r.settled_at IS NULL AND r.delegator_user_id IS NULL
+    AND (r.instance_id IS NULL OR r.instance_id=$4)
+    AND p.state='running' AND p.stop_reason IS NULL AND p.page_id IS NOT NULL AND p.page_name IS NOT NULL
+    AND (EXISTS (SELECT 1 FROM data.agent_message_executions working WHERE working.run_id=$3
+        AND working.channel_id=r.channel_id AND working.source_message_id=r.delivery_message_id
+        AND working.state IN ('accepted','running'))
+      OR (NOT EXISTS (SELECT 1 FROM data.agent_message_executions any_execution WHERE any_execution.run_id=$3)
+        AND EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=$3
+          AND launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id)))
+  LIMIT 2`;
+
+async function admissionWork(tx: DatabaseTransaction, spaceId: string, run: RunSecretCaller): Promise<AdmissionWork | undefined> {
+  const rows = await tx.query({ name: "space_secret_admission_work_v1", text: ADMISSION_WORK_SQL,
+    values: [spaceId, run.channelId, run.runId, run.instanceId], maxRows: 2 });
+  // Work for two programs at once names neither.
+  return rows.length === 1 ? { program: `${String(rows[0]!.page_id)}/${String(rows[0]!.page_name)}`, digest: String(rows[0]!.digest) }
+    : undefined;
+}
+
 export class SpaceSecretError extends ControlError {
   override name = "SpaceSecretError";
   constructor(code: string, status: number, message: string = code, retryable = false) {
@@ -367,6 +425,111 @@ export class PostgresSpaceSecretRepository {
     });
   }
 
+  /** The Space's adopted admission policy, for a member; its text only for one who may adopt. */
+  async admissionPolicy(input: { spaceId: string; userId: string }): Promise<{ policy?: SpaceAdmissionPolicy; canAdopt: boolean }> {
+    return this.inSpace(input.spaceId, "space-secret.admission-policy", async (tx) => {
+      const memberRole = await role(tx, input.spaceId, input.userId);
+      if (!memberRole || !SECRET_READERS.includes(memberRole)) {
+        throw new SpaceSecretError("forbidden", 403, "Only a Space member sees its admission policy");
+      }
+      const canAdopt = SECRET_ADMINS.includes(memberRole);
+      const rows = await tx.query({ name: "space_secret_admission_policy_read_v1", text: `SELECT page_id,library_name,
+        source_text,source_sha256,adopted_by_user_id,adopted_at FROM data.space_admission_policies WHERE space_id=$1`,
+      values: [input.spaceId], maxRows: 1 });
+      if (!rows[0]) return { canAdopt };
+      const policy = admissionPolicy(rows[0]);
+      return { policy: canAdopt ? policy : { ...policy, sourceText: "" }, canAdopt };
+    });
+  }
+
+  /**
+   * A Space admin adopts, in person, the text of one library on one of the
+   * Space's Pages as its admission policy. The caller read that text from the
+   * Page and checked it; this stores what was adopted, from where and by whom.
+   */
+  async adoptAdmissionPolicy(input: { spaceId: string; userId: string; pageId: string; libraryName: string;
+    sourceText: string; sourceSha256: string }): Promise<{ policy: SpaceAdmissionPolicy }> {
+    if (!ADMISSION_LIBRARY_NAME.test(input.libraryName) || !/^[0-9a-f]{64}$/u.test(input.sourceSha256) || !input.sourceText.trim() ||
+        !input.pageId || input.pageId.length > 300) {
+      throw new SpaceSecretError("invalid_request", 400, "An admission policy is a library on a Page, with its text and digest");
+    }
+    if (utf8ByteLength(input.sourceText) > MAX_ADMISSION_POLICY_BYTES) {
+      throw new SpaceSecretError("invalid_request", 413, "An admission policy is at most 16 KiB");
+    }
+    return this.inSpace(input.spaceId, "space-secret.admission-policy-adopt", async (tx) => {
+      await requireRole(tx, input.spaceId, input.userId, SECRET_ADMINS, "adopts its admission policy");
+      const page = await tx.query({ name: "space_secret_admission_page_v1", text: `SELECT 1 FROM data.pages
+        WHERE space_id=$1 AND page_id=$2 LIMIT 1`, values: [input.spaceId, input.pageId], maxRows: 1 });
+      if (!page[0]) throw new SpaceSecretError("page_not_found", 404, "That Page is not in this Space");
+      const rows = await tx.query({ name: "space_secret_admission_policy_adopt_v1", text: `INSERT INTO
+        data.space_admission_policies (space_id,page_id,library_name,source_text,source_sha256,adopted_by_user_id,adopted_at)
+        VALUES ($1,$2,$3,$4,$5,$6,clock_timestamp())
+        ON CONFLICT (space_id) DO UPDATE SET page_id=EXCLUDED.page_id,library_name=EXCLUDED.library_name,
+          source_text=EXCLUDED.source_text,source_sha256=EXCLUDED.source_sha256,
+          adopted_by_user_id=EXCLUDED.adopted_by_user_id,adopted_at=EXCLUDED.adopted_at
+        RETURNING page_id,library_name,source_text,source_sha256,adopted_by_user_id,adopted_at`,
+      values: [input.spaceId, input.pageId, input.libraryName, input.sourceText, input.sourceSha256, input.userId], maxRows: 1 });
+      await admissionAudit(tx, input.spaceId, input.userId, "policy_adopt", `policy:${input.sourceSha256}`);
+      return { policy: admissionPolicy(rows[0]!) };
+    });
+  }
+
+  /** A Space admin withdraws the Space's admission policy: every request goes to its card again. */
+  async withdrawAdmissionPolicy(input: { spaceId: string; userId: string }): Promise<{ withdrawn: boolean }> {
+    return this.inSpace(input.spaceId, "space-secret.admission-policy-withdraw", async (tx) => {
+      await requireRole(tx, input.spaceId, input.userId, SECRET_ADMINS, "withdraws its admission policy");
+      const rows = await tx.query({ name: "space_secret_admission_policy_withdraw_v1", text: `DELETE FROM
+        data.space_admission_policies WHERE space_id=$1 RETURNING source_sha256`, values: [input.spaceId], maxRows: 1 });
+      if (rows[0]) await admissionAudit(tx, input.spaceId, input.userId, "policy_withdraw", `policy:${String(rows[0].source_sha256)}`);
+      return { withdrawn: Boolean(rows[0]) };
+    });
+  }
+
+  /**
+   * What the Hub needs to put a Run's request for a secret to the Space's
+   * policy: the policy in force, and the Page program this Run is working for.
+   * Read in one uncached transaction with the Run's own liveness.
+   */
+  async runAdmission(run: RunSecretCaller): Promise<{ policy?: SpaceAdmissionPolicy; work?: AdmissionWork }> {
+    return this.inSpace(run.spaceId, "space-secret.run-admission", async (tx) => {
+      const spaceId = await liveRunSpace(tx, run, "read");
+      const rows = await tx.query({ name: "space_secret_admission_policy_in_force_v1", text: ADMISSION_POLICY_IN_FORCE_SQL,
+        values: [spaceId], maxRows: 1 });
+      if (!rows[0]) return {};
+      const work = await admissionWork(tx, spaceId, run);
+      return { policy: admissionPolicy(rows[0]), ...(work ? { work } : {}) };
+    });
+  }
+
+  /**
+   * The policy answered `Allow`: this Run may read the secret, approved by
+   * whoever adopted the policy, as on a card, and audited as the policy's
+   * answer. Everything the answer rested on is read again here: the policy's
+   * digest, its adopter's role, the Run's liveness and the work it named. If
+   * any moved, nothing is approved and the caller posts the card.
+   */
+  async runAdmit(run: RunSecretCaller, input: { secretRef: string; sourceSha256: string; work?: AdmissionWork }) {
+    const ref = secretRefOf(input.secretRef);
+    return this.inSpace(run.spaceId, "space-secret.run-admit", async (tx) => {
+      const spaceId = await liveRunSpace(tx, run, "read");
+      const rows = await tx.query({ name: "space_secret_admission_policy_in_force_v1", text: ADMISSION_POLICY_IN_FORCE_SQL,
+        values: [spaceId], maxRows: 1 });
+      const policy = rows[0] ? admissionPolicy(rows[0]) : undefined;
+      const work = await admissionWork(tx, spaceId, run);
+      if (!policy || policy.sourceSha256 !== input.sourceSha256 || work?.program !== input.work?.program ||
+          work?.digest !== input.work?.digest) return { readable: false };
+      const saved = await tx.query({ name: "space_secret_approve_read_v1", text: `SELECT 1 FROM data.space_secrets
+        WHERE space_id=$1 AND secret_ref=$2`, values: [spaceId, ref], maxRows: 1 });
+      if (!saved[0]) throw new SpaceSecretError("secret_not_found", 404, `Secret ${ref} is not saved in this Space`);
+      await approveRun(tx, spaceId, run.runId, ref, policy.adoptedByUserId);
+      await tx.query({ name: "space_secret_admission_approve_audit_v1", text: `INSERT INTO
+        data.secret_grant_audit (command_id,grant_id,owner_user_id,action,machine_id,space_id,secret_refs_json,created_at)
+        VALUES ($1,$2,$3,'policy_approve',NULL,$4,$5::jsonb,clock_timestamp())`, values: [crypto.randomUUID(),
+        `run:${run.runId}`.slice(0, 300), policy.adoptedByUserId, spaceId, JSON.stringify([ref])], maxRows: 0 });
+      return { readable: true };
+    });
+  }
+
   /** A transaction on the Space's own shard; Space secrets live with the Space. */
   private inSpace<T>(spaceId: string, operation: string, callback: (tx: DatabaseTransaction) => Promise<T>) {
     return inActiveSpace(this.database, { requestId: crypto.randomUUID(), operation, spaceId }, SpaceSecretError, callback);
@@ -421,6 +584,13 @@ export class PostgresSpaceSecretRepository {
     maxRows: 1 });
     return entry(rows[0]!);
   }
+}
+
+async function admissionAudit(tx: DatabaseTransaction, spaceId: string, userId: string, action: string, grantId: string) {
+  await tx.query({ name: "space_secret_admission_audit_v1", text: `INSERT INTO
+    data.secret_grant_audit (command_id,grant_id,owner_user_id,action,machine_id,space_id,secret_refs_json,created_at)
+    VALUES ($1,$2,$3,$4,NULL,$5,'[]'::jsonb,clock_timestamp())`, values: [crypto.randomUUID(), grantId, userId, action, spaceId],
+  maxRows: 0 });
 }
 
 /** The card names a Run and its Channel; they must agree. */

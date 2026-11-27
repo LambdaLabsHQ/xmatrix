@@ -708,6 +708,18 @@ previews and fail-closed v1-to-v2 ledger migration verification.
 and typed fields alongside its actions. See [norn-host-index.md](norn-host-index.md)
 for the compact always-on reference.
 
+## Admission
+
+A Space may adopt an admission policy: a Space library whose pure `admit`
+answers what the Hub is about to admit (`docs/design/admission-policy.md`,
+Norn spec §10.1). The Hub evaluates the text a Space admin adopted in person,
+never the Page's, and hands it the request as a value (`admission-policy.ts`).
+It is wired for one thing: a Run asking to use a saved secret that asks first
+(`POST /api/secret-requests`). `Allow` approves that Run with no card, `Deny`
+refuses, and `AlsoAsk`, a policy that fails, and a Space with no policy all
+post the card. The policy is not a program: it holds no ledger and no
+request, and nobody asks it anything. `Admission` is a reserved library name.
+
 ## Not in this version
 
 - Requests to an existing Instance by its address, other than one its holder
