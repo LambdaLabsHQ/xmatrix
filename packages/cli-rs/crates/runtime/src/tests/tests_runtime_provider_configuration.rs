@@ -1546,6 +1546,41 @@ fn a_network_block_while_authenticating_is_not_a_sign_out() {
 }
 
 #[test]
+fn a_machine_that_cannot_reach_its_vendor_is_not_signed_out() {
+    // Antigravity on a machine without its proxy on 2026-11-27: the sign-in
+    // could not refresh because Google was out of reach, and a sign-in card
+    // told the owner to sign in again, which could not help.
+    let unreachable = crate::acp_unreachable_service(
+        "Antigravity",
+        Some("https://oauth2.googleapis.com/"),
+        "Authentication required | code=-32000",
+    );
+    assert!(unreachable.starts_with("Antigravity could not reach its service (oauth2.googleapis.com)"));
+    assert!(!crate::harness_signed_out_error(&unreachable));
+    assert!(!crate::harness_signed_out_error(
+        "antigravity agent session/new failed: authentication required: \
+         Post \"https://oauth2.googleapis.com/token\": dial tcp 142.250.72.10:443: i/o timeout"
+    ));
+    assert!(!crate::harness_signed_out_error(
+        "OAuth session expired and could not be refreshed: TypeError: fetch failed (ETIMEDOUT)"
+    ));
+    // A refusal from the vendor itself stays a sign-out whatever else it says.
+    assert!(crate::harness_signed_out_error(
+        "Failed to authenticate. API Error: 401 Unauthorized (after ECONNRESET retry)"
+    ));
+    // A readiness check that could not reach the vendor is no answer, not a
+    // harness that cannot take work.
+    assert_eq!(
+        crate::readiness_verdict::<()>(Err(crate::CliError::Launch(unreachable))),
+        None
+    );
+    let refused = crate::readiness_verdict::<()>(Err(crate::CliError::Launch(
+        "Antigravity authentication required: Not logged in".to_string(),
+    )));
+    assert!(matches!(refused, Some(Err(_))));
+}
+
+#[test]
 fn a_client_the_provider_no_longer_serves_is_not_a_sign_out() {
     // What Gemini CLI answered a personal Google account on 2026-11-24:
     // signing in again cannot help, so no sign-in card may be offered.

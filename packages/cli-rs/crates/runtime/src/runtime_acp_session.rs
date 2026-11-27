@@ -282,12 +282,21 @@ impl AcpSession {
                 if self.config.authenticate.is_none()
                     && err.code == Some(ACP_AUTH_REQUIRED_CODE) =>
             {
+                let display_name = self.config.display_name.clone();
+                // It could not refresh its sign-in because the network failed:
+                // logging in again cannot help.
+                if crate::harness_network_failure(&err.detail) {
+                    return Err(CliError::Launch(acp_unreachable_service(
+                        &display_name,
+                        None,
+                        &err.detail,
+                    )));
+                }
                 let method_id = acp_retry_auth_method(&self.auth_method_ids);
                 // The agent itself said it needs credentials and refused the
                 // ones it has: whatever its wording, that is a sign-in problem.
                 // A method that answers only after someone signs in somewhere
                 // (CodeBuddy's opens a browser login and waits) is one too.
-                let display_name = self.config.display_name.clone();
                 match tokio::time::timeout(
                     ACP_AUTH_RETRY_TIMEOUT,
                     self.request(
@@ -301,6 +310,17 @@ impl AcpSession {
                         CliError::Launch(acp_authenticate_refusal(&display_name, &err.to_string()))
                     })?,
                     Err(_) => {
+                        // A sign-in that cannot reach its vendor hangs the same
+                        // way as one waiting for a person: look before saying so.
+                        if let Some(url) = self.config.service_probe_url
+                            && !acp_service_reachable(url).await
+                        {
+                            return Err(CliError::Launch(acp_unreachable_service(
+                                &display_name,
+                                Some(url),
+                                &err.detail,
+                            )));
+                        }
                         return Err(CliError::Launch(format!(
                             "{display_name} authentication required: it waits for a sign-in \
                              (authenticate {method_id} did not answer)"
@@ -1759,6 +1779,37 @@ pub(crate) fn acp_authenticate_refusal(display_name: &str, err: &str) -> String 
     }
 }
 
+/// A start that failed because this machine could not reach the agent's
+/// vendor. Its own words follow, but the lead keeps it from reading as a
+/// sign-out, which signing in again could not fix.
+pub(crate) fn acp_unreachable_service(display_name: &str, url: Option<&str>, err: &str) -> String {
+    let host = url
+        .and_then(|url| reqwest::Url::parse(url).ok())
+        .and_then(|url| url.host_str().map(str::to_string));
+    let target = host.map(|host| format!(" ({host})")).unwrap_or_default();
+    format!(
+        "{display_name} {}{target}: check this machine's network or proxy; it said: {err}",
+        crate::HARNESS_UNREACHABLE_SERVICE
+    )
+}
+
+/// Whether this machine gets any HTTP answer from `url`, through the same
+/// proxy settings a harness reads from the environment. Any status counts:
+/// only a connection that never opens means the service is out of reach.
+pub(crate) async fn acp_service_reachable(url: &str) -> bool {
+    crate::ensure_reqwest_crypto_provider();
+    let Ok(client) = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("xMatrix-reachability/1")
+        .build()
+    else {
+        return true;
+    };
+    client.head(url).send().await.is_ok()
+}
+
 /// The agent's provider no longer serves this client, whoever signs in.
 pub(crate) fn acp_client_no_longer_supported(detail: &str) -> bool {
     detail.to_ascii_lowercase().contains("client is no longer supported")
@@ -1821,9 +1872,17 @@ pub(crate) async fn acp_harness_readiness(
 /// A harness that quits or errors before a session opens fails every launch
 /// the same way (a WorkBuddy-bundled CodeBuddy exits right after loading its
 /// mods), so routing must skip it as surely as one that refused credentials.
+///
+/// One that could not reach its vendor said nothing about whether it can take
+/// work once the network is back, so that is no answer.
 fn readiness_verdict<T>(opened: error::Result<T>) -> Option<Result<(), String>> {
     match opened {
         Ok(_) => Some(Ok(())),
-        Err(err) => Some(Err(err.to_string())),
+        Err(err) => {
+            let detail = err.to_string();
+            (!crate::harness_network_failure(&detail)
+                || crate::harness_signed_out_error(&detail))
+            .then_some(Err(detail))
+        }
     }
 }

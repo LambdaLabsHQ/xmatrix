@@ -28,12 +28,31 @@ pub(crate) const AGENT_SIGNED_OUT_LIFECYCLE_REASON: &str = "harness_signed_out";
 /// "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare" is
 /// a network block in front of the API while the program is still signed in.
 /// Only the refusal itself (a 401, an expired or missing credential) counts.
+///
+/// A machine that cannot reach the vendor at all (no proxy where one is needed,
+/// DNS or a dropped connection) cannot refresh even a valid sign-in, and the
+/// harness may then say "authentication required". Signing in again cannot
+/// help, so that is not a sign-out unless the vendor itself refused the
+/// credential (a 401, an invalid key, "not logged in").
 pub(crate) fn harness_signed_out_error(detail: &str) -> bool {
     // A provider that no longer serves this client refuses every sign-in.
     if crate::acp_client_no_longer_supported(detail) {
         return false;
     }
     let text = detail.to_ascii_lowercase();
+    if harness_network_failure(detail)
+        && ![
+            "api error: 401",
+            "401 unauthorized",
+            "invalid api key",
+            "missing api key",
+            "not logged in",
+        ]
+        .iter()
+        .any(|marker| text.contains(marker))
+    {
+        return false;
+    }
     [
         "api error: 401",
         "oauth session expired",
@@ -47,6 +66,41 @@ pub(crate) fn harness_signed_out_error(detail: &str) -> bool {
         "authentication required",
         "login required",
         "401 unauthorized",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
+}
+
+/// What a launch writes when the harness could not reach its vendor, so the
+/// failure reads as a network problem wherever it is classified.
+pub(crate) const HARNESS_UNREACHABLE_SERVICE: &str = "could not reach its service";
+
+/// Whether an error says the machine could not reach the vendor's service:
+/// Node's and Go's network errors, and the launch's own unreachable wording.
+pub(crate) fn harness_network_failure(detail: &str) -> bool {
+    let text = detail.to_ascii_lowercase();
+    [
+        HARNESS_UNREACHABLE_SERVICE,
+        "fetch failed",
+        "etimedout",
+        "econnrefused",
+        "econnreset",
+        "enotfound",
+        "eai_again",
+        "enetunreach",
+        "ehostunreach",
+        "getaddrinfo",
+        "socket hang up",
+        "network error",
+        "network is unreachable",
+        "connection refused",
+        "connection reset",
+        "connection timed out",
+        "i/o timeout",
+        "no such host",
+        "dial tcp",
+        "tls handshake timeout",
+        "error sending request",
     ]
     .iter()
     .any(|marker| text.contains(marker))

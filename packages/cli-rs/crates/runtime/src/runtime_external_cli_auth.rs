@@ -2679,6 +2679,9 @@ struct AcpVendorConfig {
     /// demand via `read_file`, so skipping eager inlining avoids media bloat
     /// across long resumed sessions and duplicate image ingestion.
     pub(crate) inline_prompt_images: bool,
+    /// A URL of the vendor's sign-in service. When a credential retry hangs,
+    /// a machine that cannot reach it is offline, not waiting for a sign-in.
+    service_probe_url: Option<&'static str>,
 }
 
 impl AcpVendorConfig {
@@ -2715,6 +2718,7 @@ impl AcpVendorConfig {
             supports_background_tasks: false,
             steers_mid_turn: false,
             inline_prompt_images: true,
+            service_probe_url: None,
         }
     }
 
@@ -2765,6 +2769,9 @@ impl AcpVendorConfig {
             supports_background_tasks: stem == "antigravity",
             steers_mid_turn: stem == "antigravity",
             inline_prompt_images: stem != "antigravity",
+            // Google accounts refresh their tokens here.
+            service_probe_url: matches!(stem.as_str(), "antigravity" | "gemini")
+                .then_some("https://oauth2.googleapis.com/"),
         }
     }
 

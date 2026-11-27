@@ -149,8 +149,9 @@ use runtime_trusted_role_prompt::{
     trusted_role_is_active,
 };
 use runtime_turn_failure::{
-    AGENT_SIGNED_OUT_LIFECYCLE_REASON, clear_pending_turn_failure, harness_signed_out_error,
-    report_turn_failure, report_turn_failure_with_usage_limit, resend_pending_turn_failure,
+    AGENT_SIGNED_OUT_LIFECYCLE_REASON, HARNESS_UNREACHABLE_SERVICE, clear_pending_turn_failure,
+    harness_network_failure, harness_signed_out_error, report_turn_failure,
+    report_turn_failure_with_usage_limit, resend_pending_turn_failure,
 };
 use xmatrix_harness::fields::{first_f64, first_string};
 use xmatrix_harness::quota::antigravity::read_antigravity_quota_usage;
