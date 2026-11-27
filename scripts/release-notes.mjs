@@ -138,9 +138,40 @@ export function plainStoreText(markdown) {
     .replace(/>/gu, "›");
 }
 
+const APP_STORE_EXCLUDED_HEADINGS = new Set([
+  "cli and daemon",
+  "hub and automation",
+  "hub and automation (already live)",
+  "compatibility and updating",
+  "known limitations",
+]);
+
+function filterAppStoreSections(markdown) {
+  const lines = markdown.split("\n");
+  const sections = [];
+  let current = { heading: null, lines: [] };
+  for (const line of lines) {
+    const match = /^##\s+(.+?)\s*$/u.exec(line);
+    if (match) {
+      sections.push(current);
+      current = { heading: match[1], lines: [line] };
+    } else {
+      current.lines.push(line);
+    }
+  }
+  sections.push(current);
+  const named = sections.filter((s) => s.heading !== null);
+  if (!named.length) return markdown;
+  const kept = named.filter((s) => !APP_STORE_EXCLUDED_HEADINGS.has(s.heading.toLowerCase()));
+  if (!kept.length) return markdown;
+  // Prefer iOS section first when present so mobile users read iOS changes immediately.
+  kept.sort((a, b) => (a.heading.toLowerCase() === "ios" ? -1 : b.heading.toLowerCase() === "ios" ? 1 : 0));
+  return kept.map((s) => s.lines.join("\n").trim()).filter(Boolean).join("\n\n");
+}
+
 /** Apple's What's New field is plain text, bounded to 4,000 CRLF characters. */
 export function appStoreReleaseNotes(root, version) {
-  const notes = plainStoreText(authoredReleaseNotes(root, version));
+  const notes = plainStoreText(filterAppStoreSections(authoredReleaseNotes(root, version)));
   const link = `\n\nFull release notes: https://xmatrix.sh/releases/${version}`;
   const available = 4_000 - appleTextLength(link);
   if (appleTextLength(notes) <= available) return notes + link;

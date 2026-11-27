@@ -34,8 +34,34 @@ test("stable notes are version-specific, nonempty and cannot carry transaction m
   // Multi-line notes must still fit Apple's 4,000-char limit after LF->CRLF normalization and strip angle brackets.
   writeFileSync(file, `# xMatrix 1.2.0\n\n${Array.from({ length: 40 }, () => `Use <account> ${"a".repeat(86)}`).join("\n")}`);
   const multilineNotes = appStoreReleaseNotes(root, "1.2.0");
-  assert.ok(appleTextLength(multilineNotes) <= 4000, `appleTextLength=${appleTextLength(multilineNotes)}`);
+  assert.equal(appleTextLength(multilineNotes) <= 4000, true, `appleTextLength=${appleTextLength(multilineNotes)}`);
   assert.equal(/[<>]/u.test(multilineNotes), false);
+  // Multi-platform notes prioritize iOS/Website and drop CLI/Known limitations from App Store What's New.
+  writeFileSync(file, [
+    "# xMatrix 1.2.0",
+    "",
+    "This release updates website, CLI, and iOS.",
+    "",
+    "## Website",
+    "",
+    "- Cleaner workspace search.",
+    "",
+    "## CLI and daemon",
+    "",
+    "- Lighter channel lookup.",
+    "",
+    "## iOS",
+    "",
+    "- Native attachment picker.",
+    "",
+    "## Known limitations",
+    "",
+    "- Windows CLI binaries are not yet Authenticode-signed.",
+  ].join("\n"));
+  const filtered = appStoreReleaseNotes(root, "1.2.0");
+  assert.match(filtered, /^iOS\n\n- Native attachment picker\./u);
+  assert.match(filtered, /Website\n\n- Cleaner workspace search\./u);
+  assert.doesNotMatch(filtered, /CLI and daemon|Authenticode-signed/u);
   assert.throws(() => authoredReleaseNotes(root, "../../outside"), /version/iu);
 });
 
