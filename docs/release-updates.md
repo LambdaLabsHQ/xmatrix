@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: Replay plays at one even rate the reader sets, one place at a time, and the space bar pauses it
+
+Replay fitted each version into a few seconds: a version that changed a lot typed its words faster, so a long change flashed past; every word a version took out was struck at once wherever it was, while the page showed only the first; and the next version began the moment one ended. Replay now plays each version's changes one place at a time, in page order: the page moves to the place, the words taken out are struck by a red line from left to right and fold away, and the new words are typed by their author's caret. Striking and typing go at one even rate in characters a second, however much a version changed; only moving to the next place and folding struck words take a fixed beat. The slider sets that rate, from 4 to 128 characters a second, 12 by default, and shows it. In History the space bar starts Replay and pauses and resumes it, except while typing in a field. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Replay's speed is a slider from very slow to very fast, and Replay has a phone layout
 
 Replay's speed was a button that stepped through 1×, 2× and 4×. It is now a slider beside the play button, from 0.25× on the left to 8× on the right along powers of two, with a turtle and a hare at its ends and the speed shown beside it. It can be set before Replay starts and moved while it plays, and the playing version follows it at once.

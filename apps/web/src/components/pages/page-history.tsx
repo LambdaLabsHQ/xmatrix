@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { renderPageDiff, renderPageDocument } from "./page-document-render";
 import type { PageMediaUrl } from "./page-media";
 import type { PageReferenceTargets } from "./page-reference-chips";
-import { REPLAY_FASTEST, REPLAY_SLOWEST, replaySpeedLabel, type ReplayProgress, type ReplaySpeed } from "./page-replay";
+import { REPLAY_DEFAULT, REPLAY_FASTEST, REPLAY_SLOWEST, replaySpeedLabel, type ReplayProgress, type ReplaySpeed } from "./page-replay";
 
 /**
  * A page's history (pages-live-document.md §4.2, §7): the other of the page's two states. The page is always
@@ -59,7 +59,7 @@ export interface PageHistoryState {
   host: RefObject<HTMLDivElement | null>;
   /** The replay from the reader's last visit, while it plays (page-replay.tsx). */
   replay: ReplayProgress | null;
-  /** How fast the replay plays; the reader sets it on a slider, before or while it plays. */
+  /** The even rate the replay plays at, in characters a second; the reader sets it on a slider, before or while it plays. */
   speed: ReplaySpeed;
   setSpeed: (speed: ReplaySpeed) => void;
   setReplay: Dispatch<SetStateAction<ReplayProgress | null>>;
@@ -86,7 +86,7 @@ export function usePageHistory({ open, spaceId, pageId, token, headRevision, sin
   const [marked, setMarked] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [replay, setReplay] = useState<ReplayProgress | null>(null);
-  const [speed, setSpeed] = useState<ReplaySpeed>(1);
+  const [speed, setSpeed] = useState<ReplaySpeed>(REPLAY_DEFAULT);
   // Each time History opens it starts from what is new.
   useEffect(() => {
     if (open) return;
@@ -410,7 +410,7 @@ export function PageHistoryBar({ history, canEdit, onClose, replayControls = tru
   );
 }
 
-/** The speed slider moves along powers of two, so each step to the right is the same "faster". */
+/** The rate slider moves along powers of two, so each step to the right is the same "faster". */
 const SPEED_MIN = Math.log2(REPLAY_SLOWEST), SPEED_MAX = Math.log2(REPLAY_FASTEST);
 
 /** Plays the replay, and pauses and resumes it while it plays. */
@@ -425,18 +425,18 @@ function RewindPlay({ history }: { history: PageHistoryState }) {
   );
 }
 
-/** The replay's speed, from very slow on the left to very fast on the right. */
+/** The replay's even rate, from very slow on the left to very fast on the right. */
 function RewindSpeed({ history, className }: { history: PageHistoryState; className?: string }) {
   const { speed, setSpeed } = history;
   return (
     <label className={cn("flex items-center gap-2 text-xs text-muted-foreground", className)}
-      title="Replay speed: slow on the left, fast on the right">
+      title="Replay speed in characters a second: slow on the left, fast on the right">
       <Turtle className="size-3.5 shrink-0" aria-hidden="true" />
       <input type="range" aria-label="Replay speed" aria-valuetext={replaySpeedLabel(speed)} data-testid="page-rewind-speed"
         min={SPEED_MIN} max={SPEED_MAX} step={0.05} value={Math.log2(speed)}
         onChange={(event) => setSpeed(2 ** Number(event.target.value))} className="w-28 min-w-0 flex-1 accent-primary" />
       <Rabbit className="size-3.5 shrink-0" aria-hidden="true" />
-      <span className="w-10 shrink-0 tabular-nums text-foreground" data-testid="page-rewind-speed-value">{replaySpeedLabel(speed)}</span>
+      <span className="w-20 shrink-0 tabular-nums text-foreground" data-testid="page-rewind-speed-value">{replaySpeedLabel(speed)}</span>
     </label>
   );
 }
@@ -447,8 +447,27 @@ function rewindStatus(history: PageHistoryState): string {
   return history.news.length === 1 ? "1 change while you were away" : `${history.news.length} changes while you were away`;
 }
 
+/** The space bar plays the replay, and pauses and resumes it, wherever the reader is not typing. */
+function useSpaceToPlay(history: PageHistoryState) {
+  const { setReplay } = history;
+  const playable = history.news.length > 0;
+  useEffect(() => {
+    if (!playable) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== " " || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input:not([type="range"]), textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+      event.preventDefault();
+      setReplay((now) => now ? { ...now, paused: !now.paused } : { step: 0, pos: 0, clock: "" });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [playable, setReplay]);
+}
+
 /** The replay's controls in History's header: play, speed and the clock it keeps. */
 function PageRewindTrack({ history }: { history: PageHistoryState }) {
+  useSpaceToPlay(history);
   if (!history.news.length) return <span className="mr-auto" />;
   return (
     <div className="mx-4 mr-auto flex items-center gap-3" data-testid="page-rewind">
