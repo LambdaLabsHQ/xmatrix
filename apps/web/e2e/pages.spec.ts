@@ -2531,6 +2531,7 @@ test("typing fast at the top of a busy page while an Agent writes keeps every ke
   agentWrites(server, push, 1, "none", "none yet", "writing");
 
   // A slow device: the page renders slower than the keys arrive.
+  await browser.screenshot({ path: "/tmp/claude-1000/ime-0.png", clip: { x: 384, y: 60, width: 500, height: 140 } });
   const cdp = await browser.context().newCDPSession(browser);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
   // An empty paragraph opens the page, and the title is typed into its heading, key after key.
@@ -2903,4 +2904,25 @@ test("a page's code blocks take syntax inks by their fence's language, and a tab
   await expect(blocks.first().locator(".hljs-keyword")).toHaveText("const");
   await expect(blocks.nth(1)).toContainText("sh.xmatrix.app.pro.annual");
   await expect(blocks.nth(1).locator("[class*='hljs-']")).toHaveCount(0);
+});
+
+test("a title typed through an IME hides \"Untitled\" while the text is composed, before the editor reads any in", async ({ page: browser }) => {
+  await installWorkspaceStubs(browser, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  await fixtureJson(browser, "page-tree", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u, { pages: [] });
+  await fixtureJson(browser, "migration-read", /\/api\/xmatrix\/spaces\/[^/]+\/page-migration$/u,
+    { spaceId: E2E_SPACE.id, state: "none", version: 0, drafter: null, draft: { pages: [] }, sources: [], report: null });
+  await browser.goto("/app", { waitUntil: "domcontentloaded" });
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await browser.getByRole("button", { name: "Create the first page" }).click();
+  const title = browser.getByTestId("page-title");
+  const editor = browser.getByTestId("page-editor").locator(".page-document");
+  await expect(editor).toBeFocused();
+  const placeholder = () => title.evaluate((node) => getComputedStyle(node, "::before").content);
+  await expect.poll(placeholder).toBe('"Untitled"');
+  // The IME draws its marked text in the line itself; "Untitled" would stand under it.
+  await editor.evaluate((dom) => dom.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+  await expect.poll(placeholder).toMatch(/^(none|normal)$/u);
+  // A composition given up leaves the line empty, and named "Untitled" again.
+  await editor.evaluate((dom) => dom.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "" })));
+  await expect.poll(placeholder).toBe('"Untitled"');
 });
