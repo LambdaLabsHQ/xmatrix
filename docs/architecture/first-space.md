@@ -152,13 +152,12 @@ the Hub (`packages/protocol/src/signup-source.ts`).
   client-side navigation keeps.
 - Where a full page load would lose it, the URL carries it as `xm_src` (and
   `ref`): a link from xmatrix.page to xmatrix.sh, a plain anchor to `/login` or
-  `/app`, and a Google or GitHub sign-in's new-account return
-  (`newUserCallbackURL`). Our own sites and localhost are never a source.
+  `/app`, and a Google or GitHub sign-in's returns into `/app`. Our own sites and localhost are never a source.
 - The new account's first page posts it to `POST /api/me/signup-source`
   (`lib/signup-source-send.ts`), once per visit. The Hub keeps it only while
   the account is younger than 24 hours and has none, so a later visit cannot
-  rewrite it. A direct visit is sent only when the sign-in said it made the
-  account.
+  rewrite it. The page sends it when the account is under 24 hours old by
+  its own `created_at` (from the session), however it signed in.
 - No full URL, path, page view or third-party tool is involved. The daily
   funnel prints it per person (`docs/operations/new-user-funnel.md`).
 
