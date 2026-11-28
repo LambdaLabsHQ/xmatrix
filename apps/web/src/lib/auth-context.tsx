@@ -353,7 +353,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (provider === "google" && !isBetterAuthGoogleEnabled()) {
       throw new Error("Google sign-in is not configured for this account. Use a login code while setup is completed.");
     }
-    const callbackURL = buildBetterAuthCallbackUrl(returnTo);
+    const callbackURL = withSignupSourceIntoApp(buildBetterAuthCallbackUrl(returnTo));
     await signInWithBetterAuthSocial(provider, callbackURL, buildBetterAuthCallbackUrl(window.location.href),
       newAccountCallbackUrl(callbackURL));
   };
@@ -688,13 +688,23 @@ function normalizeOAuthReturnPath(returnTo?: string): string {
  * Where a sign-in that made a new account lands: the same place in the app,
  * flagged so the app says so. Anywhere else keeps its own flow.
  */
+/**
+ * A return into the app carries where the visit came from, which the full page
+ * load of the return would otherwise lose. An outside app's authorization
+ * return keeps its signed query exactly as it was.
+ */
+function withSignupSourceIntoApp(callbackURL: string): string {
+  const url = new URL(callbackURL);
+  if (url.pathname !== "/app" && !url.pathname.startsWith("/app/")) return callbackURL;
+  return withCurrentSignupSource(callbackURL);
+}
+
 function newAccountCallbackUrl(callbackURL: string): string {
   const url = new URL(callbackURL);
   // Only the app itself says so; an outside app's authorization query must stay as it was signed.
   if (url.pathname !== "/app" && !url.pathname.startsWith("/app/")) return callbackURL;
   url.searchParams.set("new_account", "1");
-  // The new account's first page tells the Hub where the visit came from.
-  return withCurrentSignupSource(url.toString());
+  return url.toString();
 }
 
 function isBetterAuthGoogleEnabled(): boolean {

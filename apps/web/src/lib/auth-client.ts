@@ -24,6 +24,8 @@ export interface WebAuthSession {
     id: string;
     email?: string;
     user_metadata?: Record<string, unknown>;
+    /** When the account was made (ISO), so its first pages can tell it is new. */
+    created_at?: string;
   };
 }
 
@@ -156,6 +158,7 @@ export async function loadBetterAuthSession(): Promise<{
           email?: string;
           name?: string | null;
           image?: string | null;
+          createdAt?: string | Date;
         };
         session?: {
           token?: string;
@@ -194,6 +197,7 @@ export async function loadBetterAuthSession(): Promise<{
       user: {
         id: user.id,
         email: user.email,
+        ...(data.user.createdAt ? { created_at: new Date(data.user.createdAt).toISOString() } : {}),
         user_metadata: {
           name: user.name,
           avatarUrl: user.avatarUrl,
