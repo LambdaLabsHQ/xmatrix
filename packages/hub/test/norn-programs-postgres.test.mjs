@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
-import { createAuthorityDatabase, enqueueNornEventDeliveries, PostgresNornProgramRepository, readNornRequest, readWaitingNornPrograms, NORN_CHANNEL_DUE_SQL } from "../../db/dist/index.js";
+import { createAuthorityDatabase, enqueueNornEventDeliveries, PostgresNornProgramRepository, readNornRequest, readNornRequestsOfPerson, readWaitingNornPrograms, NORN_CHANNEL_DUE_SQL } from "../../db/dist/index.js";
 import { fenceChannelRunsForStop } from "../../db/dist/channel-stop-fence.js";
 import { initialMessageSource } from "../../db/dist/runtime-initial-input.js";
 import { integration, isolatedPostgres, seedOwnedTestSpace } from "../../db/test/postgres-database.fixture.mjs";
@@ -160,12 +160,22 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     assert.deepEqual((await programs.channelWork(scope())).passes, []);
     assert.equal((await programs.personRequest({ requestId: randomUUID(), requestRef: asked.requestRef, userId: "owner" })).programId, "person");
     assert.equal(await programs.personRequest({ requestId: randomUUID(), requestRef: asked.requestRef, userId: "someone-else" }), undefined);
+    // What waits on them in the Space lists it, as the ledger has it, and lists nothing for anyone else.
+    const waitingOn = userId => readNornRequestsOfPerson(database, { requestId: randomUUID(), spaceId: "space", userId });
+    const [theirs, ...others] = await waitingOn("owner");
+    assert.deepEqual(others, []);
+    assert.deepEqual({ ...theirs, deliveredAt: "", request: theirs.request.text }, { requestRef: asked.requestRef, channelId: "channel",
+      deliveryMessageId: `norn:${asked.requestRef}:${asked.epoch}`, deliveredAt: "", programId: "person", pageId: null, pageName: null,
+      source: `switch ask(@Owner, "Approve the budget?")->wait { | Broke(why) => why | other => fail(other) }`, authorMention: null,
+      request: "Approve the budget?" });
+    assert.deepEqual(await waitingOn("someone-else"), []);
     // The conversation is closed to them: the request is left with nobody, and the next pass ends it with the reason.
     await sql("UPDATE data.channels SET mode='closed' WHERE channel_id='channel'");
     await sql("UPDATE data.space_members SET role='member' WHERE space_id='space' AND user_id='owner'");
     // Nothing is theirs to answer once they can no longer read the conversation, even before the pass ends it.
     assert.equal(await programs.personRequest({ requestId: randomUUID(), requestRef: asked.requestRef, userId: "owner" }),
       undefined, "a person who can no longer read holds nothing to answer");
+    assert.deepEqual(await waitingOn("owner"), [], "and nothing waits on them there");
     assert.deepEqual((await programs.channelWork(scope())).passes, ["person"]);
     assert.equal((await programs.advance(scope("person"), nornStep())).status, "completed");
     await sql("UPDATE data.channels SET mode='open' WHERE channel_id='channel'");

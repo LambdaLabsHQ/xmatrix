@@ -884,6 +884,30 @@ export async function readNornRequest(database: AuthorityDatabase, input: { requ
 }
 
 /**
+ * The open requests a person holds in a Space, the longest waiting first, each as its program's ledger
+ * has it, with the program's page and whoever wrote the program: only those in conversations they can
+ * still read, the rule that delivered each to them.
+ */
+export async function readNornRequestsOfPerson(database: AuthorityDatabase, input: { requestId: string; spaceId: string; userId: string }) {
+  return readInActiveSpace(database, { requestId: input.requestId, operation: "norn.requests-of-person", spaceId: input.spaceId },
+    NornSpaceError, async tx => (await tx.query<QueryResultRow>({ name: "norn_requests_of_person_v1", text: `SELECT r.request_ref,
+          r.channel_id,r.delivery_message_id,r.delivered_at,r.program_id,p.page_id,p.page_name,p.source,
+          ${AUTHOR_MENTION_SQL} AS author_mention,
+          p.ledger_json->'requests'->r.request_id AS request_json
+        FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
+          JOIN data.channels c ON c.space_id=r.space_id AND c.channel_id=r.channel_id
+        WHERE r.space_id=$1 AND r.holder_user_id=$2 AND r.settled_at IS NULL AND r.delivered_at IS NOT NULL
+          AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c", principalKindSql: "'user'",
+            principalIdSql: "$2" })}
+        ORDER BY r.delivered_at,r.request_id LIMIT 200`, values: [input.spaceId, input.userId], maxRows: 200 }))
+      .map(row => ({ requestRef: String(row.request_ref), channelId: String(row.channel_id),
+        deliveryMessageId: String(row.delivery_message_id), deliveredAt: new Date(row.delivered_at as string | Date).toISOString(),
+        programId: String(row.program_id), pageId: typeof row.page_id === "string" ? row.page_id : null,
+        pageName: typeof row.page_name === "string" ? row.page_name : null, source: String(row.source),
+        authorMention: typeof row.author_mention === "string" ? row.author_mention : null, request: row.request_json as unknown })));
+}
+
+/**
  * A program by its message, as `userId` may see it: only if they can read its
  * conversation. Undefined otherwise, the same for "no such program".
  */

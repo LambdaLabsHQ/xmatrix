@@ -561,7 +561,7 @@ export type {
   ChannelReferenceSpan, MessageReferenceSpan, NornRequestView, RequestReferenceSpan,
 } from "./message-references.js";
 export {
-  isSupportedNornEdition, nornFactsBlock, nornLibBlock, nornRunBlock, PAGE_DOCUMENT_FRAGMENT, pageAuthorColor, pageAuthorLabel,
+  isSupportedNornEdition, nornFactsBlock, nornLibBlock, nornRunBlock, PAGE_DOCUMENT_FRAGMENT, PAGE_RESULT_KINDS, pageAuthorColor, pageAuthorLabel,
 } from "./pages.js";
 export { pagePositionBetween, PagePositionError } from "./page-position.js";
 
@@ -575,7 +575,7 @@ export type {
   PageAuthor, PageAwareness, PageBlame, PageBlockAwareness, PageChanges, PageEditResult, PageConversation, PageProgramBranchStatus, PageProgramRequest, PageProgramStatus, PageProgramStep, PageScheduleProblem,
   PageDocument, PageGitHubFile, PageLink, PageMessageEdit, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
   PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PagePresent,
-  PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,
+  PageOverview, PageRecentChange, PageResult, PageResultKind, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,
 } from "./pages.js";
 
 export {

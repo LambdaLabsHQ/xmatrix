@@ -1,13 +1,13 @@
-import { NORN_REMOVED_FROM_PAGE, PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornProgram, readNornRequest, readPageNornPrograms, type PagePrincipal } from "@xmatrix/db";
-import type { NornRequestView, PageProgramBranchStatus, PageProgramRequest, PageProgramStatus, PageScheduleProblem } from "@xmatrix/protocol";
+import { NORN_REMOVED_FROM_PAGE, PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornProgram, readNornRequest, readNornRequestsOfPerson, readPageNornPrograms, type PagePrincipal } from "@xmatrix/db";
+import { NORN_ASK_MESSAGE_PREFIX, type NornRequestView, type PageProgramBranchStatus, type PageProgramRequest, type PageProgramStatus, type PageScheduleProblem } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./page-restriction";
 import { deterministicConversationId } from "./deterministic-id";
 import { ensureAndWakeNornBranches, type NornBranchChannel } from "./norn-branches";
 import { revalidatePageFactHolds, seedPageFactsForProgram } from "./norn-facts";
 import {
-  checkNornProgram, collectSpaceLibraries, diffNornProgramUpgrade, nornBlocks, nornBlockSource, nornRequestWords, nornStartLedger, nornStep,
-  personHolder, pinNornProgram, plainAnswer as answerText, plainResult as resultText, previewNornEdit, selectReferencedLibraries,
+  checkNornProgram, collectSpaceLibraries, diffNornProgramUpgrade, nornAsking, nornBlocks, nornBlockSource, nornRequestCard, nornRequestWords,
+  nornStartLedger, nornStep, personHolder, pinNornProgram, plainAnswer as answerText, plainResult as resultText, previewNornEdit, selectReferencedLibraries,
   verifyNornLedgerMigration, type SpaceLibraryCatalog,
 } from "./norn-host";
 import { nornFlow } from "./norn-plan";
@@ -278,6 +278,22 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
     reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
       : "reason" in request.reply ? request.reply.reason : null,
     ...(found.delegatedByReader ? { yoursToTakeBack: true } : {}) };
+}
+
+/**
+ * What waits on a person in a Space: each open request they hold, as its card shows it, with the
+ * conversation that carries the card and the page of the program that asks.
+ */
+export async function nornRequestsOfPerson(env: Env, input: { spaceId: string; userId: string }) {
+  const found = await readNornRequestsOfPerson(database(env), { requestId: crypto.randomUUID(), ...input });
+  return found.flatMap(item => {
+    const request = item.request as LedgerRequest | null | undefined;
+    if (!request || request.reply !== null) return [];
+    return [{ channelId: item.channelId, messageId: item.deliveryMessageId, deliveredAt: item.deliveredAt,
+      pageId: item.pageId, pageName: item.pageName,
+      card: nornRequestCard(request, item.requestRef, input.userId, nornAsking({ authorMention: item.authorMention,
+        source: item.source, askedWithCommand: item.programId.startsWith(NORN_ASK_MESSAGE_PREFIX) })) }];
+  });
 }
 
 type ProgramLedger = Ledger & {
