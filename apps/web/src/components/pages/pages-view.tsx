@@ -45,7 +45,7 @@ import { PageMargin, PageOffscreenCard, type MarginWriter, type OffscreenEntry }
 import type { PageSessionChanges } from "./page-session-changes";
 import { PageSessionChangesList, PageUndoNotice, useSessionChanges } from "./page-session-changes-panel";
 import { PagePhoneDock } from "./page-phone-dock";
-import { PageHistoryBar, PageHistoryDocument, PageHistoryRail, PageRewindColumn, usePageHistory } from "./page-history";
+import { PageHistoryBar, PageHistoryDocument, PageHistoryRail, PageRewindColumn, PageRewindDock, usePageHistory } from "./page-history";
 import { PageReplayStage } from "./page-replay";
 import { usePageVisit } from "./page-visit";
 import type { SuggestionsReport } from "./page-suggestions";
@@ -1627,7 +1627,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   };
 
-  const historyBar = <PageHistoryBar history={history} canEdit={canEdit} onClose={() => setMode("page")} />;
+  const historyBar = <PageHistoryBar history={history} canEdit={canEdit} onClose={() => setMode("page")} replayControls={!phone} />;
   const historyRail = (
     <PageHistoryRail history={history} fold={!roomy} conversationName={conversationName} onOpenConversation={openConversation} />
   );
@@ -1739,14 +1739,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                 </p>
               )}
               {mode === "history" && page ? (
-                // The same column and the same margin as the page, so the text stands where it stood.
-                <div className="flex gap-6">
+                // The same column and the same margin as the page, so the text stands where it stood; on a phone
+                // it ends above the replay's controls at the bottom.
+                <div className={cn("flex gap-6", phone && history.news.length > 0 && "pb-28")}>
                   <div className="relative min-w-0 max-w-3xl flex-1 page-byline-room">
                     {!roomy && !history.replay && historyRail}
                     {history.replay && spaceId && page && history.revisions.find((r) => r.revision === history.since) ? (
                       <PageReplayStage spaceId={spaceId} pageId={page.pageId} token={token}
                         since={history.revisions.find((r) => r.revision === history.since)!}
-                        ticks={replayTicks} paused={Boolean(history.replay.paused)} speed={history.replay.speed ?? 1}
+                        ticks={replayTicks} paused={Boolean(history.replay.paused)} speed={history.speed}
                         references={references} mediaUrl={mediaUrl}
                         onProgress={(position) => history.setReplay((now) => now && { ...now, ...position })}
                         onDone={() => { history.setReplay(null); history.choose("since"); }} />
@@ -1756,6 +1757,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     // The timeline stays where it is on screen while the page scrolls under it.
                     <aside className="w-80 shrink-0"><div className="sticky top-4 pt-12"><PageRewindColumn history={history} /></div></aside>
                   )}
+                  {/* Without room beside the text, the timeline is a thin rail at the window's edge. */}
+                  {!roomy && history.replay && <PageRewindColumn history={history} compact />}
+                  {phone && <PageRewindDock history={history} />}
                   {roomy && !history.replay && (
                     // The versions stay beside the text as it scrolls, and a long list scrolls on its own.
                     <aside className="w-80 shrink-0">

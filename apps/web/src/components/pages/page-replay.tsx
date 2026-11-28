@@ -16,8 +16,14 @@ import type { PageReferenceTargets } from "./page-reference-chips";
  * is drawn from one clock, so the motion is continuous and can pause.
  */
 
-/** How fast the replay plays: a long history is watched at 2× or 4×. */
-export type ReplaySpeed = 1 | 2 | 4;
+/** How fast the replay plays, as a multiple of its own pace: from REPLAY_SLOWEST to REPLAY_FASTEST. */
+export type ReplaySpeed = number;
+export const REPLAY_SLOWEST = 0.25, REPLAY_FASTEST = 8;
+
+/** A speed as the reader reads it: `0.25×`, `0.5×`, `1×`, `2.5×`, `8×`. */
+export function replaySpeedLabel(speed: ReplaySpeed): string {
+  return `${Number(speed.toFixed(speed < 1 ? 2 : 1))}×`;
+}
 
 /** Where the replay stands, as the stage reports it. */
 export interface ReplayPosition {
@@ -31,7 +37,6 @@ export interface ReplayPosition {
 /** A replay in History: where it stands, and how the reader set it to play. */
 export interface ReplayProgress extends ReplayPosition {
   paused?: boolean;
-  speed?: ReplaySpeed;
 }
 
 const clamp = (x: number) => Math.max(0, Math.min(1, x));
