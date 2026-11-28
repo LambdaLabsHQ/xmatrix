@@ -1150,9 +1150,9 @@ function committed(headRevision: number): Uint8Array {
  * Opens a page whose reader last read revision 2, written by Daniel, and that claude:1 has changed since in
  * three places: a line reworded, a paragraph added under it, and a new section.
  */
-async function openChangedPage(browser: Page) {
-  const before = "# Relay\n\n## Status\n\nPlanned for next week, after review\n\n## Notes\n\nnone\n";
-  const after = "# Relay\n\n## Status\n\nShipped this week, after review\n\nThe second region is next\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n";
+async function openChangedPage(browser: Page,
+  before = "# Relay\n\n## Status\n\nPlanned for next week, after review\n\n## Notes\n\nnone\n",
+  after = "# Relay\n\n## Status\n\nShipped this week, after review\n\nThe second region is next\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n") {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   await fixtureJson(browser, "page-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 2 },
@@ -1242,9 +1242,20 @@ test("Replay plays the page from its reader's last visit to now, can pause, and 
   const column = browser.getByTestId("page-rewind-column");
   await expect(column).toContainText("As you left it");
   await expect(column).toContainText("claude:1");
-  // Each version is played by its author: the version's badge names claude:1.
-  await expect(stage).toContainText("claude:1", { timeout: 10_000 });
-  const control = browser.getByTestId("page-rewind").getByRole("button");
+  // The timeline stays on screen while the page scrolls: it is pinned beside the text.
+  await expect(column.locator("xpath=..")).toHaveCSS("position", "sticky");
+  // Each version is played by its author: its caret carries their name and the version's time.
+  await expect(stage.getByText(/^claude:1 · \d{1,2}:\d{2}/u)).toBeVisible({ timeout: 10_000 });
+  const control = browser.getByTestId("page-rewind").getByRole("button", { name: /^(Pause|Resume)$/u });
+  // A long history is watched faster: the speed steps 1×, 2×, 4× and back.
+  const speed = browser.getByTestId("page-rewind-speed");
+  await expect(speed).toHaveText("1×");
+  await speed.click();
+  await expect(speed).toHaveText("2×");
+  await speed.click();
+  await expect(speed).toHaveText("4×");
+  await speed.click();
+  await expect(speed).toHaveText("1×");
   await control.click();
   await expect(stage).toContainText("Paused");
   await expect(control).toHaveAttribute("aria-label", "Resume");
@@ -1254,6 +1265,19 @@ test("Replay plays the page from its reader's last visit to now, can pause, and 
   await expect(stage).toHaveCount(0, { timeout: 30_000 });
   const version = browser.getByTestId("page-version");
   await expect(version.locator('[data-change="added"]')).toHaveText(["The second region is next", "Risks", "Late reviews"]);
+});
+
+test("Replay brings each version's change into view on a long page", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const body = Array.from({ length: 60 }, (_, n) => `Line ${n + 1} of the page`).join("\n\n");
+  await openChangedPage(browser, `# Relay\n\n${body}\n\n## End\n\nThe old ending stays\n`,
+    `# Relay\n\n${body}\n\n## End\n\nThe new ending, written overnight, stays\n`);
+  await browser.getByTestId("page-replay").click();
+  const stage = browser.getByTestId("page-replay-stage");
+  await expect(stage).toContainText("As you left it");
+  // The change is sixty lines down; the replay scrolls to it when that version plays.
+  const changed = stage.locator('[data-change="edited"]');
+  await expect(changed).toBeInViewport({ timeout: 10_000 });
 });
 
 test("what changes while its reader watches is read, and coming back to the page's tab what it became meanwhile is new", async ({ page: browser }) => {
