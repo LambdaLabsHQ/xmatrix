@@ -251,7 +251,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .page-document.page-document li.pa
   pointer-events: none;
 }
 .page-document[data-editable="false"] pre.page-md-open::before { content: none; }
-.page-document .page-placeholder::before {
+/* Not while an IME composes in the line: its marked text stands there before the editor has read it in. */
+.page-document:not([data-composing]) .page-placeholder::before {
   content: attr(data-placeholder);
   color: var(--muted-foreground);
   pointer-events: none;
