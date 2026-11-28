@@ -1,5 +1,11 @@
 # Release Updates
 
+## Unreleased: the Hub keeps what each page change resulted in, and lists what waits on a person
+
+The Pages list's "Recent changes" shows the first text a change added, so a fixed typo and a decision read alike. For the Overview that replaces it (`docs/design/pages-overview.md`), the Hub now keeps a result for a page change: the one-shot task that writes a page's one-line summary is handed the lines the change added and took out since the summary was last written, and answers a second line with what that resulted in and its kind (`shipped`, `decided`, `problem`, `fixed`, `number`), or `none` for bookkeeping. The result is stored for the revision the summary read (`data.page_results`, migration 0279), with the section the change is in. Changes from before this release have no result.
+
+`GET /api/spaces/:spaceId/pages/overview` returns the last week's results on the pages the caller can read, how far they have seen them, and which they have handled; `PUT …/pages/overview/seen` and `PUT …/pages/overview/handled` move that place. `GET /api/spaces/:spaceId/norn-requests` lists the open requests the caller holds in a Space, each as its card shows it; until now a request could only be read one at a time by its reference. All four are for a person, never an Agent Run. Hub only; the Web view follows. Recovery is a CI-validated beta reverting this change; the three new tables are expand-only and stay.
+
 ## Unreleased: `xmatrix page move --before` puts a page before a sibling
 
 `xmatrix page move` could place a page only after a sibling (`--after`), so an Agent could not put a page first among its siblings; only dragging it in the Web could. `--before <page>` now places it immediately before that sibling, so `--root --before <the first root page>` makes a page the first one in the tree. The Hub already took `beforePageId` for the Web's drag. CLI only. Recovery is a CI-validated beta reverting this change.

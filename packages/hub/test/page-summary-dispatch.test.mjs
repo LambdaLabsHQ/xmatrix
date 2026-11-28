@@ -91,7 +91,9 @@ integration("a page summary sends text only to a Machine whose owner currently r
     candidates = [outsider, member, owner];
     assert.equal((await start(child)).started, true, "an unreadable candidate does not hide an authorized one");
     assert.equal(commands.at(-1).ownerUserId, owner.id);
-    assert.equal(commands.at(-1).payload.input, "# Child\n\nInherited private ledger\n");
+    // A page at its first revision has no earlier text: the whole of it is what changed.
+    assert.equal(commands.at(-1).payload.input,
+      "<changed>\n+ # Child\n+ Inherited private ledger\n</changed>\n\n# Child\n\nInherited private ledger\n");
     candidates = [member];
     await pages.update({ requestId: crypto.randomUUID(), spaceId, pageId: parent.pageId, principal: owner,
       access: [{ userId: member.id, access: "read" }] });
@@ -102,17 +104,28 @@ integration("a page summary sends text only to a Machine whose owner currently r
     assert.equal((await start(child)).started, false, "revocation is checked again at the next dispatch");
     assert.equal(commands.length, issued);
     assert.equal((await start(open)).started, true, "ordinary open pages still use members' Machines");
-    assert.equal(commands.at(-1).payload.input, "# Open\n\nPublic plan\n");
+    assert.equal(commands.at(-1).payload.input, "<changed>\n+ # Open\n+ Public plan\n</changed>\n\n# Open\n\nPublic plan\n");
     const sent = commands.length;
     assert.equal((await startPageSummary({}, { spaceId, pageId: open.pageId, triedRevision: open.headRevision })).reason, "tried");
     await pages.recordSummary({ requestId: crypto.randomUUID(), spaceId, pageId: open.pageId,
       revision: open.headRevision, summary: "Ready" });
     assert.equal((await start(open)).reason, "current");
     assert.equal(commands.length, sent, "current and already-tried revisions are not issued again");
+    // Once a page has a summary, what changed is what it gained and lost since the revision that summary read.
+    for (const [base, body] of [[1, "# Open\n\nPublic plan\n\nStep one\n"], [2, "# Open\n\nPublic plan, revised\n\nStep one\n"]]) {
+      await pages.edit({ requestId: crypto.randomUUID(), spaceId, pageId: open.pageId, principal: owner, baseRevision: base, body });
+    }
+    assert.equal((await start(open)).started, true);
+    assert.equal(commands.at(-1).payload.input,
+      "<changed>\n- Public plan\n+ Public plan, revised\n+ Step one\n</changed>\n\n# Open\n\nPublic plan, revised\n\nStep one\n");
+    await pages.recordSummary({ requestId: crypto.randomUUID(), spaceId, pageId: open.pageId, revision: 3, summary: "Revised" });
+    const sentAgain = commands.length;
+    assert.equal((await start(open)).reason, "current");
+    assert.equal(commands.length, sentAgain);
     unavailable = true;
     candidates = [member, owner];
     await assert.rejects(start(child), { code: "database_unavailable", status: 503 });
-    assert.equal(commands.length, sent, "authority outages never turn into another disclosure attempt");
+    assert.equal(commands.length, sentAgain, "authority outages never turn into another disclosure attempt");
     unavailable = false;
 
     // HUB-85: an interrupted preparation used to abandon this revision's summary.
@@ -122,17 +135,17 @@ integration("a page summary sends text only to a Machine whose owner currently r
     const recovered = await start(recovering);
     assert.equal(recovered.started, true);
     assert.ok(readAttempts - beforeRecovery > 1, "retry performs a fresh authorized page read");
-    assert.equal(commands.length, sent + 1, "only the successful preparation issues a task");
+    assert.equal(commands.length, sentAgain + 1, "only the successful preparation issues a task");
 
     readFailures = [new Error("Connection terminated due to connection timeout")];
     assert.equal((await start(child)).started, false, "retry still observes the ancestor's revoked read grant");
-    assert.equal(commands.length, sent + 1, "a retried preparation cannot bypass page access");
+    assert.equal(commands.length, sentAgain + 1, "a retried preparation cannot bypass page access");
 
     const unavailableReads = readAttempts;
     readFailures = Array.from({ length: 2 }, () => new Error("Connection terminated due to connection timeout"));
     await assert.rejects(start(recovering), /connection timeout/u);
     assert.equal(readAttempts - unavailableReads, 2, "a continuing outage exhausts the bounded retry");
-    assert.equal(commands.length, sent + 1, "failed preparation never discloses page text");
+    assert.equal(commands.length, sentAgain + 1, "failed preparation never discloses page text");
 
     const invalidReads = readAttempts;
     readFailures = [Object.assign(new Error("missing relation"), { code: "42P01" })];
@@ -144,7 +157,7 @@ integration("a page summary sends text only to a Machine whose owner currently r
     assert.equal(replayed.started, true);
     assert.deepEqual(commands.at(-1), commands.at(-2), "an uncertain commit replays the exact command and payload");
     assert.equal(commands.at(-1).controlId, replayed.requestId);
-    assert.equal(commands.length, sent + 3, "one command attempt and its one bounded replay");
+    assert.equal(commands.length, sentAgain + 3, "one command attempt and its one bounded replay");
   } finally {
     await client.query("ROLLBACK");
     await client.end();

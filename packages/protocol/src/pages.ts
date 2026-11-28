@@ -199,6 +199,39 @@ export interface PageRecentChange {
   created: boolean;
 }
 
+/** What a change to a page resulted in, as the Overview sorts it. */
+export type PageResultKind = "shipped" | "decided" | "problem" | "fixed" | "number";
+export const PAGE_RESULT_KINDS: readonly PageResultKind[] = ["shipped", "decided", "problem", "fixed", "number"];
+
+/**
+ * What a change to a page resulted in, in one sentence: written with the
+ * page's summary, for the revision the summary read, and kept. A change a
+ * reader does not need has none.
+ */
+export interface PageResult {
+  pageId: string;
+  title: string;
+  revision: number;
+  kind: PageResultKind;
+  text: string;
+  /** The section the change is in; null before the first heading. */
+  block: { id: string; title: string } | null;
+  createdAt: string;
+  /** Who made the change, and the conversations it was made from. */
+  authors: PageAuthor[];
+  conversationIds: string[];
+}
+
+/** One person's Overview of a Space: the last week's results on the pages they can read, and their place in them. */
+export interface PageOverview {
+  /** How far they have seen the results; null before their first look. */
+  seenAt: string | null;
+  /** Newest first. */
+  results: PageResult[];
+  /** The results they have handled: checked off, or answered in `conversationId`. */
+  handled: Array<{ pageId: string; revision: number; conversationId: string | null; at: string }>;
+}
+
 export interface PageChanges {
   pageId: string;
   since: number;

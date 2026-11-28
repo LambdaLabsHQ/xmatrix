@@ -2,7 +2,7 @@ import { HUB_ROUTES } from "@xmatrix/protocol";
 import type { Hono } from "hono";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { jsonErrors, readBoundedRequestBody, requireAuth } from "./index-shared";
-import { messageProgramStatus, nornRequestView } from "./norn-page-programs";
+import { messageProgramStatus, nornRequestsOfPerson, nornRequestView } from "./norn-page-programs";
 import { answerNornRequest, answerNornRequestAsPerson, askNornQuestion, callOffNornQuestion, delegateNornRequest, openNornRequests,
   reclaimNornRequest } from "./norn-programs";
 import type { Env } from "./types";
@@ -95,6 +95,13 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
       agentName: run.agentName }, { verb, who, question, ...(by ? { by } : {}), ...(otherwise ? { otherwise } : {}),
       ...(Array.isArray(body?.options) ? { options: body.options.filter((option): option is string => typeof option === "string") } : {}) });
     return c.json(asked, asked.refusal ? 400 : 200, NO_STORE);
+  }));
+  // What waits on the caller in a Space: every open request they hold, as its card shows it.
+  app.get(HUB_ROUTES.space_norn_requests(":spaceId").replace("%3AspaceId", ":spaceId"), c => jsonErrors(c, async () => {
+    const auth = await requireAuth(c.req.raw, c.env);
+    if (auth.agentRun) return c.json({ error: "What waits on a person is listed for that person" }, 403, NO_STORE);
+    return c.json({ requests: await nornRequestsOfPerson(c.env, { spaceId: c.req.param("spaceId") ?? "", userId: auth.id }) },
+      200, NO_STORE);
   }));
   // What a request reference shows in its place, for a person who can read the request's conversation.
   const view = HUB_ROUTES.space_norn_request(":spaceId", ":requestRef").replace("%3AspaceId", ":spaceId").replace("%3ArequestRef", ":requestRef");

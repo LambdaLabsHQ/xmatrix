@@ -26,7 +26,8 @@ export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[
     `(entity_kind='instance' AND entity_id IN ${INSTANCES})` },
   { table: "data.cross_space_read_grants", predicate:
     `channel_id=$2 OR source_channel_id=$2 OR run_id IN ${RUNS}` },
-  ...["data.page_links", "data.page_unlinks", "data.page_co_writing"]
+  // A result someone answered in this Channel is no longer handled there: its mark goes, and it waits on them again.
+  ...["data.page_links", "data.page_unlinks", "data.page_co_writing", "data.page_result_marks"]
     .map(table => ({ table, predicate: "conversation_id=$2" })),
   { table: "control.scoped_control_command_replays", predicate:
     `ARRAY[CASE WHEN scope_kind='channel' THEN scope_id END, ${REPLAY_CHANNEL_IDS}] @> ARRAY[$2]` },
