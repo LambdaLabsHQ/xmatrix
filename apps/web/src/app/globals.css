@@ -8217,24 +8217,28 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-list-section-head
   content: none !important;
 }
 
-/* A page's recent change is a page row's two lines without the tree: its
-   icon on the line a top-level page's icon sits on (past the chevron beside
-   a desktop's page, on the phone's content line), the section it changed
-   after the page's name in the line under's ink. */
-.xmatrix-app .app-recent-change {
-  padding-left: calc(12px + 24px);
-  padding-right: var(--app-list-row-end);
+/* The Overview's row (docs/design/pages-overview.md §5) is the list's own row
+   without the tree, not a card: its icon on the line a top-level page's icon
+   sits on (past the chevron beside a desktop's page, on the phone's content
+   line). It is taller than a page's row and its name is set at a heading's
+   size, so it reads apart from the pages under it (Daniel 2026-11-28: 不要做成
+   卡片，行高做大一点). (0,6,1) outranks the list row's own height and padding. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-page-overview-row.app-list-row {
+  min-height: 86px;
+  padding: 15px var(--app-list-row-end) 16px calc(12px + 24px) !important;
 }
 
 @media (max-width: 767px) {
-  .xmatrix-app .app-mobile-chat-pane .app-recent-change {
-    padding-left: var(--app-list-row-start);
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-mobile-chat-pane .app-page-overview-row.app-list-row {
+    padding-left: var(--app-list-row-start) !important;
   }
 }
 
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-recent-change .app-recent-change-section {
-  font-weight: 500 !important;
-  color: var(--app-panel-ink-muted, var(--muted-foreground));
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-page-overview-row span.app-list-row-title {
+  font-size: 22px !important;
+  font-weight: 800 !important;
+  line-height: 30px;
+  letter-spacing: -0.02em;
 }
 
 /* A conversation row stacks its two lines. */
@@ -8344,7 +8348,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   padding-left: 15px;
 }
 
-html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) :is(.app-recent-change > .app-list-row-meta, .app-page-row-meta-line) {
+html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) :is(.app-page-overview-row > .app-list-row-meta, .app-page-row-meta-line) {
   padding-left: 24px;
 }
 
@@ -8363,7 +8367,6 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 }
 
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-channel-row.app-channel-chat-row span.app-channel-row-time,
-html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-recent-change.app-list-row span.app-channel-row-time,
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row span.app-channel-row-time,
 html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobile-chat-pane.app-mobile-chat-pane) .app-page-row.app-list-row > span.app-page-row-discussions-read {
   font-size: 12px !important;

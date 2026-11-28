@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: the Pages list leads with the Overview: what to handle, and what happened while you were away
+
+The Pages list began with "Recent changes": the three pages that changed last, each with the first text its change added, so a fixed typo and a decision read alike and nothing could be done from there. In its place the list now leads with one row, **Overview** (`docs/design/pages-overview.md`): the list's own row, taller than a page's, with the number of things left to handle at its end, or a check when nothing is left. A desktop's Pages area lands on it when the Space has pages; a phone opens it from the list.
+
+The Overview is a board, not a page. **Needs you** lists every open request the reader holds in the Space and every conversation with a declared wait on them; a request is answered on its own row (an option, or their own words) and a wait is opened, answered in a line, or marked done. **Problems** lists the changes that resulted in a problem (the results the Hub keeps since the previous release): a reply goes to the Agent that made the change, in a conversation about that section, and a check takes it off the list. **Happened** lists the other results, since the reader last looked by default, or for today, yesterday or the week. What is handled stays in place as a receipt until the reader leaves, and the count runs down to zero. Results exist only for changes made since the Hub began keeping them, so the list starts short.
+
+Web only (the Hub side shipped before). The Hub's `recent-changes` route stays until the stable Web no longer calls it. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the Hub keeps what each page change resulted in, and lists what waits on a person
 
 The Pages list's "Recent changes" shows the first text a change added, so a fixed typo and a decision read alike. For the Overview that replaces it (`docs/design/pages-overview.md`), the Hub now keeps a result for a page change: the one-shot task that writes a page's one-line summary is handed the lines the change added and took out since the summary was last written, and answers a second line with what that resulted in and its kind (`shipped`, `decided`, `problem`, `fixed`, `number`), or `none` for bookkeeping. The result is stored for the revision the summary read (`data.page_results`, migration 0279), with the section the change is in. Changes from before this release have no result.

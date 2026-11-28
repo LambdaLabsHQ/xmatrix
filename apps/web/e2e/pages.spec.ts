@@ -139,6 +139,17 @@ async function stubClaudeWritingNotes(browser: Page) {
 }
 
 /** On a phone Pages opens on its list: this opens Relay from it, its live session holding `session`. */
+/**
+ * Opens the Pages area on the Space's first page. A desktop lands on the Overview (pages-overview.spec.ts);
+ * these tests are about a page, so they open one.
+ */
+async function openFirstPage(browser: Page) {
+  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  // A phone lands on the list, and its tests open their page from there.
+  if ((browser.viewportSize()?.width ?? 1280) < 768) return;
+  await browser.getByTestId("page-tree").locator(".app-page-row-title").first().click();
+}
+
 async function openRelayOnPhone(browser: Page, session: Y.Doc, on: Parameters<typeof servePageSession>[2] = {}) {
   await servePageSession(browser, session, on);
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
@@ -163,7 +174,7 @@ async function openLivePage(browser: Page, session: Y.Doc | string = BODY,
   on: Parameters<typeof servePageSession>[2] = {}) {
   await servePageSession(browser, typeof session === "string" ? pageDocument(session) : session, on);
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await openFirstPage(browser);
   return browser.getByTestId("page-editor");
 }
 
@@ -264,7 +275,7 @@ test("a page is co-edited live and shows an Agent working on a section", async (
   });
 
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await openFirstPage(browser);
   const tree = browser.getByTestId("page-tree");
   await expect(tree).toContainText("Company");
   await expect(tree).toContainText("Relay");
@@ -277,7 +288,7 @@ test("a page is co-edited live and shows an Agent working on a section", async (
   await expect(tree.getByTestId("page-tree-agents").locator(".identity-avatar-face")).not.toHaveCount(0);
   await expect(tree.getByRole("button", { name: /^Relay .*claude:2 editing · Status/u })).toBeVisible();
   await expect(tree.getByRole("button", { name: /^Company .*Ada: Ship it Friday\?/u })).toBeVisible();
-  // The first page opens by default; count the sessions of the page we switch to.
+  // The first page is open; count the sessions of the page we switch to.
   await expect.poll(() => connections).toBeGreaterThan(0);
   connections = 0;
   await tree.getByRole("button", { name: "Relay" }).click();
@@ -971,7 +982,7 @@ test("a page is typed like Typora: the caret's line shows its markers", async ({
   const server = pageDocument(LAMBDA);
   await servePageSession(browser, server);
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await openFirstPage(browser);
   const editor = browser.getByTestId("page-editor");
   await expect(editor).toContainText("怎么工作");
   const table = editor.locator("table");
@@ -1077,7 +1088,7 @@ test("a page: reference in a page's text is a chip with the page's title that op
   await servePageSession(browser, pageDocument(
     `# Relay\n\nDates are in page:${planId}#status and \`page:${planId}\` names it.\n\nSee page:${unseenId} too.\n`));
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await openFirstPage(browser);
   const editor = browser.getByTestId("page-editor");
   const chip = editor.getByTestId("page-reference-chip").filter({ hasText: "Launch plan" });
   await expect(chip).toHaveText("Launch plan › status");
@@ -1109,7 +1120,7 @@ async function openSyncingPage(browser: Page, read: string, live: string, syncAf
     revisionInfo: { revision: 3, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
   await servePageSession(browser, pageDocument(live), { syncAfterMs });
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await openFirstPage(browser);
   return browser.getByTestId("page-preview");
 }
 
@@ -1353,7 +1364,7 @@ test("an editor that meets a Hub still keeping pages as text waits instead of sh
   await browser.routeWebSocket(/\/ws\/pages\//u, () => { sockets++; });
 
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await openFirstPage(browser);
   await expect(browser.getByTestId("page-preview")).toContainText("In progress");
   await expect(browser.getByTestId("pages-view")).toContainText("Live editing is being updated");
   expect(sockets, "it never joins the old session").toBe(0);
@@ -2067,7 +2078,7 @@ test("two people co-edit a page live: each sees the other's typing and cursor, a
       await fixtureJson(person, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
       await servePageSession(person, server);
       await person.goto("/app", { waitUntil: "domcontentloaded" });
-      await person.getByRole("button", { name: "Pages", exact: true }).first().click();
+      await openFirstPage(person);
       await expect(person.getByTestId("page-editor")).toContainText("In progress");
     }
 
@@ -2141,7 +2152,7 @@ async function openLongPage(browser: Page, stub: (server: Y.Doc) => Promise<void
   await stub(server);
   await servePageSession(browser, server, { connect: (next) => { send = next; } });
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await openFirstPage(browser);
   const editor = browser.getByTestId("page-editor");
   await expect(editor).toContainText("In progress");
   return { server, editor, push: (data: Uint8Array) => send(data) };
@@ -2168,7 +2179,7 @@ async function openWithGrokThinking(browser: Page, conversationId: string) {
   let send: (data: Uint8Array) => void = () => {};
   await servePageSession(browser, server, { connect: (connected) => { send = connected; } });
   await browser.goto("/app", { waitUntil: "domcontentloaded" });
-  await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
+  await openFirstPage(browser);
   await expect(browser.getByTestId("page-editor")).toContainText("In progress");
   const grok = { user: { name: "grok:1", color: "#7a5389", kind: "agent", conversationId }, block: "status" };
   const push = (data: Uint8Array) => send(data);

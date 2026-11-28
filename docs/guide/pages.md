@@ -11,7 +11,7 @@ Conversations move fast and are hard to read later. Pages are where a Space keep
 
 Each Space has one tree of pages. Organize it by what the Space works on, not by who said what. A page is Markdown, and its headings are its sections. Its first top-level heading (`# Name`) is its name, wherever it stands; renaming a page rewrites that heading.
 
-In the app, open **Pages**. The list starts with recent changes, then the whole tree. From a terminal:
+In the app, open **Pages**. The list starts with the **Overview** (what waits on you in the Space, the problems your Agents ran into, and what happened since you last looked, each handled right there), then the whole tree. From a terminal:
 
 ```sh
 xmatrix page tree
