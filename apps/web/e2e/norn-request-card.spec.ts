@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import {
-  E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, fixtureRequestBodies, openWorkspaceWithStubs,
+  E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, fixtureRequestBodies, openWorkspaceWithStubs, routeHumanSocket,
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -133,6 +133,29 @@ test("a request of an Agent reads as the request, without the Agent's copy of th
   await expect(page.getByTestId("request-reference-block")).toContainText("Keep the whole task here.");
   await expect(page.getByTestId("request-reference-block")).toContainText("waiting for @claude");
   await page.screenshot({ path: test.info().outputPath("norn-agent-request.png") });
+});
+
+test("an Agent's answer to a request shows the request answered at once, without waiting for its next read", async ({ page }) => {
+  const asked = "@claude repo:acme/app\n\n**Request** `request:rabcdefgh23`";
+  const socket = await routeHumanSocket(page, () => {});
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { hasMore: false, messages: [
+    { messageId: "norn:rabcdefgh23:0", channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
+      body: `${asked}\n\nThe request is from a program.`, metadata: { nornAnswerFrom: asked.length } }] });
+  await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
+    channelId: CHANNEL.id, holder: "@claude", text: "Fix the checkout crash", state: "open" } });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
+  const block = page.getByTestId("request-reference-block");
+  await expect(block).toHaveAttribute("data-request-state", "open", { timeout: 20_000 });
+  // The Hub ends the request, then posts the Agent's answer in the conversation.
+  await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
+    channelId: CHANNEL.id, holder: "@claude", text: "Fix the checkout crash", state: "answered", reply: "Fixed" } });
+  socket.send({ type: "channel_message_received", message: { messageId: "norn-answer:rabcdefgh23:1", channelId: CHANNEL.id,
+    sequence: 2, sentAt: E2E_NOW, body: "Fixed", reactions: [], annotations: [], attachments: [],
+    from: { kind: "agent", identityId: "agent:channel-general:1", agentId: "channel-general:1", userId: "e2e-user", email: "",
+      label: "claude", agentName: "claude", instanceId: "channel-general:1", channelInstanceId: "1", instanceLabel: "claude:1" } } });
+  // Well inside the 30 s the request would otherwise wait to be read again.
+  await expect(block).toHaveAttribute("data-request-state", "answered", { timeout: 5_000 });
 });
 
 test("a request's reference in a message reads as the request: what is asked, of whom, how it stands", async ({ page }) => {

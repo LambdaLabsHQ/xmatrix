@@ -2242,6 +2242,13 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           if (!isValidChannelMessage(entry)) {
             break;
           }
+          // An Agent's answer to a program's request is posted as `norn-answer:<ref>:…` once the request has ended,
+          // so the request it answers is read again now instead of on its next poll.
+          const answeredRequest = /^norn-answer:([^:]+):/u.exec(entry.messageId)?.[1];
+          if (answeredRequest) {
+            void queryClient.invalidateQueries({ predicate: (query) =>
+              query.queryKey.includes("norn-request") && query.queryKey.at(-1) === answeredRequest });
+          }
           if (message.clientMessageId && isOwnChannelMessage(entry, userId)) {
             // The realtime event normally arrives before the POST response.
             // Reconcile here so the pending row is updated in place instead of
@@ -2454,6 +2461,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       relaySocketProbeRef.current = null;
     };
   }, [
+    queryClient,
     viewerReadsOf,
     reconcileInstances,
     applyChannelHistory,
