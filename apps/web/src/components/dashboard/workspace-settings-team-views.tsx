@@ -393,7 +393,8 @@ export function SettingsView({
         <div className="app-settings-section min-w-0">
           <p className="max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
             Secrets belong to {space?.name ?? "the Space"}. An Agent reads one when it needs it: an <b>auto</b> secret
-            right away, an <b>ask</b> secret after a Space admin approves that Agent on a card in its Channel.
+            right away, an <b>ask</b> secret once the admission policy below pre-authorizes that Agent, or else after a
+            Space admin approves it on a card in its Channel.
             Stored values are never shown.
           </p>
           <div className="mb-8 mt-4 flex flex-wrap items-center gap-2">
@@ -464,7 +465,7 @@ export function SettingsView({
                     onChange={(value) => updateSecretDraft({ access: value as SpaceSecretAccess })}
                     options={[
                       { value: "auto", label: "Automatically" },
-                      { value: "ask", label: "After an admin approves" },
+                      { value: "ask", label: "Pre-authorized by policy, or after an admin approves" },
                     ]}
                     disabled={secretSaving}
                     className="h-9 px-3 text-sm font-medium disabled:cursor-not-allowed"

@@ -42,8 +42,9 @@ export function AdmissionPolicyRow({ spaceId, token, userId }: { spaceId: string
         <p className="py-4 text-sm text-muted-foreground">{read.isError ? error : "Loading…"}</p>
       ) : !view.policy || !standing ? (
         <p className="max-w-[60ch] py-4 text-sm leading-relaxed text-muted-foreground">
-          None adopted: every Agent asks on a card before it uses an <b>ask</b> secret. A policy is a <code>norn 1 lib</code> block
-          on a Page that says which requests need no card; an Agent proposes one on a card, and only a Space admin adopts it.
+          None adopted: every Agent asks on a card before it uses an <b>ask</b> secret. A policy pre-authorizes the requests it
+          names, so they need no card: it is a <code>norn 1 lib</code> block on a Page that an Agent proposes on a card and only
+          a Space admin adopts. It decides nothing for an <b>auto</b> secret.
         </p>
       ) : (
         <div className="grid gap-3 py-3.5">
