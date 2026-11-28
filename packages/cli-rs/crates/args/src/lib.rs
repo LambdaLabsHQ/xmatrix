@@ -1170,6 +1170,35 @@ mod tests {
     }
 
     #[test]
+    fn page_move_places_a_page_before_or_after_a_sibling_but_not_both() {
+        let cli = Cli::try_parse_from([
+            "xmatrix", "page", "move", "page-1", "--root", "--before", "page-2",
+        ])
+        .expect("page move with --before should parse");
+        let Some(Commands::Page {
+            command:
+                PageCommand::Move {
+                    root,
+                    before,
+                    after,
+                    ..
+                },
+        }) = cli.command
+        else {
+            panic!("expected page move command");
+        };
+        assert!(root);
+        assert_eq!(before.as_deref(), Some("page-2"));
+        assert_eq!(after, None);
+        assert!(
+            Cli::try_parse_from([
+                "xmatrix", "page", "move", "page-1", "--before", "page-2", "--after", "page-3",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
     fn daemon_profile_control_commands_parse_with_global_selector() {
         for (name, expected) in [
             ("start-profile", "start"),
@@ -2378,8 +2407,11 @@ pub enum PageCommand {
         #[arg(long)]
         root: bool,
         /// Sibling page ID to place it after
-        #[arg(long)]
+        #[arg(long, conflicts_with = "before")]
         after: Option<String>,
+        /// Sibling page ID to place it before (put a page first: --before <the first sibling>)
+        #[arg(long)]
+        before: Option<String>,
         /// Space ID (defaults to this Run's conversation's Space)
         #[arg(long)]
         space: Option<String>,
