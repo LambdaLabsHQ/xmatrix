@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: a program's request reads answered as soon as its Agent answers
+
+A request a Norn program made of an Agent is drawn in its conversation as the request itself, with how it stands. It was read again only every 30 seconds while open, so after the Agent answered, the request still said "waiting for" its Agent for up to half a minute, under the answer itself. The Hub posts the answer as `norn-answer:<ref>:…` once the request has ended; the Web now reads that request again the moment the answer arrives. The 30-second read stays for a request referenced from a conversation the answer is not posted in. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Replay follows each change on a long page, keeps its timeline on screen, and plays faster on demand
 
 Replay played a long page where it stood: a version that changed text below the fold played off screen, and its timeline scrolled away with the page. Each version now opens on what it changed, scrolled to the middle of the window when it is off screen, and the page follows the author's caret down a long change. The upright timeline stays pinned beside the text while the page scrolls; past eight versions it names only the version playing and its two ends, and shows the rest as dots. A version types at most about 2.4 seconds of text, faster when it changed more, so a long history stays watchable, and a speed button plays it at 1×, 2× or 4×. The caret's flag names its author and the version's time. Web only. Recovery is a CI-validated beta reverting this change.
