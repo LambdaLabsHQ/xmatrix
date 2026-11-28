@@ -4,7 +4,7 @@
 
 Replay's speed was a button that stepped through 1×, 2× and 4×. It is now a slider beside the play button, from 0.25× on the left to 8× on the right along powers of two, with a turtle and a hare at its ends and the speed shown beside it. It can be set before Replay starts and moved while it plays, and the playing version follows it at once.
 
-On a phone the History header held the play button, the clock and now the slider, and pushed "Back to the page" off the screen; the upright timeline was not shown at all. On a phone the header now keeps the way back and the title; play, speed and whose change is playing (its author and time) float in a bar at the bottom, and the timeline is a thin rail of dots at the window's right edge. Without room beside the text on a wide screen, the timeline is that rail too. Web only. Recovery is a CI-validated beta reverting this change.
+On a phone the replay's controls shared History's narrow header, where the slider does not fit beside "Back to the page", and the upright timeline was not shown at all. On a phone the header now keeps the way back and the title; play, speed and whose change is playing (its author and time) float in a bar at the bottom, and the timeline is a thin rail of dots at the window's right edge. Without room beside the text on a wide screen, the timeline is that rail too. Web only. Recovery is a CI-validated beta reverting this change.
 
 ## Unreleased: a program's request reads answered as soon as its Agent answers
 
