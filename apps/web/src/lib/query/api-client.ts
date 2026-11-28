@@ -159,6 +159,8 @@ export async function xmatrixApiRequest<T>(input: {
   rawBody?: BodyInit;
   signal?: AbortSignal;
   headers?: HeadersInit;
+  /** For a request made as its page goes away: the browser finishes sending it after the page is gone. */
+  keepalive?: boolean;
 }): Promise<T> {
   if (input.body !== undefined && input.rawBody !== undefined) {
     throw new TypeError("xMatrix request cannot contain both JSON and raw bodies");
@@ -177,6 +179,7 @@ export async function xmatrixApiRequest<T>(input: {
         : { body: JSON.stringify(input.body) }),
       signal: input.signal,
       cache: "no-store",
+      ...(input.keepalive ? { keepalive: true } : {}),
     });
   } catch (cause) {
     throwTransportError(cause, input.signal);

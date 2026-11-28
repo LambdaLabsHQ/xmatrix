@@ -683,6 +683,7 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/support-handoffs/${encodeURIComponent(grantId)}/replies`,
   space_norn_program: (spaceId: string, programId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/norn-programs/${encodeURIComponent(programId)}`,
+  space_norn_requests: (spaceId: string) => `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/norn-requests`,
   space_norn_request: (spaceId: string, requestRef: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/norn-requests/${encodeURIComponent(requestRef)}`,
   channel_norn_request_answer: (channelId: string, requestRef: string) =>

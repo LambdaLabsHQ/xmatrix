@@ -95,12 +95,14 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await expect(page.locator(".app-main .app-list-create")).toHaveCount(0);
   const heading = page.locator(".app-sidebar .app-list-section-heading", { hasText: "All pages" });
   const row = page.locator(".app-sidebar .app-page-row").first();
-  const [createBox, headingBox, rowBox] = await Promise.all([create.boundingBox(), heading.boundingBox(),
-    row.boundingBox()]);
+  const overview = page.locator(".app-sidebar").getByTestId("page-overview-entry");
+  const [createBox, overviewBox, headingBox, rowBox] = await Promise.all([create.boundingBox(), overview.boundingBox(),
+    heading.boundingBox(), row.boundingBox()]);
   expect(createBox!.height).toBeCloseTo(rowBox!.height, 0);
   await expectCentredWithShortcut(create);
-  // With no recent changes, the + leads straight into All pages and its first page.
-  expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
+  // The + leads straight into the Overview's entry, and that into All pages and its first page.
+  expect(overviewBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
+  expect(headingBox!.y - (overviewBox!.y + overviewBox!.height)).toBeCloseTo(0, 0);
   expect(rowBox!.y - (headingBox!.y + headingBox!.height)).toBeCloseTo(0, 0);
 
   // Ctrl+N opens an untitled page at once, as Notion does, as any page opens; it is named on the page.

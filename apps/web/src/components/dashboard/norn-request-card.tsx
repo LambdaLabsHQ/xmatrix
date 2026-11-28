@@ -53,7 +53,7 @@ export function nornRequestMetadata(metadata: Record<string, unknown> | undefine
 }
 
 /** An option the person completes before sending: `High(say why)` takes words of their own. */
-const takesWords = (option: string) => option.includes("(");
+export const takesWords = (option: string) => option.includes("(");
 
 /**
  * What is asked, apart from the rest of what the program wrote: the first
@@ -285,7 +285,7 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
 }
 
 /** Posts to one of a request's routes; the Hub's refusal, if it gave one. */
-async function postNornRequest(fetch: typeof globalThis.fetch, token: string | null | undefined, url: string, body: unknown): Promise<string | undefined> {
+export async function postNornRequest(fetch: typeof globalThis.fetch, token: string | null | undefined, url: string, body: unknown): Promise<string | undefined> {
   const response = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },

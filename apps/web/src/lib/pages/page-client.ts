@@ -3,12 +3,12 @@ import {
   spaceVisibilityScope,
   type PageAwareness, type PageBlame, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
-  type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
+  type PageLink, type PageOverview, type PageResult, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type NornRequestView, type PageProgramStatus,
 } from "@xmatrix/protocol";
 
 export type {
-  PageAwareness, PageBlame, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageRecentChange, PageRevision,
+  PageAwareness, PageBlame, PageConversation, PageDocument, PageLinkAnchor, PageLink, PageOverview, PageResult, PageRevision,
   PageRevisionMoment, PageSummary, PageTreeActivity, PageTreeAgent,
 };
 import * as decoding from "lib0/decoding";
@@ -20,6 +20,16 @@ import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixHubRead } from "@/lib/query/hub-read";
 import { commitBlobRef, prepareMessageAttachmentUpload } from "@/lib/relay-v2/message-attachment-upload-client";
 import { ReconnectingSocket } from "@/lib/connectivity/reconnecting-socket";
+
+/** A request that waits on the reader, as the Hub lists it: `card` is what its card in `channelId` carries. */
+export interface WaitingRequest {
+  channelId: string;
+  messageId: string;
+  deliveredAt: string;
+  pageId: string | null;
+  pageName: string | null;
+  card: Record<string, unknown>;
+}
 
 /** How an open project is run (docs/design/open-project-governance.md). */
 export interface SpaceGovernance {
@@ -36,11 +46,22 @@ export const pageApi = {
   tree: (spaceId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ pages: PageSummary[] }>({ hubPath: HUB_ROUTES.space_pages(spaceId),
       webUrl: WEB_PROXY_ROUTES.space_pages(spaceId), token, signal }),
-  /** The pages that changed last and what each change was, for the list's Recent changes. */
-  recentChanges: (spaceId: string, token: string, limit: number, signal?: AbortSignal) =>
-    xmatrixHubRead<{ changes: PageRecentChange[] }>({
-      hubPath: `${HUB_ROUTES.space_pages(spaceId, "recent-changes")}?limit=${limit}`,
-      webUrl: `${WEB_PROXY_ROUTES.space_pages(spaceId)}/recent-changes?limit=${limit}`, token, signal }),
+  /** The reader's Overview: the last week's results on the pages they can read, and their place in them. */
+  overview: (spaceId: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<PageOverview>({ hubPath: HUB_ROUTES.space_pages(spaceId, "overview"),
+      webUrl: `${WEB_PROXY_ROUTES.space_pages(spaceId)}/overview`, token, signal }),
+  /** The reader has seen the Space's results through this time. It is said as they leave, the tab closing or not. */
+  markOverviewSeen: (spaceId: string, token: string, through: string) =>
+    xmatrixApiRequest<{ seenAt: string }>({ url: `${WEB_PROXY_ROUTES.space_pages(spaceId)}/overview/seen`, token,
+      method: "PUT", body: { through }, keepalive: true }),
+  /** The reader has handled a result: checked it off, or answered it in `conversationId`. */
+  markResultHandled: (spaceId: string, token: string, input: { pageId: string; revision: number; conversationId?: string }) =>
+    xmatrixApiRequest<{ handled: true }>({ url: `${WEB_PROXY_ROUTES.space_pages(spaceId)}/overview/handled`, token,
+      method: "PUT", body: input }),
+  /** The open requests the reader holds in the Space, each with the conversation that carries its card. */
+  waitingRequests: (spaceId: string, token: string, signal?: AbortSignal) =>
+    xmatrixApiRequest<{ requests: WaitingRequest[] }>({ url: WEB_PROXY_ROUTES.space_norn_requests(spaceId), token, signal })
+      .then((result) => result.requests),
   read: (spaceId: string, pageId: string, token: string, revision?: number, signal?: AbortSignal) =>
     xmatrixHubRead<{ page: PageDocument }>({
       hubPath: `${hubPage(spaceId, pageId)}${revision ? `?revision=${revision}` : ""}`,
