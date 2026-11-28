@@ -54,7 +54,8 @@ Results exist from the release that added them: earlier changes have none.
   The Web moves it forward to the newest result it showed when the person
   leaves the Overview. "While you were away" is what came after it.
 - `data.page_result_marks`: the results a person has handled, and the
-  conversation they answered in when they replied.
+  conversation they answered in when they replied. When that conversation is
+  deleted the mark goes with it, and the result waits on them again.
 
 Both are a person's own; an Agent Run has no Overview.
 
