@@ -594,6 +594,32 @@ test.describe("on a phone", () => {
     await expect(browser.getByTestId("page-history-new")).toHaveCount(0);
   });
 
+  test("Replay on a phone keeps its controls at the bottom and its timeline as a rail at the edge", async ({ page: browser }) => {
+    const editor = await openChangedPage(browser);
+    await browser.getByRole("button", { name: /^Relay/u }).click();
+    await expect(editor).toContainText("Shipped this week");
+    await browser.getByTestId("page-replay").click();
+    const stage = browser.getByTestId("page-replay-stage");
+    await expect(stage).toContainText("As you left it");
+    // The header keeps the way back; play, speed and whose change is playing sit at the bottom, within the screen.
+    await expect(browser.getByRole("button", { name: "Back to the page" })).toBeInViewport();
+    const dock = browser.getByTestId("page-rewind");
+    await expect(dock.getByRole("slider", { name: "Replay speed" })).toBeInViewport();
+    await expect(dock.getByRole("button", { name: /^(Pause|Resume)$/u })).toBeInViewport();
+    const box = (await dock.boundingBox())!;
+    const viewport = browser.viewportSize()!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+    await expect(dock).toContainText("claude:1", { timeout: 10_000 });
+    // The timeline is the same upright line, a rail at the window's edge with dots and no words.
+    const rail = browser.getByTestId("page-rewind-column");
+    await expect(rail).toBeInViewport();
+    await expect(rail).not.toContainText("As you left it");
+    await browser.screenshot({ path: test.info().outputPath("pages-replay-phone.png") });
+    await expect(stage).toHaveCount(0, { timeout: 30_000 });
+  });
+
   test("co-writing starts with one tap on an Agent's face, and the reader stays on the page", async ({ page: browser }) => {
     await browser.setViewportSize({ width: 390, height: 844 });
     await stubCoWriting(browser, "");
@@ -1247,18 +1273,18 @@ test("Replay plays the page from its reader's last visit to now, can pause, and 
   // Each version is played by its author: its caret carries their name and the version's time.
   await expect(stage.getByText(/^claude:1 · \d{1,2}:\d{2}/u)).toBeVisible({ timeout: 10_000 });
   const control = browser.getByTestId("page-rewind").getByRole("button", { name: /^(Pause|Resume)$/u });
-  // A long history is watched faster: the speed steps 1×, 2×, 4× and back.
-  const speed = browser.getByTestId("page-rewind-speed");
-  await expect(speed).toHaveText("1×");
-  await speed.click();
-  await expect(speed).toHaveText("2×");
-  await speed.click();
-  await expect(speed).toHaveText("4×");
-  await speed.click();
-  await expect(speed).toHaveText("1×");
   await control.click();
   await expect(stage).toContainText("Paused");
   await expect(control).toHaveAttribute("aria-label", "Resume");
+  // The reader sets the pace on a slider, from very slow on the left to very fast on the right, paused or playing.
+  const speed = browser.getByRole("slider", { name: "Replay speed" });
+  const shown = browser.getByTestId("page-rewind-speed-value");
+  await expect(shown).toHaveText("1×");
+  await speed.fill("-2");
+  await expect(shown).toHaveText("0.25×");
+  await expect(speed).toHaveAttribute("aria-valuetext", "0.25×");
+  await speed.fill("3");
+  await expect(shown).toHaveText("8×");
   await control.click();
   await expect(stage).not.toContainText("Paused");
   // When it has played every version it ends on History's view of what changed since the last visit.

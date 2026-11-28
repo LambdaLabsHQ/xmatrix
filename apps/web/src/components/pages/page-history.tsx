@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, Pause, Play } from "lucide-react";
+import { ArrowLeft, ChevronDown, Pause, Play, Rabbit, Turtle } from "lucide-react";
 import { pageAuthorColor, pageAuthorLabel, type PageAuthor } from "@xmatrix/protocol";
 import { markdownToPageDoc, pageDocDiff, type PageDocDiff } from "@xmatrix/protocol/page-document";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { renderPageDiff, renderPageDocument } from "./page-document-render";
 import type { PageMediaUrl } from "./page-media";
 import type { PageReferenceTargets } from "./page-reference-chips";
-import type { ReplayProgress, ReplaySpeed } from "./page-replay";
+import { REPLAY_FASTEST, REPLAY_SLOWEST, replaySpeedLabel, type ReplayProgress, type ReplaySpeed } from "./page-replay";
 
 /**
  * A page's history (pages-live-document.md §4.2, §7): the other of the page's two states. The page is always
@@ -59,6 +59,9 @@ export interface PageHistoryState {
   host: RefObject<HTMLDivElement | null>;
   /** The replay from the reader's last visit, while it plays (page-replay.tsx). */
   replay: ReplayProgress | null;
+  /** How fast the replay plays; the reader sets it on a slider, before or while it plays. */
+  speed: ReplaySpeed;
+  setSpeed: (speed: ReplaySpeed) => void;
   setReplay: Dispatch<SetStateAction<ReplayProgress | null>>;
   jump: (index: number) => void;
 }
@@ -83,6 +86,7 @@ export function usePageHistory({ open, spaceId, pageId, token, headRevision, sin
   const [marked, setMarked] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [replay, setReplay] = useState<ReplayProgress | null>(null);
+  const [speed, setSpeed] = useState<ReplaySpeed>(1);
   // Each time History opens it starts from what is new.
   useEffect(() => {
     if (open) return;
@@ -125,7 +129,7 @@ export function usePageHistory({ open, spaceId, pageId, token, headRevision, sin
     };
   return {
     revisions, news, since, choice, choose: setPicked, version, shown, failed: read.failed || history.isError, marked,
-    mark: setMarked, restore, error, host, replay, setReplay,
+    mark: setMarked, restore, error, host, replay, setReplay, speed, setSpeed,
     jump: (index) => host.current?.children[index]?.scrollIntoView({ block: "center", behavior: "smooth" }),
   };
 }
@@ -386,14 +390,16 @@ export function PageHistoryRail({ history, fold, conversationName, onOpenConvers
 }
 
 /** History's own header, in place of the page's: the way back, and putting the chosen version back. */
-export function PageHistoryBar({ history, canEdit, onClose }: {
+export function PageHistoryBar({ history, canEdit, onClose, replayControls = true }: {
   history: PageHistoryState; canEdit: boolean; onClose: () => void;
+  /** Whether the replay's controls sit in this bar; on a phone they sit at the bottom instead (PageRewindDock). */
+  replayControls?: boolean;
 }) {
   return (
     <>
       <Button variant="ghost" size="sm" onClick={onClose} className="-ml-2"><ArrowLeft /> Back to the page</Button>
-      <span className="text-sm font-semibold">Version history</span>
-      <PageRewindTrack history={history} />
+      <span className={cn("text-sm font-semibold", !replayControls && "mr-auto")}>Version history</span>
+      {replayControls && <PageRewindTrack history={history} />}
       {history.error && <span role="alert" className={cn("text-xs", statusInkClass("alert"))}>{history.error}</span>}
       {canEdit && history.restore && (
         <Button size="sm" onClick={() => void history.restore!()}>
@@ -404,28 +410,76 @@ export function PageHistoryBar({ history, canEdit, onClose }: {
   );
 }
 
-const NEXT_SPEED: Record<ReplaySpeed, ReplaySpeed> = { 1: 2, 2: 4, 4: 1 };
+/** The speed slider moves along powers of two, so each step to the right is the same "faster". */
+const SPEED_MIN = Math.log2(REPLAY_SLOWEST), SPEED_MAX = Math.log2(REPLAY_FASTEST);
 
-/** The replay's play button, which pauses it while it plays, its speed, and the clock it keeps. */
-function PageRewindTrack({ history }: { history: PageHistoryState }) {
+/** Plays the replay, and pauses and resumes it while it plays. */
+function RewindPlay({ history }: { history: PageHistoryState }) {
   const { replay, setReplay } = history;
+  return (
+    <button type="button" aria-label={replay ? (replay.paused ? "Resume" : "Pause") : "Replay what changed"}
+      onClick={() => setReplay((now) => now ? { ...now, paused: !now.paused } : { step: 0, pos: 0, clock: "" })}
+      className={cn(actionClass({ variant: "primary", size: "icon" }), "shrink-0 rounded-full")}>
+      {replay && !replay.paused ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
+    </button>
+  );
+}
+
+/** The replay's speed, from very slow on the left to very fast on the right. */
+function RewindSpeed({ history, className }: { history: PageHistoryState; className?: string }) {
+  const { speed, setSpeed } = history;
+  return (
+    <label className={cn("flex items-center gap-2 text-xs text-muted-foreground", className)}
+      title="Replay speed: slow on the left, fast on the right">
+      <Turtle className="size-3.5 shrink-0" aria-hidden="true" />
+      <input type="range" aria-label="Replay speed" aria-valuetext={replaySpeedLabel(speed)} data-testid="page-rewind-speed"
+        min={SPEED_MIN} max={SPEED_MAX} step={0.05} value={Math.log2(speed)}
+        onChange={(event) => setSpeed(2 ** Number(event.target.value))} className="w-28 min-w-0 flex-1 accent-primary" />
+      <Rabbit className="size-3.5 shrink-0" aria-hidden="true" />
+      <span className="w-10 shrink-0 tabular-nums text-foreground" data-testid="page-rewind-speed-value">{replaySpeedLabel(speed)}</span>
+    </label>
+  );
+}
+
+/** What the replay is at: the time it has reached, or, before it plays, how much there is to play. */
+function rewindStatus(history: PageHistoryState): string {
+  if (history.replay) return history.replay.clock;
+  return history.news.length === 1 ? "1 change while you were away" : `${history.news.length} changes while you were away`;
+}
+
+/** The replay's controls in History's header: play, speed and the clock it keeps. */
+function PageRewindTrack({ history }: { history: PageHistoryState }) {
   if (!history.news.length) return <span className="mr-auto" />;
-  const speed = replay?.speed ?? 1;
   return (
     <div className="mx-4 mr-auto flex items-center gap-3" data-testid="page-rewind">
-      <button type="button" aria-label={replay ? (replay.paused ? "Resume" : "Pause") : "Replay what changed"}
-        onClick={() => setReplay((now) => now ? { ...now, paused: !now.paused } : { step: 0, pos: 0, clock: "" })}
-        className={cn(actionClass({ variant: "primary", size: "icon" }), "shrink-0 rounded-full")}>
-        {replay && !replay.paused ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
-      </button>
-      {replay && (
-        <button type="button" aria-label={`Replay speed ${speed}×`} data-testid="page-rewind-speed"
-          onClick={() => setReplay((now) => now && { ...now, speed: NEXT_SPEED[now.speed ?? 1] })}
-          className={cn(actionClass({ variant: "secondary", size: "sm" }), "tabular-nums")}>{speed}×</button>
-      )}
-      <span className="font-mono text-sm tabular-nums">
-        {replay ? replay.clock : history.news.length === 1 ? "1 change while you were away" : `${history.news.length} changes while you were away`}
-      </span>
+      <RewindPlay history={history} />
+      <RewindSpeed history={history} />
+      <span className="font-mono text-sm tabular-nums">{rewindStatus(history)}</span>
+    </div>
+  );
+}
+
+/** On a phone the replay's controls float at the bottom, under the thumb: play, speed, and whose change is playing. */
+export function PageRewindDock({ history }: { history: PageHistoryState }) {
+  const ticks = useMemo(() => [...history.news].sort((a, b) => a.revision - b.revision), [history.news]);
+  if (!ticks.length) return null;
+  const step = history.replay?.step ?? 0;
+  const playing = step >= 1 && step <= ticks.length ? ticks[step - 1]! : null;
+  return (
+    <div className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.75rem)] z-30 rounded-2xl border bg-background/95 px-3 py-2 shadow-lg"
+      data-testid="page-rewind">
+      <div className="flex items-center gap-3">
+        <RewindPlay history={history} />
+        <RewindSpeed history={history} className="min-w-0 flex-1" />
+      </div>
+      <div className="mt-1 flex items-baseline gap-2 truncate pl-11 text-xs">
+        <span className="font-mono tabular-nums">{rewindStatus(history)}</span>
+        {playing && (
+          <span className="truncate" style={{ color: pageAuthorColor(playing.authors[0]!) }}>
+            {playing.authors.map(pageAuthorLabel).join(", ")} · {versionTime(playing.createdAt)}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -435,7 +489,11 @@ const DENSE_TIMELINE = 8;
 
 /** The replay's timeline, upright beside the page: the reader's last visit at the bottom and now at the top.
     The playhead climbs as each version plays, and each version lights up as the playhead reaches it. */
-export function PageRewindColumn({ history }: { history: PageHistoryState }) {
+export function PageRewindColumn({ history, compact = false }: {
+  history: PageHistoryState;
+  /** Without room beside the text: a thin rail at the window's right edge, dots without words. */
+  compact?: boolean;
+}) {
   const ticks = useMemo(() => [...history.news].sort((a, b) => a.revision - b.revision), [history.news]);
   const since = history.revisions.find((revision) => revision.revision === history.since);
   const step = history.replay?.step ?? 0;
@@ -443,7 +501,8 @@ export function PageRewindColumn({ history }: { history: PageHistoryState }) {
   const slot = (index: number) => (all.length <= 1 ? 0 : (index / (all.length - 1)) * 100);
   const head = history.replay?.pos ?? 0;
   return (
-    <div className="relative ml-2 h-[min(34rem,calc(100dvh-10rem))] select-none" data-testid="page-rewind-column">
+    <div className={cn("select-none", compact ? "fixed right-1.5 top-1/2 z-20 h-[45dvh] w-4 -translate-y-1/2"
+      : "relative ml-2 h-[min(34rem,calc(100dvh-10rem))]")} data-testid="page-rewind-column">
       <div className="absolute bottom-0 left-[7px] top-0 w-0.5 rounded bg-border" />
       <div className="absolute bottom-0 left-[7px] w-0.5 rounded bg-foreground"
         style={{ height: `${head}%` }} />
@@ -457,7 +516,7 @@ export function PageRewindColumn({ history }: { history: PageHistoryState }) {
         // A long history names only the version playing and the two ends; the rest are dots on the line.
         const end = index === 0 || index === all.length - 1;
         const nearNow = Math.abs(slot(index) - slot(Math.min(step, all.length - 1))) < 8;
-        const named = all.length <= DENSE_TIMELINE || now || (end && !nearNow);
+        const named = !compact && (all.length <= DENSE_TIMELINE || now || (end && !nearNow));
         const author = revision.authors[0]!;
         const color = pageAuthorColor(author);
         return (
