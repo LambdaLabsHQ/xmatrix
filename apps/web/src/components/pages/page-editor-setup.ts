@@ -385,7 +385,16 @@ function placeholder(hint: () => string | undefined): Plugin {
     },
     props: {
       handleDOMEvents: {
+        // An IME draws its marked text (or macOS its predicted text) in the line before the editor reads any of
+        // it in, so the line still counts as empty and its placeholder stands under the text: hide it until done.
+        compositionstart(view) {
+          const at = view.domAtPos(view.state.selection.from).node;
+          const line = (at instanceof Element ? at : at.parentElement)?.closest(".page-placeholder");
+          if (line && view.dom.contains(line)) view.dom.dataset.composing = "";
+          return false;
+        },
         compositionend(view) {
+          delete view.dom.dataset.composing;
           // After ProseMirror reads the composed text in.
           window.setTimeout(() => {
             const tr = view.composing ? null : nameFirstLine(view.state);
