@@ -1273,18 +1273,23 @@ test("Replay plays the page from its reader's last visit to now, can pause, and 
   // Each version is played by its author: its caret carries their name and the version's time.
   await expect(stage.getByText(/^claude:1 · \d{1,2}:\d{2}/u)).toBeVisible({ timeout: 10_000 });
   const control = browser.getByTestId("page-rewind").getByRole("button", { name: /^(Pause|Resume)$/u });
-  await control.click();
+  // The space bar pauses it and plays it again, as in a video player.
+  await browser.keyboard.press("Space");
   await expect(stage).toContainText("Paused");
   await expect(control).toHaveAttribute("aria-label", "Resume");
-  // The reader sets the pace on a slider, from very slow on the left to very fast on the right, paused or playing.
+  await browser.keyboard.press("Space");
+  await expect(stage).not.toContainText("Paused");
+  await control.click();
+  await expect(stage).toContainText("Paused");
+  // The reader sets one even rate, in characters a second, from very slow on the left to very fast on the right.
   const speed = browser.getByRole("slider", { name: "Replay speed" });
   const shown = browser.getByTestId("page-rewind-speed-value");
-  await expect(shown).toHaveText("1×");
-  await speed.fill("-2");
-  await expect(shown).toHaveText("0.25×");
-  await expect(speed).toHaveAttribute("aria-valuetext", "0.25×");
-  await speed.fill("3");
-  await expect(shown).toHaveText("8×");
+  await expect(shown).toHaveText("12 chars/s");
+  await speed.fill("2");
+  await expect(shown).toHaveText("4 chars/s");
+  await expect(speed).toHaveAttribute("aria-valuetext", "4 chars/s");
+  await speed.fill("7");
+  await expect(shown).toHaveText("128 chars/s");
   await control.click();
   await expect(stage).not.toContainText("Paused");
   // When it has played every version it ends on History's view of what changed since the last visit.
