@@ -20,9 +20,11 @@ export default function WorkspaceAppShell({ children }: { children?: ReactNode }
   const [newAccount, setNewAccount] = useState(false);
   useEffect(() => setNewAccount(new URLSearchParams(window.location.search).has(NEW_ACCOUNT_FLAG)), []);
   const token = session?.access_token;
+  const accountCreatedAt = session?.user.created_at;
   useEffect(() => {
-    if (token) sendSignupSource(token, { newAccount: new URLSearchParams(window.location.search).has(NEW_ACCOUNT_FLAG) });
-  }, [token]);
+    if (token) sendSignupSource(token, { accountCreatedAt,
+      newAccount: new URLSearchParams(window.location.search).has(NEW_ACCOUNT_FLAG) });
+  }, [token, accountCreatedAt]);
   if (user && session && !named && isPlaceholderHumanName(user.name, user.id)) {
     return <NameYourselfStep token={session.access_token} email={user.email} onNamed={() => setNamed(true)} />;
   }

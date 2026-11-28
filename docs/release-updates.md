@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a new account's source is sent however it signed in
+
+The first day of 4.14.2 recorded no source for any of four new accounts. The
+first page sent it only when the sign-in returned with `new_account` or the
+visit had an outside referrer, and a Google return lands from our own Hub. The
+page now decides from the account's own creation time (`created_at`, from the
+session), so a Google, GitHub, email-code or passkey sign-up within 24 hours
+sends it, `direct` included; and both of a social sign-in's returns into the
+app carry the visit's source. Web only.
+
 ## Unreleased: a Space adopts an admission policy for secrets that ask first
 
 A secret that cannot be `auto` asked a Space admin on a card every time, so
