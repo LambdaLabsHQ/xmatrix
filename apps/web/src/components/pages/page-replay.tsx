@@ -3,7 +3,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { pageAuthorColor, pageAuthorLabel } from "@xmatrix/protocol";
 import { markdownToPageDoc, pageDocDiff, type PageDocDiff } from "@xmatrix/protocol/page-document";
-import type { Node as DocNode } from "prosemirror-model";
 import { pageApi, type PageRevision } from "@/lib/pages/page-client";
 import { renderPageDiff, renderPageDocument } from "./page-document-render";
 import type { PageMediaUrl } from "./page-media";
@@ -11,18 +10,22 @@ import type { PageReferenceTargets } from "./page-reference-chips";
 
 /**
  * Replay (pages-live-document.md §4.2): the page played from the version its reader last saw to now, in
- * place. Each version is drawn as History draws it, with what it changed marked, and then moves: words
- * taken out are struck and fold away, and new words are typed by their author's caret. Every moving part
- * is drawn from one clock, so the motion is continuous and can pause.
+ * place. Each version is drawn as History draws it, with what it changed marked, and then its changes play
+ * one place at a time: the page moves to the place, the words taken out are struck from left to right and
+ * fold away, and the new words are typed by their author's caret.
+ *
+ * Words are struck and typed at one even rate, in characters a second, however much a version changed: a
+ * long change takes longer, it is never hurried to fit a length. The reader sets that rate. Only moving to
+ * the next place and folding struck words away take a fixed beat.
  */
 
-/** How fast the replay plays, as a multiple of its own pace: from REPLAY_SLOWEST to REPLAY_FASTEST. */
+/** How fast the replay plays: an even rate in characters a second, from REPLAY_SLOWEST to REPLAY_FASTEST. */
 export type ReplaySpeed = number;
-export const REPLAY_SLOWEST = 0.25, REPLAY_FASTEST = 8;
+export const REPLAY_SLOWEST = 4, REPLAY_FASTEST = 128, REPLAY_DEFAULT = 12;
 
-/** A speed as the reader reads it: `0.25×`, `0.5×`, `1×`, `2.5×`, `8×`. */
+/** A rate as the reader reads it: `12 chars/s`. */
 export function replaySpeedLabel(speed: ReplaySpeed): string {
-  return `${Number(speed.toFixed(speed < 1 ? 2 : 1))}×`;
+  return `${Math.round(speed)} chars/s`;
 }
 
 /** Where the replay stands, as the stage reports it. */
@@ -41,16 +44,14 @@ export interface ReplayProgress extends ReplayPosition {
 
 const clamp = (x: number) => Math.max(0, Math.min(1, x));
 const ease = (x: number) => { const t = clamp(x); return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2; };
-const span = (u: number, from: number, to: number) => ease((u - from) / (to - from));
 const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
-/* One version's beats, in ms from its start. The next starts as soon as this one's words are in. A version
-   types at PER_CHAR a character, faster when that would take longer than TYPE_BUDGET, so one version plays
-   for under four seconds however much it changed, and a long history stays watchable. */
-const STRIKE = [100, 650] as const, FOLD = [650, 1250] as const, TYPE_AT = 1000, PER_CHAR = 38, OPEN = 500, CLOSE = 600;
-const TYPE_BUDGET = 2400, MIN_LENGTH = 1600, UNDERLINE_FADE = 300;
+/* The fixed beats, in ms: the page as the reader left it, a version's name coming in, moving to the next
+   place that changed, folding struck words away, and the page as it is now before History takes over. */
+const OPEN = 500, INTRO = 300, TRAVEL = 400, FOLD = 300, CLOSE = 600;
 /** How close to the top or bottom of the window the change may come before the page follows it. */
 const FOLLOW_MARGIN = 96, FOLLOW_EVERY = 700;
+const STRIKE_INK = "180, 35, 24";
 
 /** Brings `el` to the middle of the window when it is off screen or about to leave it. */
 function follow(el: Element) {
@@ -60,68 +61,100 @@ function follow(el: Element) {
   }
 }
 
-/** How many characters a version puts in: the words it inserted and the blocks it added. */
-function insertedChars(doc: DocNode): number {
-  let count = 0;
-  doc.descendants((node, _pos, parent) => {
-    if (!node.isText) return true;
-    const added = (parent?.attrs.change === "added");
-    if (added || node.marks.some((mark) => mark.type.name === "inserted")) count += node.text?.length ?? 0;
-    return false;
-  });
-  return count;
-}
-
-/** What one drawn version moves: the parts it takes out and the text it types, in reading order. */
-interface Drawn {
-  struck: { el: HTMLElement; width: number }[];
-  removed: { el: HTMLElement; height: number }[];
+/** One place a version changed: a run of blocks next to each other, played as one. */
+interface Hunk {
+  anchor: HTMLElement;
+  /** What it takes out, in reading order: words inside a kept block, or whole blocks, each at its offset. */
+  struck: { el: HTMLElement; inline: boolean; size: number; from: number; length: number }[];
+  /** What it puts in: the text typed, and the blocks that grow in as their text comes. */
+  texts: { node: Text; full: string; from: number }[];
   added: { el: HTMLElement; height: number; from: number }[];
   marks: HTMLElement[];
-  texts: { node: Text; full: string; from: number }[];
-  total: number;
+  deleted: number;
+  inserted: number;
 }
 
-function prepare(host: HTMLElement): Drawn {
-  const removedBlocks = [...host.querySelectorAll<HTMLElement>('[data-change="removed"]')];
-  const inRemoved = (node: Node) => removedBlocks.some((block) => block.contains(node));
-  const struck = [...host.querySelectorAll<HTMLElement>("del")].filter((el) => !inRemoved(el))
-    .map((el) => ({ el, width: el.getBoundingClientRect().width }));
-  const removed = removedBlocks.map((el) => ({ el, height: el.getBoundingClientRect().height }));
-  const addedBlocks = [...host.querySelectorAll<HTMLElement>('[data-change="added"]')]
-    .filter((el) => !el.parentElement?.closest('[data-change="added"]'));
-  const texts: Drawn["texts"] = [];
-  let total = 0;
-  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
-    const parent = node.parentElement;
-    if (!parent || parent.closest("del") || inRemoved(node)) continue;
-    if (!parent.closest('ins, [data-change="added"]')) continue;
-    const full = node.data;
-    texts.push({ node, full, from: total });
-    total += full.length;
+const CHANGED = 'del, ins, [data-change]';
+
+/** The places a drawn version changed, from its top-level blocks: neighbouring changed blocks are one place. */
+function hunksOf(host: HTMLElement): Hunk[] {
+  const runs: HTMLElement[][] = [];
+  let run: HTMLElement[] | null = null;
+  for (const block of [...host.children] as HTMLElement[]) {
+    const changed = block.matches("[data-change]") || Boolean(block.querySelector(CHANGED));
+    if (!changed) { run = null; continue; }
+    if (!run) { run = []; runs.push(run); }
+    run.push(block);
   }
-  const added = addedBlocks.map((el) => {
-    const first = texts.find((text) => el.contains(text.node));
-    return { el, height: el.getBoundingClientRect().height, from: first?.from ?? total };
+  return runs.map((blocks) => {
+    const within = (selector: string) => blocks.flatMap((block) =>
+      [...(block.matches(selector) ? [block] : []), ...block.querySelectorAll<HTMLElement>(selector)]);
+    const removedBlocks = within('[data-change="removed"]').filter((el) => !el.parentElement?.closest('[data-change="removed"]'));
+    const inRemoved = (node: Node) => removedBlocks.some((block) => block !== node && block.contains(node));
+    const out = [...removedBlocks, ...within("del").filter((el) => !inRemoved(el))]
+      .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    let deleted = 0;
+    const struck = out.map((el) => {
+      const inline = el.tagName === "DEL";
+      const box = el.getBoundingClientRect();
+      const length = el.textContent?.length ?? 0;
+      const item = { el, inline, size: inline ? box.width : box.height, from: deleted, length };
+      deleted += length;
+      return item;
+    });
+    const texts: Hunk["texts"] = [];
+    let inserted = 0;
+    for (const block of blocks) {
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+        const parent = node.parentElement;
+        if (!parent || parent.closest("del") || inRemoved(node) || removedBlocks.includes(parent)) continue;
+        if (!parent.closest('ins, [data-change="added"]')) continue;
+        texts.push({ node, full: node.data, from: inserted });
+        inserted += node.data.length;
+      }
+    }
+    const added = within('[data-change="added"]').filter((el) => !el.parentElement?.closest('[data-change="added"]'))
+      .map((el) => ({ el, height: el.getBoundingClientRect().height,
+        from: texts.find((text) => el.contains(text.node))?.from ?? inserted }));
+    return { anchor: blocks[0]!, struck, texts, added, marks: within("ins"), deleted, inserted };
   });
-  return { struck, removed, added, marks: [...host.querySelectorAll<HTMLElement>("ins")], texts, total };
 }
+
+/** A version's beats, in order: fixed ones in ms, struck and typed ones in characters. */
+type Beat = { kind: "intro" | "travel" | "fold"; ms: number; hunk: number }
+  | { kind: "strike" | "type"; chars: number; hunk: number };
+
+function beatsOf(hunks: Hunk[]): Beat[] {
+  const beats: Beat[] = [{ kind: "intro", ms: INTRO, hunk: -1 }];
+  hunks.forEach((hunk, index) => {
+    beats.push({ kind: "travel", ms: TRAVEL, hunk: index });
+    if (hunk.deleted > 0) beats.push({ kind: "strike", chars: hunk.deleted, hunk: index }, { kind: "fold", ms: FOLD, hunk: index });
+    if (hunk.inserted > 0) beats.push({ kind: "type", chars: hunk.inserted, hunk: index });
+  });
+  return beats;
+}
+
+const beatMs = (beat: Beat, rate: number) => ("ms" in beat ? beat.ms : (beat.chars / rate) * 1000);
+
+/** Where the replay is: before the first version (-1), in a version, or past the last; the beat and how far into it. */
+interface Cursor { version: number; beat: number; progress: number; finished: boolean }
 
 export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, speed, references, mediaUrl, onProgress, onDone }: {
   spaceId: string; pageId: string; token: string;
   /** The version the reader last saw, and the versions since, oldest first. */
   since: PageRevision; ticks: readonly PageRevision[];
+  /** Paused, and the even rate it plays at in characters a second. */
   paused: boolean; speed: ReplaySpeed; references?: PageReferenceTargets; mediaUrl?: PageMediaUrl;
   onProgress: (position: ReplayPosition) => void; onDone: () => void;
 }) {
   const [bodies, setBodies] = useState<string[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const [t, setT] = useState(0);
+  const [, setFrame] = useState(0);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
-  const speedRef = useRef(speed);
-  speedRef.current = speed;
+  const rateRef = useRef(speed);
+  rateRef.current = speed;
   useEffect(() => {
     let stop = false;
     void Promise.all([since, ...ticks].map((revision) =>
@@ -129,138 +162,187 @@ export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, 
       .then((read) => { if (!stop) setBodies(read); }, () => { if (!stop) setFailed(true); });
     return () => { stop = true; };
   }, [spaceId, pageId, token, since, ticks]);
-  const steps = useMemo(() => {
-    if (!bodies) return [];
-    let at = OPEN;
-    return bodies.slice(1).map((body, index) => {
-      const diff: PageDocDiff = pageDocDiff(markdownToPageDoc(bodies[index]!), markdownToPageDoc(body));
-      const chars = insertedChars(diff.doc);
-      const perChar = chars > 0 ? Math.min(PER_CHAR, TYPE_BUDGET / chars) : PER_CHAR;
-      const length = Math.max(MIN_LENGTH, TYPE_AT + chars * perChar + 150);
-      const step = { start: at, length, diff, perChar };
-      at += length;
-      return step;
-    });
-  }, [bodies]);
-  const end = steps.length ? steps[steps.length - 1]!.start + steps[steps.length - 1]!.length : 0;
+  const diffs = useMemo<PageDocDiff[]>(() => !bodies ? []
+    : bodies.slice(1).map((body, index) => pageDocDiff(markdownToPageDoc(bodies[index]!), markdownToPageDoc(body))), [bodies]);
 
-  // The clock advances while not paused. A recording can step it: `__xmatrixReplayClock` replaces the
-  // page's own time, and `__xmatrixReplayTick` draws the next frame.
+  // Each version's places and beats, known once it is drawn.
+  const drawn = useRef<{ version: number; hunks: Hunk[]; beats: Beat[] } | null>(null);
+  const cursor = useRef<Cursor>({ version: -1, beat: 0, progress: 0, finished: false });
+  /** Replay time in ms, for following the caret at an even pace. */
+  const played = useRef(0);
+
+  // The clock: the page's own time, or the time a recording steps through (`__xmatrixReplayClock`, with
+  // `__xmatrixReplayTick` drawing the next frame). Each tick moves the cursor through the beats.
   useEffect(() => {
     if (!bodies) return;
     const w = window as unknown as { __xmatrixReplayClock?: () => number; __xmatrixReplayTick?: () => void };
     const now = () => w.__xmatrixReplayClock?.() ?? performance.now();
-    let last = now(), acc = 0, frame = 0, live = true;
+    let last = now(), frame = 0, live = true;
+    const advance = (dt: number) => {
+      const c = cursor.current;
+      let left = dt;
+      played.current += dt;
+      while (left > 0 && !c.finished) {
+        if (c.version === -1) {
+          const take = Math.min(left, OPEN - c.progress);
+          c.progress += take; left -= take;
+          if (c.progress >= OPEN) Object.assign(c, { version: 0, beat: 0, progress: 0 });
+          continue;
+        }
+        if (c.version >= diffs.length) {
+          c.progress += left; left = 0;
+          if (c.progress >= CLOSE) c.finished = true;
+          continue;
+        }
+        // A version moves only once it is drawn and its places are known.
+        const version = drawn.current;
+        if (!version || version.version !== c.version) break;
+        const beat = version.beats[c.beat];
+        if (!beat) { Object.assign(c, { version: c.version + 1, beat: 0, progress: 0 }); continue; }
+        if ("ms" in beat) {
+          const take = Math.min(left, beat.ms - c.progress);
+          c.progress += take; left -= take;
+          if (c.progress >= beat.ms) Object.assign(c, { beat: c.beat + 1, progress: 0 });
+        } else {
+          const rate = rateRef.current;
+          const take = Math.min(left, ((beat.chars - c.progress) / rate) * 1000);
+          c.progress += (take * rate) / 1000; left -= take;
+          if (c.progress >= beat.chars - 1e-6) Object.assign(c, { beat: c.beat + 1, progress: 0 });
+        }
+      }
+    };
     const tick = () => {
       const current = now();
-      if (!pausedRef.current) acc += (current - last) * speedRef.current;
+      if (!pausedRef.current) advance(current - last);
       last = current;
-      setT(acc);
+      setFrame((n) => n + 1);
     };
     w.__xmatrixReplayTick = tick;
     const loop = () => { if (!live) return; if (!w.__xmatrixReplayClock) tick(); frame = requestAnimationFrame(loop); };
     frame = requestAnimationFrame(loop);
     return () => { live = false; cancelAnimationFrame(frame); if (w.__xmatrixReplayTick === tick) delete w.__xmatrixReplayTick; };
-  }, [bodies]);
+  }, [bodies, diffs]);
 
-  const index = steps.findIndex((step) => t < step.start + step.length);
-  const before = steps.length > 0 && t < steps[0]!.start;
-  const done = bodies !== null && steps.length > 0 && index < 0;
-  const current = !before && index >= 0 ? steps[index]! : null;
-  const u = current ? t - current.start : 0;
-  const revision = current ? ticks[index]! : null;
+  const c = cursor.current;
+  const before = c.version === -1;
+  const done = bodies !== null && c.version >= diffs.length;
+  const index = before || done ? -1 : c.version;
+  const revision = index >= 0 ? ticks[index]! : null;
   const color = revision ? pageAuthorColor(revision.authors[0]!) : "transparent";
-
+  const version = drawn.current && drawn.current.version === index ? drawn.current : null;
+  // How far through this version, at the rate it now plays: the playhead and the clock move by it.
+  const rate = rateRef.current;
+  const total = version ? version.beats.reduce((sum, beat) => sum + beatMs(beat, rate), 0) : 1;
+  const elapsed = version ? version.beats.slice(0, c.beat).reduce((sum, beat) => sum + beatMs(beat, rate), 0)
+    + (version.beats[c.beat] ? ("ms" in version.beats[c.beat]! ? c.progress : (c.progress / rate) * 1000) : 0) : 0;
+  const through = version ? clamp(elapsed / total) : 0;
   const previous = Date.parse(index > 0 ? ticks[index - 1]!.createdAt : since.createdAt);
-  const clockMs = current ? previous + (Date.parse(revision!.createdAt) - previous) * clamp(u / current.length)
+  const clockMs = revision ? previous + (Date.parse(revision.createdAt) - previous) * through
     : Date.parse((done ? ticks[ticks.length - 1]! : since).createdAt);
-  const stepNo = done ? steps.length + 1 : current ? index + 1 : 0;
-  const pos = !steps.length ? 0 : done ? 100 : current ? ((index + clamp(u / current.length)) / steps.length) * 100 : 0;
+  const stepNo = done ? diffs.length + 1 : revision ? index + 1 : 0;
+  const pos = !diffs.length ? 0 : done ? 100 : revision ? ((index + through) / diffs.length) * 100 : 0;
   const clock = time(clockMs);
   useEffect(() => {
     onProgress({ step: stepNo, pos, clock });
     // Reported as it changes in steps a reader sees, not every frame.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepNo, Math.round(pos * 10), clock]);
-  useEffect(() => { if (done && t >= end + CLOSE) onDone(); }, [done, t, end, onDone]);
+  useEffect(() => { if (c.finished) onDone(); }, [c.finished, onDone]);
 
-  // Each version is drawn once, as History draws it; its parts then move with the clock.
+  // Each version is drawn once, as History draws it; its places then move with the cursor.
   const host = useRef<HTMLDivElement | null>(null);
-  const drawn = useRef<Drawn | null>(null);
   const caret = useRef<HTMLSpanElement | null>(null);
-  // When the page last moved to follow the caret, on the replay's own clock, so it follows without jitter.
-  const followed = useRef(-Infinity);
-  const shownKey = !bodies ? "none" : before ? "since" : done ? "now" : `step-${index}`;
+  const followed = useRef({ place: "", at: -Infinity });
+  const shownKey = !bodies ? "none" : before ? "since" : done ? "now" : `version-${index}`;
   useLayoutEffect(() => {
     const target = host.current;
     if (!target || !bodies) return;
     drawn.current = null;
+    caret.current?.remove();
     if (shownKey === "since") renderPageDocument(bodies[0]!, target, references, mediaUrl);
     else if (shownKey === "now") renderPageDocument(bodies[bodies.length - 1]!, target, references, mediaUrl);
-    else if (current) {
-      renderPageDiff(current.diff.doc, target, references, mediaUrl);
-      drawn.current = prepare(target);
-      // Each version opens on what it changed, wherever on the page that is.
-      const first = target.querySelector('del, ins, [data-change]');
-      if (first) { follow(first); followed.current = t; }
+    else if (index >= 0) {
+      renderPageDiff(diffs[index]!.doc, target, references, mediaUrl);
+      const hunks = hunksOf(target);
+      drawn.current = { version: index, hunks, beats: beatsOf(hunks) };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownKey, bodies]);
   useLayoutEffect(() => {
-    const parts = drawn.current;
-    if (!parts || !current || !revision) { caret.current?.remove(); return; }
-    const strike = span(u, ...STRIKE);
-    const fold = 1 - span(u, ...FOLD);
-    const typed = Math.max(0, (u - TYPE_AT) / current.perChar);
-    const fade = 1 - clamp((u - (current.length - UNDERLINE_FADE)) / UNDERLINE_FADE);
-    for (const { el, width } of parts.struck) {
-      el.style.color = `rgba(180, 35, 24, ${0.4 + 0.6 * strike})`;
-      el.style.textDecorationColor = `rgba(180, 35, 24, ${strike})`;
-      el.style.textDecorationThickness = "2px";
-      el.style.backgroundColor = `rgba(253, 227, 223, ${strike * fold})`;
-      if (fold < 1) {
-        el.style.display = "inline-block";
-        el.style.whiteSpace = "nowrap";
-        el.style.overflow = "hidden";
-        el.style.verticalAlign = "bottom";
-        el.style.maxWidth = `${width * fold}px`;
-        el.style.opacity = String(fold);
+    if (!version || !revision) { caret.current?.remove(); return; }
+    // How far each place has got: struck characters, how folded, typed characters.
+    const state = version.hunks.map(() => ({ struck: 0, fold: 1, typed: 0 }));
+    version.beats.forEach((beat, at) => {
+      if (beat.hunk < 0) return;
+      const s = state[beat.hunk]!;
+      const share = at < c.beat ? 1 : at > c.beat ? 0 : "ms" in beat ? c.progress / beat.ms : c.progress / beat.chars;
+      if (beat.kind === "strike") s.struck = share * beat.chars;
+      if (beat.kind === "fold") s.fold = 1 - ease(share);
+      if (beat.kind === "type") s.typed = share * beat.chars;
+    });
+    const current = version.beats[c.beat];
+    // Moving to a place brings it into view, once.
+    if (current?.kind === "travel") {
+      const place = `${index}:${current.hunk}`;
+      if (followed.current.place !== place) {
+        follow(version.hunks[current.hunk]!.anchor);
+        followed.current = { place, at: played.current };
       }
     }
-    for (const { el, height } of parts.removed) {
-      el.style.color = `rgba(180, 35, 24, ${0.4 + 0.6 * strike})`;
-      if (fold < 1) {
-        el.style.overflow = "hidden";
-        el.style.maxHeight = `${height * fold}px`;
-        el.style.opacity = String(fold);
-        el.style.marginBlock = fold === 0 ? "0" : "";
+    let typingAt: Text | null = null;
+    version.hunks.forEach((hunk, hi) => {
+      const s = state[hi]!;
+      for (const item of hunk.struck) {
+        const swept = item.length ? clamp((s.struck - item.from) / item.length) : (s.struck > item.from ? 1 : 0);
+        const el = item.el;
+        // Not reached yet it reads as the page did; struck, a red line crosses it from left to right.
+        el.style.color = swept > 0 ? `rgb(${STRIKE_INK})` : "inherit";
+        el.style.textDecorationLine = "none";
+        if (item.inline) {
+          el.style.backgroundImage = `linear-gradient(rgb(${STRIKE_INK}), rgb(${STRIKE_INK}))`;
+          el.style.backgroundRepeat = "no-repeat";
+          el.style.backgroundPosition = "0 55%";
+          el.style.backgroundSize = `${swept * 100}% 2px`;
+          el.style.setProperty("box-decoration-break", "clone");
+        } else if (swept > 0) {
+          el.style.textDecorationLine = "line-through";
+          el.style.textDecorationColor = `rgba(${STRIKE_INK}, ${swept})`;
+        }
+        el.style.opacity = String(s.fold);
+        if (s.fold < 1) {
+          el.style.overflow = "hidden";
+          if (item.inline) {
+            el.style.display = "inline-block";
+            el.style.whiteSpace = "nowrap";
+            el.style.verticalAlign = "bottom";
+            el.style.maxWidth = `${item.size * s.fold}px`;
+          } else {
+            el.style.maxHeight = `${item.size * s.fold}px`;
+            el.style.marginBlock = s.fold === 0 ? "0" : "";
+          }
+        }
       }
-    }
-    let left = typed;
-    let at: Text | null = null;
-    for (const text of parts.texts) {
-      const shown = Math.max(0, Math.min(text.full.length, Math.floor(left)));
-      if (text.node.data.length !== shown) text.node.data = text.full.slice(0, shown);
-      if (!at && shown < text.full.length) at = text.node;
-      left -= text.full.length;
-    }
-    for (const { el, height, from } of parts.added) {
-      const grown = clamp((typed - from) / 4);
-      el.style.overflow = grown < 1 ? "hidden" : "";
-      el.style.maxHeight = grown < 1 ? `${height * grown}px` : "";
-      el.style.marginBlock = grown === 0 ? "0" : "";
-      el.style.opacity = String(grown);
-    }
-    for (const mark of parts.marks) {
-      mark.style.textDecorationColor = color;
-      mark.style.textDecorationThickness = "2px";
-      mark.style.backgroundColor = `color-mix(in srgb, ${color} ${12 * fade}%, transparent)`;
-      mark.style.textDecorationLine = fade > 0 ? "underline" : "none";
-    }
-    const typing = typed > 0 && typed < parts.total && at;
-    if (typing) {
+      for (const text of hunk.texts) {
+        const shown = Math.max(0, Math.min(text.full.length, Math.floor(s.typed - text.from)));
+        if (text.node.data.length !== shown) text.node.data = text.full.slice(0, shown);
+        if (!typingAt && s.typed > 0 && s.typed < hunk.inserted && shown < text.full.length) typingAt = text.node;
+      }
+      for (const { el, height, from } of hunk.added) {
+        const grown = clamp((s.typed - from) / 4);
+        el.style.overflow = grown < 1 ? "hidden" : "";
+        el.style.maxHeight = grown < 1 ? `${height * grown}px` : "";
+        el.style.marginBlock = grown === 0 ? "0" : "";
+        el.style.opacity = String(grown);
+      }
+      for (const mark of hunk.marks) {
+        mark.style.textDecorationColor = color;
+        mark.style.textDecorationThickness = "2px";
+        mark.style.backgroundColor = `color-mix(in srgb, ${color} 12%, transparent)`;
+      }
+    });
+    if (typingAt) {
       if (!caret.current) {
-        // Styled once where it is made: the caret and the author's name on a flag above it.
+        // Styled once where it is made: the caret and the author's name and time on a flag above it.
         caret.current = document.createElement("span");
         caret.current.setAttribute("aria-hidden", "true");
         Object.assign(caret.current.style, { position: "relative", display: "inline-block", width: "2px", height: "1.2em",
@@ -270,22 +352,26 @@ export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, 
           borderRadius: "4px 4px 4px 0", color: "#fff", fontSize: "11px", fontWeight: "600", lineHeight: "1", whiteSpace: "nowrap" });
         caret.current.append(flag);
       }
+      const at: Text = typingAt;
       caret.current.style.backgroundColor = color;
       const flag = caret.current.firstElementChild as HTMLElement;
       flag.style.backgroundColor = color;
       flag.textContent = `${pageAuthorLabel(revision.authors[0]!)} · ${time(Date.parse(revision.createdAt))}`;
-      if (caret.current.previousSibling !== at) at!.parentNode!.insertBefore(caret.current, at!.nextSibling);
-      // The page follows the caret down a long version, at most every FOLLOW_EVERY ms of replay.
-      if (t - followed.current > FOLLOW_EVERY) { follow(caret.current); followed.current = t; }
+      if (caret.current.previousSibling !== at) at.parentNode!.insertBefore(caret.current, at.nextSibling);
+      // The page follows the caret down a long change, at most every FOLLOW_EVERY ms of replay.
+      if (played.current - followed.current.at > FOLLOW_EVERY) {
+        follow(caret.current);
+        followed.current = { ...followed.current, at: played.current };
+      }
     } else caret.current?.remove();
   });
 
   if (failed) return <p role="alert" className="min-h-[50vh] text-sm text-muted-foreground">Couldn&apos;t read this page&apos;s history.</p>;
-  const badgeIn = current ? span(u, 0, 400) : 1;
+  const badgeIn = revision && version ? ease(elapsed / INTRO) : 1;
   return (
     <div className="relative" data-testid="page-replay-stage">
       <div className="mb-4 flex h-7 items-center gap-2">
-        {revision && current ? (
+        {revision ? (
           <span className="flex min-w-0 items-center gap-2 rounded-full border px-3 py-1 text-sm"
             style={{ borderColor: color, opacity: badgeIn, transform: `translateY(${(1 - badgeIn) * -6}px)` }}>
             <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
