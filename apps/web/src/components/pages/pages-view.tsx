@@ -1746,12 +1746,15 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                     {history.replay && spaceId && page && history.revisions.find((r) => r.revision === history.since) ? (
                       <PageReplayStage spaceId={spaceId} pageId={page.pageId} token={token}
                         since={history.revisions.find((r) => r.revision === history.since)!}
-                        ticks={replayTicks} paused={Boolean(history.replay.paused)} references={references} mediaUrl={mediaUrl}
-                        onProgress={(progress) => history.setReplay({ ...progress, paused: history.replay?.paused })} onDone={() => { history.setReplay(null); history.choose("since"); }} />
+                        ticks={replayTicks} paused={Boolean(history.replay.paused)} speed={history.replay.speed ?? 1}
+                        references={references} mediaUrl={mediaUrl}
+                        onProgress={(position) => history.setReplay((now) => now && { ...now, ...position })}
+                        onDone={() => { history.setReplay(null); history.choose("since"); }} />
                     ) : <PageHistoryDocument history={history} references={references} mediaUrl={mediaUrl} />}
                   </div>
                   {roomy && history.replay && (
-                    <aside className="w-80 shrink-0 pt-12"><PageRewindColumn history={history} /></aside>
+                    // The timeline stays where it is on screen while the page scrolls under it.
+                    <aside className="w-80 shrink-0"><div className="sticky top-4 pt-12"><PageRewindColumn history={history} /></div></aside>
                   )}
                   {roomy && !history.replay && (
                     // The versions stay beside the text as it scrolls, and a long list scrolls on its own.
