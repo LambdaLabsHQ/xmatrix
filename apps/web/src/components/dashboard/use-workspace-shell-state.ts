@@ -2461,7 +2461,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       relaySocketProbeRef.current = null;
     };
   }, [
-    queryClient,
     viewerReadsOf,
     reconcileInstances,
     applyChannelHistory,
