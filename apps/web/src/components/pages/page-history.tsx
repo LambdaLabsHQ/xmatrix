@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, Pause, Play } from "lucide-react";
 import { pageAuthorColor, pageAuthorLabel, type PageAuthor } from "@xmatrix/protocol";
@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 import { renderPageDiff, renderPageDocument } from "./page-document-render";
 import type { PageMediaUrl } from "./page-media";
 import type { PageReferenceTargets } from "./page-reference-chips";
-import type { ReplayProgress } from "./page-replay";
+import type { ReplayProgress, ReplaySpeed } from "./page-replay";
 
 /**
  * A page's history (pages-live-document.md §4.2, §7): the other of the page's two states. The page is always
@@ -59,7 +59,7 @@ export interface PageHistoryState {
   host: RefObject<HTMLDivElement | null>;
   /** The replay from the reader's last visit, while it plays (page-replay.tsx). */
   replay: ReplayProgress | null;
-  setReplay: (progress: ReplayProgress | null) => void;
+  setReplay: Dispatch<SetStateAction<ReplayProgress | null>>;
   jump: (index: number) => void;
 }
 
@@ -404,23 +404,34 @@ export function PageHistoryBar({ history, canEdit, onClose }: {
   );
 }
 
-/** The replay's play button, which pauses it while it plays, and the clock it keeps. */
+const NEXT_SPEED: Record<ReplaySpeed, ReplaySpeed> = { 1: 2, 2: 4, 4: 1 };
+
+/** The replay's play button, which pauses it while it plays, its speed, and the clock it keeps. */
 function PageRewindTrack({ history }: { history: PageHistoryState }) {
-  const { replay } = history;
+  const { replay, setReplay } = history;
   if (!history.news.length) return <span className="mr-auto" />;
+  const speed = replay?.speed ?? 1;
   return (
     <div className="mx-4 mr-auto flex items-center gap-3" data-testid="page-rewind">
       <button type="button" aria-label={replay ? (replay.paused ? "Resume" : "Pause") : "Replay what changed"}
-        onClick={() => history.setReplay(replay ? { ...replay, paused: !replay.paused } : { step: 0, pos: 0, clock: "" })}
+        onClick={() => setReplay((now) => now ? { ...now, paused: !now.paused } : { step: 0, pos: 0, clock: "" })}
         className={cn(actionClass({ variant: "primary", size: "icon" }), "shrink-0 rounded-full")}>
         {replay && !replay.paused ? <Pause className="size-4" /> : <Play className="size-4 translate-x-px" />}
       </button>
+      {replay && (
+        <button type="button" aria-label={`Replay speed ${speed}×`} data-testid="page-rewind-speed"
+          onClick={() => setReplay((now) => now && { ...now, speed: NEXT_SPEED[now.speed ?? 1] })}
+          className={cn(actionClass({ variant: "secondary", size: "sm" }), "tabular-nums")}>{speed}×</button>
+      )}
       <span className="font-mono text-sm tabular-nums">
         {replay ? replay.clock : history.news.length === 1 ? "1 change while you were away" : `${history.news.length} changes while you were away`}
       </span>
     </div>
   );
 }
+
+/** Past this many versions the timeline names only the one playing and its two ends. */
+const DENSE_TIMELINE = 8;
 
 /** The replay's timeline, upright beside the page: the reader's last visit at the bottom and now at the top.
     The playhead climbs as each version plays, and each version lights up as the playhead reaches it. */
@@ -432,7 +443,7 @@ export function PageRewindColumn({ history }: { history: PageHistoryState }) {
   const slot = (index: number) => (all.length <= 1 ? 0 : (index / (all.length - 1)) * 100);
   const head = history.replay?.pos ?? 0;
   return (
-    <div className="relative ml-2 h-[34rem] select-none" data-testid="page-rewind-column">
+    <div className="relative ml-2 h-[min(34rem,calc(100dvh-10rem))] select-none" data-testid="page-rewind-column">
       <div className="absolute bottom-0 left-[7px] top-0 w-0.5 rounded bg-border" />
       <div className="absolute bottom-0 left-[7px] w-0.5 rounded bg-foreground"
         style={{ height: `${head}%` }} />
@@ -443,6 +454,10 @@ export function PageRewindColumn({ history }: { history: PageHistoryState }) {
         // Lights as the playhead arrives: 0 a little below its slot, 1 at it. Drawn from the playhead, never on a timer.
         const lit = Math.max(0, Math.min(1, (head - slot(index)) / (unit * 0.2) + 1));
         const now = index === step || (index === 0 && step === 0);
+        // A long history names only the version playing and the two ends; the rest are dots on the line.
+        const end = index === 0 || index === all.length - 1;
+        const nearNow = Math.abs(slot(index) - slot(Math.min(step, all.length - 1))) < 8;
+        const named = all.length <= DENSE_TIMELINE || now || (end && !nearNow);
         const author = revision.authors[0]!;
         const color = pageAuthorColor(author);
         return (
@@ -451,12 +466,14 @@ export function PageRewindColumn({ history }: { history: PageHistoryState }) {
             <span className="mt-1 size-4 shrink-0 rounded-full border-2 border-background"
               style={{ backgroundColor: color, transform: `scale(${1 + 0.35 * lit * (now ? 1 : 0)})`, opacity: 0.35 + 0.65 * lit,
                 boxShadow: now && lit > 0.5 ? `0 0 0 4px ${color}33` : undefined }} />
-            <div className={cn("min-w-0 rounded-md px-2 py-1", now && lit > 0.5 && "bg-accent")} style={{ opacity: 0.35 + 0.65 * lit }}>
-              <div className="flex items-baseline gap-2 text-sm">
-                <span className="font-semibold tabular-nums">{versionTime(revision.createdAt)}</span>
-                <span className="text-xs" style={{ color }}>{index === 0 ? "As you left it" : pageAuthorLabel(author)}</span>
+            {named && (
+              <div className={cn("min-w-0 rounded-md px-2 py-1", now && lit > 0.5 && "bg-accent")} style={{ opacity: 0.35 + 0.65 * lit }}>
+                <div className="flex items-baseline gap-2 text-sm">
+                  <span className="font-semibold tabular-nums">{versionTime(revision.createdAt)}</span>
+                  <span className="text-xs" style={{ color }}>{index === 0 ? "As you left it" : pageAuthorLabel(author)}</span>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         );
       })}

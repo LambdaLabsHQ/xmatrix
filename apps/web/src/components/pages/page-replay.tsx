@@ -16,13 +16,22 @@ import type { PageReferenceTargets } from "./page-reference-chips";
  * is drawn from one clock, so the motion is continuous and can pause.
  */
 
-export interface ReplayProgress {
+/** How fast the replay plays: a long history is watched at 2× or 4×. */
+export type ReplaySpeed = 1 | 2 | 4;
+
+/** Where the replay stands, as the stage reports it. */
+export interface ReplayPosition {
   /** 0 before the first version; i while version i (1-based) plays; past the last when done. */
   step: number;
   /** Where the playhead stands, 0–100 along the versions, fractional while it moves. */
   pos: number;
   clock: string;
+}
+
+/** A replay in History: where it stands, and how the reader set it to play. */
+export interface ReplayProgress extends ReplayPosition {
   paused?: boolean;
+  speed?: ReplaySpeed;
 }
 
 const clamp = (x: number) => Math.max(0, Math.min(1, x));
@@ -30,9 +39,21 @@ const ease = (x: number) => { const t = clamp(x); return t < 0.5 ? 4 * t * t * t
 const span = (u: number, from: number, to: number) => ease((u - from) / (to - from));
 const time = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 
-/* One version's beats, in ms from its start. The next starts as soon as this one's words are in. */
+/* One version's beats, in ms from its start. The next starts as soon as this one's words are in. A version
+   types at PER_CHAR a character, faster when that would take longer than TYPE_BUDGET, so one version plays
+   for under four seconds however much it changed, and a long history stays watchable. */
 const STRIKE = [100, 650] as const, FOLD = [650, 1250] as const, TYPE_AT = 1000, PER_CHAR = 38, OPEN = 500, CLOSE = 600;
-const MIN_LENGTH = 1600, UNDERLINE_FADE = 300;
+const TYPE_BUDGET = 2400, MIN_LENGTH = 1600, UNDERLINE_FADE = 300;
+/** How close to the top or bottom of the window the change may come before the page follows it. */
+const FOLLOW_MARGIN = 96, FOLLOW_EVERY = 700;
+
+/** Brings `el` to the middle of the window when it is off screen or about to leave it. */
+function follow(el: Element) {
+  const box = el.getBoundingClientRect();
+  if (box.top < FOLLOW_MARGIN || box.bottom > window.innerHeight - FOLLOW_MARGIN) {
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
 
 /** How many characters a version puts in: the words it inserted and the blocks it added. */
 function insertedChars(doc: DocNode): number {
@@ -82,18 +103,20 @@ function prepare(host: HTMLElement): Drawn {
   return { struck, removed, added, marks: [...host.querySelectorAll<HTMLElement>("ins")], texts, total };
 }
 
-export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, references, mediaUrl, onProgress, onDone }: {
+export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, speed, references, mediaUrl, onProgress, onDone }: {
   spaceId: string; pageId: string; token: string;
   /** The version the reader last saw, and the versions since, oldest first. */
   since: PageRevision; ticks: readonly PageRevision[];
-  paused: boolean; references?: PageReferenceTargets; mediaUrl?: PageMediaUrl;
-  onProgress: (progress: ReplayProgress) => void; onDone: () => void;
+  paused: boolean; speed: ReplaySpeed; references?: PageReferenceTargets; mediaUrl?: PageMediaUrl;
+  onProgress: (position: ReplayPosition) => void; onDone: () => void;
 }) {
   const [bodies, setBodies] = useState<string[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [t, setT] = useState(0);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
+  const speedRef = useRef(speed);
+  speedRef.current = speed;
   useEffect(() => {
     let stop = false;
     void Promise.all([since, ...ticks].map((revision) =>
@@ -106,8 +129,10 @@ export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, 
     let at = OPEN;
     return bodies.slice(1).map((body, index) => {
       const diff: PageDocDiff = pageDocDiff(markdownToPageDoc(bodies[index]!), markdownToPageDoc(body));
-      const length = Math.max(MIN_LENGTH, TYPE_AT + insertedChars(diff.doc) * PER_CHAR + 150);
-      const step = { start: at, length, diff };
+      const chars = insertedChars(diff.doc);
+      const perChar = chars > 0 ? Math.min(PER_CHAR, TYPE_BUDGET / chars) : PER_CHAR;
+      const length = Math.max(MIN_LENGTH, TYPE_AT + chars * perChar + 150);
+      const step = { start: at, length, diff, perChar };
       at += length;
       return step;
     });
@@ -123,7 +148,7 @@ export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, 
     let last = now(), acc = 0, frame = 0, live = true;
     const tick = () => {
       const current = now();
-      if (!pausedRef.current) acc += current - last;
+      if (!pausedRef.current) acc += (current - last) * speedRef.current;
       last = current;
       setT(acc);
     };
@@ -148,16 +173,18 @@ export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, 
   const pos = !steps.length ? 0 : done ? 100 : current ? ((index + clamp(u / current.length)) / steps.length) * 100 : 0;
   const clock = time(clockMs);
   useEffect(() => {
-    onProgress({ step: stepNo, pos, clock, paused });
+    onProgress({ step: stepNo, pos, clock });
     // Reported as it changes in steps a reader sees, not every frame.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stepNo, Math.round(pos * 10), clock, paused]);
+  }, [stepNo, Math.round(pos * 10), clock]);
   useEffect(() => { if (done && t >= end + CLOSE) onDone(); }, [done, t, end, onDone]);
 
   // Each version is drawn once, as History draws it; its parts then move with the clock.
   const host = useRef<HTMLDivElement | null>(null);
   const drawn = useRef<Drawn | null>(null);
   const caret = useRef<HTMLSpanElement | null>(null);
+  // When the page last moved to follow the caret, on the replay's own clock, so it follows without jitter.
+  const followed = useRef(-Infinity);
   const shownKey = !bodies ? "none" : before ? "since" : done ? "now" : `step-${index}`;
   useLayoutEffect(() => {
     const target = host.current;
@@ -168,6 +195,9 @@ export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, 
     else if (current) {
       renderPageDiff(current.diff.doc, target, references, mediaUrl);
       drawn.current = prepare(target);
+      // Each version opens on what it changed, wherever on the page that is.
+      const first = target.querySelector('del, ins, [data-change]');
+      if (first) { follow(first); followed.current = t; }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownKey, bodies]);
@@ -176,7 +206,7 @@ export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, 
     if (!parts || !current || !revision) { caret.current?.remove(); return; }
     const strike = span(u, ...STRIKE);
     const fold = 1 - span(u, ...FOLD);
-    const typed = Math.max(0, (u - TYPE_AT) / PER_CHAR);
+    const typed = Math.max(0, (u - TYPE_AT) / current.perChar);
     const fade = 1 - clamp((u - (current.length - UNDERLINE_FADE)) / UNDERLINE_FADE);
     for (const { el, width } of parts.struck) {
       el.style.color = `rgba(180, 35, 24, ${0.4 + 0.6 * strike})`;
@@ -238,8 +268,10 @@ export function PageReplayStage({ spaceId, pageId, token, since, ticks, paused, 
       caret.current.style.backgroundColor = color;
       const flag = caret.current.firstElementChild as HTMLElement;
       flag.style.backgroundColor = color;
-      flag.textContent = pageAuthorLabel(revision.authors[0]!);
+      flag.textContent = `${pageAuthorLabel(revision.authors[0]!)} · ${time(Date.parse(revision.createdAt))}`;
       if (caret.current.previousSibling !== at) at!.parentNode!.insertBefore(caret.current, at!.nextSibling);
+      // The page follows the caret down a long version, at most every FOLLOW_EVERY ms of replay.
+      if (t - followed.current > FOLLOW_EVERY) { follow(caret.current); followed.current = t; }
     } else caret.current?.remove();
   });
 

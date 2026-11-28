@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: Replay follows each change on a long page, keeps its timeline on screen, and plays faster on demand
+
+Replay played a long page where it stood: a version that changed text below the fold played off screen, and its timeline scrolled away with the page. Each version now opens on what it changed, scrolled to the middle of the window when it is off screen, and the page follows the author's caret down a long change. The upright timeline stays pinned beside the text while the page scrolls; past eight versions it names only the version playing and its two ends, and shows the rest as dots. A version types at most about 2.4 seconds of text, faster when it changed more, so a long history stays watchable, and a speed button plays it at 1×, 2× or 4×. The caret's flag names its author and the version's time. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a new account's source is sent however it signed in
 
 The first day of 4.14.2 recorded no source for any of four new accounts. The
