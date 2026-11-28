@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { LIVE_AGENT_STATUS_SQL, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, pageTitleLine, utf8ByteLength } from "@xmatrix/protocol";
+import { LIVE_AGENT_STATUS_SQL, PAGE_RESULT_KINDS, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, pageTitleLine, utf8ByteLength } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import { spaceBilling } from "@xmatrix/billing";
 import { readsOnly } from "./space-roles.js";
@@ -15,7 +15,7 @@ import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "
 import { deriveChangedBlocksForWrite, keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
 import { keepBlames, walkBlame, type BlameRevisionRow } from "./page-blame.js";
 import type {
-  PageAuthor, PageBlame, PageBlockAwareness, PageDocument, PageLink, PageLinkAnchor, PageMessageEdit, PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
+  PageAuthor, PageBlame, PageBlockAwareness, PageDocument, PageLink, PageLinkAnchor, PageMessageEdit, PageOverview, PageRecentChange, PageResult, PageResultKind, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeAgent, PublicPage,
 } from "@xmatrix/protocol";
 
 export type { PageAuthor, PageDocument, PageLink, PageRevision, PageSummary, PublicPage };
@@ -68,6 +68,9 @@ const MAX_WAITING_SUGGESTIONS = 20;
 const RECENT_CHANGES = 3;
 const MAX_RECENT_CHANGES = 10;
 const RECENT_CHANGE_SPARES = 4;
+/** The Overview reads this far back, and at most this many results. */
+const OVERVIEW_DAYS = 7;
+const MAX_OVERVIEW_RESULTS = 500;
 const MAX_LINKS = 500;
 /**
  * An end from before `stopped` was stored cannot be told from a person pressing stop. Typing wakes
@@ -1483,21 +1486,141 @@ export class PostgresPageRepository {
     });
   }
 
-  /** Writes the line a summary execution answered, if the page is still at the revision it read. */
-  async recordSummary(input: { requestId: string; spaceId: string; pageId: string; revision: number; summary: string }):
-    Promise<{ recorded: boolean }> {
+  /**
+   * Writes the line a summary execution answered, if the page is still at the revision it read, and with it
+   * what the change since the last summary resulted in, when the execution named a result. The result's
+   * section is the first one that change touched.
+   */
+  async recordSummary(input: { requestId: string; spaceId: string; pageId: string; revision: number; summary: string;
+    result?: { kind: PageResultKind; text: string } }): Promise<{ recorded: boolean }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     const text = typeof input.summary === "string" ? input.summary.replace(/\s+/gu, " ").trim() : "";
     if (!text || [...text].length > 240 || !Number.isSafeInteger(input.revision) || input.revision < 1) {
       throw new PageControlError("invalid_request", 400, "summary is invalid");
     }
+    const result = input.result && { kind: input.result.kind, text: input.result.text.replace(/\s+/gu, " ").trim() };
+    if (result && (!PAGE_RESULT_KINDS.includes(result.kind) || !result.text || [...result.text].length > 240)) {
+      throw new PageControlError("invalid_request", 400, "result is invalid");
+    }
     return this.inSpace(bounded(input.requestId, "requestId"), "page.summary.record", spaceId, async (tx) => {
-      const rows = await tx.query({ name: "page_summary_record_v1",
-        text: `UPDATE data.pages SET summary=$3, summary_revision=$4, summary_at=now()
-          WHERE space_id=$1 AND page_id=$2 AND head_revision=$4 RETURNING page_id`,
+      const [row] = await tx.query<QueryResultRow & { previous_revision: string | null }>({ name: "page_summary_record_v2",
+        text: `WITH before AS (SELECT summary_revision FROM data.pages WHERE space_id=$1 AND page_id=$2 FOR UPDATE)
+          UPDATE data.pages SET summary=$3, summary_revision=$4, summary_at=now()
+          WHERE space_id=$1 AND page_id=$2 AND head_revision=$4
+          RETURNING (SELECT summary_revision::text FROM before) AS previous_revision`,
         values: [spaceId, pageId, text, input.revision], maxRows: 1 });
-      return { recorded: rows.length > 0 };
+      if (!row) return { recorded: false };
+      if (!result) return { recorded: true };
+      // What the execution read as the change: from the revision last summarised (or the one before this) to this one.
+      const from = row.previous_revision === null ? input.revision - 1 : Number(row.previous_revision);
+      const bodies = await tx.query<QueryResultRow & { revision: string; body: string | null; created_at: Date | string }>({
+        name: "page_result_bodies_v1",
+        text: `SELECT revision::text,body,created_at FROM data.page_revisions
+          WHERE space_id=$1 AND page_id=$2 AND revision IN ($3,$4) ORDER BY revision`,
+        values: [spaceId, pageId, from, input.revision], maxRows: 2 });
+      const head = bodies.find((item) => Number(item.revision) === input.revision);
+      if (!head) return { recorded: true };
+      const before = from < input.revision ? bodies.find((item) => Number(item.revision) === from) : undefined;
+      const after = head.body ?? "";
+      const older = before ? (from === 1 ? canonicalPageMarkdown(before.body ?? "") : before.body ?? "") : "";
+      const blockId = pageChangeGist(older, after).blockId;
+      const block = blockId ? pageBlocks(after).find((item) => item.id === blockId) : undefined;
+      await tx.query({ name: "page_result_record_v1",
+        text: `INSERT INTO data.page_results (space_id,page_id,revision,kind,text,block_id,block_title,created_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (space_id,page_id,revision) DO NOTHING`,
+        values: [spaceId, pageId, input.revision, result.kind, result.text, block?.id ?? null,
+          block ? block.title.slice(0, 300) || block.id : null, iso(head.created_at)], maxRows: 0 });
+      return { recorded: true };
+    });
+  }
+
+  /**
+   * A person's Overview of the Space: the last week's results on the pages they can read, newest first,
+   * with how far they have seen them and which they have handled. It is a person's own: an Agent Run has none.
+   */
+  async overview(input: { requestId: string; spaceId: string; principal: PagePrincipal }): Promise<PageOverview> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    if (input.principal.kind !== "user") throw new PageControlError("page_overview_human_only", 403);
+    return this.readInSpace(bounded(input.requestId, "requestId"), "page.overview", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, false);
+      const titles = new Map((await this.accessibleTree(tx, spaceId, actor)).map((row) => [row.page_id, row.title ?? UNNAMED_PAGE]));
+      const rows = titles.size === 0 ? [] : await tx.query<RevisionRow & { page_id: string; result_kind: PageResultKind;
+        text: string; block_id: string | null; block_title: string | null; result_at: Date | string }>({
+        name: "page_overview_results_v1",
+        text: `SELECT r.page_id,r.revision,r.kind AS result_kind,r.text,r.block_id,r.block_title,r.created_at AS result_at,
+            v.kind,v.authors_json,v.conversation_ids,v.based_on_revision,v.created_at
+          FROM data.page_results r
+            JOIN data.page_revisions v ON v.space_id=r.space_id AND v.page_id=r.page_id AND v.revision=r.revision
+          WHERE r.space_id=$1 AND r.page_id=ANY($2::text[]) AND r.created_at > now() - make_interval(days => $3)
+          ORDER BY r.created_at DESC, r.page_id LIMIT ${MAX_OVERVIEW_RESULTS}`,
+        values: [spaceId, [...titles.keys()], OVERVIEW_DAYS], maxRows: MAX_OVERVIEW_RESULTS });
+      const marks = await tx.query<QueryResultRow & { page_id: string; revision: string; conversation_id: string | null;
+        created_at: Date | string }>({ name: "page_overview_marks_v1",
+        text: `SELECT page_id,revision::text,conversation_id,created_at FROM data.page_result_marks
+          WHERE space_id=$1 AND user_id=$2 AND created_at > now() - make_interval(days => $3)
+          ORDER BY created_at DESC LIMIT ${MAX_OVERVIEW_RESULTS}`,
+        values: [spaceId, actor.userId, OVERVIEW_DAYS], maxRows: MAX_OVERVIEW_RESULTS });
+      const [seen] = await tx.query<QueryResultRow & { seen_at: Date | string }>({ name: "page_overview_seen_v1",
+        text: "SELECT seen_at FROM data.page_overview_reads WHERE space_id=$1 AND user_id=$2",
+        values: [spaceId, actor.userId], maxRows: 1 });
+      const results: PageResult[] = rows.map((row) => {
+        const { revision, authors, conversationIds } = revisionOf(row);
+        return { pageId: row.page_id, title: titles.get(row.page_id) ?? UNNAMED_PAGE, revision, kind: row.result_kind, text: row.text,
+          block: row.block_id && row.block_title ? { id: row.block_id, title: row.block_title } : null,
+          createdAt: iso(row.result_at), authors, conversationIds };
+      });
+      return { seenAt: seen ? iso(seen.seen_at) : null, results,
+        handled: marks.map((mark) => ({ pageId: mark.page_id, revision: Number(mark.revision),
+          conversationId: mark.conversation_id, at: iso(mark.created_at) })) };
+    });
+  }
+
+  /** Moves how far this person has seen the Space's results forward to a time that has passed; it never moves back. */
+  async markOverviewSeen(input: { requestId: string; spaceId: string; principal: PagePrincipal; through: string }):
+    Promise<{ seenAt: string }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    if (input.principal.kind !== "user") throw new PageControlError("page_overview_human_only", 403);
+    const through = typeof input.through === "string" ? Date.parse(input.through) : Number.NaN;
+    if (!Number.isFinite(through)) throw new PageControlError("invalid_request", 400, "through is invalid");
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.overview.seen", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, false);
+      const [stored] = await tx.query<QueryResultRow & { seen_at: Date | string }>({ name: "page_overview_mark_seen_v1",
+        text: `INSERT INTO data.page_overview_reads (space_id,user_id,seen_at,updated_at)
+          VALUES ($1,$2,LEAST($3::timestamptz, now()),now())
+          ON CONFLICT (space_id,user_id) DO UPDATE
+            SET seen_at=GREATEST(data.page_overview_reads.seen_at, EXCLUDED.seen_at), updated_at=EXCLUDED.updated_at
+          RETURNING seen_at`,
+        values: [spaceId, actor.userId, new Date(through).toISOString()], maxRows: 1 });
+      return { seenAt: iso(stored!.seen_at) };
+    });
+  }
+
+  /**
+   * This person has handled a result: checked it off, or answered it in a conversation. The conversation
+   * they answered in is kept once it is known.
+   */
+  async markResultHandled(input: { requestId: string; spaceId: string; principal: PagePrincipal; pageId: string;
+    revision: number; conversationId?: string }): Promise<{ handled: true }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    if (input.principal.kind !== "user") throw new PageControlError("page_overview_human_only", 403);
+    if (!Number.isSafeInteger(input.revision) || input.revision < 1) {
+      throw new PageControlError("invalid_request", 400, "revision is invalid");
+    }
+    const conversationId = input.conversationId === undefined ? null : bounded(input.conversationId, "conversationId");
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.overview.handled", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, false);
+      await this.page(tx, spaceId, actor, pageId, "read");
+      const marked = await tx.query({ name: "page_result_mark_v1",
+        text: `INSERT INTO data.page_result_marks (space_id,user_id,page_id,revision,conversation_id,created_at)
+          SELECT $1,$2,$3,$4,$5,now() FROM data.page_results WHERE space_id=$1 AND page_id=$3 AND revision=$4
+          ON CONFLICT (space_id,user_id,page_id,revision) DO UPDATE
+            SET conversation_id=COALESCE(EXCLUDED.conversation_id, data.page_result_marks.conversation_id)
+          RETURNING page_id`,
+        values: [spaceId, actor.userId, pageId, input.revision, conversationId], maxRows: 1 });
+      if (!marked.length) throw new PageControlError("page_result_not_found", 404);
+      return { handled: true };
     });
   }
 
@@ -1665,7 +1788,7 @@ export class PostgresPageRepository {
         values: [spaceId, pageId], maxRows: 1 });
       if (child.length) throw new PageControlError("page_has_children", 409, "Move or remove its child pages first");
       for (const table of ["data.page_links", "data.page_unlinks", "data.page_access", "data.page_reads",
-        "data.page_co_writing", "data.page_revisions"]) {
+        "data.page_co_writing", "data.page_result_marks", "data.page_results", "data.page_revisions"]) {
         await tx.query({ name: `page_remove_${table.slice(5)}_v1`,
           text: `DELETE FROM ${table} WHERE space_id=$1 AND page_id=$2`, values: [spaceId, pageId], maxRows: 0 });
       }
