@@ -115,7 +115,8 @@ import { startConversation } from "./start-conversation";
 import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
 import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-resize";
 import { mobileBackState, dockTabOf, isFleetView, DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
-import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-view";
+import { PageTreePanel, PagesSurface, usePageTree } from "@/components/pages/pages-view";
+import { OVERVIEW_PAGE_ID, OVERVIEW_TITLE } from "@/components/pages/page-overview-model";
 import type { PageEditOpening } from "@/components/dashboard/page-edit-cards";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, usePageCreation } from "@/components/pages/page-creation";
 import { searchWorkspacePages } from "./workspace-message-search";
@@ -698,6 +699,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // On a phone, a conversation opened from a page is a screen pushed over it; the page stays where it was.
   const phonePageConversation = phonePageOpen && Boolean(selectedChannel);
   const pageTree = usePageTree(currentSpaceId, token ?? "", { live: view === "pages" });
+  // The Space's conversations, for what waits on the reader in the Overview.
+  const spaceChannels = useMemo(() => channels.filter((channel) => channel.spaceId === currentSpaceId), [channels, currentSpaceId]);
   const searchPages = useMemo(() => {
     if (!token || !currentSpaceId) return undefined;
     return (query: string) => searchWorkspacePages({ token, spaceId: currentSpaceId, query });
@@ -763,6 +766,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // Keep the back bar and its content spacing while the title is loading.
   const openedPage = phonePageOpen
     ? selectedPageId === NEW_PAGE_ID ? { title: NEW_PAGE_TITLE }
+      : selectedPageId === OVERVIEW_PAGE_ID ? { title: OVERVIEW_TITLE }
       : pageTree.data?.find((page) => page.pageId === selectedPageId) ?? { title: "Page" }
     : null;
   // A conversation, a new one and an open page are pushed screens: their back bar replaces the dock.
@@ -1564,14 +1568,16 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // who opens Pages.
   const pagesDockPane = dockTabMounted("pages") ? (
     <PageTreePanel spaceId={currentSpaceId} token={token ?? ""} selectedPageId={null}
-      onSelectPage={openPage} onOpenSection={openPageAt} creation={pageCreation} layout="phone" />
+      onSelectPage={openPage} channels={spaceChannels} creation={pageCreation} layout="phone" />
   ) : null;
 
   // One Pages document surface, whether read on the desktop, pushed over the
   // phone's Pages list, shown while the Space is being moved to pages, or a new
   // page not made until it is first written on.
   const pagesViewSurface = (
-    <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId} creation={pageCreation}
+    <PagesSurface spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId} creation={pageCreation}
+      overview={{ channels: spaceChannels, onOpenConversation: (conversationId, messageId) => navigateToChannel(conversationId, messageId),
+        onMarkDone: (conversationId) => void markChannelResponded(conversationId) }}
       members={currentSpace?.members}
       commentComposer={{ space: currentSpace, token: token ?? null, workspaces: projects,
         localContext: localMentionContext, onOpenAppsForSpace: openAppsForSpace,
@@ -1801,7 +1807,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             >
               {view === "pages" ? (
                 <PageTreePanel spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId}
-                  onSelectPage={openPage} onOpenSection={openPageAt} creation={pageCreation}
+                  onSelectPage={openPage} channels={spaceChannels} creation={pageCreation}
                   create={<ListCreate action={desktopCreate} />} />
               ) : <ChannelSidebar
                 events={events}
@@ -1920,7 +1926,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             />
           ) : view === "pages" && selectedPageId && mobileDockPager ? (
             // On a phone an open page is a pushed screen over the Pages list.
-            // Desktop lets PagesView draw the margin/dock conversation itself.
+            // Desktop lets the page view draw the margin/dock conversation itself.
             <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
               <div className={cn("flex min-h-0 min-w-0 flex-1", phonePageConversation && "hidden")}>
                 {pagesViewSurface}

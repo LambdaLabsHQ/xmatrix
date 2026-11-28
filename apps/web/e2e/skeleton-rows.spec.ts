@@ -6,7 +6,6 @@ import {
   E2E_NOW,
   E2E_SPACE,
   E2E_USER_SENDER,
-  fixtureJson,
   fixtureRequests,
   fixtureRule,
   installPageTreeStubs,
@@ -53,9 +52,14 @@ async function expectListSkeletonLanded(options: {
   metaSelector: string;
   hashSelector?: string;
   firstLabel: string;
+  /** The section heading the rows stand under, where the list has more than one. */
+  heading?: string;
   release: () => Promise<void>;
 }) {
-  const { page, list, rowSelector, titleSelector, metaSelector, hashSelector, firstLabel, release } = options;
+  const { page, list, rowSelector, titleSelector, metaSelector, hashSelector, firstLabel, heading, release } = options;
+  const headingIn = (scope: Locator | Page, visible: string) => heading
+    ? scope.locator(`.app-list-section-label${visible}`).filter({ hasText: heading })
+    : scope.locator(`.app-list-section-label${visible}`).first();
   await expect(list).toBeVisible();
   await waitForSettledAnimations(list);
   const skeletonRows = list.locator(rowSelector);
@@ -64,14 +68,14 @@ async function expectListSkeletonLanded(options: {
     hash: hashSelector ? await box(row.locator(hashSelector)) : null,
   });
   const skeleton = [await measure(skeletonRows.nth(0), true), await measure(skeletonRows.nth(2), true)];
-  const skeletonHeading = await box(list.locator(".app-list-section-label"));
+  const skeletonHeading = await box(headingIn(list, ""));
 
   await release();
   const rows = page.locator(`${rowSelector}:visible`);
   await expect(rows.filter({ hasText: firstLabel })).toBeVisible();
   await expect(list).toHaveCount(0);
 
-  expectSameBox(skeletonHeading, await box(page.locator(".app-list-section-label:visible").first()));
+  expectSameBox(skeletonHeading, await box(headingIn(page, ":visible")));
   for (const [at, index] of [[0, 0], [1, 2]] as const) {
     const row = await measure(rows.nth(index), false);
     expectSameBox(skeleton[at].row, row.row);
@@ -345,9 +349,6 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
         pattern: /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u,
         responder: { kind: "deferred", json: { pages } },
       });
-      await fixtureJson(page, "page-recent-empty", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/recent-changes(?:\?.*)?$/u, {
-        changes: [],
-      });
       await fixtureRule(page, {
         id: HELD_PAGE_DOC_RULE,
         pattern: /\/api\/xmatrix\/spaces\/[^/]+\/pages\/page-skeleton-0(?:\?.*)?$/u,
@@ -362,7 +363,9 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
         },
       });
 
-      await page.goto("/app/personal-sspaceperso/pages", { waitUntil: "domcontentloaded" });
+      // A desktop with no page named lands on the Overview; the page's own skeleton is checked on a page it names.
+      await page.goto(`/app/personal-sspaceperso/pages${device === "desktop" ? "?page=page-skeleton-0" : ""}`,
+        { waitUntil: "domcontentloaded" });
       await page.locator(".xmatrix-app-shell:not([aria-busy])").waitFor();
 
       const docSkeleton = device === "desktop"
@@ -374,15 +377,22 @@ for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2
         docSkeletonBox = await box(docSkeleton);
       }
 
+      // The Overview's entry leads the list: the skeleton holds its taller row, so the pages under it do not move.
+      const pagesSkeleton = page.getByRole("status", { name: "Loading pages" }).locator("visible=true");
+      await expect(pagesSkeleton).toBeVisible();
+      await waitForSettledAnimations(pagesSkeleton);
+      const overviewSkeletonBox = await box(pagesSkeleton.locator(".app-page-overview-row"));
       await expectListSkeletonLanded({
         page,
-        list: page.getByRole("status", { name: "Loading pages" }).locator("visible=true"),
+        list: pagesSkeleton,
         rowSelector: ".app-page-row",
         titleSelector: ".app-page-row-title",
         metaSelector: ".app-list-row-meta",
         firstLabel: "Architecture",
+        heading: "All pages",
         release: () => releaseFixture(page, HELD_PAGE_TREE_RULE),
       });
+      expectSameBox(overviewSkeletonBox, await box(page.locator(".app-page-overview-row:visible")));
 
       if (docSkeletonBox) {
         await releaseFixture(page, HELD_PAGE_DOC_RULE);

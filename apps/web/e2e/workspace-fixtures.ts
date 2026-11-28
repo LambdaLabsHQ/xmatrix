@@ -250,8 +250,10 @@ export async function fixtureSpaceResources(page: Page) {
   await fixtureJson(page, "page-tree", /\/api\/xmatrix\/spaces\/[^/]+\/pages(?:\?.*)?$/u, { pages: [] });
   await fixtureJson(page, "page-document", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/?]+(?:\?.*)?$/u,
     { error: "not found" }, { status: 404, method: "GET" });
-  await fixtureJson(page, "page-recent-changes", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/recent-changes(?:\?.*)?$/u,
-    { changes: [] });
+  // The Overview with nothing in it: no results, nothing handled, and no request waiting on the reader.
+  await fixtureJson(page, "page-overview", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/overview$/u,
+    { seenAt: null, results: [], handled: [] }, { method: "GET" });
+  await fixtureJson(page, "waiting-requests", /\/api\/xmatrix\/spaces\/[^/]+\/norn-requests$/u, { requests: [] });
   await fixtureJson(page, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links(?:\?.*)?$/u, { links: [] },
     { method: "GET" });
   await fixtureJson(page, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, { pages: [] });

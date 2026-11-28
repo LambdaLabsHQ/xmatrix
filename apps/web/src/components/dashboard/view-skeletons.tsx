@@ -337,8 +337,9 @@ export function ToolPaperSkeleton({
 }
 
 /**
- * Placeholder page tree inside PageTreeRow's own boxes, holding the section
- * heading's room above the first row so rows do not shift when the tree lands.
+ * Placeholder page tree inside PageTreeRow's own boxes, holding the Overview's
+ * entry and the section heading's room above the first row so rows do not
+ * shift when the tree lands.
  */
 export function PageListSkeleton({
   label = "Loading pages",
@@ -350,6 +351,21 @@ export function PageListSkeleton({
   return (
     <div className="app-list-skeleton" role="status" aria-label={label}>
       <div aria-hidden="true" inert>
+        {/* The Overview's entry leads a Space's pages: its heading's room and its taller row are held too. */}
+        <div className="invisible">
+          <ListSectionHeading label="Up to date" mark={{ icon: Files, tone: "plain" }} />
+        </div>
+        <ul>
+          <li>
+            <div className="app-page-overview-row app-list-row flex min-w-0 flex-col justify-center">
+              <span className="app-page-row-title-line flex min-w-0 items-center gap-2">
+                <span className="app-list-skeleton-mark shrink-0" />
+                <span className="app-list-row-title min-w-0 flex-1 truncate"><SkeletonBar width="6.5rem" /></span>
+              </span>
+              <span className="app-list-row-meta truncate"><SkeletonBar width="7rem" /></span>
+            </div>
+          </li>
+        </ul>
         <div className="invisible">
           <ListSectionHeading label="All pages" mark={{ icon: Files, tone: "primary" }} />
         </div>

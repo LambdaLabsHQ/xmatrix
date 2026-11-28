@@ -4,24 +4,24 @@ import { automaticConversationName, channelPresenceInstances, pageReferenceToken
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
   faceOfSender, isLiveAgentStatus, pageAuthorColor, pageAuthorLabel,
   type FaceOf, type ChannelSnapshot, type LiveChannel, type PageAuthor, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
-  Check, ChevronLeft, Clock, Files, FileText, History, Lock, MessageSquare, Play, Plus, Share, Trash2, Undo2, X,
+  Check, ChevronLeft, CircleCheck, Clock, Files, FileText, History, LayoutDashboard, Lock, MessageSquare, Play, Plus, Share, Trash2, Undo2, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAnimationActivity } from "@/components/ui/decoration-animation";
-import { noticeClass } from "@/components/ui/status-tone";
+import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
 import { actionClass } from "@/components/ui/action-tone";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
   PageLiveSession, pageApi, pageChildren,
-  type PageLinkAnchor, type PagePresenceState, type PageRecentChange, type PageRevisionMoment, type PageSummary, type PageTreeActivity,
+  type PageLinkAnchor, type PagePresenceState, type PageRevisionMoment, type PageSummary, type PageTreeActivity,
   type PageTreeAgent,
 } from "@/lib/pages/page-client";
 import type { PageBlameSource } from "./page-blame";
@@ -59,7 +59,8 @@ import {
 import { formatRelativeAge, mobileChatTimeLabel } from "@/components/dashboard/time-display";
 import { ListSectionHeading } from "@/components/dashboard/list-section-heading";
 import { InlineRowPreview } from "@/components/dashboard/inline-row-preview";
-import { MORE_RECENT_CHANGES, RECENT_CHANGES, pageRecentChangePreview, pageTreeHeadKey } from "./page-recent-changes";
+import { OVERVIEW_PAGE_ID, OVERVIEW_RANGE_LABEL, OVERVIEW_TITLE } from "./page-overview-model";
+import { PageOverviewView, overviewLeft, usePageOverview, useWaitingRequests, type PageOverviewProps } from "./page-overview";
 import {
   discussionQuote, discussionTitle, quotedMessage, type DiscussionQuote,
 } from "@/components/dashboard/selection-discussion";
@@ -272,29 +273,33 @@ function TreeNode({ page, childrenOf, activity, depth, selectedPageId, onSelect,
 }
 
 /**
- * A page's latest change, drawn as a conversation row: the page and the
- * section on the first line with when, who wrote what on the second. It
- * opens the page at that section.
+ * The Overview's place in the list (docs/design/pages-overview.md §5): the list's own row, taller than a
+ * page's, its name at a heading's size and what is left to handle at its end. It is not a card.
  */
-function RecentChangeRow({ change, onOpen }: { change: PageRecentChange; onOpen: () => void }) {
+function OverviewRow({ left, selected, onOpen }: { left: { needs: number; problems: number } | null; selected: boolean;
+  onOpen: () => void }) {
+  const total = left ? left.needs + left.problems : 0;
+  const waiting = left ? [left.needs > 0 && `${left.needs} need you`,
+    left.problems > 0 && `${left.problems} ${left.problems === 1 ? "problem" : "problems"}`].filter(Boolean).join(" · ") : "";
   return (
     <li>
-      <div role="button" tabIndex={0} onClick={onOpen}
+      <div role="button" tabIndex={0} onClick={onOpen} data-testid="page-overview-row"
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
           onOpen();
         }}
-        className="app-recent-change app-list-row flex min-w-0 cursor-pointer flex-col">
+        className={cn("app-page-overview-row app-list-row flex min-w-0 cursor-pointer flex-col justify-center",
+          selected && "app-page-row-selected")}>
         <span className="app-page-row-title-line flex min-w-0 items-center gap-2">
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <span className="app-list-row-title min-w-0 flex-1 truncate">
-            {change.title}
-            {change.block?.title && <span className="app-recent-change-section"> › {change.block.title}</span>}
-          </span>
-          <span className="app-channel-row-time shrink-0">{mobileChatTimeLabel(change.createdAt)}</span>
+          <LayoutDashboard className="size-4 shrink-0" />
+          <span className="app-list-row-title min-w-0 flex-1 truncate">{OVERVIEW_TITLE}</span>
+          {total > 0
+            ? <span className={statusInkClass("attention", "shrink-0 text-[26px] leading-[30px] font-extrabold tracking-tight")}
+              data-testid="page-overview-left">{total}</span>
+            : left && <CircleCheck className="size-[22px] shrink-0 text-[oklch(0.5_0.12_155)]" aria-label="All caught up" />}
         </span>
-        <span className="app-list-row-meta truncate">{pageRecentChangePreview(change)}</span>
+        <span className="app-list-row-meta truncate">{!left ? "\u00a0" : total > 0 ? waiting : "All caught up"}</span>
       </div>
     </li>
   );
@@ -341,11 +346,11 @@ function preloadPageChunks() {
 const PREFETCHED_PAGES = 40;
 const PHONE_PREFETCHED_PAGES = 8;
 
-export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, creation,
+export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, channels, creation,
   layout = "sidebar", create }: {
   spaceId: string | null; token: string; selectedPageId: string | null; onSelectPage: (pageId: string) => void;
-  /** Opens a page at one of its sections, as a recent change does. */
-  onOpenSection: (pageId: string, blockId: string | null) => void;
+  /** The Space's conversations this client holds: what waits on the reader in them counts in the Overview's row. */
+  channels: readonly ChannelSnapshot[];
   creation: PageCreation;
   /** The list's +, first under its name: a new page. */
   create?: ReactNode;
@@ -401,18 +406,13 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
     }
   }, [queryClient, spaceId, token, userId]);
   const drag = usePageRowDrag(tree.data ?? [], (pageId, drop) => void movePage(pageId, drop));
-  // Read again only when the tree says a page changed: it rides the tree's refresh, with no clock of its own.
-  const [moreChanges, setMoreChanges] = useState(false);
-  const changeLimit = moreChanges ? MORE_RECENT_CHANGES : RECENT_CHANGES;
-  const headKey = useMemo(() => pageTreeHeadKey(tree.data ?? []), [tree.data]);
-  const recent = useQuery<PageRecentChange[]>({
-    queryKey: xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-recent-changes",
-      [spaceId, headKey, changeLimit]),
-    enabled: Boolean(spaceId && token && userId && roots.length > 0),
-    placeholderData: keepPreviousData,
-    queryFn: ({ signal }) => pageApi.recentChanges(spaceId!, token, changeLimit, signal).then((result) => result.changes ?? []),
-  });
-  const changes = roots.length > 0 ? recent.data ?? [] : [];
+  // What is left for the reader to handle, read again only when a page or what waits on them changes.
+  const overview = usePageOverview(spaceId, token, roots.length > 0 ? tree.data : undefined);
+  const waitingRequests = useWaitingRequests(roots.length > 0 ? spaceId : null, token, channels);
+  const left = useMemo(() => overview.data && waitingRequests.data
+    ? overviewLeft(overview.data, waitingRequests.data, channels, new Date()) : null,
+  [channels, overview.data, waitingRequests.data]);
+  const toHandle = left ? left.needs + left.problems : 0;
 
   // The tree's other lines start where its rows' content and its header do.
   const inset = "px-[var(--app-list-row-start)]";
@@ -429,15 +429,14 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
             </Button>
           </div>
         )}
-        {changes.length > 0 && (
-          <section data-testid="page-recent-changes">
-            <ListSectionHeading label="Recent changes" mark={{ icon: Clock, tone: "plain" }}
-              action={moreChanges ? { label: "Less", onClick: () => setMoreChanges(false) }
-                : changes.length >= RECENT_CHANGES ? { label: "More", onClick: () => setMoreChanges(true) } : undefined} />
-            <ul>{changes.map((change) => (
-              <RecentChangeRow key={change.pageId} change={change}
-                onOpen={() => onOpenSection(change.pageId, change.block?.id ?? null)} />
-            ))}</ul>
+        {roots.length > 0 && (
+          <section data-testid="page-overview-entry">
+            <ListSectionHeading label={toHandle > 0 || !left ? OVERVIEW_RANGE_LABEL.away : "Up to date"}
+              mark={toHandle > 0 ? { icon: Clock, tone: "attention" } : { icon: left ? Check : Clock, tone: "plain" }} />
+            <ul>
+              <OverviewRow left={left} onOpen={() => onSelectPage(OVERVIEW_PAGE_ID)}
+                selected={selectedPageId === OVERVIEW_PAGE_ID || (layout === "sidebar" && selectedPageId === null)} />
+            </ul>
           </section>
         )}
         {/* The list always meets the plank with a section's name, never a bare row. */}
@@ -1908,5 +1907,46 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         </>
       )}
     </div>
+  );
+}
+
+type PagesViewProps = Parameters<typeof PagesView>[0];
+
+/** What the Overview takes from the shell beyond what a page does: the reader's conversations and how to act in them. */
+export type PagesOverviewActions = Pick<PageOverviewProps, "channels" | "onOpenConversation" | "onMarkDone">;
+
+/**
+ * The Pages area's main surface: a page, or the Overview (docs/design/pages-overview.md). The Overview is
+ * opened by its row, and is what a desktop lands on when no page is chosen and the Space has pages; a Space
+ * without pages lands on the page view, which offers to make the first one.
+ */
+export function PagesSurface({ overview, ...page }: PagesViewProps & { overview: PagesOverviewActions }) {
+  const tree = usePageTree(page.spaceId, page.token);
+  // A Space whose tree arrived empty stays on the page view until a page is opened: its first page is made
+  // there, and its move to pages is reviewed there through the moment the pages appear.
+  const [startedEmpty, setStartedEmpty] = useState<string | null>(null);
+  const empty = tree.data?.length === 0 ? page.spaceId : page.selectedPageId ? null : startedEmpty;
+  if (empty !== startedEmpty) setStartedEmpty(empty);
+  const landing = page.layout !== "phone" && page.selectedPageId === null && empty !== page.spaceId
+    && (tree.data === undefined || tree.data.length > 0);
+  if (page.spaceId && (page.selectedPageId === OVERVIEW_PAGE_ID || landing)) {
+    return <PagesOverview spaceId={page.spaceId} pages={tree.data ?? NO_PAGES} overview={overview} page={page} />;
+  }
+  return <PagesView {...page} />;
+}
+
+const NO_PAGES: PageSummary[] = [];
+const NO_AGENTS_ON_PAGES: ReadonlyMap<string, readonly PageTreeAgent[]> = new Map();
+
+function PagesOverview({ spaceId, pages, overview, page }: { spaceId: string; pages: readonly PageSummary[];
+  overview: PagesOverviewActions; page: PagesViewProps }) {
+  const agents = usePageAgents(spaceId, page.token).data?.agents ?? NO_AGENTS_ON_PAGES;
+  const writers = usePageWriters(spaceId, page.token, true);
+  const harnesses = useMemo(() => writers.agents.map((agent) => agent.harness), [writers.agents]);
+  return (
+    <PageOverviewView key={spaceId} spaceId={spaceId} token={page.token} layout={page.layout ?? "desktop"} pages={pages}
+      agentsOnPages={agents} harnesses={harnesses} restricted={(pageId) => effectivelyRestricted(pageId, pages)}
+      onOpenSection={page.onOpenSection} onSend={page.onSend} conversation={page.conversation}
+      onResolveConversation={page.onResolveConversation} onDiscuss={page.onDiscuss} {...overview} />
   );
 }
