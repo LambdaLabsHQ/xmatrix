@@ -1256,11 +1256,13 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             parent,
             root,
             after,
+            before,
             space,
         } => {
-            if parent.is_none() && !root && after.is_none() {
+            if parent.is_none() && !root && after.is_none() && before.is_none() {
                 return Err(CliError::Http(
-                    "Name where the page goes: --under <page>, --root, or --after <page>".into(),
+                    "Name where the page goes: --under <page>, --root, --after <page>, or --before <page>"
+                        .into(),
                 ));
             }
             let space = resolve_space(hub_url, token, space).await?;
@@ -1272,6 +1274,9 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             }
             if let Some(after) = after {
                 request["afterPageId"] = json!(after);
+            }
+            if let Some(before) = before {
+                request["beforePageId"] = json!(before);
             }
             let url = with_route(hub_url, &page_route(&space, &page));
             let moved: PageSummaryResponse =
