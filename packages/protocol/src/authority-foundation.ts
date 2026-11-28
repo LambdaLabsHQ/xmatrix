@@ -250,6 +250,8 @@ export const HUB_ROUTES = {
   /** A Norn request by its reference, for whoever can read its conversation: what a `request:<ref>` shows. */
   space_norn_request: (spaceId: string, requestRef: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/norn-requests/${encodeURIComponent(requestRef)}`,
+  /** The open Norn requests the caller, a person, holds in a Space: what waits on them, for the Overview. */
+  space_norn_requests: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/norn-requests`,
   /** An Agent Run asks a person or an Agent something, as a Norn program it becomes the author of. */
   norn_request_ask: "/api/norn/requests/ask",
   /** The person a Norn request was delivered to answers it, from its card. */

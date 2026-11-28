@@ -332,6 +332,23 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     });
   }));
 
+  // The Overview: what changes to the reader's pages resulted in over the last week, how far they have
+  // seen that, and which results they have handled. Registered before the routes that take a page id.
+  app.get(`${base}/overview`, async (c) => run(c, async () => repository(c.env).overview({
+    requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), principal: await principal(c) })));
+  app.put(`${base}/overview/seen`, async (c) => run(c, async () => {
+    const body = await json(c);
+    return repository(c.env).markOverviewSeen({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      principal: await principal(c), through: typeof body.through === "string" ? body.through : "" });
+  }));
+  app.put(`${base}/overview/handled`, async (c) => run(c, async () => {
+    const body = await json(c);
+    return repository(c.env).markResultHandled({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      principal: await principal(c), pageId: typeof body.pageId === "string" ? body.pageId : "",
+      revision: integer(body.revision),
+      ...(typeof body.conversationId === "string" ? { conversationId: body.conversationId } : {}) });
+  }));
+
   // A page is made with a name and markdown, or, when a person starts writing a new page, from the
   // document they are writing (pages-live-document.md §7): the session starts from that document,
   // and their editor goes on syncing into it.

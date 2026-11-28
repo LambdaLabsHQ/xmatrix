@@ -92,8 +92,8 @@ async function addSleepingInstance(client, ids) {
 }
 
 async function cleanup(client, ids) {
-  for (const table of ["page_reads", "page_co_writing", "page_links", "page_unlinks", "page_access", "page_revisions",
-    "pages"]) {
+  for (const table of ["page_overview_reads", "page_result_marks", "page_results", "page_reads", "page_co_writing",
+    "page_links", "page_unlinks", "page_access", "page_revisions", "pages"]) {
     await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [ids.space]).catch(() => {});
   }
   await client.query("DELETE FROM control.entity_space_routes WHERE entity_id=$1", [ids.run]).catch(() => {});
@@ -216,6 +216,76 @@ integration("pages: a summary is written for the page's head revision and stays 
       await assert.rejects(call("setSummary", { principal: owner, pageId: page.pageId, baseRevision: 2, summary }),
         code("invalid_request"));
     }
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+integration("pages: what a change resulted in is kept with its revision and makes each reader's Overview", async () => {
+  const { client, ids, pages, owner, member, agent } = await pageTest("page-results");
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: crypto.randomUUID() });
+    const overview = (principal = owner) => call("overview", { principal });
+    const { page } = await call("create", { principal: owner, title: "Plan", body: "# Plan\n\n## Status\n\nPlanned\n" });
+    const pageId = page.pageId;
+    assert.deepEqual(await overview(), { seenAt: null, results: [], handled: [] });
+    assert.deepEqual(await call("recordSummary", { pageId, revision: 1, summary: "Planned" }), { recorded: true });
+    assert.deepEqual((await overview()).results, [], "a summary alone is no result");
+
+    await call("edit", { principal: owner, pageId, baseRevision: 1, body: "# Plan\n\n## Status\n\nOn beta\n",
+      conversationIds: [ids.open] });
+    assert.deepEqual(await call("recordSummary", { pageId, revision: 1, summary: "Late",
+      result: { kind: "shipped", text: "Late" } }), { recorded: false }, "an answer about a revision the page has left is dropped whole");
+    assert.deepEqual((await overview()).results, []);
+    for (const result of [{ kind: "none", text: "x" }, { kind: "shipped", text: "  " }, { kind: "shipped", text: "x".repeat(241) }]) {
+      await assert.rejects(call("recordSummary", { pageId, revision: 2, summary: "On beta", result }), code("invalid_request"));
+    }
+    assert.deepEqual(await call("recordSummary", { pageId, revision: 2, summary: "On beta",
+      result: { kind: "shipped", text: " Replay\n is on beta " } }), { recorded: true });
+    const [result, ...more] = (await overview()).results;
+    assert.deepEqual(more, []);
+    assert.deepEqual({ ...result, createdAt: "", authors: result.authors.map((author) => author.id) }, { pageId, title: "Plan",
+      revision: 2, kind: "shipped", text: "Replay is on beta", block: { id: "status", title: "Status" }, createdAt: "",
+      authors: [ids.owner], conversationIds: [ids.open] }, "it carries the section the change is in and who made it, from where");
+    assert.ok(Date.parse(result.createdAt) <= Date.now(), "at the time of the change");
+
+    // How far a person has seen the results is theirs and only moves forward, never past now.
+    const past = new Date(Date.parse(result.createdAt) - 60_000).toISOString();
+    assert.equal((await call("markOverviewSeen", { principal: owner, through: result.createdAt })).seenAt, result.createdAt);
+    assert.equal((await call("markOverviewSeen", { principal: owner, through: past })).seenAt, result.createdAt);
+    const capped = (await call("markOverviewSeen", { principal: owner, through: "2999-01-01T00:00:00.000Z" })).seenAt;
+    assert.ok(Date.parse(capped) <= Date.now() + 5_000);
+    assert.equal((await overview()).seenAt, capped);
+    await assert.rejects(call("markOverviewSeen", { principal: owner, through: "soon" }), code("invalid_request"));
+
+    // A result is handled once: checked off, then answered in a conversation, which is kept.
+    await call("markResultHandled", { principal: owner, pageId, revision: 2 });
+    assert.deepEqual((await overview()).handled.map(({ at: _at, ...mark }) => mark), [{ pageId, revision: 2, conversationId: null }]);
+    await call("markResultHandled", { principal: owner, pageId, revision: 2, conversationId: ids.open });
+    await call("markResultHandled", { principal: owner, pageId, revision: 2 });
+    assert.deepEqual((await overview()).handled.map(({ at: _at, ...mark }) => mark), [{ pageId, revision: 2, conversationId: ids.open }]);
+    await assert.rejects(call("markResultHandled", { principal: owner, pageId, revision: 1 }), code("page_result_not_found"));
+
+    // Another reader has the same results and their own place in them; an Agent Run has no Overview.
+    const others = await overview(member);
+    assert.deepEqual([others.seenAt, others.results.length, others.handled], [null, 1, []]);
+    for (const method of ["overview", "markOverviewSeen", "markResultHandled"]) {
+      await assert.rejects(call(method, { principal: agent, pageId, revision: 2, through: past }), code("page_overview_human_only"));
+    }
+    await call("update", { principal: owner, pageId, accessMode: "restricted" });
+    assert.deepEqual((await overview(member)).results, [], "a page a reader cannot read gives them no results");
+    await assert.rejects(call("markResultHandled", { principal: member, pageId, revision: 2 }), code("page_not_found"));
+
+    // A later summary's result is its own row, newest first; results and marks go with their page.
+    await call("edit", { principal: owner, pageId, baseRevision: 2, body: "# Plan\n\n## Status\n\nOn beta\n\n## Risks\n\nLate reviews\n" });
+    await call("recordSummary", { pageId, revision: 3, summary: "On beta, one risk", result: { kind: "problem", text: "Reviews are late" } });
+    assert.deepEqual((await overview()).results.map((item) => [item.revision, item.kind, item.block?.id]),
+      [[3, "problem", "risks"], [2, "shipped", "status"]]);
+    await call("remove", { principal: owner, pageId });
+    const left = await client.query(`SELECT (SELECT count(*) FROM data.page_results WHERE space_id=$1)::int AS results,
+      (SELECT count(*) FROM data.page_result_marks WHERE space_id=$1)::int AS marks`, [ids.space]);
+    assert.deepEqual(left.rows[0], { results: 0, marks: 0 });
   } finally {
     await cleanup(client, ids);
     await client.end();
